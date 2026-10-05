@@ -176,3 +176,88 @@ func TestStreamFatalStatus(t *testing.T) {
 		t.Fatalf("err = %v, want asleep", err)
 	}
 }
+
+// A malformed event (bad JSON, no seq, no type) followed by a valid one is
+// not skipped: the stream reconnects from the last good cursor and the
+// server's corrected replay is delivered, exactly once. Works for live
+// (prompt) and replay (logs) streams.
+func TestStreamMalformedEventReconnects(t *testing.T) {
+	for _, untilHead := range []bool{false, true} {
+		for name, bad := range map[string]string{
+			"bad json":     "id: 2\ndata: {not json\n\n",
+			"missing seq":  "id: 2\ndata: {\"v\":1,\"type\":\"text.delta\"}\n\n",
+			"missing type": "id: 2\ndata: {\"v\":1,\"seq\":2}\n\n",
+		} {
+			var mu sync.Mutex
+			var cursors []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				cursors = append(cursors, r.Header.Get("Last-Event-ID"))
+				n := len(cursors)
+				mu.Unlock()
+				w.Header().Set("Content-Type", "text/event-stream")
+				if n == 1 {
+					writeEvent(t, w, 1, api.EventTextDelta, `{"text":"a"}`)
+					fmt.Fprint(w, bad)
+					writeEvent(t, w, 3, api.EventTextDelta, `{"text":"c"}`)
+					<-r.Context().Done()
+					return
+				}
+				writeEvent(t, w, 2, api.EventTextDelta, `{"text":"b"}`)
+				writeEvent(t, w, 3, api.EventTextDelta, `{"text":"c"}`)
+				fmt.Fprint(w, "event: head\ndata: {\"seq\":3}\n\n")
+				writeEvent(t, w, 4, api.EventTurnFinished, `{"status":"completed"}`)
+				<-r.Context().Done()
+			}))
+			var got []int64
+			s := &Stream{Client: testClient(srv.URL), Path: "/x", SendCursor: true, UntilHead: untilHead}
+			err := s.Run(context.Background(), func(e api.Event) (bool, error) {
+				got = append(got, e.Seq)
+				return e.Type == api.EventTurnFinished, nil
+			})
+			srv.Close()
+			want := "[1 2 3 4]"
+			if untilHead {
+				want = "[1 2 3]"
+			}
+			if err != nil || fmt.Sprint(got) != want {
+				t.Errorf("%s (untilHead %v): got %v, err %v; want %s", name, untilHead, got, err, want)
+			}
+			if fmt.Sprint(cursors) != "[0 1]" {
+				t.Errorf("%s (untilHead %v): cursors %q, want [0 1]", name, untilHead, cursors)
+			}
+		}
+	}
+}
+
+// A server that keeps sending the same malformed event makes Run give up
+// with a clear error, after MaxMalformed attempts on the same cursor.
+func TestStreamMalformedEventGivesUp(t *testing.T) {
+	var mu sync.Mutex
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cursors = append(cursors, r.Header.Get("Last-Event-ID"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		if r.Header.Get("Last-Event-ID") == "" {
+			writeEvent(t, w, 1, api.EventTextDelta, `{"text":"a"}`)
+		}
+		fmt.Fprint(w, "id: 2\ndata: {not json\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	var got []int64
+	s := &Stream{Client: testClient(srv.URL), Path: "/x"}
+	err := s.Run(context.Background(), func(e api.Event) (bool, error) {
+		got = append(got, e.Seq)
+		return false, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "giving up after 3 attempts: malformed event after seq 1") {
+		t.Fatalf("err = %v", err)
+	}
+	if fmt.Sprint(got) != "[1]" || fmt.Sprint(cursors) != "[ 1 1]" {
+		t.Errorf("delivered %v, cursors %q", got, cursors)
+	}
+}

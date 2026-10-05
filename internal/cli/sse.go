@@ -53,6 +53,22 @@ type Stream struct {
 	OnReconnect func(after int64, err error)
 }
 
+// MaxMalformed is how many times in a row a stream may deliver a malformed
+// event after the same cursor before Run gives up.
+const MaxMalformed = 3
+
+// malformedError is an event that is not a valid journal event (bad JSON,
+// no seq or no type). The stream reconnects from the last good cursor.
+type malformedError struct {
+	after   int64
+	id      string
+	payload string
+}
+
+func (e *malformedError) Error() string {
+	return fmt.Sprintf("malformed event after seq %d (id %q): %s", e.after, e.id, Truncate(e.payload, 120))
+}
+
 // ErrReplayIncomplete is returned by an UntilHead stream that ended before
 // the replay boundary.
 var ErrReplayIncomplete = errors.New("replay incomplete")
@@ -68,12 +84,14 @@ func (s *Stream) Run(ctx context.Context, fn func(api.Event) (stop bool, err err
 	sendCursor := s.SendCursor
 	backoff := 100 * time.Millisecond
 	var failingSince time.Time
+	malformed := 0 // consecutive malformed events after the same cursor
 	for {
 		delivered, done, err := s.connect(ctx, last, sendCursor, fn)
 		if delivered > last {
 			last = delivered
 			failingSince = time.Time{}
 			backoff = 100 * time.Millisecond
+			malformed = 0
 		}
 		if done {
 			return err
@@ -81,7 +99,12 @@ func (s *Stream) Run(ctx context.Context, fn func(api.Event) (stop bool, err err
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if s.UntilHead {
+		var bad *malformedError
+		if errors.As(err, &bad) {
+			if malformed++; malformed >= MaxMalformed {
+				return fmt.Errorf("event stream: giving up after %d attempts: %w", malformed, err)
+			}
+		} else if s.UntilHead {
 			return fmt.Errorf("%w: %v", ErrReplayIncomplete, err)
 		}
 		if failingSince.IsZero() {
@@ -149,15 +172,13 @@ func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn f
 		default:
 			continue // a named event this client does not know
 		}
-		if payload == "" {
-			continue // keep-alive or comment
+		if payload == "" && evID == "" {
+			continue // keep-alive
 		}
 		var e api.Event
-		if err := json.Unmarshal([]byte(payload), &e); err != nil {
-			return last, true, fmt.Errorf("event stream: bad event %q: %w", payload, err)
-		}
-		if e.Seq == 0 {
-			e.Seq, _ = strconv.ParseInt(evID, 10, 64)
+		if err := json.Unmarshal([]byte(payload), &e); err != nil || e.Seq == 0 || e.Type == "" {
+			// Never skip it: reconnect from the last good cursor.
+			return last, false, &malformedError{after: last, id: evID, payload: payload}
 		}
 		if e.Seq <= last {
 			continue // replayed after a reconnect: already delivered
