@@ -55,28 +55,32 @@ check "5 fifth removed, home drive kept (orphan listed)" "grep -q 'removed fifth
 log "## 6 kill the SSE client mid-turn, reconnect with Last-Event-ID: no loss, no duplicates"
 $A12S logs scout --follow > /tmp/gate6.a 2>&1 &
 L=$!
-$A12S prompt scout "Count from 1 to 60, one number per line, nothing else." > /tmp/gate6.prompt 2>&1 &
+$A12S prompt scout "Count from 1 to 150, one number per line, nothing else." > /tmp/gate6.prompt 2>&1 &
 P=$!
-sleep 3; kill -9 $L; wait $L 2>/dev/null
+for i in $(seq 1 300); do grep -q ' text.delta ' /tmp/gate6.a && break; sleep 0.2; done; sleep 1
+kill -9 $L; wait $L 2>/dev/null
 last=$(awk '{print $1}' /tmp/gate6.a | tail -1)
-log "killed the logs client after 3s at seq $last; waiting for the turn to finish"
-wait $P; cat /tmp/gate6.prompt >> "$LOG"
-run $A12S logs scout --since "$last" > /tmp/gate6.b
+log "killed the logs client mid-turn at seq $last; reconnecting with Last-Event-ID $last"
+$A12S logs scout --follow --since "$last" > /tmp/gate6.b 2>&1 &
+L2=$!
+wait $P; cat /tmp/gate6.prompt >> "$LOG"; sleep 2; kill $L2; wait $L2 2>/dev/null
 cat > /tmp/gate6.py <<'PY'
 import sys, json
 a = [l for l in open(sys.argv[1]) if l[:1].isdigit()]
 b = [l for l in open(sys.argv[2]) if l[:1].isdigit()]
 rows = [(int(l.split(" ", 2)[0]), l.split(" ", 2)[1], l.split(" ", 2)[2]) for l in a + b]
+started = max(s for s, t, d in rows if t == "turn.started")
+mid_turn = not any(t == "turn.finished" and s > started for s, t, d in (tuple(r) for r in rows[:len(a)]))
 seqs = [r[0] for r in rows]
 dupes = len(seqs) - len(set(seqs)); gaps = [y for x, y in zip(seqs, seqs[1:]) if y != x + 1]
-text = "".join(json.loads(d).get("text", "") for s, t, d in rows if t == "text.delta" and s > int(sys.argv[3]))
+text = "".join(json.loads(d).get("text", "") for s, t, d in rows if t == "text.delta" and s > started)
 nums = [int(t) for t in text.split() if t.isdigit()]
-ok = dupes == 0 and not gaps and nums == list(range(1, 61))
-print(f"6: before kill {len(a)} events, after reconnect {len(b)}, dupes={dupes}, gaps={gaps}, numbers 1..60 complete={nums == list(range(1, 61))}")
+finished = any(t == "turn.finished" and s > started for s, t, d in rows)
+ok = mid_turn and finished and dupes == 0 and not gaps and nums == list(range(1, 151))
+print(f"6: killed mid-turn={mid_turn}; before kill {len(a)} events, after reconnect {len(b)}; dupes={dupes}, gaps={gaps}; numbers 1..150 complete={nums == list(range(1, 151))}; turn.finished seen={finished}")
 sys.exit(0 if ok else 1)
 PY
-first=$(grep -E ' turn\.started ' /tmp/gate6.a /tmp/gate6.b | awk -F'[: ]' '{print $2}' | sort -n | tail -1)
-python3 /tmp/gate6.py /tmp/gate6.a /tmp/gate6.b "${first:-0}" > /tmp/gate6.res; rc=$?; tee -a "$LOG" < /tmp/gate6.res
+python3 /tmp/gate6.py /tmp/gate6.a /tmp/gate6.b > /tmp/gate6.res 2>&1; rc=$?; tee -a "$LOG" < /tmp/gate6.res
 check "6 reconnect lost nothing and duplicated nothing" "[ $rc -eq 0 ]"
 
 log "## 7 a request to a host that isn't allowed is blocked and shows up as a diagnostic"
