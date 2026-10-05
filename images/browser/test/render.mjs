@@ -1,0 +1,12 @@
+import { createRequire } from 'node:module';
+const require = createRequire('/opt/a12s/playwright-mcp/');
+const { chromium } = require('playwright');
+const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, chromiumSandbox: true });
+const page = await browser.newPage();
+await page.goto('data:text/html,<title>a12s</title><h1 id=h>hello from chromium</h1>');
+console.log('title:', await page.title(), '| h1:', await page.textContent('#h'));
+const png = await page.screenshot();
+console.log('screenshot bytes:', png.length);
+const sb = await page.goto('chrome://sandbox').then(() => page.innerText('body')).catch(e => 'n/a: ' + e.message);
+console.log(sb.split('\n').filter(l => /Namespace|Seccomp|Sandbox|Layer|adequately/i.test(l)).join(' | '));
+await browser.close();

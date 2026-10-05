@@ -13,3 +13,6 @@ vet:
 
 fmt:
 	$(GO) fmt ./...
+
+# Image targets live in images/images.mk, included last so they never become the default goal.
+include images/images.mk

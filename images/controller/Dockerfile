@@ -1,0 +1,17 @@
+# a12s Controller: the `a12s` binary run as `a12s controller`.
+# Build context: repo root.  docker build -f images/controller/Dockerfile -t a12s/controller:dev .
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/a12s ./cmd/a12s
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/a12s /usr/local/bin/a12s
+ENTRYPOINT ["a12s", "controller"]
