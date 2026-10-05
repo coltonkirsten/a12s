@@ -86,3 +86,27 @@ test('codex: an app-server that ignores interrupt is killed; turn ends interrupt
   assert.equal(await adapter.precheck(run.sessionId), null);
   await adapter.close();
 });
+
+test('codex: the configured model goes on every turn/start, also after a precheck resume', async () => {
+  const { adapter, input, log } = setup('normal');
+  assert.equal(await adapter.precheck('thr_7'), null);
+  await collect((await adapter.startTurn({ ...input, sessionId: 'thr_7' })).events);
+  assert.equal(log().find((m) => m.method === 'turn/start')?.params.model, 'gpt-x');
+});
+
+test('codex: a stalled request hits its deadline; stop during startup kills the app-server', async () => {
+  const cfg = testConfig({ harness: { kind: 'codex', version: '0', model: null } });
+  const deps = { cfg, credentialEnv: () => ({ FAKE_MODE: 'stall' }), mcpServers: {} };
+  const input: TurnInput = { prompt: 'p', sessionId: null, cwd: cfg.agentHome, model: null, autonomy: 'full', mcpServers: {} };
+  const slow = new CodexAdapter(deps, fake, { termAfterMs: 300, killAfterMs: 300 }, 300);
+  after(() => slow.close());
+  await assert.rejects(slow.startTurn(input), /did not answer turn\/start within 300ms/);
+
+  const stoppable = new CodexAdapter(deps, fake, { termAfterMs: 300, killAfterMs: 300 }, 60_000);
+  after(() => stoppable.close());
+  const started = Date.now();
+  const p = stoppable.startTurn(input);
+  setTimeout(() => void stoppable.stop(), 200);
+  await assert.rejects(p, /stopped before the turn started/);
+  assert.ok(Date.now() - started < 5000);
+});

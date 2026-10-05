@@ -26,6 +26,7 @@ interface ActiveTurn {
 export class ClaudeAdapter implements Adapter {
   readonly kind = 'claude-code' as const;
   private active: ActiveTurn | null = null;
+  private starting: { cancelled: boolean } | null = null;
 
   constructor(
     private readonly deps: HarnessDeps,
@@ -35,10 +36,17 @@ export class ClaudeAdapter implements Adapter {
 
   async startTurn(input: TurnInput): Promise<RunningTurn> {
     if (this.active) throw new Error('a turn is already running');
-    if (input.sessionId) {
-      const reason = await this.precheck(input.sessionId);
-      if (reason) throw new ResumeError(reason);
+    const start = { cancelled: false };
+    this.starting = start;
+    try {
+      if (input.sessionId) {
+        const reason = await this.precheck(input.sessionId);
+        if (reason) throw new ResumeError(reason);
+      }
+    } finally {
+      this.starting = null;
     }
+    if (start.cancelled) throw new Error('stopped before the turn started');
     const sessionId = input.sessionId ?? randomUUID();
     const events = new EventQueue<AdapterEvent>();
     const stderr = new Tail();
@@ -119,6 +127,7 @@ export class ClaudeAdapter implements Adapter {
   }
 
   async stop(): Promise<void> {
+    if (this.starting) this.starting.cancelled = true;
     const a = this.active;
     if (!a || a.stopping) return;
     a.stopping = true;

@@ -164,3 +164,15 @@ test('session record loading: missing is fresh, wrong shape is damaged', async (
   writeFileSync(p, '{"sessionId":"s","harness":"codex","cwd":"/home/agent"}');
   assert.deepEqual(loadSessionRecord(p), { record: { sessionId: 's', harness: 'codex', cwd: '/home/agent' }, damaged: null });
 });
+
+test('stop while the harness is still starting reaches the adapter and ends the turn interrupted', async () => {
+  const { adapter, computer, finished } = setup();
+  await computer.start();
+  adapter.stallStart = true;
+  const reply = computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  await until(() => computer.status().activeTurn !== null);
+  computer.stopTurn(String(computer.status().activeTurn));
+  const t = await reply;
+  assert.equal(finished(t.turnId), 'interrupted');
+  assert.equal(computer.status().phase, 'ready');
+});

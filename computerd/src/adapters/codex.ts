@@ -39,18 +39,34 @@ export class CodexAdapter implements Adapter {
   private readonly pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
   private readonly loaded = new Set<string>();
   private turn: ActiveTurn | null = null;
+  private starting: { cancelled: boolean } | null = null;
   private stderr = new Tail();
 
   constructor(
     private readonly deps: HarnessDeps,
     private readonly executable = join(deps.cfg.bundle, 'bin', 'codex'),
     private readonly timing: StopTiming = { termAfterMs: 10_000, killAfterMs: 5_000 },
+    private readonly requestTimeoutMs = 60_000,
   ) {
     this.mcpServers = deps.mcpServers;
   }
 
   async startTurn(input: TurnInput): Promise<RunningTurn> {
-    if (this.turn) throw new Error('a turn is already running');
+    if (this.turn || this.starting) throw new Error('a turn is already running');
+    const start = { cancelled: false };
+    this.starting = start;
+    try {
+      const run = await this.dispatch(input, start);
+      if (start.cancelled) throw new Error('stopped before the turn started');
+      return run;
+    } catch (err) {
+      throw start.cancelled ? new Error('stopped before the turn started') : err;
+    } finally {
+      this.starting = null;
+    }
+  }
+
+  private async dispatch(input: TurnInput, start: { cancelled: boolean }): Promise<RunningTurn> {
     if (JSON.stringify(input.mcpServers) !== JSON.stringify(this.mcpServers)) {
       this.mcpServers = input.mcpServers;
       await this.restart();
@@ -72,17 +88,32 @@ export class CodexAdapter implements Adapter {
     const turn: ActiveTurn = { threadId, turnId: null, out: new EventQueue(), usage: null, stopping: false, timer: null };
     this.turn = turn;
     try {
-      const r = await this.request('turn/start', { threadId, input: [{ type: 'text', text: input.prompt, text_elements: [] }], cwd: input.cwd });
+      // The model goes on every turn: a thread loaded by the wake precheck was resumed without it.
+      const r = await this.request('turn/start', {
+        threadId,
+        input: [{ type: 'text', text: input.prompt, text_elements: [] }],
+        cwd: input.cwd,
+        ...(input.model ? { model: input.model } : {}),
+      });
       turn.turnId = String(r.turn.id);
     } catch (err) {
       this.turn = null;
       throw err;
     }
-    if (turn.stopping) void this.interrupt(turn);
+    if (start.cancelled) {
+      turn.stopping = true;
+      void this.interrupt(turn);
+    }
     return { sessionId: threadId, events: turn.out };
   }
 
   async stop(): Promise<void> {
+    if (this.starting) {
+      // Mid-startup there is no turn to interrupt; kill the app-server so a stalled request cannot hold the Computer.
+      this.starting.cancelled = true;
+      if (this.child) void terminate(this.child, this.timing.killAfterMs);
+      return;
+    }
     const t = this.turn;
     if (!t || t.stopping) return;
     t.stopping = true;
@@ -179,7 +210,14 @@ export class CodexAdapter implements Adapter {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (!this.child) return reject(new Error('codex app-server is not running'));
-      this.pending.set(id, { resolve, reject });
+      const child = this.child;
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new Error(`codex app-server did not answer ${method} within ${this.requestTimeoutMs}ms`));
+        void terminate(child, this.timing.killAfterMs);
+      }, this.requestTimeoutMs);
+      const done = <T>(fn: (v: T) => void) => (v: T) => (clearTimeout(timer), fn(v));
+      this.pending.set(id, { resolve: done(resolve), reject: done(reject) });
       this.send({ id, method, params });
     });
   }

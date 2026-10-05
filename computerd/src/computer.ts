@@ -240,7 +240,7 @@ export class Computer {
     if (a && a.turnId === turnId) {
       if (!a.stopRequested) {
         a.stopRequested = true;
-        if (a.started) void this.adapter.stop();
+        void this.adapter.stop(); // also cancels a turn the adapter is still starting
       }
       return { turnId, status: 'stopping' };
     }
