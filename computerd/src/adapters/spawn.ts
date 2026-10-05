@@ -22,6 +22,8 @@ export function harnessEnv(deps: HarnessDeps): Record<string, string> {
     CODEX_HOME: cfg.codexHome,
   };
   if (!cfg.isRoot && process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;
+  // The browser tier ships Playwright here, so agent scripts can require("playwright").
+  if (cfg.imageTier === 'browser') env.NODE_PATH = '/opt/a12s/playwright-mcp/node_modules';
   if (cfg.proxy) {
     for (const k of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) env[k] = cfg.proxy;
     env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1,::1';

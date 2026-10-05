@@ -176,3 +176,35 @@ test('stop while the harness is still starting reaches the adapter and ends the 
   assert.equal(finished(t.turnId), 'interrupted');
   assert.equal(computer.status().phase, 'ready');
 });
+
+test('credential generation is acknowledged only once applied; a busy turn defers it to the idle boundary', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
+  const adapter = new StubAdapter();
+  const computer = new Computer(cfg, journal, adapter, {}, 20);
+  await computer.start();
+  assert.equal(computer.status().credentialGeneration, 1);
+
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'long' });
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(computer.status().credentialGeneration, 1, 'not while the harness still runs on the old credentials');
+  assert.equal(adapter.restarts, 0);
+  adapter.finish();
+  await until(() => computer.status().credentialGeneration === 2);
+  assert.equal(adapter.restarts, 1);
+  assert.equal(journal.turnInfo(t.turnId)?.finished, 'completed');
+
+  writeFileSync(join(cfg.secretsDir, '.generation'), '3\n');
+  await until(() => computer.status().credentialGeneration === 3);
+  assert.equal(adapter.restarts, 2, 'idle: restarted then acknowledged');
+  await computer.shutdown(100);
+});
+
+test('browser tier: harness env carries NODE_PATH for Playwright', async () => {
+  const { harnessEnv } = await import('../adapters/spawn.js');
+  const deps = (imageTier: string) => ({ cfg: testConfig({ imageTier }), credentialEnv: () => ({}), mcpServers: {} });
+  assert.equal(harnessEnv(deps('browser')).NODE_PATH, '/opt/a12s/playwright-mcp/node_modules');
+  assert.equal(harnessEnv(deps('slim')).NODE_PATH, undefined);
+});

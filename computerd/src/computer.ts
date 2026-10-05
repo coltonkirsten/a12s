@@ -57,13 +57,16 @@ export class Computer {
   private restarting = false;
   private restartRequested = false;
   private readonly inflight = new Map<string, { hash: string; reply: Promise<TurnReply> }>();
-  private adapterCredGeneration: number | null = null;
+  /** The credential generation actually in effect: wired, and any long-lived harness restarted with it. */
+  private ackedGeneration: number | null = null;
+  private credentialTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly cfg: Config,
     private readonly journal: Journal,
     private readonly adapter: Adapter,
     private readonly mcpServers: Record<string, McpServer>,
+    private readonly credentialPollMs = 2_000,
   ) {}
 
   get phase(): Phase {
@@ -89,16 +92,19 @@ export class Computer {
       this.resumePending = true;
       this.journal.append('resume.failed', { sessionId: null, reason: this.sessionDamaged, at: 'wake' });
     }
+    const generation = credentialGeneration(this.cfg); // read before wiring: never acknowledge more than was applied
     const wiring = this.wire(null);
-    this.adapterCredGeneration = credentialGeneration(this.cfg);
     if (wiring?.missing.length) this.journal.append('diagnostic', { message: 'credentials not injected', names: wiring.missing });
     if (this.session) {
       this.resumePending = true;
       const reason = await this.precheck(this.session);
       if (reason) this.journal.append('resume.failed', { sessionId: this.session.sessionId, reason, at: 'wake' }, { session: this.session.sessionId });
     }
+    this.ackedGeneration = generation; // no harness process holds older credentials yet
     this.base = 'ready';
     this.lifecycle('ready');
+    this.credentialTimer = setInterval(() => void this.applyCredentials(), this.credentialPollMs);
+    this.credentialTimer.unref();
   }
 
   status(): Record<string, unknown> {
@@ -107,7 +113,7 @@ export class Computer {
       session: this.session?.sessionId ?? null,
       activeTurn: this.active?.turnId ?? null,
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
-      credentialGeneration: credentialGeneration(this.cfg),
+      credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
     };
   }
@@ -156,11 +162,11 @@ export class Computer {
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
-      this.wire(turnId);
       const generation = credentialGeneration(this.cfg);
-      if (generation !== this.adapterCredGeneration) {
+      this.wire(turnId);
+      if (generation !== this.ackedGeneration) {
         await this.adapter.restart(); // rotated credentials must not stay in a long-lived harness
-        this.adapterCredGeneration = generation;
+        this.ackedGeneration = generation;
       }
       run = await this.adapter.startTurn({
         prompt: req.prompt,
@@ -226,6 +232,7 @@ export class Computer {
     if (resumed && status === 'completed') this.resumePending = false;
     this.endTurn(active);
     if (this.restartRequested) void this.restartHarness(active.turnId, status);
+    else void this.applyCredentials();
   }
 
   private endTurn(active: ActiveTurn): void {
@@ -270,7 +277,10 @@ export class Computer {
     let resumed = false;
     const session = this.session;
     try {
+      const generation = credentialGeneration(this.cfg);
+      this.wire(null);
       await this.adapter.restart();
+      this.ackedGeneration = generation;
       if (session) {
         const reason = await this.precheck(session);
         if (reason) {
@@ -292,10 +302,28 @@ export class Computer {
     }
   }
 
+  /** At an idle boundary, applies a new credential generation: rewire, restart the harness, then acknowledge. */
+  private async applyCredentials(): Promise<void> {
+    const generation = credentialGeneration(this.cfg);
+    if (generation === this.ackedGeneration || this.base !== 'ready' || this.active || this.restarting) return;
+    this.restarting = true;
+    try {
+      this.wire(null);
+      await this.adapter.restart();
+      this.ackedGeneration = generation;
+      this.journal.append('lifecycle', { phase: 'credentials-applied', credentialGeneration: generation }, { session: this.session?.sessionId ?? null });
+    } catch (err) {
+      this.journal.append('diagnostic', { message: `applying credential generation ${generation} failed: ${(err as Error).message}` });
+    } finally {
+      this.restarting = false;
+    }
+  }
+
   /** Closes admission, interrupts the active turn and waits (bounded) for it to finish. */
   async shutdown(flushMs = 20_000): Promise<void> {
     if (this.base === 'stopping') return;
     this.base = 'stopping';
+    if (this.credentialTimer) clearInterval(this.credentialTimer);
     this.lifecycle('stopping');
     const a = this.active;
     if (a) {
