@@ -349,15 +349,31 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 	return nil
 }
 
-// busy asks computerd whether a turn is running.
+// busy asks a running Computer's computerd whether a turn is running. A
+// computerd that does not answer may be running one: unknown is busy (only
+// `apply --interrupt` overrides it). The cached phase is never trusted:
+// a just-accepted turn's events may not have arrived.
 func (c *Controller) busy(ctx context.Context, name string) bool {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	st, err := c.client(name).Status(sctx)
 	if err != nil {
-		return c.phase(name) == api.PhaseBusy
+		return true
 	}
 	return st.ActiveTurn != "" || st.Phase == "busy"
+}
+
+// idle reports whether the Computer runs no turn: it is not running, or
+// its computerd says so.
+func (c *Controller) idle(ctx context.Context, name string) bool {
+	obs, exists, err := c.observeOne(ctx, name)
+	if err != nil {
+		return false
+	}
+	if !exists || !obs.Running {
+		return true
+	}
+	return !c.busy(ctx, name)
 }
 
 // restage stops the Computer if it runs, stages a new generation of the
@@ -453,7 +469,7 @@ func (c *Controller) applyStaged(name string) {
 		return
 	}
 	c.closeAdmission(name)
-	if c.busy(c.ctx, name) {
+	if !c.idle(c.ctx, name) {
 		c.openAdmission(name)
 		return
 	}
@@ -484,7 +500,7 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 	for i, name := range names {
 		wg.Go(func() {
 			c.closeAdmission(name)
-			if c.busy(ctx, name) {
+			if !c.idle(ctx, name) {
 				if !req.Interrupt {
 					c.openAdmission(name)
 					return

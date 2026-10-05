@@ -178,16 +178,29 @@ func (c *Controller) start(ctx context.Context, name string) error {
 	c.mu.Lock()
 	c.rtLocked(name).credsHash = c.credsHashLocked(comp.Credentials)
 	c.mu.Unlock()
-	if err := c.waitReady(ctx, name); err != nil {
+	st, err := c.waitReady(ctx, name)
+	if err == nil {
+		err = c.confirmRunning(ctx, name, gen)
+	}
+	if err != nil {
 		return c.fail(name, err, true)
 	}
+	c.observeStatus(name, st)
 	c.openAdmission(name)
 	c.subscribe(name)
 	return nil
 }
 
+// confirmRunning reads back through Observe that the generation runs,
+// before the Computer is published Ready.
+func (c *Controller) confirmRunning(ctx context.Context, name string, gen int64) error {
+	return c.confirm(ctx, name, fmt.Sprintf("generation %d running", gen), func(st driver.ComputerState, exists bool) bool {
+		return exists && st.Generation == gen && st.Power == driver.PowerAwake && st.Running
+	})
+}
+
 // waitReady polls computerd until it answers with admission open.
-func (c *Controller) waitReady(ctx context.Context, name string) error {
+func (c *Controller) waitReady(ctx context.Context, name string) (api.ComputerdStatus, error) {
 	deadline := time.Now().Add(c.timing.ReadyTimeout)
 	cl := c.client(name)
 	var last error
@@ -196,8 +209,7 @@ func (c *Controller) waitReady(ctx context.Context, name string) error {
 		st, err := cl.Status(sctx)
 		cancel()
 		if err == nil && st.Phase != "starting" {
-			c.observeStatus(name, st)
-			return nil
+			return st, nil
 		}
 		if err == nil {
 			err = errors.New("computerd is starting")
@@ -206,15 +218,15 @@ func (c *Controller) waitReady(ctx context.Context, name string) error {
 			if ok && obs.Failure != "" {
 				reason = "container " + obs.Failure
 			}
-			return errors.New(reason)
+			return st, errors.New(reason)
 		}
 		last = err
 		if time.Now().After(deadline) {
-			return fmt.Errorf("computerd did not become ready within %s: %v", c.timing.ReadyTimeout, last)
+			return st, fmt.Errorf("computerd did not become ready within %s: %v", c.timing.ReadyTimeout, last)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return st, ctx.Err()
 		case <-time.After(c.timing.Poll):
 		}
 	}
@@ -412,6 +424,12 @@ func (c *Controller) attach(ctx context.Context, name string) error {
 	defer cancel()
 	st, err := c.client(name).Status(sctx)
 	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	gen := c.state.Computers[name].Generation
+	c.mu.Unlock()
+	if err := c.confirmRunning(ctx, name, gen); err != nil {
 		return err
 	}
 	c.observeStatus(name, st)

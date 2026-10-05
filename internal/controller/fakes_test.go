@@ -34,8 +34,10 @@ type fakeDriver struct {
 	calls     []string
 	events    chan driver.Event
 	cds       *fakeComputerds
-	// lostStages makes StageComputer report success without effect.
-	lostStages bool
+	// lostStages makes StageComputer report success without effect;
+	// ghostStarts makes Observe never show a container running (a start
+	// the substrate reported but that did not take).
+	lostStages, ghostStarts bool
 }
 
 type fakeContainer struct {
@@ -84,8 +86,9 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 	obs := driver.Observation{Computers: map[string]driver.ComputerState{}, Drives: map[string]driver.DriveState{}}
 	attached := map[string][]string{}
 	for name, c := range d.computers {
-		st := driver.ComputerState{Name: name, Generation: c.spec.Generation, Power: driver.PowerAsleep, Running: c.running}
-		if c.running {
+		running := c.running && !d.ghostStarts
+		st := driver.ComputerState{Name: name, Generation: c.spec.Generation, Power: driver.PowerAsleep, Running: running}
+		if running {
 			st.Power = driver.PowerAwake
 		}
 		obs.Computers[name] = st
@@ -641,4 +644,17 @@ func (d *fakeDriver) setLostStages(b bool) {
 func (d *fakeDriver) mounts(driveID string) []string {
 	obs, _ := d.Observe(context.Background())
 	return obs.Drives[driveID].AttachedTo
+}
+
+func (d *fakeDriver) setGhostStarts(b bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ghostStarts = b
+}
+
+// mute makes computerd stop answering while its container keeps running.
+func (f *fakeComputerd) mute() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.up = false
 }
