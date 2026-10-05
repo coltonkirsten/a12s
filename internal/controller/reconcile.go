@@ -523,9 +523,9 @@ func (c *Controller) applyStaged(name string) {
 	if !due {
 		return
 	}
-	if held, err := c.exclusiveHolder(c.ctx, name); err != nil || held != nil {
-		return
-	}
+	// No holder check here: restage itself waits for a held drive, and
+	// first releases one this Computer holds that the holder needs (a swap
+	// whose turns have both ended).
 	c.closeAdmission(name)
 	if !c.idle(c.ctx, name) {
 		c.openAdmission(name)
