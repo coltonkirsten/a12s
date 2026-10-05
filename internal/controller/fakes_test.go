@@ -34,8 +34,14 @@ type fakeDriver struct {
 	calls     []string
 	events    chan driver.Event
 	cds       *fakeComputerds
-	// lostStages makes StageComputer report success without effect.
-	lostStages bool
+	// lostStages makes StageComputer report success without effect;
+	// ghostStarts makes Observe never show a container running (a start
+	// the substrate reported but that did not take).
+	lostStages, ghostStarts bool
+	// exclusive drives (as in the lab Fleet); staging a second attachment
+	// of one is recorded in violations.
+	exclusive  map[string]bool
+	violations []string
 }
 
 type fakeContainer struct {
@@ -56,8 +62,9 @@ func newFakeDriver(cds *fakeComputerds) *fakeDriver {
 			"a12s/bundle-claude-code:2.1.280": bundle("claude-code", "2.1.280", "sha256:claude1", "platform.claude.com"),
 			"a12s/bundle-codex:0.154.0":       bundle("codex", "0.154.0", "sha256:codex1", "auth.openai.com"),
 		},
-		events: make(chan driver.Event, 16),
-		cds:    cds,
+		events:    make(chan driver.Event, 16),
+		cds:       cds,
+		exclusive: map[string]bool{"drive-a12s-repo": true, "drive-ux-scratch": true},
 	}
 }
 
@@ -84,8 +91,9 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 	obs := driver.Observation{Computers: map[string]driver.ComputerState{}, Drives: map[string]driver.DriveState{}}
 	attached := map[string][]string{}
 	for name, c := range d.computers {
-		st := driver.ComputerState{Name: name, Generation: c.spec.Generation, Power: driver.PowerAsleep, Running: c.running}
-		if c.running {
+		running := c.running && !d.ghostStarts
+		st := driver.ComputerState{Name: name, Generation: c.spec.Generation, Power: driver.PowerAsleep, Running: running}
+		if running {
 			st.Power = driver.PowerAwake
 		}
 		obs.Computers[name] = st
@@ -174,6 +182,13 @@ func (d *fakeDriver) StageComputer(_ context.Context, spec driver.ComputerSpec) 
 	}
 	if d.lostStages {
 		return nil
+	}
+	for _, m := range spec.Drives {
+		for other, c := range d.computers {
+			if other != spec.Name && d.exclusive[m.DriveID] && slices.ContainsFunc(c.spec.Drives, func(o driver.Mount) bool { return o.DriveID == m.DriveID }) {
+				d.violations = append(d.violations, fmt.Sprintf("%s staged with %s while %s attaches it", spec.Name, m.DriveID, other))
+			}
+		}
 	}
 	d.computers[spec.Name] = &fakeContainer{spec: spec, files: map[string][]byte{}}
 	d.record("stage %s %d", spec.Name, spec.Generation)
@@ -641,4 +656,23 @@ func (d *fakeDriver) setLostStages(b bool) {
 func (d *fakeDriver) mounts(driveID string) []string {
 	obs, _ := d.Observe(context.Background())
 	return obs.Drives[driveID].AttachedTo
+}
+
+func (d *fakeDriver) setGhostStarts(b bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ghostStarts = b
+}
+
+// mute makes computerd stop answering while its container keeps running.
+func (f *fakeComputerd) mute() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.up = false
+}
+
+func (d *fakeDriver) twoWriters() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.violations)
 }

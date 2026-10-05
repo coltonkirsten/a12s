@@ -250,6 +250,7 @@ func (c *Controller) activeLocked(name string) Active {
 		Allow:       slices.Clone(comp.Egress.Allow),
 		SignInHosts: slices.Clone(c.state.BundleHosts[comp.Harness.BundleKey()]),
 		Drives:      slices.Clone(comp.Drives),
+		Unenforced:  c.state.Fleet.Egress.Unenforced(),
 	}
 }
 
@@ -290,6 +291,55 @@ func (c *Controller) exclusiveHolder(ctx context.Context, name string) (*driveHe
 		}
 	}
 	return nil, nil
+}
+
+// holdsObsolete reports whether the active generation attaches an
+// exclusive drive the Computer's Fleet entry no longer attaches.
+func (c *Controller) holdsObsolete(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, rec := c.state.Fleet, c.state.Computers[name]
+	comp := f.Computers[name]
+	for _, old := range rec.Active.Drives {
+		if d, ok := f.Drives[old.Name]; ok && d.Access != fleet.AccessExclusive {
+			continue
+		}
+		if !slices.ContainsFunc(comp.Drives, func(m fleet.DriveMount) bool { return m.Name == old.Name }) {
+			return true
+		}
+	}
+	return false
+}
+
+// release stops and removes an idle Computer's old generation, which
+// detaches its drives, and reads that back; its new generation stays
+// staged until the drives it needs are free. The caller has closed
+// admission and found the Computer idle.
+func (c *Controller) release(ctx context.Context, name string, obs driver.ComputerState) error {
+	c.setTransition(name, true)
+	defer c.setTransition(name, false)
+	c.mu.Lock()
+	c.rtLocked(name).released = true
+	c.mu.Unlock()
+	if obs.Power == driver.PowerAwake {
+		c.setPhase(name, api.PhaseStopping, nil)
+		c.finalStatus(ctx, name)
+		c.stopEvents(name)
+		if err := c.stop(ctx, name, obs.Generation); err != nil {
+			return c.fail(name, err, true)
+		}
+	}
+	err := c.drv.RemoveComputer(ctx, name)
+	if err == nil {
+		err = c.confirm(ctx, name, "release of the old generation", func(_ driver.ComputerState, exists bool) bool { return !exists })
+	}
+	if err != nil {
+		return c.fail(name, err, true)
+	}
+	c.setPhase(name, api.PhaseProvisioning, nil)
+	c.logf("%s: generation %d removed to release its drives (drives kept)", name, obs.Generation)
+	c.kickPending(name)
+	return nil
 }
 
 // kickPending retries staged generations, for example one that waited for
@@ -349,15 +399,31 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 	return nil
 }
 
-// busy asks computerd whether a turn is running.
+// busy asks a running Computer's computerd whether a turn is running. A
+// computerd that does not answer may be running one: unknown is busy (only
+// `apply --interrupt` overrides it). The cached phase is never trusted:
+// a just-accepted turn's events may not have arrived.
 func (c *Controller) busy(ctx context.Context, name string) bool {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	st, err := c.client(name).Status(sctx)
 	if err != nil {
-		return c.phase(name) == api.PhaseBusy
+		return true
 	}
 	return st.ActiveTurn != "" || st.Phase == "busy"
+}
+
+// idle reports whether the Computer runs no turn: it is not running, or
+// its computerd says so.
+func (c *Controller) idle(ctx context.Context, name string) bool {
+	obs, exists, err := c.observeOne(ctx, name)
+	if err != nil {
+		return false
+	}
+	if !exists || !obs.Running {
+		return true
+	}
+	return !c.busy(ctx, name)
 }
 
 // restage stops the Computer if it runs, stages a new generation of the
@@ -368,9 +434,20 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	if err != nil {
 		return c.fail(name, err, false)
 	}
+	obs, exists, err := c.observeOne(ctx, name)
+	if err != nil {
+		return c.fail(name, err, true)
+	}
 	if held, err := c.exclusiveHolder(ctx, name); err != nil {
 		return c.fail(name, err, true)
 	} else if held != nil {
+		// The holder may itself wait for a drive this Computer attaches
+		// (a swap): release that one first, so the holder can proceed.
+		if exists && c.holdsObsolete(name) {
+			if err := c.release(ctx, name, obs); err != nil {
+				return err
+			}
+		}
 		return held
 	}
 	c.mu.Lock()
@@ -381,10 +458,6 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 		if spec.Preset = loadPreset(c.cfg.StateDir, sum); spec.Preset == nil {
 			return c.fail(name, fmt.Errorf("preset %s (%s) is not stored; run a12s up to send it", preset, sum), true)
 		}
-	}
-	obs, exists, err := c.observeOne(ctx, name)
-	if err != nil {
-		return c.fail(name, err, true)
 	}
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
@@ -423,6 +496,7 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	rec.StagedGeneration, rec.StagedHash = 0, ""
 	// The new generation's egress policy and drives take effect now.
 	rec.Active = c.activeLocked(name)
+	c.rtLocked(name).released = false
 	desired := rec.DesiredPower
 	err = c.saveLocked()
 	c.mu.Unlock()
@@ -453,7 +527,7 @@ func (c *Controller) applyStaged(name string) {
 		return
 	}
 	c.closeAdmission(name)
-	if c.busy(c.ctx, name) {
+	if !c.idle(c.ctx, name) {
 		c.openAdmission(name)
 		return
 	}
@@ -484,7 +558,7 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 	for i, name := range names {
 		wg.Go(func() {
 			c.closeAdmission(name)
-			if c.busy(ctx, name) {
+			if !c.idle(ctx, name) {
 				if !req.Interrupt {
 					c.openAdmission(name)
 					return
@@ -680,7 +754,8 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
 // Lock (generation and preset unset), and the hash of what makes a
-// generation: image, bundle, resources, drives, environment and egress.
+// generation: image, bundle, resources, drives, environment, egress and
+// the Fleet's egress enforcement.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -721,7 +796,9 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Drives        []driver.Mount
 		Env           []string
 		Egress        []string
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress})
+		// Omitted when enforced, so enforced generations keep their hash.
+		Unenforced bool `json:",omitempty"`
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced()})
 	if err != nil {
 		return spec, "", err
 	}

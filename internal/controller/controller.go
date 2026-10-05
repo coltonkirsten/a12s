@@ -367,13 +367,13 @@ func (c *Controller) policy(name string) (Policy, bool) {
 	if c.state.Fleet == nil || rec == nil {
 		return Policy{}, false
 	}
-	return NewPolicy(rec.Active.Allow, rec.Active.SignInHosts, c.state.Fleet.Egress.Unenforced()), true
+	return NewPolicy(rec.Active.Allow, rec.Active.SignInHosts, rec.Active.Unenforced), true
 }
 
 // egressMode is the active egress mode of a Computer, for status.
 func (c *Controller) egressModeLocked(rec *Record) string {
 	switch {
-	case c.state.Fleet != nil && c.state.Fleet.Egress.Unenforced():
+	case rec.Active.Unenforced:
 		return api.EgressUnenforced
 	case slices.Contains(rec.Active.Allow, fleet.AllowAll):
 		return api.EgressAllowAll
