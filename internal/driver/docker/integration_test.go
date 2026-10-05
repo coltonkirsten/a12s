@@ -159,7 +159,24 @@ func TestDockerIntegration(t *testing.T) {
 
 	spec.Preset = preset.Bytes()
 	must(t, d.StageComputer(ctx, spec))
-	must(t, d.StageComputer(ctx, spec)) // same generation: no-op
+	staged, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
+	must(t, err)
+	must(t, d.StageComputer(ctx, spec)) // same generation, bootstrap finished: no-op
+	if again, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{}); err != nil || again.Container.ID != staged.Container.ID {
+		t.Fatalf("same-generation restage replaced a finished container: %v", err)
+	}
+	// A same-generation container whose preset copy never finished is
+	// replaced and the preset copied again.
+	must(t, d.writeMarker(ctx, staged.Container.ID, "pending"))
+	must(t, d.StageComputer(ctx, spec))
+	again, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
+	must(t, err)
+	if again.Container.ID == staged.Container.ID {
+		t.Error("pending-marker container was reported as staged")
+	}
+	if state, err := d.readFile(ctx, again.Container.ID, presetMarker); err != nil || state != "applied" {
+		t.Errorf("marker after restage = %q, %v", state, err)
+	}
 
 	obs, err := d.Observe(ctx)
 	must(t, err)

@@ -125,6 +125,35 @@ func TestBundleDir(t *testing.T) {
 	}
 }
 
+func TestCheckSpecMountPoints(t *testing.T) {
+	base := driver.ComputerSpec{Name: "c", Generation: 1, Image: "x", HomeDrive: "home-c",
+		Bundle: driver.BundleRef{Kind: "codex", Version: "1", Image: "sha256:0123456789abcdef"}}
+	for at, ok := range map[string]bool{
+		"/work/data":          true,
+		"/work/A-z_0.9":       true,
+		"/work/v,/home/.a12s": false,
+		"/work/v:rw":          false,
+		"/work/my dir":        false,
+		"work":                false,
+		"/work/../home":       false,
+		"/":                   false,
+		"/home/agent/x":       false,
+		"/run/a12s":           false,
+		"/opt/a12s/bundles/x": false,
+		"/tmp/x":              false,
+		"/proc/x":             false,
+		"/sys":                false,
+		"/dev/shm":            false,
+		"/homework":           true,
+	} {
+		s := base
+		s.Drives = []driver.Mount{{DriveID: "drive-d", At: at}}
+		if err := checkSpec(s); (err == nil) != ok {
+			t.Errorf("checkSpec(at=%q) = %v, want ok=%v", at, err, ok)
+		}
+	}
+}
+
 func TestCheckNetwork(t *testing.T) {
 	d := &Driver{fleet: "lab"}
 	good := network.Network{

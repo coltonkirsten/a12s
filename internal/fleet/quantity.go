@@ -98,9 +98,6 @@ func ParseCPU(s string) (CPU, error) {
 // Millis returns the quantity in millicores.
 func (c CPU) Millis() int64 { return int64(c) }
 
-// NanoCPUs returns the quantity in billionths of a CPU (Docker's unit).
-func (c CPU) NanoCPUs() int64 { return int64(c) * 1_000_000 }
-
 // String formats c as whole cores when exact, else millicores.
 func (c CPU) String() string {
 	if c%1000 == 0 {

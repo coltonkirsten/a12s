@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -115,25 +114,4 @@ func pin(m *map[string]string, key, digest string) bool {
 	}
 	(*m)[key] = digest
 	return true
-}
-
-// Missing lists the lock keys the Fleet needs that are not yet pinned, in
-// Computer name order without duplicates.
-func (l *Lock) Missing(f *Fleet) (images, bundles, presets []string) {
-	for _, name := range f.ComputerNames() {
-		c := f.Computers[name]
-		images = appendMissing(images, l.Images, c.Image)
-		bundles = appendMissing(bundles, l.Bundles, c.Harness.BundleKey())
-		if c.Home.Preset != "" {
-			presets = appendMissing(presets, l.Presets, c.Home.Preset)
-		}
-	}
-	return images, bundles, presets
-}
-
-func appendMissing(list []string, pinned map[string]string, key string) []string {
-	if _, ok := pinned[key]; ok || slices.Contains(list, key) {
-		return list
-	}
-	return append(list, key)
 }

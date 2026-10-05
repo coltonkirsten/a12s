@@ -85,22 +85,6 @@ presets: { "./presets/scout": "sha256:e" }   # content hash of the directory
 	}
 }
 
-func TestLockMissing(t *testing.T) {
-	lab, err := Load("testdata/lab.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	l := NewLock()
-	l.PinImage("slim", "sha256:s")
-	l.PinBundle("codex", "0.154.0", "sha256:x")
-	images, bundles, presets := l.Missing(lab)
-	if !reflect.DeepEqual(images, []string{"browser"}) ||
-		!reflect.DeepEqual(bundles, []string{"claude-code@2.1.280"}) ||
-		!reflect.DeepEqual(presets, []string{"./presets/scout"}) {
-		t.Errorf("Missing = %v %v %v", images, bundles, presets)
-	}
-}
-
 func writeTree(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	for name, body := range files {

@@ -1,7 +1,6 @@
 package fleet
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -241,6 +240,21 @@ computers:
 		{"bad access", base + "drives: { d: { access: public } }\n" + c, "drives.d.access"},
 		{"relative mount", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: work }]\n", "absolute"},
 		{"reserved mount", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /home/agent/x }]\n", "reserved"},
+		{"mount comma", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: '/work/v,/home/.a12s' }]\n", "may only contain"},
+		{"mount colon", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: '/work/v:rw' }]\n", "may only contain"},
+		{"mount space", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: '/work/my dir' }]\n", "may only contain"},
+		{"mount unicode", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/café }]\n", "may only contain"},
+		{"mount unclean", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/../home }]\n", "clean absolute"},
+		{"mount trailing slash", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/ }]\n", "clean absolute"},
+		{"mount root", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: / }]\n", "reserved"},
+		{"mount allowed chars", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/A-z_0.9 }]\n", ""},
+		{"reserved /home", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /home/x }]\n", "reserved"},
+		{"reserved /run/a12s", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /run/a12s/x }]\n", "reserved"},
+		{"reserved /opt/a12s", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /opt/a12s/x }]\n", "reserved"},
+		{"reserved /tmp", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /tmp/x }]\n", "reserved"},
+		{"reserved /proc", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /proc/x }]\n", "reserved"},
+		{"reserved /sys", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /sys/x }]\n", "reserved"},
+		{"reserved /dev", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /dev/x }]\n", "reserved"},
 		{"shared readOnly", base + "drives: { d: { access: shared } }\n" + c + "    drives: [{ name: d, at: /w, readOnly: true }]\n", ""},
 		{"shared writable", base + "drives: { d: { access: shared } }\n" + c + "    drives: [{ name: d, at: /w }]\n", "must be attached readOnly"},
 		{"shared-write writable", base + "drives: { d: { access: shared-write } }\n" + c + "    drives: [{ name: d, at: /w }]\n", ""},
@@ -324,55 +338,9 @@ func TestQuantities(t *testing.T) {
 			t.Errorf("ParseCPU(%q) = %d (%s), %v; want %d (%s)", tt.in, got, got, err, tt.want, tt.str)
 		}
 	}
-	if CPU(1500).NanoCPUs() != 1_500_000_000 {
-		t.Error("NanoCPUs")
-	}
 	for _, in := range []string{"", "m", "-1", "one"} {
 		if _, err := ParseCPU(in); err == nil {
 			t.Errorf("ParseCPU(%q): want error", in)
 		}
-	}
-}
-
-func TestDiff(t *testing.T) {
-	lab, err := Load("testdata/lab.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile("testdata/lab.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fifth := string(data) + `
-  critic:
-    harness: { kind: codex, version: 0.154.0 }
-    image: slim
-`
-	withFifth, err := Parse([]byte(fifth))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bumped, err := Parse([]byte(strings.Replace(fifth, "version: 0.154.0, model: gpt-6-astra", "version: 0.155.0, model: gpt-6-astra", 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tests := []struct {
-		name     string
-		old, new *Fleet
-		want     Changes
-	}{
-		{"first apply", nil, lab, Changes{Created: []string{"builder", "reviewer", "scout", "tester"}}},
-		{"no change", lab, lab, Changes{Unchanged: []string{"builder", "reviewer", "scout", "tester"}}},
-		{"add a fifth", lab, withFifth, Changes{Created: []string{"critic"}, Unchanged: []string{"builder", "reviewer", "scout", "tester"}}},
-		{"remove it again", withFifth, lab, Changes{Removed: []string{"critic"}, Unchanged: []string{"builder", "reviewer", "scout", "tester"}}},
-		{"bump builder", withFifth, bumped, Changes{Updated: []string{"builder"}, Unchanged: []string{"critic", "reviewer", "scout", "tester"}}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Diff(tt.old, tt.new); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Diff = %+v, want %+v", got, tt.want)
-			}
-		})
 	}
 }

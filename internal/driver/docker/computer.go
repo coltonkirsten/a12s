@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/netip"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -60,11 +61,20 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 		if c.State != nil && (c.State.Running || c.State.Restarting || c.State.Paused) {
 			return fmt.Errorf("stage %s generation %d: %w", spec.Name, spec.Generation, driver.ErrRunning)
 		}
-		switch staged := parseGeneration(c.Config.Labels); {
-		case staged > spec.Generation:
+		staged := parseGeneration(c.Config.Labels)
+		if staged > spec.Generation {
 			return fmt.Errorf("stage %s generation %d: generation %d is staged: %w", spec.Name, spec.Generation, staged, driver.ErrStaleGeneration)
-		case staged == spec.Generation:
-			return nil
+		}
+		if staged == spec.Generation {
+			// Same generation: done only if its bootstrap finished; a stage
+			// interrupted mid-way is replaced, never reported as success.
+			done, err := d.bootstrapped(ctx, c.ID, spec)
+			if err != nil {
+				return fmt.Errorf("stage %s: %w", spec.Name, err)
+			}
+			if done {
+				return nil
+			}
 		}
 		if _, err := d.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{}); err != nil {
 			return fmt.Errorf("stage %s: remove generation %s: %w", spec.Name, c.Config.Labels[LabelGeneration], err)
@@ -90,17 +100,69 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 		return fmt.Errorf("stage %s: create container: %w", spec.Name, err)
 	}
 	if err := d.checkBundle(ctx, created.ID, spec); err != nil {
-		_, _ = d.cli.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true})
-		return fmt.Errorf("stage %s: %w", spec.Name, err)
+		return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
 	}
 	if len(spec.Preset) > 0 {
 		if err := d.applyPreset(ctx, created.ID, spec.Preset); err != nil {
 			// Without the container, a retry stages (and copies) again.
-			_, _ = d.cli.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true})
-			return fmt.Errorf("stage %s: %w", spec.Name, err)
+			return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
 		}
 	}
 	return nil
+}
+
+// discard removes a half-staged container after cause, and reports a failed
+// removal alongside cause rather than assuming the container is gone.
+func (d *Driver) discard(ctx context.Context, containerID string, cause error) error {
+	if _, err := d.cli.ContainerRemove(context.WithoutCancel(ctx), containerID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
+		return errors.Join(cause, fmt.Errorf("remove half-staged container: %w", err))
+	}
+	return cause
+}
+
+// bootstrapped reports whether an existing container of spec's generation
+// finished staging: its bundle is in the cache and, with a preset, the
+// marker says "applied" (or the home was initialized without one).
+func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driver.ComputerSpec) (bool, error) {
+	if err := d.checkBundle(ctx, containerID, spec); err != nil {
+		return false, nil
+	}
+	if len(spec.Preset) == 0 {
+		return true, nil
+	}
+	state, err := d.readFile(ctx, containerID, presetMarker)
+	if err != nil {
+		return false, fmt.Errorf("preset: %w", err)
+	}
+	switch state {
+	case "applied":
+		return true, nil
+	case "": // no marker: finished only if the home was already initialized
+		_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: agentHome})
+		if isNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("preset: stat %s: %w", agentHome, err)
+		}
+		return true, nil
+	}
+	return false, nil // "pending": the copy did not finish
+}
+
+// mountPointRE is the character set a mount point may use; A12S_DRIVES
+// separates entries with ',' and modes with ':'.
+var mountPointRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// reservedMount reports whether a work drive would mount over a path the
+// Computer itself owns.
+func reservedMount(at string) bool {
+	for _, r := range []string{"/", homeMount, "/run", "/opt/a12s", "/tmp", "/proc", "/sys", "/dev"} {
+		if at == r || (r != "/" && strings.HasPrefix(at, r+"/")) {
+			return true
+		}
+	}
+	return false
 }
 
 func checkSpec(s driver.ComputerSpec) error {
@@ -119,7 +181,7 @@ func checkSpec(s driver.ComputerSpec) error {
 		return fmt.Errorf("bundle image %q must be the image ID EnsureBundle returned", s.Bundle.Image)
 	}
 	for _, m := range s.Drives {
-		if !path.IsAbs(m.At) || m.At == homeMount || strings.HasPrefix(m.At, homeMount+"/") {
+		if !mountPointRE.MatchString(m.At) || path.Clean(m.At) != m.At || !path.IsAbs(m.At) || reservedMount(m.At) {
 			return fmt.Errorf("drive %s: invalid mount point %q", m.DriveID, m.At)
 		}
 	}
