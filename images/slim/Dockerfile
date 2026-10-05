@@ -4,10 +4,11 @@
 FROM node:24-bookworm-slim AS computerd
 WORKDIR /src
 COPY computerd/package.json computerd/package-lock.json ./
-RUN npm ci
+# The SDK's optional bundled claude binary is never used (the HarnessBundle supplies it).
+RUN npm ci --omit=optional
 COPY computerd/ ./
 RUN npm run build \
- && npm prune --omit=dev \
+ && npm prune --omit=dev --omit=optional \
  && mkdir -p node_modules \
  && test -f dist/main.js
 
