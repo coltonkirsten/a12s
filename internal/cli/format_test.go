@@ -27,6 +27,15 @@ func TestUpSummary(t *testing.T) {
 	if got := UpSummary(&api.PutFleetResponse{}, false); got[0] != "no changes" {
 		t.Errorf("got %q", got)
 	}
+
+	// Failures are listed by name, and never summarised as "no changes".
+	r = &api.PutFleetResponse{Created: []string{"scout"}, Errors: map[string]string{"tester": "image a12s/browser:dev not found", "builder": "bundle missing"}}
+	if got := UpErrors(r); strings.Join(got, "\n") != "builder: bundle missing\ntester: image a12s/browser:dev not found" {
+		t.Errorf("UpErrors = %q", got)
+	}
+	if got := UpSummary(&api.PutFleetResponse{Errors: map[string]string{"scout": "x"}}, false); len(got) != 0 {
+		t.Errorf("summary with only errors = %q", got)
+	}
 }
 
 func TestWriteStatus(t *testing.T) {

@@ -36,10 +36,20 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	if len(r.Removed) > 0 {
 		lines = append(lines, "removed "+strings.Join(r.Removed, ", ")+" (drives kept)")
 	}
-	if len(lines) == 0 {
+	if len(lines) == 0 && len(r.Errors) == 0 {
 		lines = append(lines, "no changes")
 	}
 	return lines
+}
+
+// UpErrors lists the Computers that did not converge, `<computer>: <reason>`,
+// in name order.
+func UpErrors(r *api.PutFleetResponse) []string {
+	var out []string
+	for _, name := range sortedKeys(r.Errors) {
+		out = append(out, name+": "+r.Errors[name])
+	}
+	return out
 }
 
 // ShortID abbreviates a session or turn id for a status row.

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"sort"
@@ -62,6 +63,13 @@ func runUp(g *globals, args []string) error {
 	if err := c.Do(ctx, "PUT", "/v1/fleet", req, &resp); err != nil {
 		return err
 	}
+	return g.finishUp(onDisk, lock, &resp, *asleep, os.Stdout, os.Stderr)
+}
+
+// finishUp writes new pins to fleet.lock and prints the summary, then each
+// Computer that did not converge. What converged stays applied and pinned;
+// any failure still fails the command.
+func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse, asleep bool, stdout, stderr io.Writer) error {
 	if resp.Lock != nil {
 		lock = resp.Lock
 	}
@@ -69,10 +77,17 @@ func runUp(g *globals, args []string) error {
 		if err := lock.Save(g.lockPath()); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "pinned in %s: %s\n", fleet.LockFile, strings.Join(added, ", "))
+		fmt.Fprintf(stderr, "pinned in %s: %s\n", fleet.LockFile, strings.Join(added, ", "))
 	}
-	for _, line := range cli.UpSummary(&resp, *asleep) {
-		fmt.Println(line)
+	for _, line := range cli.UpSummary(resp, asleep) {
+		fmt.Fprintln(stdout, line)
+	}
+	failed := cli.UpErrors(resp)
+	for _, line := range failed {
+		fmt.Fprintln(stderr, line)
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d Computer(s) did not converge (a12s status shows their state)", len(failed))
 	}
 	return nil
 }
