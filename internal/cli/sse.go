@@ -43,17 +43,19 @@ type Stream struct {
 	// reconnect the last delivered seq is sent.
 	After      int64
 	SendCursor bool
-	// Idle, when positive, ends the stream (without error) once no event
-	// has arrived for that long: `a12s logs` without --follow.
-	Idle time.Duration
+	// UntilHead ends the stream at the replay boundary, computerd's `head`
+	// event (`a12s logs` without --follow). A connection that ends before
+	// it is ErrReplayIncomplete, not a reconnect. Live streams ignore head.
+	UntilHead bool
 	// GiveUp bounds how long reconnecting may keep failing. Zero means 2m.
 	GiveUp time.Duration
 	// OnReconnect, if set, is told about each dropped connection.
 	OnReconnect func(after int64, err error)
 }
 
-// errIdle cancels a request when the idle timer fires.
-var errIdle = errors.New("idle")
+// ErrReplayIncomplete is returned by an UntilHead stream that ended before
+// the replay boundary.
+var ErrReplayIncomplete = errors.New("replay incomplete")
 
 // Run delivers events to fn until fn returns stop or an error, the context
 // ends, or the server reports a gap.
@@ -79,6 +81,9 @@ func (s *Stream) Run(ctx context.Context, fn func(api.Event) (stop bool, err err
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if s.UntilHead {
+			return fmt.Errorf("%w: %v", ErrReplayIncomplete, err)
+		}
 		if failingSince.IsZero() {
 			failingSince = time.Now()
 		} else if time.Since(failingSince) > giveUp {
@@ -98,10 +103,8 @@ func (s *Stream) Run(ctx context.Context, fn func(api.Event) (stop bool, err err
 }
 
 // connect runs one connection. It returns the last seq it delivered, whether
-// the stream is finished (fn stopped, idle, gap or fn error), and the error.
+// the stream is finished (fn stopped, head reached, gap or fn error), and the error.
 func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn func(api.Event) (bool, error)) (int64, bool, error) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
 	req, err := s.Client.NewRequest(ctx, http.MethodGet, s.Path, nil)
 	if err != nil {
 		return after, true, err
@@ -110,16 +113,8 @@ func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn f
 	if sendCursor {
 		req.Header.Set("Last-Event-ID", strconv.FormatInt(after, 10))
 	}
-	var idle *time.Timer
-	if s.Idle > 0 {
-		idle = time.AfterFunc(s.Idle, func() { cancel(errIdle) })
-		defer idle.Stop()
-	}
 	resp, err := s.Client.HTTP.Do(req)
 	if err != nil {
-		if errors.Is(context.Cause(ctx), errIdle) {
-			return after, true, nil
-		}
 		return after, false, err
 	}
 	defer resp.Body.Close()
@@ -136,17 +131,23 @@ func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn f
 	for {
 		f, err := r.Next()
 		if err != nil {
-			if errors.Is(context.Cause(ctx), errIdle) {
-				return last, true, nil
-			}
 			if err == io.EOF {
 				err = io.ErrUnexpectedEOF // a live stream does not end by itself
 			}
 			return last, false, fmt.Errorf("event stream dropped after seq %d: %w", last, err)
 		}
 		ev, payload, evID := f.Event, string(f.Data), f.ID
-		if ev == api.SSEGap {
+		switch ev {
+		case "":
+		case api.SSEGap:
 			return last, true, &GapError{After: last, Data: payload}
+		case api.SSEHead:
+			if s.UntilHead {
+				return last, true, nil
+			}
+			continue
+		default:
+			continue // a named event this client does not know
 		}
 		if payload == "" {
 			continue // keep-alive or comment
@@ -162,9 +163,6 @@ func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn f
 			continue // replayed after a reconnect: already delivered
 		}
 		last = e.Seq
-		if idle != nil {
-			idle.Reset(s.Idle)
-		}
 		stop, err := fn(e)
 		if stop || err != nil {
 			return last, true, err

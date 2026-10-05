@@ -63,8 +63,10 @@ func TestStreamReconnectExactlyOnce(t *testing.T) {
 			w.(http.Flusher).Flush()
 			panic(http.ErrAbortHandler)
 		case 2:
-			// The server replays from the cursor; it may overlap.
+			// The server replays from the cursor; it may overlap. A live
+			// stream passes over the replay boundary and unknown names.
 			writeEvent(t, w, 3, api.EventTextDelta, `{"text":"lo"}`)
+			fmt.Fprint(w, "event: head\ndata: {\"seq\":3}\n\nevent: future\ndata: {\"seq\":99}\n\n")
 			writeEvent(t, w, 4, api.EventTextDelta, `{"text":" world"}`)
 			panic(http.ErrAbortHandler) // drop again, cleanly between events
 		default:
@@ -132,22 +134,33 @@ func TestStreamCursorAndGap(t *testing.T) {
 	}
 }
 
-func TestStreamIdleEnds(t *testing.T) {
+func TestStreamUntilHead(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeEvent(t, w, 7, api.EventLifecycle, `{"phase":"Ready"}`)
 		writeEvent(t, w, 8, api.EventLifecycle, `{"phase":"Busy"}`)
+		if r.URL.Path == "/cut" {
+			panic(http.ErrAbortHandler) // ends before the replay boundary
+		}
+		fmt.Fprint(w, "event: head\ndata: {\"seq\":8}\n\n")
+		w.(http.Flusher).Flush()
+		writeEvent(t, w, 9, api.EventLifecycle, `{"phase":"Ready"}`) // live: not part of the replay
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+
 	var got []int64
-	s := &Stream{Client: testClient(srv.URL), Path: "/x", SendCursor: true, Idle: 200 * time.Millisecond}
-	err := s.Run(context.Background(), func(e api.Event) (bool, error) {
-		got = append(got, e.Seq)
-		return false, nil
-	})
-	if err != nil || fmt.Sprint(got) != "[7 8]" {
+	collect := func(e api.Event) (bool, error) { got = append(got, e.Seq); return false, nil }
+	s := &Stream{Client: testClient(srv.URL), Path: "/full", After: 6, SendCursor: true, UntilHead: true}
+	if err := s.Run(context.Background(), collect); err != nil || fmt.Sprint(got) != "[7 8]" {
 		t.Fatalf("got %v, err %v", got, err)
+	}
+
+	got = nil
+	s = &Stream{Client: testClient(srv.URL), Path: "/cut", After: 6, SendCursor: true, UntilHead: true}
+	err := s.Run(context.Background(), collect)
+	if !errors.Is(err, ErrReplayIncomplete) || fmt.Sprint(got) != "[7 8]" {
+		t.Fatalf("got %v, err %v; want replay incomplete", got, err)
 	}
 }
 
