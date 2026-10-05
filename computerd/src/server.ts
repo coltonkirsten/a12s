@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { TLSSocket } from 'node:tls';
 import { HttpError, type Computer, type TurnRequest } from './computer.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { Leases } from './leases.js';
@@ -60,6 +61,15 @@ function wrap(fn: (req: IncomingMessage, res: ServerResponse, url: URL) => Promi
         if (err instanceof HttpError) send(res, err.status, { error: err.message });
         else send(res, 500, { error: (err as Error).message });
       });
+  };
+}
+
+/** CA membership is not enough: only the Controller's identity (CN=controller) may drive this Computer. */
+export function controllerOnly(handler: Handler): Handler {
+  return (req, res) => {
+    const peer = (req.socket as TLSSocket).getPeerCertificate?.();
+    if (!peer || peer.subject?.CN !== 'controller') return send(res, 403, { error: 'client certificate is not the controller' });
+    handler(req, res);
   };
 }
 

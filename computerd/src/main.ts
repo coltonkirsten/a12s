@@ -13,7 +13,7 @@ import { credentialEnv } from './credentials.js';
 import { prepareDirs, prepareDrives } from './dirs.js';
 import { Journal } from './journal.js';
 import { Leases, type TlsMaterial } from './leases.js';
-import { apiHandler, localHandler } from './server.js';
+import { apiHandler, controllerOnly, localHandler } from './server.js';
 
 function log(message: string): void {
   process.stderr.write(`computerd: ${message}\n`);
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   await new Promise<void>((r) => local.listen(cfg.sockPath, r));
   chmodSync(cfg.sockPath, 0o666);
 
-  const api = createHttpsServer({ ...tls, requestCert: true, rejectUnauthorized: true }, apiHandler(computer, journal));
+  const api = createHttpsServer({ ...tls, requestCert: true, rejectUnauthorized: true }, controllerOnly(apiHandler(computer, journal)));
   await new Promise<void>((r) => api.listen(cfg.port, r));
   log(`listening on :${cfg.port} (mTLS) and ${cfg.sockPath}`);
 
