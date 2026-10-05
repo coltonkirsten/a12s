@@ -83,3 +83,13 @@ Verdict: not signed off. Round-2 verification: 20 fixed, #41 rejection accepted,
 | 35 | Refresh writes could land on the home drive; reclaim races injection | accept, with evidence | Codex 0.154.0 `storage.rs save()` writes in place (`truncate+write+create`, follows the symlink → tmpfs); Node `writeFileSync` likewise; reclaim is a fallback, now serialized with wiring; raw `sk-ant-oat…` → `CLAUDE_CODE_OAUTH_TOKEN` (no file at all) is the recommended Claude credential |
 | 51 | Exclusive-drive swap between two idle Computers deadlocks | accept | obsolete attachment released at idle, detachment observed, then the new generation staged |
 | 52 | A corrupt cached preset cannot be repaired by `a12s up` | accept | existing cache entry hash-validated or replaced atomically |
+
+## Round 4 — sign-off round at c86b49f
+
+Verdict: not signed off; all round-3 items verified fixed (#35 main path fixed with the acknowledged flock residual; #51 partial → #53). 3 new findings.
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 53 | A swap submitted while both holders are busy never converges after the turns end (premature holder check in `applyStaged`) | accept | holder check removed; admission closed, idle confirmed, `restage` releases the obsolete attachment |
+| 54 | Recycled networks can inherit the proxy's cached address→Computer mapping (a Computer could get its peer's policy) | accept | mapping invalidated before network removal, refreshed before a replacement serves, fail closed without a verified mapping |
+| 55 | A malformed first journal event can be skipped because the initial cursor is empty | accept | cursor initialized from the validated `head` frame |
