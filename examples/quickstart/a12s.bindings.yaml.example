@@ -1,0 +1,3 @@
+# Copy to a12s.bindings.yaml (git-ignored). Maps the credential name in fleet.yaml to a file on this Mac.
+credentials:
+  anthropic: { file: ~/.a12s/anthropic }

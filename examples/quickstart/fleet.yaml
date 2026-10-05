@@ -1,0 +1,11 @@
+# The smallest Fleet: one Claude Code computer on the slim tier.
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: quickstart }
+
+computers:
+  hello:
+    harness: { kind: claude-code, version: 2.1.280 }
+    image: slim
+    credentials: [anthropic]
+    egress: { allow: [api.anthropic.com] }

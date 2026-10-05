@@ -7,3 +7,4 @@ node_modules/
 *.log
 .DS_Store
 examples/lab/fleet.lock
+examples/quickstart/fleet.lock
