@@ -29,7 +29,7 @@ const (
 var bundleNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._+-]{0,63}$`)
 
 // EnsureBundle extracts a HarnessBundle image's /bundle into the Fleet's
-// bundle cache volume as <kind>-<version>/. Throwaway containers are created
+// bundle cache volume as <kind>-<version>-<short image ID>/. Throwaway containers are created
 // from the bundle image (never started, so the image needs no shell), one
 // with the cache volume mounted, and the files move through the archive API.
 // bundle.json is written last, so its presence marks a complete extraction.
@@ -61,7 +61,7 @@ func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bund
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: %w", imageRef, err)
 	}
 	out := driver.Bundle{ImageID: imageID, Manifest: m}
-	dir := driver.BundleDir(m.Kind, m.Version)
+	dir := driver.BundleDir(m.Kind, m.Version, imageID)
 
 	_, err = d.cli.ContainerStatPath(ctx, created, client.ContainerStatPathOptions{Path: path.Join(extractMount, dir, bundleManifest)})
 	if err == nil {

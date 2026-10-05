@@ -58,7 +58,8 @@ func TestDockerIntegration(t *testing.T) {
 	}
 	standin := "a12s-test-standin:" + fleetName
 	bundleRef := "a12s-test-bundle-codex:" + fleetName
-	t.Cleanup(func() { cleanup(t, cli, fleetName, standin, bundleRef) })
+	bundleRef2 := "a12s-test-bundle-codex:" + fleetName + "-other"
+	t.Cleanup(func() { cleanup(t, cli, fleetName, standin, bundleRef, bundleRef2) })
 
 	buildImage(ctx, t, cli, standin, map[string]string{"Dockerfile": standinDockerfile})
 	buildImage(ctx, t, cli, bundleRef, map[string]string{
@@ -86,7 +87,8 @@ func TestDockerIntegration(t *testing.T) {
 	// Drives.
 	home := driver.DriveSpec{ID: driver.HomeDriveID("c"), Kind: driver.DriveHome, Computer: "c", Size: 1 << 30}
 	data := driver.DriveSpec{ID: driver.WorkDriveID("data"), Kind: driver.DriveWork}
-	for _, spec := range []driver.DriveSpec{home, data} {
+	ref := driver.DriveSpec{ID: driver.WorkDriveID("ref"), Kind: driver.DriveWork}
+	for _, spec := range []driver.DriveSpec{home, data, ref} {
 		created, err := d.EnsureDrive(ctx, spec)
 		if err != nil || !created {
 			t.Fatalf("EnsureDrive %s = %v, %v; want created", spec.ID, created, err)
@@ -108,6 +110,17 @@ func TestDockerIntegration(t *testing.T) {
 	if b2.ImageID != b.ImageID {
 		t.Errorf("bundle ID changed: %s %s", b.ImageID, b2.ImageID)
 	}
+	// A different image claiming the same kind and version gets its own directory.
+	buildImage(ctx, t, cli, bundleRef2, map[string]string{
+		"Dockerfile":         bundleDockerfile,
+		"bundle/bundle.json": bundleJSON,
+		"bundle/bin/codex":   "#!/bin/sh\necho other codex\n",
+	})
+	other, err := d.EnsureBundle(ctx, bundleRef2)
+	must(t, err)
+	if other.ImageID == b.ImageID || driver.BundleDir("codex", "0.0.0-test", other.ImageID) == driver.BundleDir("codex", "0.0.0-test", b.ImageID) {
+		t.Fatalf("same-version bundles share an identity: %s %s", b.ImageID, other.ImageID)
+	}
 
 	// Stage generation 1 with a preset.
 	presetDir := t.TempDir()
@@ -117,13 +130,34 @@ func TestDockerIntegration(t *testing.T) {
 	must(t, fleet.WritePresetTar(presetDir, &preset))
 	spec := driver.ComputerSpec{
 		Name: "c", Generation: 1, Image: standin, Tier: fleet.TierCustom,
-		Bundle:   driver.BundleRef{Kind: "codex", Version: "0.0.0-test", Image: bundleRef},
+		Bundle:   driver.BundleRef{Kind: "codex", Version: "0.0.0-test", Image: b.ImageID},
 		Autonomy: fleet.AutonomyFull, CPUMillis: 500, Memory: 256 << 20,
 		HomeDrive:   home.ID,
-		Drives:      []driver.Mount{{DriveID: data.ID, At: "/work/data"}},
+		Drives:      []driver.Mount{{DriveID: data.ID, At: "/work/data"}, {DriveID: ref.ID, At: "/work/ref", ReadOnly: true}},
 		Credentials: []string{"openai"},
-		Preset:      preset.Bytes(),
 	}
+
+	// A preset copy that fails leaves no staged container behind, so the
+	// retry below stages and copies again instead of reporting success.
+	bad := spec
+	bad.Preset = badPreset(t)
+	if err := d.StageComputer(ctx, bad); err == nil {
+		t.Fatal("stage with a broken preset succeeded")
+	}
+	if obs, err := d.Observe(ctx); err != nil || len(obs.Computers) != 0 {
+		t.Fatalf("after a failed preset: %+v, %v", obs.Computers, err)
+	}
+
+	// A network with the Computer's name that is not isolated is never reused.
+	_, err = cli.NetworkCreate(ctx, d.NetworkName("rogue"), client.NetworkCreateOptions{Driver: "bridge", Labels: map[string]string{LabelFleet: fleetName}})
+	must(t, err)
+	rogue := spec
+	rogue.Name, rogue.HomeDrive, rogue.Drives, rogue.Preset = "rogue", home.ID, nil, nil
+	if err := d.StageComputer(ctx, rogue); err == nil || !strings.Contains(err.Error(), "not internal") {
+		t.Errorf("stage on a non-isolated network = %v", err)
+	}
+
+	spec.Preset = preset.Bytes()
 	must(t, d.StageComputer(ctx, spec))
 	must(t, d.StageComputer(ctx, spec)) // same generation: no-op
 
@@ -162,7 +196,7 @@ func TestDockerIntegration(t *testing.T) {
 	}
 
 	t.Run("container spec", func(t *testing.T) { checkContainer(ctx, t, d, cli) })
-	t.Run("inside the computer", func(t *testing.T) { checkInside(ctx, t, d, st.Address) })
+	t.Run("inside the computer", func(t *testing.T) { checkInside(ctx, t, d, st.Address, spec.Bundle.Path()) })
 
 	// Connect: from the test process (not on the network) it must refuse clearly.
 	if _, err := d.Connect(ctx, "c", driver.ServiceComputerd); !errors.Is(err, driver.ErrNotOnNetwork) {
@@ -215,10 +249,11 @@ func TestDockerIntegration(t *testing.T) {
 	}
 	obs, err = d.Observe(ctx)
 	must(t, err)
-	if len(obs.Computers) != 0 || len(obs.Drives) != 2 || len(obs.Drives[home.ID].AttachedTo) != 0 {
+	if len(obs.Computers) != 0 || len(obs.Drives) != 3 || len(obs.Drives[home.ID].AttachedTo) != 0 {
 		t.Errorf("after remove: %+v", obs)
 	}
 	must(t, d.RemoveDrive(ctx, data.ID))
+	must(t, d.RemoveDrive(ctx, ref.ID))
 	must(t, d.RemoveDrive(ctx, home.ID))
 	must(t, d.RemoveDrive(ctx, home.ID)) // idempotent
 }
@@ -239,6 +274,9 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 	if !slices.Equal(h.CapDrop, []string{"ALL"}) || !sameCaps(h.CapAdd, capAdd) || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") {
 		t.Errorf("caps: drop=%v add=%v secopt=%v", h.CapDrop, h.CapAdd, h.SecurityOpt)
 	}
+	if h.Init == nil || !*h.Init {
+		t.Error("init is not enabled")
+	}
 	if h.Memory != 256<<20 || h.NanoCPUs != 500_000_000 {
 		t.Errorf("resources: memory=%d nanocpus=%d", h.Memory, h.NanoCPUs)
 	}
@@ -257,6 +295,7 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 		"/home":             d.VolumeName(driver.HomeDriveID("c")) + ":rw",
 		"/opt/a12s/bundles": d.BundleVolume() + ":ro",
 		"/work/data":        d.VolumeName(driver.WorkDriveID("data")) + ":rw",
+		"/work/ref":         d.VolumeName(driver.WorkDriveID("ref")) + ":ro",
 	}
 	if !equalMaps(got, want) {
 		t.Errorf("mounts = %v, want %v", got, want)
@@ -273,7 +312,7 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 	}
 }
 
-func checkInside(ctx context.Context, t *testing.T, d *Driver, address string) {
+func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePath string) {
 	run := func(asRoot bool, stdin string, cmd ...string) (int, string) {
 		t.Helper()
 		var in io.Reader
@@ -307,14 +346,29 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address string) {
 	if code, _ := run(true, "", "touch", "/opt/a12s/bundles/x"); code == 0 {
 		t.Error("bundle cache is writable")
 	}
-	expect(false, bundleJSON, "cat", "/opt/a12s/bundles/codex-0.0.0-test/bundle.json")
+	expect(false, bundleJSON, "cat", bundlePath+"/bundle.json")
+	expect(false, "echo fake codex", "sed", "-n", "2p", bundlePath+"/bin/codex")
 	expect(true, "", "touch", "/run/a12s/x", "/tmp/x", "/work/data/x")
+	// Fresh work drives: A12S_DRIVES tells computerd which empty, root-owned
+	// rw roots to hand to the agent. The stand-in has no computerd, so the
+	// test does that chown through Exec, then writes as the agent.
+	expect(false, "/work/data:rw,/work/ref:ro", "sh", "-c", "echo $A12S_DRIVES")
+	if code, _ := run(false, "", "touch", "/work/data/agent-file"); code == 0 {
+		t.Error("fresh drive root is writable by the agent before computerd's chown")
+	}
+	expect(true, "", "chown", "1000:1000", "/work/data")
+	expect(false, "1000", "sh", "-c", "echo hi > /work/data/agent-file && stat -c %u /work/data/agent-file")
+	if code, _ := run(true, "", "touch", "/work/ref/x"); code == 0 {
+		t.Error("readOnly drive is writable")
+	}
+	expect(true, "applied", "cat", presetMarker)
+	expect(true, "docker-init", "sh", "-c", "cat /proc/1/comm")
 	expect(true, "tmpfs 700", "sh", "-c", "echo $(stat -f -c %T /run/a12s) $(stat -c %a /run/a12s)")
 	// The secret-inject path: bytes on stdin into tmpfs.
 	if code, out := run(true, "s3cret", "sh", "-c", "cat > /run/a12s/token && cat /run/a12s/token"); code != 0 || out != "s3cret" {
 		t.Errorf("stdin inject: code %d, output %q", code, out)
 	}
-	expect(false, "/opt/a12s/bundles/codex-0.0.0-test", "sh", "-c", "echo $A12S_BUNDLE")
+	expect(false, bundlePath, "sh", "-c", "echo $A12S_BUNDLE")
 	// No route out: neither as the agent nor as root, by IP or to the host.
 	for _, asRoot := range []bool{false, true} {
 		if code, out := run(asRoot, "", "wget", "-q", "-T", "3", "-O-", "http://1.1.1.1"); code == 0 {
@@ -358,6 +412,15 @@ func execIn(ctx context.Context, cli *client.Client, name string, cmd ...string)
 		out = out[8:]
 	}
 	return res.ExitCode, out, nil
+}
+
+// badPreset is a preset tar the driver refuses (a hard link), so the copy fails.
+func badPreset(t *testing.T) []byte {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	must(t, tw.WriteHeader(&tar.Header{Typeflag: tar.TypeLink, Name: "l", Linkname: "x"}))
+	must(t, tw.Close())
+	return buf.Bytes()
 }
 
 func nextEvent(t *testing.T, events <-chan driver.Event) driver.Event {

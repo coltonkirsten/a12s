@@ -28,6 +28,12 @@ const (
 	agentUID  = 1000
 	agentGID  = 1000
 	agentUser = "1000:1000"
+
+	// presetMarker records preset state on the home drive, outside the
+	// agent's home and owned by root: "pending" while copying, "applied" after.
+	presetMarker = "/home/.a12s-preset"
+
+	gatewayModeOption = "com.docker.network.bridge.gateway_mode_ipv4"
 )
 
 // StageComputer creates the container for spec.Generation, with its network
@@ -89,6 +95,8 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 	}
 	if len(spec.Preset) > 0 {
 		if err := d.applyPreset(ctx, created.ID, spec.Preset); err != nil {
+			// Without the container, a retry stages (and copies) again.
+			_, _ = d.cli.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true})
 			return fmt.Errorf("stage %s: %w", spec.Name, err)
 		}
 	}
@@ -107,6 +115,8 @@ func checkSpec(s driver.ComputerSpec) error {
 		return errors.New("home drive is required")
 	case s.Bundle.Kind == "" || s.Bundle.Version == "":
 		return errors.New("bundle kind and version are required")
+	case driver.ShortImageID(s.Bundle.Image) == "":
+		return fmt.Errorf("bundle image %q must be the image ID EnsureBundle returned", s.Bundle.Image)
 	}
 	for _, m := range s.Drives {
 		if !path.IsAbs(m.At) || m.At == homeMount || strings.HasPrefix(m.At, homeMount+"/") {
@@ -144,6 +154,7 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 		security = append(security, "seccomp="+spec.Seccomp)
 	}
 	stop := StopTimeout
+	useInit := true
 	return client.ContainerCreateOptions{
 		Name: d.ContainerName(spec.Name),
 		Config: &container.Config{
@@ -161,6 +172,7 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 		HostConfig: &container.HostConfig{
 			NetworkMode:    container.NetworkMode(netName),
 			RestartPolicy:  container.RestartPolicy{Name: container.RestartPolicyDisabled},
+			Init:           &useInit, // --init: reap orphans, forward signals to computerd
 			ReadonlyRootfs: true,
 			CapDrop:        []string{"ALL"},
 			CapAdd:         capAdd,
@@ -183,10 +195,10 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 
 // checkBundle verifies the Computer's bundle is in the cache.
 func (d *Driver) checkBundle(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
-	p := path.Join(driver.BundlePath(spec.Bundle.Kind, spec.Bundle.Version), bundleManifest)
+	p := path.Join(spec.Bundle.Path(), bundleManifest)
 	_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: p})
 	if isNotFound(err) {
-		return fmt.Errorf("bundle %s@%s is not in the cache; EnsureBundle first", spec.Bundle.Kind, spec.Bundle.Version)
+		return fmt.Errorf("bundle %s@%s (%s) is not in the cache; EnsureBundle first", spec.Bundle.Kind, spec.Bundle.Version, spec.Bundle.Image)
 	}
 	if err != nil {
 		return fmt.Errorf("check bundle: %w", err)
@@ -195,15 +207,29 @@ func (d *Driver) checkBundle(ctx context.Context, containerID string, spec drive
 }
 
 // applyPreset copies a preset tar into /home/agent of a stopped container,
-// owned by the agent, but only when the home drive is still empty: the
-// preset is applied once, before computerd first creates /home/agent.
+// owned by the agent, once per home drive: when the home is still empty
+// (before computerd first creates /home/agent), or when an earlier copy did
+// not finish. A root-owned marker beside /home/agent reads "pending" during
+// the copy and "applied" only after it succeeded.
 func (d *Driver) applyPreset(ctx context.Context, containerID string, preset []byte) error {
-	_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: agentHome})
-	if err == nil {
-		return nil // home already initialized
+	state, err := d.readFile(ctx, containerID, presetMarker)
+	if err != nil {
+		return fmt.Errorf("preset: %w", err)
 	}
-	if !isNotFound(err) {
-		return fmt.Errorf("preset: stat %s: %w", agentHome, err)
+	switch state {
+	case "applied":
+		return nil
+	case "": // no marker: apply only onto an empty home
+		_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: agentHome})
+		if err == nil {
+			return nil // home initialized without a preset
+		}
+		if !isNotFound(err) {
+			return fmt.Errorf("preset: stat %s: %w", agentHome, err)
+		}
+	}
+	if err := d.writeMarker(ctx, containerID, "pending"); err != nil {
+		return err
 	}
 	var buf bytes.Buffer
 	if err := rebasePresetTar(bytes.NewReader(preset), &buf, path.Base(agentHome)); err != nil {
@@ -212,7 +238,41 @@ func (d *Driver) applyPreset(ctx context.Context, containerID string, preset []b
 	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: homeMount, Content: &buf}); err != nil {
 		return fmt.Errorf("preset: copy: %w", err)
 	}
+	return d.writeMarker(ctx, containerID, "applied")
+}
+
+func (d *Driver) writeMarker(ctx context.Context, containerID, state string) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	_ = tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(presetMarker), Mode: 0o600, Size: int64(len(state))})
+	_, _ = tw.Write([]byte(state))
+	_ = tw.Close()
+	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: path.Dir(presetMarker), Content: &buf}); err != nil {
+		return fmt.Errorf("preset: write marker: %w", err)
+	}
 	return nil
+}
+
+// readFile returns a small file's content from a container, or "" if it
+// does not exist.
+func (d *Driver) readFile(ctx context.Context, containerID, p string) (string, error) {
+	res, err := d.cli.CopyFromContainer(ctx, containerID, client.CopyFromContainerOptions{SourcePath: p})
+	if isNotFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", p, err)
+	}
+	defer res.Content.Close()
+	tr := tar.NewReader(res.Content)
+	if _, err := tr.Next(); err != nil {
+		return "", fmt.Errorf("read %s: %w", p, err)
+	}
+	b, err := io.ReadAll(io.LimitReader(tr, 4096))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", p, err)
+	}
+	return string(b), nil
 }
 
 // rebasePresetTar prefixes every entry with dir/, adds dir/ itself, and makes
@@ -261,8 +321,8 @@ func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, er
 	name := d.NetworkName(computer)
 	res, err := d.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
 	if err == nil {
-		if res.Network.Labels[LabelFleet] != d.fleet || !res.Network.Internal {
-			return "", fmt.Errorf("network %s exists but is not an a12s internal network of fleet %s", name, d.fleet)
+		if err := d.checkNetwork(res.Network.Network, computer); err != nil {
+			return "", err
 		}
 		return name, nil
 	}
@@ -289,7 +349,7 @@ func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, er
 		Driver:   "bridge",
 		Internal: true,
 		IPAM:     &network.IPAM{Config: []network.IPAMConfig{{Subnet: subnet}}},
-		Options:  map[string]string{"com.docker.network.bridge.gateway_mode_ipv4": "isolated"},
+		Options:  map[string]string{gatewayModeOption: "isolated"},
 		Labels: map[string]string{
 			LabelFleet:    d.fleet,
 			LabelComputer: computer,
@@ -300,6 +360,20 @@ func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, er
 		return "", fmt.Errorf("create network %s: %w", name, err)
 	}
 	return name, nil
+}
+
+// checkNetwork accepts an existing network for reuse only if it is exactly
+// what ensureNetwork would create: internal, isolated gateway, our labels.
+func (d *Driver) checkNetwork(n network.Network, computer string) error {
+	switch {
+	case !n.Internal:
+		return fmt.Errorf("network %s exists but is not internal; remove it", n.Name)
+	case n.Options[gatewayModeOption] != "isolated":
+		return fmt.Errorf("network %s exists without %s=isolated; remove it", n.Name, gatewayModeOption)
+	case n.Labels[LabelFleet] != d.fleet || n.Labels[LabelComputer] != computer || n.Labels[LabelRole] != RoleComputer:
+		return fmt.Errorf("network %s exists but is not the network of Computer %s in fleet %s", n.Name, computer, d.fleet)
+	}
+	return nil
 }
 
 // allocateSubnet returns the first /bits prefix in pool that overlaps none of used.

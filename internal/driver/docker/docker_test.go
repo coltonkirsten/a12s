@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
@@ -104,6 +105,57 @@ func TestRebasePresetTar(t *testing.T) {
 	}
 }
 
+func TestBundleDir(t *testing.T) {
+	id := "sha256:3f1c9a0b7d2e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a"
+	if got := driver.BundleDir("codex", "0.154.0", id); got != "codex-0.154.0-3f1c9a0b7d2e" {
+		t.Errorf("BundleDir = %q", got)
+	}
+	if got := driver.BundlePath("codex", "0.154.0", id); got != "/opt/a12s/bundles/codex-0.154.0-3f1c9a0b7d2e" {
+		t.Errorf("BundlePath = %q", got)
+	}
+	for _, bad := range []string{"", "a12s/bundle-codex:0.154.0", "sha256:short", "sha256:XYZ456789abcdef"} {
+		if driver.ShortImageID(bad) != "" {
+			t.Errorf("ShortImageID(%q) should be empty", bad)
+		}
+	}
+	spec := driver.ComputerSpec{Name: "c", Generation: 1, Image: "x", HomeDrive: "home-c",
+		Bundle: driver.BundleRef{Kind: "codex", Version: "1", Image: "a12s/bundle-codex:1"}}
+	if err := checkSpec(spec); err == nil || !strings.Contains(err.Error(), "image ID") {
+		t.Errorf("checkSpec with a bundle ref = %v, want an image ID error", err)
+	}
+}
+
+func TestCheckNetwork(t *testing.T) {
+	d := &Driver{fleet: "lab"}
+	good := network.Network{
+		Name: "a12s-lab-c", Internal: true,
+		Options: map[string]string{gatewayModeOption: "isolated"},
+		Labels:  map[string]string{LabelFleet: "lab", LabelComputer: "c", LabelRole: RoleComputer},
+	}
+	if err := d.checkNetwork(good, "c"); err != nil {
+		t.Fatal(err)
+	}
+	mutate := map[string]func(n *network.Network){
+		"not internal":   func(n *network.Network) { n.Internal = false },
+		"nat gateway":    func(n *network.Network) { n.Options = map[string]string{gatewayModeOption: "nat"} },
+		"no gateway opt": func(n *network.Network) { n.Options = nil },
+		"other fleet": func(n *network.Network) {
+			n.Labels = map[string]string{LabelFleet: "x", LabelComputer: "c", LabelRole: RoleComputer}
+		},
+		"other computer": func(n *network.Network) {
+			n.Labels = map[string]string{LabelFleet: "lab", LabelComputer: "d", LabelRole: RoleComputer}
+		},
+		"no role": func(n *network.Network) { n.Labels = map[string]string{LabelFleet: "lab", LabelComputer: "c"} },
+	}
+	for name, m := range mutate {
+		n := good
+		m(&n)
+		if err := d.checkNetwork(n, "c"); err == nil {
+			t.Errorf("%s: want rejection", name)
+		}
+	}
+}
+
 func TestRebaseBundleTar(t *testing.T) {
 	in := makeTar(t,
 		entry{name: "bundle/"},
@@ -135,11 +187,14 @@ func TestCreateOptions(t *testing.T) {
 	d := &Driver{fleet: "lab"}
 	spec := driver.ComputerSpec{
 		Name: "scout", Generation: 3, Image: "a12s/slim:dev", Tier: "slim",
-		Bundle:   driver.BundleRef{Kind: "claude-code", Version: "2.1.280"},
+		Bundle:   driver.BundleRef{Kind: "claude-code", Version: "2.1.280", Image: "sha256:0123456789abcdef0123"},
 		Model:    "claude-fable-5-1",
 		Autonomy: "full", CPUMillis: 1500, Memory: 2 << 30,
-		HomeDrive:   driver.HomeDriveID("scout"),
-		Drives:      []driver.Mount{{DriveID: driver.WorkDriveID("reference"), At: "/work/ref", ReadOnly: true}},
+		HomeDrive: driver.HomeDriveID("scout"),
+		Drives: []driver.Mount{
+			{DriveID: driver.WorkDriveID("reference"), At: "/work/ref", ReadOnly: true},
+			{DriveID: driver.WorkDriveID("scratch"), At: "/work/scratch"},
+		},
 		Credentials: []string{"anthropic", "github"},
 	}
 	o := d.createOptions(spec)
@@ -153,7 +208,8 @@ func TestCreateOptions(t *testing.T) {
 	wantEnv := []string{
 		"A12S_COMPUTER=scout", "A12S_FLEET=lab", "A12S_GENERATION=3",
 		"A12S_HARNESS_KIND=claude-code", "A12S_HARNESS_VERSION=2.1.280", "A12S_AUTONOMY=full",
-		"A12S_IMAGE_TIER=slim", "A12S_BUNDLE=/opt/a12s/bundles/claude-code-2.1.280",
+		"A12S_IMAGE_TIER=slim", "A12S_BUNDLE=/opt/a12s/bundles/claude-code-2.1.280-0123456789ab",
+		"A12S_DRIVES=/work/ref:ro,/work/scratch:rw",
 		"A12S_CREDENTIALS=anthropic,github",
 		"A12S_PROXY=http://a12s-lab-controller:3128", "A12S_CONTROLLER=https://a12s-lab-controller:7443",
 		"A12S_MODEL=claude-fable-5-1",
@@ -172,6 +228,9 @@ func TestCreateOptions(t *testing.T) {
 	}
 	if _, ok := h.Tmpfs["/run/a12s"]; !ok {
 		t.Error("tmpfs /run/a12s missing")
+	}
+	if h.Init == nil || !*h.Init {
+		t.Error("init not set")
 	}
 	if _, ok := h.Tmpfs["/tmp"]; !ok {
 		t.Error("tmpfs /tmp missing")
@@ -194,6 +253,7 @@ func TestCreateOptions(t *testing.T) {
 		{"a12s-lab-home-scout", "/home", false},
 		{"a12s-lab-bundles", "/opt/a12s/bundles", true},
 		{"a12s-lab-drive-reference", "/work/ref", true},
+		{"a12s-lab-drive-scratch", "/work/scratch", false},
 	}
 	if !reflect.DeepEqual(mounts, wantMounts) {
 		t.Errorf("mounts = %+v", mounts)

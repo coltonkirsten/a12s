@@ -40,17 +40,47 @@ type Mount struct {
 type BundleRef struct {
 	Kind    string `json:"kind"`
 	Version string `json:"version"`
-	Image   string `json:"image"`
+	// Image is the bundle's image ID ("sha256:<hex>"), as EnsureBundle returns
+	// it; it selects the cache directory.
+	Image string `json:"image"`
 }
+
+// Dir is the bundle's cache directory name; see BundleDir.
+func (b BundleRef) Dir() string { return BundleDir(b.Kind, b.Version, b.Image) }
+
+// Path is the bundle's path inside a Computer; see BundlePath.
+func (b BundleRef) Path() string { return BundlePath(b.Kind, b.Version, b.Image) }
 
 // BundleRoot is where the bundle cache is mounted read-only in Computers.
 const BundleRoot = "/opt/a12s/bundles"
 
-// BundleDir is the cache directory name of a bundle: "<kind>-<version>".
-func BundleDir(kind, version string) string { return kind + "-" + version }
+// BundleDir is the cache directory name of a bundle image:
+// "<kind>-<version>-<first 12 hex digits of the image ID>". The image ID is
+// part of the name so a different image claiming the same kind and version
+// never reuses another image's files.
+func BundleDir(kind, version, imageID string) string {
+	return kind + "-" + version + "-" + ShortImageID(imageID)
+}
 
-// BundlePath is the bundle's path inside a Computer.
-func BundlePath(kind, version string) string { return BundleRoot + "/" + BundleDir(kind, version) }
+// BundlePath is the bundle's path inside a Computer: BundleRoot/BundleDir.
+func BundlePath(kind, version, imageID string) string {
+	return BundleRoot + "/" + BundleDir(kind, version, imageID)
+}
+
+// ShortImageID returns the first 12 hex digits of an image ID
+// ("sha256:<hex>" or bare hex), or "" if id is not one.
+func ShortImageID(id string) string {
+	hex := strings.TrimPrefix(id, "sha256:")
+	if len(hex) < 12 {
+		return ""
+	}
+	for _, c := range hex {
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+			return ""
+		}
+	}
+	return hex[:12]
+}
 
 // BundleManifest is /bundle/bundle.json in a HarnessBundle image.
 type BundleManifest struct {
@@ -105,7 +135,8 @@ func (s ComputerSpec) Env(fleet string) []string {
 		"A12S_HARNESS_VERSION=" + s.Bundle.Version,
 		"A12S_AUTONOMY=" + s.Autonomy,
 		"A12S_IMAGE_TIER=" + s.Tier,
-		"A12S_BUNDLE=" + BundlePath(s.Bundle.Kind, s.Bundle.Version),
+		"A12S_BUNDLE=" + s.Bundle.Path(),
+		"A12S_DRIVES=" + s.drivesEnv(),
 		"A12S_CREDENTIALS=" + strings.Join(s.Credentials, ","),
 		"A12S_PROXY=" + s.ProxyURL,
 		"A12S_CONTROLLER=" + s.ControllerURL,
@@ -114,4 +145,18 @@ func (s ComputerSpec) Env(fleet string) []string {
 		env = append(env, "A12S_MODEL="+s.Model)
 	}
 	return env
+}
+
+// drivesEnv is A12S_DRIVES: "<at>:rw,<at>:ro,..." in mount order, so
+// computerd can hand empty, root-owned writable drive roots to the agent.
+func (s ComputerSpec) drivesEnv() string {
+	parts := make([]string, len(s.Drives))
+	for i, m := range s.Drives {
+		mode := "rw"
+		if m.ReadOnly {
+			mode = "ro"
+		}
+		parts[i] = m.At + ":" + mode
+	}
+	return strings.Join(parts, ",")
 }

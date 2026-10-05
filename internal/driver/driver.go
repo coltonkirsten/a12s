@@ -34,7 +34,7 @@ type Driver interface {
 	EnsureImage(ctx context.Context, ref string) (imageID string, err error)
 
 	// EnsureBundle makes the HarnessBundle image available read-only to
-	// Computers at BundlePath(kind, version). It is idempotent and returns the
+	// Computers at BundlePath(kind, version, imageID). It is idempotent and returns the
 	// image ID and the bundle's manifest.
 	EnsureBundle(ctx context.Context, imageRef string) (Bundle, error)
 
