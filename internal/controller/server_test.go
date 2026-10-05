@@ -122,7 +122,7 @@ func TestEgressDenialIsJournaled(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
 	p, ok := h.c.policy("scout")
-	if !ok || p.Check("platform.claude.com", 443, true) != "" || p.Check("api.openai.com", 443, true) == "" {
+	if !ok || p.Check("platform.claude.com", 443) != "" || p.Check("api.openai.com", 443) == "" {
 		t.Fatalf("scout policy = %+v", p)
 	}
 	h.c.denied("scout", "evil.example", 443, "host is not in the egress allowlist")

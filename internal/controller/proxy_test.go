@@ -19,32 +19,29 @@ import (
 func TestPolicyCheck(t *testing.T) {
 	p := NewPolicy([]string{"api.openai.com", "GitHub.com."}, []string{"platform.claude.com"}, false)
 	for _, tc := range []struct {
-		host   string
-		port   int
-		tunnel bool
-		ok     bool
+		host string
+		port int
+		ok   bool
 	}{
-		{"api.openai.com", 443, true, true},
-		{"github.com", 443, true, true},
-		{"platform.claude.com", 443, true, true},
-		{"API.OPENAI.COM.", 443, true, true},
-		{"api.openai.com", 22, true, false},
-		{"evil.com", 443, true, false},
-		{"sub.api.openai.com", 443, true, false},
-		{"api.openai.com", 80, false, true},
-		{"api.openai.com", 8080, false, false},
-		{"evil.com", 80, false, false},
+		{"api.openai.com", 443, true},
+		{"github.com", 443, true},
+		{"platform.claude.com", 443, true},
+		{"API.OPENAI.COM.", 443, true},
+		{"api.openai.com", 22, false},
+		{"api.openai.com", 80, false},
+		{"evil.com", 443, false},
+		{"sub.api.openai.com", 443, false},
 	} {
-		if got := p.Check(tc.host, tc.port, tc.tunnel) == ""; got != tc.ok {
-			t.Errorf("Check(%s, %d, tunnel=%v) allowed=%v, want %v", tc.host, tc.port, tc.tunnel, got, tc.ok)
+		if got := p.Check(tc.host, tc.port) == ""; got != tc.ok {
+			t.Errorf("Check(%s, %d) allowed=%v, want %v", tc.host, tc.port, got, tc.ok)
 		}
 	}
 	all := NewPolicy([]string{"*"}, nil, false)
-	if all.Check("anything.example", 22, true) != "" || all.Check("x.example", 8080, false) != "" {
+	if all.Check("anything.example", 22) != "" {
 		t.Error(`"*" must allow any host and port`)
 	}
 	open := NewPolicy(nil, nil, true)
-	if open.Check("anything.example", 5432, true) != "" {
+	if open.Check("anything.example", 5432) != "" {
 		t.Error("unenforced must allow any host")
 	}
 }
@@ -55,6 +52,9 @@ func TestBlockedAddr(t *testing.T) {
 		"0.0.0.0", "224.0.0.1", "255.255.255.255", "10.213.0.2",
 		"::1", "::", "fe80::1", "fd00:ec2::254", "fc00::1", "ff02::1", "::ffff:10.0.0.1",
 		"::ffff:169.254.169.254", "64:ff9b::a00:1", "2002:a00:1::1", "2001:db8::1",
+		// Zoned addresses match no prefix, so they are refused outright,
+		// public-looking ones included.
+		"fd00:ec2::254%eth0", "fe80::1%eth0", "fc00::1%1", "2606:4700:4700::1111%eth0",
 	}
 	for _, s := range blocked {
 		if BlockedAddr(netip.MustParseAddr(s)) == "" {
@@ -187,34 +187,44 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 }
 
-func TestProxyPlainHTTP(t *testing.T) {
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s %s host=%s proxyauth=%q", r.Method, r.URL.Path, r.Host, r.Header.Get("Proxy-Authorization"))
-	}))
-	defer origin.Close()
+func TestProxyRefusesPlainHTTP(t *testing.T) {
 	h := newProxyHarness(t, NewPolicy([]string{"deb.example"}, nil, false),
-		map[string][]string{"deb.example": {"93.184.216.34"}}, origin.Listener.Addr().String())
+		map[string][]string{"deb.example": {"93.184.216.34"}}, "127.0.0.1:1")
 	proxyURL, _ := url.Parse(h.srv.URL)
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
-
-	req, _ := http.NewRequest("GET", "http://deb.example/dists/x", nil)
-	req.Header.Set("Proxy-Authorization", "secret")
-	res, err := client.Do(req)
+	res, err := client.Get("http://deb.example/dists/x") // an allowed host
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-	if res.StatusCode != 200 || string(body) != `GET /dists/x host=deb.example proxyauth=""` {
-		t.Fatalf("got %d %q", res.StatusCode, body)
+	if res.StatusCode != http.StatusForbidden || strings.Count(strings.TrimSpace(string(body)), "\n") != 0 || !strings.Contains(string(body), "use https") {
+		t.Fatalf("plain http = %d %q", res.StatusCode, body)
 	}
-	res, err = client.Get("http://other.example/")
-	if err != nil {
-		t.Fatal(err)
+	if len(h.dialed) != 0 {
+		t.Fatalf("dialed %v", h.dialed)
 	}
-	body, _ = io.ReadAll(res.Body)
-	res.Body.Close()
-	if res.StatusCode != http.StatusForbidden || strings.Count(strings.TrimSpace(string(body)), "\n") != 0 {
-		t.Fatalf("denied = %d %q", res.StatusCode, body)
+	waitFor(t, func() bool { h.mu.Lock(); defer h.mu.Unlock(); return len(h.denied) == 1 })
+}
+
+func TestProxyRefusesZonedLiterals(t *testing.T) {
+	h := newProxyHarness(t, NewPolicy([]string{"*"}, nil, false), nil, "127.0.0.1:1")
+	for _, target := range []string{"[fd00:ec2::254%25eth0]:443", "[fe80::1%eth0]:80", "[2606:4700:4700::1111%eth0]:443"} {
+		code, c := h.connect(t, target)
+		c.Close()
+		// An unescaped % never reaches the handler (400); either way no tunnel.
+		if code != http.StatusForbidden && code != http.StatusBadRequest {
+			t.Errorf("CONNECT %s = %d, want 403 or 400", target, code)
+		}
+	}
+	if len(h.dialed) != 0 {
+		t.Fatalf("dialed %v", h.dialed)
+	}
+	// Zones in resolver answers are refused too.
+	z := newProxyHarness(t, NewPolicy([]string{"*"}, nil, false), map[string][]string{"zoned.example": {"2606:4700:4700::1111%eth0"}}, "127.0.0.1:1")
+	if code, c := z.connect(t, "zoned.example:443"); code != http.StatusForbidden {
+		t.Errorf("zoned answer = %d", code)
+	} else {
+		c.Close()
 	}
 }
