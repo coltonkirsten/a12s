@@ -1,0 +1,6 @@
+# Copy to a12s.bindings.yaml (git-ignored) and adjust. Maps each credential name
+# in fleet.yaml to where it comes from on this machine. Never commit the real file.
+credentials:
+  anthropic: { file: ~/.a12s/lab/anthropic.json }
+  openai:    { file: ~/.a12s/lab/openai.json }
+  github:    { env: GH_TOKEN }
