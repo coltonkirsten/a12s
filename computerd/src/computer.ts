@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { chownSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chownSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
-import { credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
+import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import type { Journal } from './journal.js';
 
 export interface SessionRecord {
@@ -45,6 +45,7 @@ interface ActiveTurn {
 
 const CONTINUE_PROMPT = 'a12s restarted your harness at your request and resumed this session. Continue the task you were working on.';
 const PRECHECK_TIMEOUT_MS = 60_000;
+const RECLAIM_DEBOUNCE_MS = 200;
 
 /** One Computer's runtime state: admission, the active turn, the session record, harness restarts. */
 export class Computer {
@@ -61,6 +62,8 @@ export class Computer {
   private ackedGeneration: number | null = null;
   private credentialTimer: NodeJS.Timeout | null = null;
   private failedGeneration: number | null = null;
+  private watchers: FSWatcher[] = [];
+  private reclaimTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly cfg: Config,
@@ -105,6 +108,7 @@ export class Computer {
     this.lifecycle('ready');
     this.credentialTimer = setInterval(() => void this.applyCredentials(), this.credentialPollMs);
     this.credentialTimer.unref();
+    this.watchCredentialFiles();
   }
 
   status(): Record<string, unknown> {
@@ -330,6 +334,8 @@ export class Computer {
     if (this.base === 'stopping') return;
     this.base = 'stopping';
     if (this.credentialTimer) clearInterval(this.credentialTimer);
+    for (const w of this.watchers) w.close();
+    if (this.reclaimTimer) clearTimeout(this.reclaimTimer);
     this.lifecycle('stopping');
     const a = this.active;
     if (a) {
@@ -341,6 +347,29 @@ export class Computer {
   }
 
   /** (Re)wires credentials, moving any file a harness rewrote on the home drive back onto tmpfs. */
+  /**
+   * A harness refreshing its token replaces the symlink with a regular file on the home drive; reclaim it right away
+   * (debounced) instead of waiting for the turn to end. The watch only yields file names; the work runs as the agent.
+   */
+  private watchCredentialFiles(): void {
+    for (const [dir, name] of credentialFiles(this.cfg)) {
+      try {
+        const w = watch(dir, (_event, file) => {
+          if (file !== name || this.reclaimTimer) return;
+          this.reclaimTimer = setTimeout(() => {
+            this.reclaimTimer = null;
+            this.wire(this.active?.turnId ?? null);
+          }, RECLAIM_DEBOUNCE_MS);
+        });
+        w.on('error', () => w.close());
+        w.unref();
+        this.watchers.push(w);
+      } catch {
+        // dir missing: the after-turn reclaim still covers it
+      }
+    }
+  }
+
   /** Returns true only if every declared credential is wired; failures are journaled (names, never values). */
   private wire(turn: string | null): boolean {
     const scope = { turn, session: this.session?.sessionId ?? null };

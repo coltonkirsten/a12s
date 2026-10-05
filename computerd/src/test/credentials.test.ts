@@ -34,18 +34,21 @@ test('a credential file a harness rewrote on the home drive goes back to tmpfs a
   const link = join(cfg.claudeConfigDir, '.credentials.json');
   writeFileSync(secret, '{"claudeAiOauth":{"accessToken":"original"}}', { mode: 0o600 });
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
-  const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: 'refresh' }), mcpServers: {} }, join(fixtures, 'fake-claude.js'));
+  const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: 'refresh', FAKE_HOLD_MS: '3000' }), mcpServers: {} }, join(fixtures, 'fake-claude.js'));
   const computer = new Computer(cfg, journal, adapter, {});
   await computer.start();
   assert.ok(lstatSync(link).isSymbolicLink());
   const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'hi' });
-  await until(() => journal.turnInfo(t.turnId)?.finished === 'completed');
+  await until(() => lstatSync(link).isSymbolicLink() && /refreshed/.test(readFileSync(secret, 'utf8')), 2500);
+  assert.equal(journal.turnInfo(t.turnId)?.finished, null, 'reclaimed while the turn still runs');
+  await until(() => journal.turnInfo(t.turnId)?.finished === 'completed', 5000);
   assert.ok(lstatSync(link).isSymbolicLink(), 'symlink restored');
   assert.equal(readlinkSync(link), secret);
   assert.match(readFileSync(secret, 'utf8'), /refreshed/, 'fresh token kept, on tmpfs');
   assert.equal(lstatSync(secret).mode & 0o777, 0o600);
   const diag = journal.after(0, t.turnId, 100).find((e) => e.type === 'diagnostic');
   assert.deepEqual(diag?.data, { message: 'refreshed credential moved back onto tmpfs', names: ['anthropic'] });
+  await computer.shutdown(100);
   journal.close();
 });
 
@@ -78,4 +81,19 @@ test('wiring never replaces a regular credential file before its content is on t
   assert.match(w2.notes[0] ?? '', /no valid credential JSON/);
   assert.deepEqual(w2.failures, []);
   assert.match(readFileSync(secret, 'utf8'), /refreshed/, 'garbage never overwrites the secret');
+});
+
+test('an on-disk credential older than the injected one is discarded, not reclaimed', async () => {
+  const { utimesSync } = await import('node:fs');
+  const cfg = testConfig({ credentials: ['openai'] });
+  const secret = join(cfg.secretsDir, 'openai');
+  const link = join(cfg.codexHome, 'auth.json');
+  writeFileSync(link, '{"tokens":"stale, from before the last injection"}');
+  utimesSync(link, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  writeFileSync(secret, '{"tokens":"newly injected"}');
+  const w = wireCredentials(cfg);
+  assert.deepEqual([w.reclaimed, w.failures], [[], []]);
+  assert.match(w.notes[0] ?? '', /older than the injected credential/);
+  assert.equal(readlinkSync(link), secret);
+  assert.match(readFileSync(secret, 'utf8'), /newly injected/);
 });

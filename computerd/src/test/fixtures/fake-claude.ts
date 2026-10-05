@@ -43,6 +43,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     const file = `${process.env.CLAUDE_CONFIG_DIR}/.credentials.json`;
     writeFileSync(`${file}.tmp`, '{"claudeAiOauth":{"accessToken":"refreshed"}}');
     renameSync(`${file}.tmp`, file);
+    if (process.env.FAKE_HOLD_MS) {
+      // Keep the turn open so a test can see the reclaim happen mid-turn.
+      setTimeout(() => result('success', false, 'pong'), Number(process.env.FAKE_HOLD_MS));
+      return;
+    }
   }
   for (const text of ['po', 'ng']) {
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
