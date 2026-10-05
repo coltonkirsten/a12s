@@ -100,6 +100,7 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
  * One SSE stream per Computer. `id:` is the journal seq. With Last-Event-ID the journal is replayed from that
  * point, then the stream goes live; a cursor the journal does not know gets `event: gap` and the stream goes live
  * from the head. Without a cursor, `?turn=` streams replay that turn from its start; unfiltered streams start live.
+ * When the replay is complete, `event: head` carries `{seq}`: everything up to that journal seq has been sent.
  * Writes honour backpressure; a consumer that stays undrained for more than `maxQueued` live events is
  * disconnected and resumes with Last-Event-ID.
  */
@@ -156,7 +157,10 @@ export function streamEvents(
   req.on('close', close);
   res.on('close', close);
   void (async () => {
+    let snapshot: number;
     for (;;) {
+      // Snapshot and page in one synchronous step: the last page then holds every match up to `snapshot`.
+      snapshot = journal.lastSeq();
       const page = journal.after(cursor, turn, REPLAY_PAGE);
       for (const e of page) {
         if (closed) return;
@@ -164,6 +168,9 @@ export function streamEvents(
       }
       if (page.length < REPLAY_PAGE) break;
     }
+    if (closed) return;
+    cursor = Math.max(cursor, snapshot);
+    if (!res.write(`event: head\ndata: ${JSON.stringify({ seq: snapshot })}\n\n`)) await drained();
     await flush();
   })();
 }
