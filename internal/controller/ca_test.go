@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -49,6 +51,7 @@ func startComputerd(t *testing.T, ca *CA, name string, h http.Handler) *httptest
 		t.Fatal(err)
 	}
 	srv := httptest.NewUnstartedServer(h)
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0) // the refused handshakes below
 	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, ClientCAs: ca.Pool(), ClientAuth: tls.RequireAndVerifyClientCert}
 	srv.StartTLS()
 	t.Cleanup(srv.Close)

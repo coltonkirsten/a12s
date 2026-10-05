@@ -1,0 +1,608 @@
+package controller
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/coltonkirsten/a12s/images/browser"
+	"github.com/coltonkirsten/a12s/internal/api"
+	"github.com/coltonkirsten/a12s/internal/driver"
+	"github.com/coltonkirsten/a12s/internal/fleet"
+)
+
+// Default image references (PLAN "HarnessBundle image").
+func imageRef(image string) string {
+	switch image {
+	case fleet.TierSlim, fleet.TierBrowser:
+		return "a12s/" + image + ":dev"
+	}
+	return image
+}
+
+func bundleRef(h fleet.Harness) string { return "a12s/bundle-" + h.Kind + ":" + h.Version }
+
+// PutFleet is `a12s up`: admit the Fleet, resolve and pin what the lock
+// lacks, then converge every Computer. Admission errors change nothing.
+func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api.PutFleetResponse, error) {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+
+	f := req.Fleet
+	if f == nil {
+		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "fleet is required")
+	}
+	if err := f.Validate(); err != nil {
+		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
+	}
+	if f.Metadata.Name != c.cfg.Fleet {
+		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "this Controller runs fleet %q, not %q", c.cfg.Fleet, f.Metadata.Name)
+	}
+	creds := req.Credentials
+	c.mu.Lock()
+	if len(creds) == 0 {
+		creds = c.creds
+	}
+	c.mu.Unlock()
+	for _, name := range f.ComputerNames() {
+		if missing := missingCredentials(f.Computers[name].Credentials, creds); len(missing) > 0 {
+			return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid,
+				"computers.%s: no material for credentials %s (check the bindings file)", name, strings.Join(missing, ", "))
+		}
+	}
+	lock, hosts, err := c.resolve(ctx, f, req.Lock, req.Presets)
+	if err != nil {
+		return api.PutFleetResponse{}, err
+	}
+
+	// Admitted: this Fleet is now the desired state.
+	c.mu.Lock()
+	var previous map[string]fleet.Computer
+	if c.state.Fleet != nil {
+		previous = c.state.Fleet.Computers
+	}
+	c.state.Fleet, c.state.Lock = f, lock
+	c.creds = maps.Clone(creds)
+	c.presets = req.Presets
+	for _, name := range f.ComputerNames() {
+		rec := c.state.Computers[name]
+		if rec == nil {
+			rec = &Record{DesiredPower: driver.PowerAwake}
+			if req.Asleep {
+				rec.DesiredPower = driver.PowerAsleep
+			}
+			c.state.Computers[name] = rec
+		}
+		rec.Restarts = 0
+		rec.SignInHosts = hosts[f.Computers[name].Harness.BundleKey()]
+	}
+	err = c.saveLocked()
+	c.mu.Unlock()
+	if err != nil {
+		return api.PutFleetResponse{}, err
+	}
+
+	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}}
+	obs, err := c.drv.Observe(ctx)
+	if err != nil {
+		return res, err
+	}
+	for _, d := range f.DriveNames() {
+		spec := driver.DriveSpec{ID: driver.WorkDriveID(d), Kind: driver.DriveWork, Size: int64(f.Drives[d].Size)}
+		if _, err := c.drv.EnsureDrive(ctx, spec); err != nil {
+			return res, err
+		}
+	}
+
+	gone := map[string]bool{}
+	for name := range previous {
+		gone[name] = true
+	}
+	for name := range obs.Computers {
+		gone[name] = true
+	}
+	for _, name := range slices.Sorted(maps.Keys(gone)) {
+		if _, ok := f.Computers[name]; ok {
+			continue
+		}
+		if err := c.removeComputer(ctx, name); err != nil {
+			return res, err
+		}
+		res.Removed = append(res.Removed, name)
+	}
+
+	outcomes := c.convergeAll(ctx, f.ComputerNames(), obs, true)
+	for _, name := range f.ComputerNames() {
+		o := outcomes[name]
+		_, existed := previous[name]
+		switch {
+		case o.err != nil:
+			if res.Errors == nil {
+				res.Errors = map[string]string{}
+			}
+			res.Errors[name] = o.err.Error()
+			if !existed {
+				res.Created = append(res.Created, name)
+			}
+		case !existed:
+			res.Created = append(res.Created, name)
+		case o.result == staged:
+			res.Staged = append(res.Staged, name)
+		case o.result == restaged:
+			res.Updated = append(res.Updated, name)
+		}
+	}
+	c.refreshAddrs(ctx)
+	return res, nil
+}
+
+type result int
+
+const (
+	unchanged result = iota
+	restaged
+	staged
+)
+
+type outcome struct {
+	result result
+	err    error
+}
+
+// convergeAll converges Computers in parallel. applyMu must be held.
+func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver.Observation, fresh bool) map[string]outcome {
+	var mu sync.Mutex
+	out := map[string]outcome{}
+	var wg sync.WaitGroup
+	for _, name := range names {
+		st, ok := obs.Computers[name]
+		wg.Go(func() {
+			r, err := c.converge(ctx, name, st, ok)
+			mu.Lock()
+			out[name] = outcome{r, err}
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	return out
+}
+
+// converge brings one Computer to the applied Fleet: unchanged ones only
+// get their power state enforced; a changed one is restaged now, or staged
+// for its next idle boundary when it is busy. applyMu must be held.
+func (c *Controller) converge(ctx context.Context, name string, obs driver.ComputerState, exists bool) (result, error) {
+	spec, hash, err := c.buildSpec(name)
+	if err != nil {
+		return unchanged, c.fail(name, err, false)
+	}
+	c.mu.Lock()
+	rec := c.state.Computers[name]
+	homeSize := c.state.Fleet.Computers[name].Home.Size
+	c.mu.Unlock()
+	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name, Size: int64(homeSize)}); err != nil {
+		return unchanged, c.fail(name, err, true)
+	}
+
+	running := exists && obs.Power == driver.PowerAwake
+	if exists && obs.Generation == rec.Generation && hash == rec.SpecHash {
+		c.mu.Lock()
+		if rec.StagedGeneration != 0 { // the Fleet went back to what runs
+			rec.StagedGeneration, rec.StagedHash = 0, ""
+			_ = c.saveLocked()
+		}
+		c.mu.Unlock()
+		return unchanged, c.ensurePower(ctx, name, running)
+	}
+	if running && c.busy(ctx, name) {
+		c.mu.Lock()
+		if rec.StagedHash != hash {
+			rec.StagedGeneration = max(rec.Generation, rec.StagedGeneration, obs.Generation) + 1
+			rec.StagedHash = hash
+		}
+		err := c.saveLocked()
+		c.mu.Unlock()
+		c.logf("%s: generation %d staged; applies when the current turn ends", name, rec.StagedGeneration)
+		return staged, err
+	}
+	return restaged, c.restage(ctx, name)
+}
+
+// ensurePower enforces the desired power of an up-to-date Computer.
+func (c *Controller) ensurePower(ctx context.Context, name string, running bool) error {
+	c.mu.Lock()
+	rec := c.state.Computers[name]
+	r := c.rtLocked(name)
+	desired, phase := rec.DesiredPower, r.phase
+	rotate := r.credsHash != "" && r.credsHash != c.credsHashLocked(c.state.Fleet.Computers[name].Credentials)
+	c.mu.Unlock()
+	switch {
+	case desired == driver.PowerAsleep && running:
+		return c.sleep(ctx, name)
+	case desired == driver.PowerAsleep:
+		c.setPhase(name, api.PhaseAsleep, nil)
+		return nil
+	case !running:
+		return c.start(ctx, name)
+	case phase != api.PhaseReady && phase != api.PhaseBusy:
+		if err := c.attach(ctx, name); err != nil {
+			return c.start(ctx, name)
+		}
+		if !rotate {
+			return nil
+		}
+		fallthrough
+	case rotate:
+		// New material for a running Computer: computerd restarts the
+		// harness on its next turn when .generation changes.
+		if err := c.inject(ctx, name); err != nil {
+			return c.fail(name, err, true)
+		}
+		c.mu.Lock()
+		r.credsHash = c.credsHashLocked(c.state.Fleet.Computers[name].Credentials)
+		c.mu.Unlock()
+		c.logf("%s: credentials re-injected", name)
+	}
+	return nil
+}
+
+// busy asks computerd whether a turn is running.
+func (c *Controller) busy(ctx context.Context, name string) bool {
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	st, err := c.client(name).Status(sctx)
+	if err != nil {
+		return c.phase(name) == api.PhaseBusy
+	}
+	return st.ActiveTurn != "" || st.Phase == "busy"
+}
+
+// restage stops the Computer if it runs, stages a new generation of the
+// applied spec, and starts it unless it should sleep. applyMu must be held.
+func (c *Controller) restage(ctx context.Context, name string) error {
+	spec, hash, err := c.buildSpec(name)
+	if err != nil {
+		return c.fail(name, err, false)
+	}
+	obs, exists, err := c.observeOne(ctx, name)
+	if err != nil {
+		return c.fail(name, err, true)
+	}
+	c.setTransition(name, true)
+	defer c.setTransition(name, false)
+	c.mu.Lock()
+	rec := c.state.Computers[name]
+	// A staged generation keeps its number; any other change gets a new one.
+	spec.Generation = max(rec.Generation, obs.Generation) + 1
+	if rec.pending() && rec.StagedHash == hash {
+		spec.Generation = max(spec.Generation, rec.StagedGeneration)
+	} else {
+		spec.Generation = max(spec.Generation, rec.StagedGeneration+1)
+	}
+	c.mu.Unlock()
+
+	if exists && obs.Power == driver.PowerAwake {
+		c.setPhase(name, api.PhaseStopping, nil)
+		c.stopEvents(name)
+		if err := c.drv.SetPower(ctx, name, driver.PowerAsleep, obs.Generation); err != nil {
+			return c.fail(name, err, true)
+		}
+	}
+	c.setPhase(name, api.PhaseProvisioning, nil)
+	if err := c.drv.StageComputer(ctx, spec); err != nil {
+		return c.fail(name, err, true)
+	}
+	c.mu.Lock()
+	rec.Generation, rec.SpecHash = spec.Generation, hash
+	rec.StagedGeneration, rec.StagedHash = 0, ""
+	desired := rec.DesiredPower
+	err = c.saveLocked()
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	c.logf("%s: generation %d staged", name, spec.Generation)
+	c.setTransition(name, false)
+	if desired == driver.PowerAwake {
+		return c.start(ctx, name)
+	}
+	c.setPhase(name, api.PhaseAsleep, nil)
+	return nil
+}
+
+// applyStaged applies a staged generation at an idle boundary.
+func (c *Controller) applyStaged(name string) {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	c.mu.Lock()
+	rec := c.state.Computers[name]
+	due := rec != nil && rec.pending()
+	c.mu.Unlock()
+	if !due || c.busy(c.ctx, name) {
+		return
+	}
+	_ = c.restage(c.ctx, name)
+}
+
+// Apply is `a12s apply [--interrupt --grace D]`: apply staged generations
+// now on idle Computers and, with interrupt, on busy ones after stopping
+// their turn and waiting up to grace.
+func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.ApplyResponse, error) {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	res := api.ApplyResponse{Applied: []string{}, Pending: []string{}}
+	c.mu.Lock()
+	var names []string
+	for name, rec := range c.state.Computers {
+		if rec.pending() {
+			names = append(names, name)
+		}
+	}
+	c.mu.Unlock()
+	sort.Strings(names)
+	for _, name := range names {
+		if c.busy(ctx, name) {
+			if !req.Interrupt {
+				res.Pending = append(res.Pending, name)
+				continue
+			}
+			c.logf("%s: interrupting the active turn to apply the staged generation", name)
+			c.interrupt(ctx, name, time.Duration(req.Grace))
+		}
+		if err := c.restage(ctx, name); err != nil {
+			return res, err
+		}
+		res.Applied = append(res.Applied, name)
+	}
+	return res, nil
+}
+
+// SetPower is `a12s sleep` and `a12s wake`.
+func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerRequest) error {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	c.mu.Lock()
+	rec := c.state.Computers[name]
+	inFleet := c.state.Fleet != nil && rec != nil
+	if inFleet {
+		_, inFleet = c.state.Fleet.Computers[name]
+	}
+	if inFleet && req.State == api.PowerAwake {
+		maps.Copy(c.creds, req.Credentials)
+		rec.DesiredPower = driver.PowerAwake
+		rec.Restarts = 0
+		_ = c.saveLocked()
+	}
+	c.mu.Unlock()
+	if !inFleet {
+		return errorf(http.StatusNotFound, api.ErrNotFound, "no computer %q in the Fleet", name)
+	}
+	switch req.State {
+	case api.PowerAsleep:
+		return c.sleep(ctx, name)
+	case api.PowerAwake:
+		obs, ok, err := c.observeOne(ctx, name)
+		if err != nil {
+			return err
+		}
+		_, err = c.converge(ctx, name, obs, ok)
+		var cm *credentialsMissing
+		if errors.As(err, &cm) {
+			return errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
+		}
+		return err
+	}
+	return errorf(http.StatusBadRequest, api.ErrInvalid, "state must be %q or %q", api.PowerAwake, api.PowerAsleep)
+}
+
+// removeComputer stops and deletes a Computer the Fleet no longer
+// declares. Its drives stay (status lists them as orphans).
+func (c *Controller) removeComputer(ctx context.Context, name string) error {
+	c.setTransition(name, true)
+	c.stopEvents(name)
+	if err := c.drv.RemoveComputer(ctx, name); err != nil {
+		c.setTransition(name, false)
+		return err
+	}
+	c.mu.Lock()
+	delete(c.state.Computers, name)
+	delete(c.rt, name)
+	delete(c.clients, name)
+	err := c.saveLocked()
+	c.mu.Unlock()
+	c.logf("%s: removed (drives kept)", name)
+	return err
+}
+
+// resolve checks the Fleet against the substrate and the lock, makes the
+// images and bundles available, and returns the lock with missing pins
+// added (an existing pin never changes) and each bundle's sign-in hosts.
+func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte) (*fleet.Lock, map[string][]string, error) {
+	invalid := func(format string, args ...any) error {
+		return errorf(http.StatusBadRequest, api.ErrInvalid, format, args...)
+	}
+	caps, err := c.drv.Capabilities(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !caps.EgressEnforcement && !f.Egress.Unenforced() {
+		return nil, nil, invalid("this substrate cannot enforce egress; set egress.enforcement: unenforced to run anyway")
+	}
+	for _, d := range f.DriveNames() {
+		if f.Drives[d].Access == fleet.AccessSharedWrite && !caps.SharedWriteDrives {
+			return nil, nil, invalid("drives.%s: this substrate has no shared-write storage", d)
+		}
+	}
+
+	lock := fleet.NewLock()
+	if in != nil {
+		maps.Copy(lock.Images, in.Images)
+		maps.Copy(lock.Bundles, in.Bundles)
+		maps.Copy(lock.Presets, in.Presets)
+	}
+	hosts := map[string][]string{}
+	seen := map[string]bool{}
+	for _, name := range f.ComputerNames() {
+		comp := f.Computers[name]
+		if !seen["image "+comp.Image] {
+			seen["image "+comp.Image] = true
+			id, err := ensurePinned(ctx, imageRef(comp.Image), lock.Images[comp.Image], c.drv.EnsureImage)
+			if err != nil {
+				return nil, nil, fmt.Errorf("computers.%s.image: %w", name, err)
+			}
+			lock.PinImage(comp.Image, id)
+		}
+		if key := comp.Harness.BundleKey(); hosts[key] == nil {
+			var b driver.Bundle
+			id, err := ensurePinned(ctx, bundleRef(comp.Harness), lock.Bundles[key], func(ctx context.Context, ref string) (string, error) {
+				var err error
+				b, err = c.drv.EnsureBundle(ctx, ref)
+				return b.ImageID, err
+			})
+			if err != nil {
+				return nil, nil, fmt.Errorf("computers.%s.harness: %w", name, err)
+			}
+			m := b.Manifest
+			if m.Kind != comp.Harness.Kind || m.Version != comp.Harness.Version {
+				return nil, nil, invalid("computers.%s.harness: bundle %s is %s@%s", name, id, m.Kind, m.Version)
+			}
+			if m.Arch != "" && !slices.Contains(caps.Architectures, m.Arch) {
+				return nil, nil, invalid("computers.%s.harness: bundle is for %s, the substrate runs %s", name, m.Arch, strings.Join(caps.Architectures, ", "))
+			}
+			lock.PinBundle(m.Kind, m.Version, id)
+			hosts[key] = append([]string{}, m.SignInHosts...)
+		}
+		if p := comp.Home.Preset; p != "" && !seen["preset "+p] {
+			seen["preset "+p] = true
+			data, ok := presets[p]
+			if !ok {
+				return nil, nil, invalid("computers.%s.home.preset: %q was not sent with the Fleet", name, p)
+			}
+			sum, err := hashPresetTar(data)
+			if err != nil {
+				return nil, nil, invalid("computers.%s.home.preset: %v", name, err)
+			}
+			if pin := lock.Presets[p]; pin != "" && pin != sum {
+				return nil, nil, invalid("preset %s changed since fleet.lock pinned it (%s, now %s); remove the pin to accept it", p, pin, sum)
+			}
+			lock.PinPreset(p, sum)
+		}
+	}
+	return lock, hosts, nil
+}
+
+// ensurePinned makes ref available and returns its image ID. When the lock
+// pins an ID, that ID is what runs: it must be available locally, or ref
+// must resolve to it.
+func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Context, string) (string, error)) (string, error) {
+	if pin == "" {
+		return ensure(ctx, ref)
+	}
+	if id, err := ensure(ctx, pin); err == nil && id == pin {
+		return id, nil
+	}
+	id, err := ensure(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("fleet.lock pins %s to %s, which is not available: %w", ref, pin, err)
+	}
+	if id != pin {
+		return "", errorf(http.StatusBadRequest, api.ErrInvalid, "fleet.lock pins %s to %s, which is not available here (%s is %s); build or pull the pinned image, or edit fleet.lock", ref, pin, ref, id)
+	}
+	return id, nil
+}
+
+// buildSpec is the Driver spec of a Computer under the applied Fleet and
+// Lock (generation unset), and the hash of what makes a generation: image,
+// bundle, resources, drives, environment and egress.
+func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, lock := c.state.Fleet, c.state.Lock
+	if f == nil || lock == nil {
+		return driver.ComputerSpec{}, "", errors.New("no Fleet applied")
+	}
+	comp, ok := f.Computers[name]
+	if !ok {
+		return driver.ComputerSpec{}, "", fmt.Errorf("no computer %q in the Fleet", name)
+	}
+	image, bundle := lock.Images[comp.Image], lock.Bundles[comp.Harness.BundleKey()]
+	if image == "" || bundle == "" {
+		return driver.ComputerSpec{}, "", errors.New("image or bundle is not pinned; run a12s up")
+	}
+	spec := driver.ComputerSpec{
+		Name:        name,
+		Image:       image,
+		Tier:        comp.Tier(),
+		Bundle:      driver.BundleRef{Kind: comp.Harness.Kind, Version: comp.Harness.Version, Image: bundle},
+		Model:       comp.Harness.Model,
+		Autonomy:    comp.Autonomy,
+		CPUMillis:   comp.Resources.CPU.Millis(),
+		Memory:      int64(comp.Resources.Memory),
+		HomeDrive:   driver.HomeDriveID(name),
+		Credentials: comp.Credentials,
+		Preset:      c.presets[comp.Home.Preset],
+	}
+	if spec.Tier == fleet.TierBrowser {
+		spec.Seccomp = browser.Seccomp
+	}
+	for _, m := range comp.Drives {
+		spec.Drives = append(spec.Drives, driver.Mount{DriveID: driver.WorkDriveID(m.Name), At: m.At, ReadOnly: m.ReadOnly})
+	}
+	egress := slices.Sorted(slices.Values(comp.Egress.Allow))
+	b, err := json.Marshal(struct {
+		Image, Bundle string
+		CPU, Memory   int64
+		Drives        []driver.Mount
+		Env           []string
+		Egress        []string
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress})
+	if err != nil {
+		return spec, "", err
+	}
+	sum := sha256.Sum256(b)
+	return spec, hex.EncodeToString(sum[:]), nil
+}
+
+// hashPresetTar is fleet.HashPreset computed over the tar stream
+// fleet.WritePresetTar made of the same directory.
+func hashPresetTar(data []byte) (string, error) {
+	tr := tar.NewReader(bytes.NewReader(data))
+	h := sha256.New()
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("preset tar: %w", err)
+		}
+		rel := strings.TrimSuffix(hdr.Name, "/")
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			fmt.Fprintf(h, "d %q %o\n", rel, hdr.Mode)
+		case tar.TypeSymlink:
+			fmt.Fprintf(h, "l %q %q\n", rel, hdr.Linkname)
+		case tar.TypeReg:
+			fh := sha256.New()
+			if _, err := io.Copy(fh, tr); err != nil {
+				return "", fmt.Errorf("preset tar: %w", err)
+			}
+			fmt.Fprintf(h, "f %q %o %d %s\n", rel, hdr.Mode, hdr.Size, hex.EncodeToString(fh.Sum(nil)))
+		default:
+			return "", fmt.Errorf("preset tar: unsupported entry %q", hdr.Name)
+		}
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
