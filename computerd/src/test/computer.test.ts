@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Computer, HttpError } from '../computer.js';
@@ -207,4 +207,54 @@ test('browser tier: harness env carries NODE_PATH for Playwright', async () => {
   const deps = (imageTier: string) => ({ cfg: testConfig({ imageTier }), credentialEnv: () => ({}), mcpServers: {} });
   assert.equal(harnessEnv(deps('browser')).NODE_PATH, '/opt/a12s/playwright-mcp/node_modules');
   assert.equal(harnessEnv(deps('slim')).NODE_PATH, undefined);
+});
+
+test('a stop that lands during the pre-dispatch credential restart cancels without dispatching', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const { adapter, computer, finished } = setup(cfg);
+  await computer.start();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  let release!: () => void;
+  adapter.restartGate = new Promise((r) => (release = r));
+  const reply = computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish' });
+  await until(() => adapter.restarts === 1);
+  computer.stopTurn(String(computer.status().activeTurn));
+  release();
+  const t = await reply;
+  assert.equal(finished(t.turnId), 'interrupted');
+  assert.equal(adapter.inputs.length, 0, 'the prompt never reached the harness');
+});
+
+test('failed credential wiring never advances the acknowledged generation', async () => {
+  const cfg = testConfig({ credentials: ['github'] });
+  writeFileSync(join(cfg.secretsDir, 'github'), 'ghp_1');
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
+  const adapter = new StubAdapter();
+  const computer = new Computer(cfg, journal, adapter, {}, 20);
+  await computer.start();
+  assert.equal(computer.status().credentialGeneration, 1);
+
+  // Generation 2 arrives without the declared credential: idle apply, prompt-time and startup all keep 1.
+  rmSync(join(cfg.secretsDir, 'github'));
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(computer.status().credentialGeneration, 1);
+  assert.equal(adapter.restarts, 0);
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  adapter.finish();
+  await until(() => journal.turnInfo(t.turnId)?.finished === 'completed');
+  assert.equal(computer.status().credentialGeneration, 1);
+  assert.ok(journal.after(0, null, 1000).some((e) => e.type === 'diagnostic' && e.data.message === 'credential wiring failed'));
+  await computer.shutdown(100);
+
+  const again = new Computer(cfg, journal, new StubAdapter(), {}, 20);
+  await again.start();
+  assert.equal(again.status().credentialGeneration, null, 'startup keeps the previous (none)');
+
+  writeFileSync(join(cfg.secretsDir, 'github'), 'ghp_2');
+  writeFileSync(join(cfg.secretsDir, '.generation'), '3\n');
+  await until(() => again.status().credentialGeneration === 3);
+  await again.shutdown(100);
 });

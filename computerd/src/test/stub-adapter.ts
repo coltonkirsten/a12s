@@ -40,8 +40,12 @@ export class StubAdapter implements Adapter {
     return this.sessions.has(sessionId) ? null : `no session ${sessionId}`;
   }
 
+  /** When set, restart() waits for it. */
+  restartGate: Promise<void> | null = null;
+
   async restart(): Promise<void> {
     this.restarts++;
+    await this.restartGate;
   }
 
   async close(): Promise<void> {}

@@ -11,3 +11,7 @@ Not root ⇒ no chown/uid switch, and `A12S_HOME_ROOT` (default `/home`), `A12S_
 Real-harness smoke run (temp dirs, throwaway openssl CA, lab credentials copied in and deleted after):
 `npm run build && node scripts/smoke.mjs claude-code` and `node scripts/smoke.mjs codex`
 (override `CLAUDE_BIN`, `CODEX_BIN`, `A12S_LAB_CREDS`). Steps: pong, resume, stop, restart_harness, restart+resume.
+
+Known limit (Layer 1): a harness that atomically replaces its credential file on token refresh leaves the refreshed
+token on the home drive until computerd notices (fs.watch, about a second; also after every turn and at start/stop),
+moves it onto the tmpfs secret (only if newer than the injected one) and restores the symlink.

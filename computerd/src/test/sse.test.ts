@@ -72,23 +72,25 @@ test('setup', async () => {
 
 test('Last-Event-ID replays from the journal, then goes live without loss or duplicates', async () => {
   const s = stream('/v1/events', { 'last-event-id': '1' });
-  await until(() => s.frames.length === 1);
-  journal.append('diagnostic', { message: 'live' });
   await until(() => s.frames.length === 2);
-  assert.deepEqual(s.frames.map((f) => f.id), ['2', '3']);
-  const live = JSON.parse(s.frames[1]!.data);
+  assert.deepEqual(s.frames[1], { event: 'head', data: '{"seq":2}' }, 'replay boundary');
+  journal.append('diagnostic', { message: 'live' });
+  await until(() => s.frames.length === 3);
+  assert.deepEqual(s.frames.map((f) => f.id), ['2', undefined, '3']);
+  const live = JSON.parse(s.frames[2]!.data);
   assert.deepEqual([live.v, live.computer, live.seq, live.type, live.data], [1, 'test', 3, 'diagnostic', { message: 'live' }]);
   s.close();
 });
 
 test('a cursor beyond the journal gets event: gap, then live events', async () => {
   const s = stream('/v1/events', { 'last-event-id': '9999' });
-  await until(() => s.frames.length === 1);
+  await until(() => s.frames.length === 2);
   assert.equal(s.frames[0]!.event, 'gap');
   assert.deepEqual(JSON.parse(s.frames[0]!.data), { lastEventId: '9999', head: journal.lastSeq() });
+  assert.deepEqual(s.frames[1], { event: 'head', data: JSON.stringify({ seq: journal.lastSeq() }) }, 'empty replay still ends with head');
   journal.append('diagnostic', { message: 'after gap' });
-  await until(() => s.frames.length === 2);
-  assert.equal(JSON.parse(s.frames[1]!.data).data.message, 'after gap');
+  await until(() => s.frames.length === 3);
+  assert.equal(JSON.parse(s.frames[2]!.data).data.message, 'after gap');
   s.close();
 });
 
@@ -103,7 +105,7 @@ test('POST /v1/turns, ?turn= replays only that turn, diagnostics and status', as
   adapter.finish();
   const s = stream(`/v1/events?turn=${turnId}`);
   await until(() => s.frames.some((f) => JSON.parse(f.data).type === 'turn.finished'));
-  const evs = s.frames.map((f) => JSON.parse(f.data));
+  const evs = s.frames.filter((f) => !f.event).map((f) => JSON.parse(f.data));
   assert.deepEqual(evs.map((e) => e.type), ['turn.started', 'session.changed', 'text.delta', 'diagnostic', 'turn.finished']);
   assert.ok(evs.every((e) => e.turn === turnId));
   assert.deepEqual(evs[3].data, { message: 'egress denied', data: { host: 'evil.example' }, source: 'controller' });
@@ -159,6 +161,6 @@ test('backpressure: a consumer that never drains is disconnected instead of buff
   streamEvents(new EventEmitter() as never, res as never, j, null, undefined, 5);
   for (let i = 0; i < 10; i++) j.append('text.delta', { text: String(i) });
   assert.equal(res.destroyed, true);
-  assert.equal(res.ids().length, 1, 'one write went out, then the stream stalled');
+  assert.equal(res.ids().length, 0, 'the head marker went out, then the stream stalled');
   j.close();
 });

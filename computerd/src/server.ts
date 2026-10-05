@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { TLSSocket } from 'node:tls';
 import { HttpError, type Computer, type TurnRequest } from './computer.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { Leases } from './leases.js';
@@ -63,6 +64,15 @@ function wrap(fn: (req: IncomingMessage, res: ServerResponse, url: URL) => Promi
   };
 }
 
+/** CA membership is not enough: only the Controller's identity (CN=controller) may drive this Computer. */
+export function controllerOnly(handler: Handler): Handler {
+  return (req, res) => {
+    const peer = (req.socket as TLSSocket).getPeerCertificate?.();
+    if (!peer || peer.subject?.CN !== 'controller') return send(res, 403, { error: 'client certificate is not the controller' });
+    handler(req, res);
+  };
+}
+
 /** The §5 contract, served over mTLS to the Controller. */
 export function apiHandler(computer: Computer, journal: Journal): Handler {
   return wrap(async (req, res, url) => {
@@ -90,6 +100,7 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
  * One SSE stream per Computer. `id:` is the journal seq. With Last-Event-ID the journal is replayed from that
  * point, then the stream goes live; a cursor the journal does not know gets `event: gap` and the stream goes live
  * from the head. Without a cursor, `?turn=` streams replay that turn from its start; unfiltered streams start live.
+ * When the replay is complete, `event: head` carries `{seq}`: everything up to that journal seq has been sent.
  * Writes honour backpressure; a consumer that stays undrained for more than `maxQueued` live events is
  * disconnected and resumes with Last-Event-ID.
  */
@@ -146,7 +157,10 @@ export function streamEvents(
   req.on('close', close);
   res.on('close', close);
   void (async () => {
+    let snapshot: number;
     for (;;) {
+      // Snapshot and page in one synchronous step: the last page then holds every match up to `snapshot`.
+      snapshot = journal.lastSeq();
       const page = journal.after(cursor, turn, REPLAY_PAGE);
       for (const e of page) {
         if (closed) return;
@@ -154,6 +168,9 @@ export function streamEvents(
       }
       if (page.length < REPLAY_PAGE) break;
     }
+    if (closed) return;
+    cursor = Math.max(cursor, snapshot);
+    if (!res.write(`event: head\ndata: ${JSON.stringify({ seq: snapshot })}\n\n`)) await drained();
     await flush();
   })();
 }

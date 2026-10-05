@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 
 export type AgentFsOp = { op: 'mkdir'; path: string } | { op: 'inspect'; path: string } | { op: 'link'; path: string; target: string };
 export type AgentFsResult =
-  | { ok: true; kind?: 'missing' | 'symlink' | 'file' | 'other'; target?: string; content?: string }
+  | { ok: true; kind?: 'missing' | 'symlink' | 'file' | 'other'; target?: string; content?: string; mtimeMs?: number }
   | { ok: false; error: string };
 
 const MAX_FILE = 1 << 20;
@@ -27,8 +27,9 @@ function run(op: AgentFsOp): AgentFsResult {
       if (!st.isFile()) return { ok: true, kind: 'other' };
       const fd = openSync(op.path, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
-        if (fstatSync(fd).size > MAX_FILE) return { ok: true, kind: 'other' };
-        return { ok: true, kind: 'file', content: readFileSync(fd, 'utf8') };
+        const fst = fstatSync(fd);
+        if (fst.size > MAX_FILE) return { ok: true, kind: 'other' };
+        return { ok: true, kind: 'file', content: readFileSync(fd, 'utf8'), mtimeMs: fst.mtimeMs };
       } finally {
         closeSync(fd);
       }

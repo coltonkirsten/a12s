@@ -75,9 +75,10 @@ function follow(turnId, onEvent = () => {}, { after, done = (e) => e.type === 't
       res.setEncoding('utf8').on('data', (chunk) => {
         buf += chunk;
         for (let i; (i = buf.indexOf('\n\n')) >= 0; ) {
-          const data = buf.slice(0, i).split('\n').find((l) => l.startsWith('data: '));
+          const block = buf.slice(0, i);
+          const data = block.split('\n').find((l) => l.startsWith('data: '));
           buf = buf.slice(i + 2);
-          if (!data) continue;
+          if (!data || block.includes('event: ')) continue; // head / gap markers
           const e = JSON.parse(data.slice(6));
           if (e.type === 'text.delta') deltas.push(e);
           else (flush(), console.log(`  #${e.seq} ${e.type}${e.turn && !turnId ? ` [${e.turn}]` : ''} ${JSON.stringify(e.data).slice(0, 150)}`));

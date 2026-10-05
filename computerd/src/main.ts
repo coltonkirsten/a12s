@@ -13,7 +13,7 @@ import { credentialEnv } from './credentials.js';
 import { prepareDirs, prepareDrives } from './dirs.js';
 import { Journal } from './journal.js';
 import { Leases, type TlsMaterial } from './leases.js';
-import { apiHandler, localHandler } from './server.js';
+import { apiHandler, controllerOnly, localHandler } from './server.js';
 
 function log(message: string): void {
   process.stderr.write(`computerd: ${message}\n`);
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   log(`starting for ${cfg.computer} (${cfg.harness.kind} ${cfg.harness.version}, ${cfg.autonomy}, root=${cfg.isRoot})`);
   prepareDirs(cfg);
-  for (const d of prepareDrives(cfg)) log(`work drive ${d} handed to the agent`);
+  for (const d of prepareDrives(cfg, log)) log(`work drive ${d} handed to the agent`);
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const tls = await waitForTls(cfg);
 
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   await new Promise<void>((r) => local.listen(cfg.sockPath, r));
   chmodSync(cfg.sockPath, 0o666);
 
-  const api = createHttpsServer({ ...tls, requestCert: true, rejectUnauthorized: true }, apiHandler(computer, journal));
+  const api = createHttpsServer({ ...tls, requestCert: true, rejectUnauthorized: true }, controllerOnly(apiHandler(computer, journal)));
   await new Promise<void>((r) => api.listen(cfg.port, r));
   log(`listening on :${cfg.port} (mTLS) and ${cfg.sockPath}`);
 
