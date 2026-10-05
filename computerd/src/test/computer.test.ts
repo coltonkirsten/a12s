@@ -115,3 +115,26 @@ test('shutdown closes admission and interrupts the active turn', async () => {
   assert.equal(finished(t.turnId), 'interrupted');
   assert.equal(await status(computer.submitTurn({ requestId: 'r2', session: 'new', prompt: 'x' })), 503);
 });
+
+test('acceptance is journaled before dispatch; a crash mid-turn ends it interrupted and never redispatches', async () => {
+  const { cfg, journal, adapter, computer } = setup();
+  await computer.start();
+  let journaledBeforeDispatch = false;
+  const original = adapter.startTurn.bind(adapter);
+  adapter.startTurn = async (input) => {
+    journaledBeforeDispatch = journal.findRequest('r1') !== undefined;
+    return original(input);
+  };
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish the release' });
+  assert.ok(journaledBeforeDispatch);
+  assert.equal(journal.turnInfo(t.turnId)?.session, t.sessionId, 'the new session id is recorded for idempotent replies');
+
+  // computerd dies here: no turn.finished. A new process over the same journal:
+  const fresh = new StubAdapter();
+  const after = new Computer(cfg, journal, fresh, {});
+  await after.start();
+  assert.equal(journal.turnInfo(t.turnId)?.finished, 'interrupted');
+  assert.equal(journal.after(0, t.turnId, 100).at(-1)?.data.error, 'computerd restarted');
+  assert.deepEqual(await after.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish the release' }), t);
+  assert.equal(fresh.inputs.length, 0, 'the retry did not reach the harness');
+});

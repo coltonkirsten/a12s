@@ -76,6 +76,10 @@ export class Computer {
   /** Wake: load the session record, precheck it where the harness allows, then open admission. */
   async start(): Promise<void> {
     this.lifecycle('starting');
+    // Never redispatch: a turn accepted before a crash ends interrupted, and "continue" is the human's call.
+    for (const t of this.journal.unfinishedTurns()) {
+      this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'computerd restarted' }, { turn: t.turnId, session: t.session });
+    }
     try {
       this.session = JSON.parse(readFileSync(this.sessionPath, 'utf8')) as SessionRecord;
     } catch {
@@ -107,7 +111,8 @@ export class Computer {
   /** POST /v1/turns. Resolves once the turn is journaled. Idempotent by requestId. */
   submitTurn(req: TurnRequest): Promise<TurnReply> {
     const hash = createHash('sha256').update(JSON.stringify([req.session, req.prompt, req.cwd ?? null])).digest('hex');
-    const prior = this.journal.findRequest(req.requestId) ?? this.inflight.get(req.requestId);
+    // In-flight first: its reply carries the session id a new session gets only after dispatch.
+    const prior = this.inflight.get(req.requestId) ?? this.journal.findRequest(req.requestId);
     if (prior) {
       const priorHash = 'bodyHash' in prior ? prior.bodyHash : prior.hash;
       if (priorHash !== hash) return Promise.reject(new HttpError(409, 'requestId was already used with a different body'));
@@ -139,6 +144,8 @@ export class Computer {
       cwd,
     };
 
+    // Durable acceptance first: once this commits, a retry of the same requestId can never dispatch again.
+    this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
     let run;
     try {
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
@@ -161,7 +168,11 @@ export class Computer {
     } catch (err) {
       const message = (err as Error).message;
       const scope = { turn: turnId, session: wanted };
-      this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
+      if (active.stopRequested) {
+        this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'stopped before the harness started' }, scope);
+        this.endTurn(active);
+        return { turnId, sessionId: wanted };
+      }
       if (err instanceof ResumeError) {
         this.resumePending = true;
         this.journal.append('resume.failed', { sessionId: wanted, reason: message, at: 'prompt' }, scope);
@@ -174,7 +185,6 @@ export class Computer {
     }
 
     const sessionId = run.sessionId;
-    this.journal.acceptTurn(req.requestId, turnId, hash, started, sessionId);
     if (sessionId !== previous?.sessionId) {
       this.journal.append('session.changed', { from: previous?.sessionId ?? null, to: sessionId }, { turn: turnId, session: sessionId });
     }
