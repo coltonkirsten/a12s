@@ -1,24 +1,58 @@
-import { chownSync, lchownSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chownSync, closeSync, constants, fstatSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { AgentFsOp, AgentFsResult } from './agentfs.js';
 import { AGENT_GID, AGENT_UID, type Config } from './config.js';
 
 export interface Wiring {
   /** Credential env for the harness only. Values are secrets: never log them. */
   env: Record<string, string>;
-  /** Names present in the secrets dir. */
+  /** Names from A12S_CREDENTIALS that are present as regular files. */
   present: string[];
-  /** Names the Fleet asked for (A12S_CREDENTIALS) that are not present. */
+  /** Names from A12S_CREDENTIALS that are absent (or not regular files). */
   missing: string[];
+  /** Names whose harness-rewritten file was moved back onto tmpfs. */
+  reclaimed: string[];
+  /** Problems worth a diagnostic (no secret values). */
+  problems: string[];
+}
+
+const AGENTFS = join(dirname(fileURLToPath(import.meta.url)), 'agentfs.js');
+
+/** Runs filesystem ops inside the agent's home as uid/gid 1000 (as the current user in dev). */
+export function agentFs(cfg: Config, ops: AgentFsOp[]): AgentFsResult[] {
+  if (ops.length === 0) return [];
+  const r = spawnSync(process.execPath, [AGENTFS, JSON.stringify(ops)], {
+    env: {},
+    encoding: 'utf8',
+    timeout: 10_000,
+    maxBuffer: 4 << 20,
+    ...(cfg.isRoot ? { uid: AGENT_UID, gid: AGENT_GID } : {}),
+  });
+  if (r.status !== 0) throw new Error(`agentfs failed: ${r.error?.message ?? r.stderr.trim()}`);
+  return JSON.parse(r.stdout) as AgentFsResult[];
+}
+
+/** Reads a file in a root-owned tmpfs dir, refusing symlinks and anything but a regular file. */
+function readNoFollow(path: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return null;
+  }
+  try {
+    return fstatSync(fd).isFile() ? readFileSync(fd, 'utf8') : null;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** The integer the Controller writes last to `.generation`, or null before the first injection. */
 export function credentialGeneration(cfg: Config): number | null {
-  try {
-    const n = Number.parseInt(readFileSync(join(cfg.secretsDir, '.generation'), 'utf8').trim(), 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
+  const n = Number.parseInt(readNoFollow(join(cfg.secretsDir, '.generation'))?.trim() ?? '', 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 function isJsonObject(text: string): boolean {
@@ -30,95 +64,71 @@ function isJsonObject(text: string): boolean {
   }
 }
 
-/** Points `link` at `target`, replacing whatever is there (atomically, via rename). */
-function linkTo(cfg: Config, link: string, target: string): void {
-  try {
-    if (readlinkSync(link) === target) return;
-  } catch {
-    // missing, or a regular file: replace it below
+/** Only the names the Fleet declared (A12S_CREDENTIALS) are ever read. */
+function readSecrets(cfg: Config): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const name of cfg.credentials) {
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) continue;
+    const v = readNoFollow(join(cfg.secretsDir, name));
+    if (v !== null) out.set(name, v.trim());
   }
-  const dir = dirname(link);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  if (cfg.isRoot) chownSync(dir, AGENT_UID, AGENT_GID);
-  const tmp = `${link}.a12s-tmp`;
-  rmSync(tmp, { force: true });
-  symlinkSync(target, tmp);
-  if (cfg.isRoot) lchownSync(tmp, AGENT_UID, AGENT_GID);
-  renameSync(tmp, link);
+  return out;
 }
 
-/** Credential files a harness rewrites on token refresh, by secret name. */
-function harnessCredentialFiles(cfg: Config): [string, string][] {
-  return [
-    ['anthropic', join(cfg.claudeConfigDir, '.credentials.json')],
-    ['openai', join(cfg.codexHome, 'auth.json')],
-  ];
+/** Raw keys and tokens for the harness env. */
+export function credentialEnv(cfg: Config): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, v] of readSecrets(cfg)) {
+    if (name === 'anthropic' && !isJsonObject(v)) env.ANTHROPIC_API_KEY = v;
+    if (name === 'openai' && !isJsonObject(v)) env.OPENAI_API_KEY = v;
+    if (name === 'github') env.GH_TOKEN = env.GITHUB_TOKEN = v;
+  }
+  return env;
+}
+
+/** Writes a secret back onto tmpfs (the secrets dir is root-owned, so the rename cannot be redirected). */
+function writeSecret(cfg: Config, name: string, content: string): void {
+  const path = join(cfg.secretsDir, name);
+  const tmp = `${path}.a12s-tmp`;
+  writeFileSync(tmp, content, { mode: 0o600, flag: 'w' });
+  if (cfg.isRoot) chownSync(tmp, AGENT_UID, AGENT_GID);
+  renameSync(tmp, path);
 }
 
 /**
- * A harness refreshing a subscription token replaces our symlink with a regular file on the home drive.
- * Move that content back onto the tmpfs secret, delete the on-disk copy and restore the symlink.
- * Returns the names reclaimed.
- */
-export function reclaimCredentials(cfg: Config): string[] {
-  const reclaimed: string[] = [];
-  for (const [name, link] of harnessCredentialFiles(cfg)) {
-    const secret = join(cfg.secretsDir, name);
-    try {
-      if (!lstatSync(link).isFile() || !lstatSync(secret).isFile()) continue;
-    } catch {
-      continue;
-    }
-    const fresh = readFileSync(link);
-    if (isJsonObject(fresh.toString('utf8'))) {
-      const tmp = `${secret}.a12s-tmp`;
-      writeFileSync(tmp, fresh, { mode: 0o600 });
-      if (cfg.isRoot) chownSync(tmp, AGENT_UID, AGENT_GID);
-      renameSync(tmp, secret);
-    }
-    rmSync(link, { force: true });
-    linkTo(cfg, link, secret);
-    reclaimed.push(name);
-  }
-  return reclaimed;
-}
-
-/**
- * Wires `/run/a12s/secrets/<name>` by name: anthropic and openai JSON files become symlinks in the
- * harness config dirs, raw keys become env, github becomes GH_TOKEN/GITHUB_TOKEN. Other names stay files.
+ * Wires credentials by name: anthropic/openai JSON → symlinks in the harness config dirs; raw keys and github → env.
+ * A harness that refreshed a subscription token replaced its symlink with a regular file on the home drive: that
+ * content is moved onto the tmpfs secret first, then the symlink is restored. Agent-side steps run as the agent.
  */
 export function wireCredentials(cfg: Config): Wiring {
-  reclaimCredentials(cfg); // a refreshed token left on disk (crash before reclaim) is newer than the secret: keep it
-  const env: Record<string, string> = {};
-  let names: string[] = [];
-  try {
-    names = readdirSync(cfg.secretsDir).filter((n) => !n.startsWith('.'));
-  } catch {
-    // no secrets dir yet
+  const secrets = readSecrets(cfg);
+  const links: [string, string][] = [];
+  for (const [name, link] of [
+    ['anthropic', join(cfg.claudeConfigDir, '.credentials.json')],
+    ['openai', join(cfg.codexHome, 'auth.json')],
+  ] as const) {
+    if (secrets.has(name) && isJsonObject(secrets.get(name)!)) links.push([name, link]);
   }
-  for (const name of names) {
-    const path = join(cfg.secretsDir, name);
-    const read = () => readFileSync(path, 'utf8').trim();
-    switch (name) {
-      case 'anthropic': {
-        const v = read();
-        if (isJsonObject(v)) linkTo(cfg, join(cfg.claudeConfigDir, '.credentials.json'), path);
-        else env.ANTHROPIC_API_KEY = v;
-        break;
-      }
-      case 'openai': {
-        const v = read();
-        if (isJsonObject(v)) linkTo(cfg, join(cfg.codexHome, 'auth.json'), path);
-        else env.OPENAI_API_KEY = v;
-        break;
-      }
-      case 'github': {
-        const v = read();
-        env.GH_TOKEN = v;
-        env.GITHUB_TOKEN = v;
-        break;
-      }
+  const reclaimed: string[] = [];
+  const problems: string[] = [];
+  const toLink: AgentFsOp[] = [];
+  agentFs(cfg, links.map(([, path]) => ({ op: 'inspect', path }))).forEach((r, i) => {
+    const [name, path] = links[i]!;
+    const target = join(cfg.secretsDir, name);
+    if (!r.ok) return void problems.push(`${path}: ${r.error}`);
+    if (r.kind === 'symlink' && r.target === target) return;
+    if (r.kind === 'other') return void problems.push(`${path} is not a file or symlink; left alone`);
+    if (r.kind === 'file') {
+      if (r.content && isJsonObject(r.content)) {
+        writeSecret(cfg, name, r.content);
+        reclaimed.push(name);
+      } else problems.push(`${path} held no valid credential JSON; replaced by the injected one`);
     }
-  }
-  return { env, present: names, missing: cfg.credentials.filter((n) => !names.includes(n)) };
+    toLink.push({ op: 'link', path, target });
+  });
+  agentFs(cfg, toLink).forEach((r, i) => {
+    if (!r.ok) problems.push(`${toLink[i]!.path}: ${r.error}`);
+  });
+  const present = [...secrets.keys()];
+  return { env: credentialEnv(cfg), present, missing: cfg.credentials.filter((n) => !present.includes(n)), reclaimed, problems };
 }

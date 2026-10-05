@@ -1,4 +1,4 @@
-import { chmodSync, chownSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { dirname, join } from 'node:path';
@@ -7,33 +7,16 @@ import type { Adapter, McpServer } from './adapters/adapter.js';
 import { ClaudeAdapter } from './adapters/claude.js';
 import { CodexAdapter } from './adapters/codex.js';
 import type { HarnessDeps } from './adapters/spawn.js';
-import { AGENT_GID, AGENT_UID, loadConfig, type Config } from './config.js';
+import { loadConfig, type Config } from './config.js';
 import { Computer } from './computer.js';
-import { wireCredentials } from './credentials.js';
+import { credentialEnv } from './credentials.js';
+import { prepareDirs, prepareDrives } from './dirs.js';
 import { Journal } from './journal.js';
 import { Leases, type TlsMaterial } from './leases.js';
 import { apiHandler, localHandler } from './server.js';
 
 function log(message: string): void {
   process.stderr.write(`computerd: ${message}\n`);
-}
-
-function ensureDir(cfg: Config, path: string, mode: number, owner: 'root' | 'agent'): void {
-  mkdirSync(path, { recursive: true, mode });
-  chmodSync(path, mode);
-  if (cfg.isRoot) owner === 'agent' ? chownSync(path, AGENT_UID, AGENT_GID) : chownSync(path, 0, 0);
-}
-
-function prepareDirs(cfg: Config): void {
-  ensureDir(cfg, cfg.agentHome, 0o755, 'agent');
-  ensureDir(cfg, cfg.stateDir, 0o700, 'root');
-  // 0711, not 0700: the agent must traverse /run/a12s to reach its own secrets/ and the sock/ socket.
-  ensureDir(cfg, cfg.runDir, 0o711, 'root');
-  ensureDir(cfg, cfg.secretsDir, 0o700, 'agent');
-  ensureDir(cfg, cfg.tlsDir, 0o700, 'root');
-  ensureDir(cfg, dirname(cfg.sockPath), 0o755, 'root');
-  ensureDir(cfg, cfg.claudeConfigDir, 0o700, 'agent');
-  ensureDir(cfg, cfg.codexHome, 0o700, 'agent');
 }
 
 async function waitForTls(cfg: Config): Promise<TlsMaterial> {
@@ -64,11 +47,12 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   log(`starting for ${cfg.computer} (${cfg.harness.kind} ${cfg.harness.version}, ${cfg.autonomy}, root=${cfg.isRoot})`);
   prepareDirs(cfg);
+  for (const d of prepareDrives(cfg)) log(`work drive ${d} handed to the agent`);
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const tls = await waitForTls(cfg);
 
   const servers = mcpServers(cfg);
-  const deps: HarnessDeps = { cfg, credentialEnv: () => wireCredentials(cfg).env, mcpServers: servers };
+  const deps: HarnessDeps = { cfg, credentialEnv: () => credentialEnv(cfg), mcpServers: servers };
   const adapter: Adapter = cfg.harness.kind === 'codex' ? new CodexAdapter(deps) : new ClaudeAdapter(deps);
   const computer = new Computer(cfg, journal, adapter, servers);
   const leases = new Leases(cfg, tls, (drive, path, why) =>

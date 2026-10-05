@@ -3,7 +3,7 @@ import { chownSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
-import { credentialGeneration, reclaimCredentials, wireCredentials } from './credentials.js';
+import { credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import type { Journal } from './journal.js';
 
 export interface SessionRecord {
@@ -89,9 +89,9 @@ export class Computer {
       this.resumePending = true;
       this.journal.append('resume.failed', { sessionId: null, reason: this.sessionDamaged, at: 'wake' });
     }
-    const wiring = wireCredentials(this.cfg);
+    const wiring = this.wire(null);
     this.adapterCredGeneration = credentialGeneration(this.cfg);
-    if (wiring.missing.length) this.journal.append('diagnostic', { message: 'credentials not injected', names: wiring.missing });
+    if (wiring?.missing.length) this.journal.append('diagnostic', { message: 'credentials not injected', names: wiring.missing });
     if (this.session) {
       this.resumePending = true;
       const reason = await this.precheck(this.session);
@@ -156,7 +156,7 @@ export class Computer {
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
-      wireCredentials(this.cfg);
+      this.wire(turnId);
       const generation = credentialGeneration(this.cfg);
       if (generation !== this.adapterCredGeneration) {
         await this.adapter.restart(); // rotated credentials must not stay in a long-lived harness
@@ -229,7 +229,7 @@ export class Computer {
   }
 
   private endTurn(active: ActiveTurn): void {
-    this.reclaim(active.turnId);
+    this.wire(active.turnId);
     if (this.active === active) this.active = null;
     active.resolveDone();
   }
@@ -303,16 +303,20 @@ export class Computer {
       await Promise.race([a.done, new Promise((r) => setTimeout(r, flushMs).unref())]);
     }
     await this.adapter.close();
-    this.reclaim(null);
+    this.wire(null);
   }
 
-  /** Moves any credential file a harness rewrote on the home drive back onto tmpfs. */
-  private reclaim(turn: string | null): void {
+  /** (Re)wires credentials, moving any file a harness rewrote on the home drive back onto tmpfs. */
+  private wire(turn: string | null): Wiring | null {
     try {
-      const names = reclaimCredentials(this.cfg);
-      if (names.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names }, { turn, session: this.session?.sessionId ?? null });
+      const w = wireCredentials(this.cfg);
+      const scope = { turn, session: this.session?.sessionId ?? null };
+      if (w.reclaimed.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names: w.reclaimed }, scope);
+      for (const p of w.problems) this.journal.append('diagnostic', { message: `credential wiring: ${p}` }, scope);
+      return w;
     } catch (err) {
-      this.journal.append('diagnostic', { message: `credential reclaim failed: ${(err as Error).message}` }, { turn });
+      this.journal.append('diagnostic', { message: `credential wiring failed: ${(err as Error).message}` }, { turn });
+      return null;
     }
   }
 

@@ -15,6 +15,8 @@ export interface Config {
   imageTier: string;
   bundle: string;
   credentials: string[];
+  /** Work drive mount points from A12S_DRIVES (`<at>:rw,<at>:ro,…`). */
+  drives: { at: string; readOnly: boolean }[];
   proxy: string | null;
   controller: string | null;
   port: number;
@@ -55,6 +57,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     imageTier: env.A12S_IMAGE_TIER ?? 'slim',
     bundle: env.A12S_BUNDLE ?? `/opt/a12s/bundles/${kind}-${env.A12S_HARNESS_VERSION ?? ''}`,
     credentials: (env.A12S_CREDENTIALS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    drives: (env.A12S_DRIVES ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => {
+        const i = s.lastIndexOf(':');
+        return i > 0 ? { at: s.slice(0, i), readOnly: s.slice(i + 1) !== 'rw' } : { at: s, readOnly: true };
+      }),
     proxy: env.A12S_PROXY || null,
     controller: env.A12S_CONTROLLER || null,
     port: Number((!isRoot && env.A12S_PORT) || 7443),
