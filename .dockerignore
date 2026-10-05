@@ -1,0 +1,8 @@
+# Build context is the repo root; keep it small and free of local state.
+.git
+**/node_modules
+**/dist
+/bin
+**/*.bindings.yaml
+**/*.log
+**/.DS_Store
