@@ -212,6 +212,7 @@ export class Computer {
           session = ev.data.to;
           this.saveSession({ sessionId: session, harness: this.cfg.harness.kind, cwd: this.session?.cwd ?? this.cfg.agentHome });
         }
+        if (ev.type === 'resume.failed') this.resumePending = true; // the session record stays as it was
         if (ev.type === 'turn.finished') status = ev.data.status;
         this.journal.append(ev.type, ev.data, { turn: active.turnId, session });
       }

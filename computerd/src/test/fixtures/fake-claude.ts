@@ -15,6 +15,7 @@ const flag = (name: string) => {
 const sessionId = flag('--resume') ?? flag('--session-id') ?? 'no-session';
 let n = 0;
 const out = (m: Record<string, unknown>) => process.stdout.write(`${JSON.stringify({ uuid: `u${n++}`, session_id: sessionId, ...m })}\n`);
+// wrong-session: the init frame names another session, as if the resume had silently started fresh.
 const result = (subtype: string, isError: boolean, text: string) =>
   out({
     type: 'result', subtype, is_error: isError, result: text, errors: isError ? ['interrupted'] : [], stop_reason: 'end_turn',
@@ -31,12 +32,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line) as { type: string; request_id?: string; request?: { subtype: string } };
   if (m.type === 'control_request') {
     process.stdout.write(`${JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response: {} } })}\n`);
-    if (m.request?.subtype === 'interrupt' && mode === 'hang') result('error_during_execution', true, '');
+    if (m.request?.subtype === 'interrupt' && (mode === 'hang' || mode === 'wrong-session')) result('error_during_execution', true, '');
     return;
   }
   if (m.type !== 'user') return;
-  out({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: [], mcp_servers: [], model: 'fake', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: 'fake' });
-  if (mode === 'hang' || mode === 'ignore-term') return;
+  out({ ...(mode === 'wrong-session' ? { session_id: 'aaaaaaaa-0000-4000-8000-000000000000' } : {}), type: 'system', subtype: 'init', cwd: process.cwd(), tools: [], mcp_servers: [], model: 'fake', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: 'fake' });
+  if (mode === 'hang' || mode === 'ignore-term' || mode === 'wrong-session') return;
   if (mode === 'refresh') {
     // Like a real token refresh: write a temp file and rename it over the credentials symlink.
     const file = `${process.env.CLAUDE_CONFIG_DIR}/.credentials.json`;

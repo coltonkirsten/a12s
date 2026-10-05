@@ -86,3 +86,16 @@ test('claude: a harness that ignores interrupt and SIGTERM is killed, turn ends 
   const evs = await collect(run.events);
   assert.equal((evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data.status, 'interrupted');
 });
+
+test('claude: a resume that comes up in another session is stopped and fails with resume.failed', async () => {
+  const { cfg, adapter, input } = setup('wrong-session');
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const dir = join(cfg.claudeConfigDir, 'projects', '-home-agent');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${id}.jsonl`), '{"type":"user"}\n');
+  const evs = await collect((await adapter.startTurn({ ...input, sessionId: id })).events);
+  assert.deepEqual(evs.map((e) => e.type), ['resume.failed', 'turn.finished']);
+  const fin = (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
+  assert.equal(fin.status, 'failed');
+  assert.match(fin.error ?? '', /started session aaaaaaaa/);
+});

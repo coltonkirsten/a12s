@@ -17,6 +17,8 @@ interface ActiveTurn {
   query: Query;
   child: ChildProcessWithoutNullStreams | null;
   stopping: boolean;
+  /** Set when a resume came up in a different session: the run is stopped and the turn fails. */
+  resumeFailed: string | null;
   timers: NodeJS.Timeout[];
 }
 
@@ -47,7 +49,7 @@ export class ClaudeAdapter implements Adapter {
       yield { type: 'user', message: { role: 'user', content: input.prompt }, parent_tool_use_id: null };
       await inputDone;
     }
-    const active: ActiveTurn = { query: null as unknown as Query, child: null, stopping: false, timers: [] };
+    const active: ActiveTurn = { query: null as unknown as Query, child: null, stopping: false, resumeFailed: null, timers: [] };
     const options: Options = {
       pathToClaudeCodeExecutable: this.executable,
       spawnClaudeCodeProcess: (o) => {
@@ -73,12 +75,12 @@ export class ClaudeAdapter implements Adapter {
     };
     active.query = query({ prompt: prompt(), options });
     this.active = active;
-    void this.pump(active, sessionId, events, stderr, endInput);
+    void this.pump(active, sessionId, input.sessionId !== null, events, stderr, endInput);
     return { sessionId, events };
   }
 
-  private async pump(active: ActiveTurn, sessionId: string, out: EventQueue<AdapterEvent>, stderr: Tail, endInput: () => void): Promise<void> {
-    const mapper = new ClaudeMapper(sessionId);
+  private async pump(active: ActiveTurn, sessionId: string, resuming: boolean, out: EventQueue<AdapterEvent>, stderr: Tail, endInput: () => void): Promise<void> {
+    const mapper = new ClaudeMapper(sessionId, resuming);
     let finished: AdapterEvent | null = null;
     let threw = false;
     try {
@@ -86,6 +88,10 @@ export class ClaudeAdapter implements Adapter {
         for (const ev of mapper.map(message)) {
           if (ev.type === 'turn.finished') finished = ev;
           else out.push(ev);
+          if (ev.type === 'resume.failed' && !active.resumeFailed) {
+            active.resumeFailed = ev.data.reason;
+            void this.stop();
+          }
         }
         if (message.type === 'result') endInput();
       }
@@ -99,7 +105,9 @@ export class ClaudeAdapter implements Adapter {
       this.active = null;
     }
     // turn.finished goes last, after the process exited, so the next turn never overlaps this one.
-    if (finished?.type === 'turn.finished') {
+    if (active.resumeFailed) {
+      out.push({ type: 'turn.finished', data: { status: 'failed', usage: finished?.type === 'turn.finished' ? finished.data.usage : null, error: active.resumeFailed } });
+    } else if (finished?.type === 'turn.finished') {
       if (active.stopping) finished.data.status = 'interrupted';
       else if (finished.data.status === 'failed') out.push({ type: 'diagnostic', data: { message: 'claude: turn failed', stderr: stderr.toString() } });
       out.push(finished);
@@ -176,13 +184,19 @@ export class ClaudeMapper {
   private readonly toolNames = new Map<string, string>();
   private readonly denied = new Set<string>();
 
-  constructor(private sessionId: string) {}
+  constructor(
+    private sessionId: string,
+    private readonly resuming = false,
+  ) {}
 
   map(m: SDKMessage): AdapterEvent[] {
     const out: AdapterEvent[] = [];
     switch (m.type) {
       case 'system':
-        if (m.subtype === 'init' && m.session_id && m.session_id !== this.sessionId) {
+        if (m.subtype === 'init' && m.session_id && m.session_id !== this.sessionId && this.resuming) {
+          // A resume must continue the stored session; anything else would run the prompt without its context.
+          out.push({ type: 'resume.failed', data: { sessionId: this.sessionId, reason: `resume of ${this.sessionId} started session ${m.session_id}` } });
+        } else if (m.subtype === 'init' && m.session_id && m.session_id !== this.sessionId) {
           out.push({ type: 'session.changed', data: { from: this.sessionId, to: m.session_id } });
           this.sessionId = m.session_id;
         } else if (m.subtype === 'permission_denied') {
