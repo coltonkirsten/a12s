@@ -138,3 +138,36 @@ func TestUnknownAddressRefusalsAreLogged(t *testing.T) {
 		t.Fatalf("logged %d refusals, want 2:\n%s", n, h.log.String())
 	}
 }
+
+// Start's resume pass runs before any apply: an `up` arriving while the
+// restarted Controller is still resuming waits for it (it once ran first,
+// and the resume then re-converged the Fleet behind it).
+func TestApplyWaitsForTheResume(t *testing.T) {
+	h := newHarness(t)
+	res := h.up(labFleet(t, nil), nil, false)
+	h.stop()
+	gate := make(chan struct{})
+	h.d.mu.Lock()
+	h.d.observeGate = gate // the resume's first Observe
+	h.d.mu.Unlock()
+	h2 := startHarness(t, h.dir, h.d)
+	// Held by the resume from the moment Start returned, not from whenever
+	// its goroutine happens to be scheduled.
+	if h2.c.applyMu.TryLock() {
+		h2.c.applyMu.Unlock()
+		close(gate)
+		t.Fatal("Start returned with the apply lock free")
+	}
+	applied := make(chan struct{})
+	go func() {
+		h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: labFleet(t, nil), Lock: res.Lock, Credentials: labCreds, Presets: labPresets(t)})
+		close(applied)
+	}()
+	select {
+	case <-applied:
+		t.Fatal("an apply ran before the resume")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(gate)
+	<-applied
+}

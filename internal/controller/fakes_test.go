@@ -50,6 +50,8 @@ type fakeDriver struct {
 	// beforeRemove runs at the start of RemoveComputer (the network still
 	// exists).
 	beforeRemove func(name string)
+	// observeGate, when set, holds the next Observe until it is closed.
+	observeGate chan struct{}
 }
 
 type fakeContainer struct {
@@ -94,6 +96,13 @@ func (d *fakeDriver) Capabilities(context.Context) (driver.Capabilities, error) 
 }
 
 func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
+	d.mu.Lock()
+	gate := d.observeGate
+	d.observeGate = nil
+	d.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	obs := driver.Observation{Computers: map[string]driver.ComputerState{}, Drives: map[string]driver.DriveState{}}

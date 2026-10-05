@@ -190,17 +190,18 @@ func (c *Controller) lockComputer(name string) func() {
 	}
 }
 
-// spawn runs f in a background goroutine that Stop waits for. Nothing new
-// starts once the Controller's context has ended.
-func (c *Controller) spawn(f func()) {
+// spawn runs f in a background goroutine that Wait waits for, and reports
+// whether it did: nothing new starts once the Controller's context ended.
+func (c *Controller) spawn(f func()) bool {
 	if c.ctx != nil && c.ctx.Err() != nil {
-		return
+		return false
 	}
 	c.bg.Add(1)
 	go func() {
 		defer c.bg.Done()
 		f()
 	}()
+	return true
 }
 
 // Wait returns once the background goroutines have ended; call it after
@@ -233,8 +234,11 @@ func (c *Controller) containerName(name string) string { return "a12s-" + c.cfg.
 func (c *Controller) Start(ctx context.Context) {
 	c.ctx = ctx
 	c.spawn(func() { c.watch(ctx) })
-	c.spawn(func() {
-		c.applyMu.Lock()
+	// Taken here, before Start returns, and released by the resume pass: an
+	// apply or power request that arrives first waits for the resume
+	// instead of the resume re-converging after it.
+	c.applyMu.Lock()
+	resumed := c.spawn(func() {
 		defer c.applyMu.Unlock()
 		c.mu.Lock()
 		f := c.state.Fleet
@@ -259,6 +263,9 @@ func (c *Controller) Start(ctx context.Context) {
 		c.convergeAll(ctx, f.ComputerNames(), obs)
 		c.refreshAddrs(ctx)
 	})
+	if !resumed { // ctx already ended: nothing will release it
+		c.applyMu.Unlock()
+	}
 }
 
 // Run is `a12s controller`: it serves the API on the Fleet bridge, the
