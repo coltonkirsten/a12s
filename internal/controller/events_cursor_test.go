@@ -16,7 +16,7 @@ func TestReadEventsCursorAdvancesOnlyOnDecodedEvents(t *testing.T) {
 		"incomplete": "id: 2\ndata: {\"v\":1,\"seq\":2,\"type\":\"turn.fin",
 	} {
 		c := &Controller{rt: map[string]*runtime{}}
-		body := "id: 1\ndata: {\"v\":1,\"seq\":1,\"type\":\"lifecycle\",\"data\":{}}\n\n" + tail
+		body := "id: 1\ndata: {\"v\":1,\"seq\":1,\"type\":\"text.delta\",\"data\":{\"text\":\"x\"}}\n\n" + tail
 		c.readEvents("scout", computerd.NewStream(io.NopCloser(strings.NewReader(body))))
 		if got := c.rt["scout"].lastEventID; got != "1" {
 			t.Errorf("%s: cursor = %q, want 1", name, got)

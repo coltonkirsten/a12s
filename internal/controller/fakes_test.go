@@ -34,6 +34,8 @@ type fakeDriver struct {
 	calls     []string
 	events    chan driver.Event
 	cds       *fakeComputerds
+	// lostStages makes StageComputer report success without effect.
+	lostStages bool
 }
 
 type fakeContainer struct {
@@ -170,6 +172,9 @@ func (d *fakeDriver) StageComputer(_ context.Context, spec driver.ComputerSpec) 
 			return nil
 		}
 	}
+	if d.lostStages {
+		return nil
+	}
 	d.computers[spec.Name] = &fakeContainer{spec: spec, files: map[string][]byte{}}
 	d.record("stage %s %d", spec.Name, spec.Generation)
 	return nil
@@ -296,6 +301,18 @@ type fakeComputerd struct {
 	keepRunningOnStop bool
 	// broken never starts listening (a computerd that fails readiness).
 	broken bool
+	// session is the current session id ("" means "s_<name>").
+	session  string
+	requests map[string]string // requestId -> turn
+	// gate, when set, holds StartTurn until it is closed.
+	gate chan struct{}
+}
+
+func (f *fakeComputerd) sessionLocked() string {
+	if f.session == "" {
+		return "s_" + f.name
+	}
+	return f.session
 }
 
 var errDown = fmt.Errorf("connection refused")
@@ -325,7 +342,7 @@ func (f *fakeComputerd) halt() {
 func (f *fakeComputerd) emitLocked(typ api.EventType, turn string, data any) {
 	f.seq++
 	raw, _ := json.Marshal(data)
-	ev := api.Event{V: 1, Computer: f.name, Session: "s_" + f.name, Turn: turn, Seq: f.seq, TS: time.Now(), Type: typ, Data: raw}
+	ev := api.Event{V: 1, Computer: f.name, Session: f.sessionLocked(), Turn: turn, Seq: f.seq, TS: time.Now(), Type: typ, Data: raw}
 	b, _ := json.Marshal(ev)
 	msg := fmt.Sprintf("id: %d\ndata: %s\n\n", f.seq, b)
 	for _, sub := range f.subs {
@@ -346,22 +363,46 @@ func (f *fakeComputerd) Status(context.Context) (api.ComputerdStatus, error) {
 	if f.active != "" {
 		phase = "busy"
 	}
-	return api.ComputerdStatus{Phase: phase, Session: "s_" + f.name, ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}}, nil
+	return api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}}, nil
 }
 
 func (f *fakeComputerd) StartTurn(_ context.Context, req api.TurnRequest) (api.TurnResponse, error) {
 	f.mu.Lock()
+	gate := f.gate
+	f.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.up {
 		return api.TurnResponse{}, errDown
+	}
+	if turn, ok := f.requests[req.RequestID]; ok && req.RequestID != "" {
+		return api.TurnResponse{TurnID: turn, SessionID: f.sessionLocked()}, nil // idempotent retry
 	}
 	if f.active != "" {
 		return api.TurnResponse{}, &computerd.Error{Status: 409, Message: "computer is busy"}
 	}
 	f.turns++
 	f.active = fmt.Sprintf("t_%d", f.turns)
+	if f.requests == nil {
+		f.requests = map[string]string{}
+	}
+	f.requests[req.RequestID] = f.active
 	f.emitLocked(api.EventTurnStarted, f.active, api.TurnStartedData{})
-	return api.TurnResponse{TurnID: f.active, SessionID: "s_" + f.name}, nil
+	if req.Session == api.SessionNew {
+		from := f.sessionLocked()
+		f.session = fmt.Sprintf("s_%s_%d", f.name, f.turns)
+		f.emitLocked(api.EventSessionChanged, f.active, map[string]string{"from": from, "to": f.session})
+	}
+	return api.TurnResponse{TurnID: f.active, SessionID: f.sessionLocked()}, nil
+}
+
+func (f *fakeComputerd) setGate(g chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gate = g
 }
 
 // finish ends the active turn.
@@ -470,10 +511,18 @@ func startHarness(t *testing.T, dir string, d *fakeDriver) *harness {
 	}
 	buf := &bytes.Buffer{}
 	c.logger = log.New(&lockedWriter{w: buf}, "", 0)
-	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3}
+	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	t.Cleanup(func() {
+		// Stop, then wait out in-flight reconciles before the state dir goes.
+		cancel()
+		c.applyMu.Lock()
+		c.applyMu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		c.mu.Lock()
+		c.mu.Unlock()
+	})
 	c.Start(ctx)
 	return &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf}
 }
@@ -580,4 +629,16 @@ func (f *fakeComputerd) stopped() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.stops)
+}
+
+func (d *fakeDriver) setLostStages(b bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lostStages = b
+}
+
+// mounts reports which containers attach a drive.
+func (d *fakeDriver) mounts(driveID string) []string {
+	obs, _ := d.Observe(context.Background())
+	return obs.Drives[driveID].AttachedTo
 }

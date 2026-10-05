@@ -4,11 +4,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
 type leaseClient struct {
@@ -30,7 +33,12 @@ func (c leaseClient) do(as, method, target, body string) (int, LeaseResponse) {
 
 func TestLeases(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	l := NewLeases()
+	l := NewLeases(func(computer, drive string) error {
+		if drive != "repo" {
+			return errors.New("not shared-write")
+		}
+		return nil
+	})
 	l.now = func() time.Time { return now }
 	c := leaseClient{t, l.Handler()}
 	body := func(computer string) string {
@@ -78,5 +86,37 @@ func TestLeases(t *testing.T) {
 	}
 	if code, _ := c.do("tester", "POST", "/v1/leases", body("tester")); code != 200 {
 		t.Fatalf("acquire after release = %d", code)
+	}
+	// The drive must be one the Computer may lock.
+	other := `{"computer":"scout","drive":"reference","path":"x"}`
+	if code, _ := c.do("scout", "POST", "/v1/leases", other); code != http.StatusForbidden {
+		t.Fatalf("unauthorized drive = %d", code)
+	}
+}
+
+func TestLeaseAuthorization(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, func(f *fleet.Fleet) {
+		f.Drives["team"] = fleet.Drive{Access: fleet.AccessSharedWrite}
+		for name, ro := range map[string]bool{"scout": false, "reviewer": true} {
+			c := f.Computers[name]
+			c.Drives = append(c.Drives, fleet.DriveMount{Name: "team", At: "/work/team", ReadOnly: ro})
+			f.Computers[name] = c
+		}
+	}), nil, false)
+	for _, tc := range []struct {
+		computer, drive string
+		ok              bool
+	}{
+		{"scout", "team", true},
+		{"reviewer", "team", false},     // read-only attachment
+		{"builder", "team", false},      // not attached
+		{"builder", "a12s-repo", false}, // exclusive, not shared-write
+		{"scout", "nonexistent", false},
+		{"nobody", "team", false},
+	} {
+		if err := h.c.authorizeLease(tc.computer, tc.drive); (err == nil) != tc.ok {
+			t.Errorf("%s on %s: %v, want ok=%v", tc.computer, tc.drive, err, tc.ok)
+		}
 	}
 }

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -45,21 +44,17 @@ func NewPolicy(allow, signIn []string, unenforced bool) Policy {
 
 func normalizeHost(h string) string { return strings.TrimSuffix(strings.ToLower(h), ".") }
 
-// Check returns why a request to host:port is denied, or "" when it is
-// allowed. tunnel is true for CONNECT, false for a plain http:// request.
-// Addresses are checked separately, after resolution.
-func (p Policy) Check(host string, port int, tunnel bool) string {
+// Check returns why a CONNECT tunnel to host:port is denied, or "" when it
+// is allowed. Addresses are checked separately, after resolution.
+func (p Policy) Check(host string, port int) string {
 	if p.AllowAll || p.Unenforced {
 		return ""
 	}
 	if !p.Hosts[normalizeHost(host)] {
 		return "host is not in the egress allowlist"
 	}
-	if tunnel && port != 443 {
+	if port != 443 {
 		return "only port 443 is allowed"
-	}
-	if !tunnel && port != 80 {
-		return "plain http is only allowed on port 80"
 	}
 	return ""
 }
@@ -88,6 +83,11 @@ func BlockedAddr(addr netip.Addr) string {
 	a := addr.Unmap()
 	if !a.IsValid() {
 		return "invalid address"
+	}
+	// A zoned address belongs to no prefix (Prefix.Contains is false), so it
+	// would slip past every check below.
+	if a.Zone() != "" {
+		return "address " + a.String() + " has an IPv6 zone"
 	}
 	for _, p := range blockedPrefixes {
 		if p.Contains(a) {
@@ -127,41 +127,36 @@ func NewProxy(identify func(netip.Addr) (string, bool), policy func(string) (Pol
 	}
 }
 
+// ServeHTTP proxies CONNECT tunnels only: plaintext requests are refused,
+// so every allowed destination is reached over TLS (§6 "declared hosts and
+// HTTPS ports"); `*` keeps any port, still over CONNECT.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	computer, ok := p.identify(r)
 	if !ok {
 		http.Error(w, "a12s egress: request from an unknown network", http.StatusForbidden)
 		return
 	}
-	tunnel := r.Method == http.MethodConnect
-	var host string
-	var port int
-	switch {
-	case tunnel:
-		h, ps, err := net.SplitHostPort(r.Host)
-		n, perr := strconv.Atoi(ps)
-		if err != nil || perr != nil || n < 1 || n > 65535 {
-			http.Error(w, "a12s egress: CONNECT needs host:port", http.StatusBadRequest)
+	if r.Method != http.MethodConnect {
+		if host, port, ok := plainTarget(r); ok {
+			p.deny(w, computer, host, port, "plain http is not proxied; use https")
 			return
 		}
-		host, port = h, n
-	case r.URL.IsAbs() && r.URL.Scheme == "http" && r.URL.Host != "":
-		host, port = r.URL.Hostname(), 80
-		if ps := r.URL.Port(); ps != "" {
-			n, err := strconv.Atoi(ps)
-			if err != nil || n < 1 || n > 65535 {
-				http.Error(w, "a12s egress: bad port", http.StatusBadRequest)
-				return
-			}
-			port = n
-		}
-	default:
-		http.Error(w, "a12s egress: only CONNECT and absolute http:// requests are proxied", http.StatusBadRequest)
+		http.Error(w, "a12s egress: only CONNECT is proxied", http.StatusBadRequest)
 		return
 	}
-
+	h, ps, err := net.SplitHostPort(r.Host)
+	port, perr := strconv.Atoi(ps)
+	if err != nil || perr != nil || port < 1 || port > 65535 {
+		http.Error(w, "a12s egress: CONNECT needs host:port", http.StatusBadRequest)
+		return
+	}
+	host := h
+	if strings.Contains(host, "%") {
+		p.deny(w, computer, host, port, "IPv6 zones are not allowed")
+		return
+	}
 	policy, _ := p.Policy(computer)
-	reason := policy.Check(host, port, tunnel)
+	reason := policy.Check(host, port)
 	var addrs []netip.Addr
 	if reason == "" {
 		addrs, reason = p.resolve(r.Context(), host)
@@ -175,11 +170,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a12s egress: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	if tunnel {
-		p.tunnel(w, upstream)
-		return
+	p.tunnel(w, upstream)
+}
+
+// plainTarget is the host and port of an absolute-URI request.
+func plainTarget(r *http.Request) (string, int, bool) {
+	if !r.URL.IsAbs() || r.URL.Host == "" {
+		return "", 0, false
 	}
-	p.forward(w, r, upstream)
+	port := 80
+	if r.URL.Scheme == "https" {
+		port = 443
+	}
+	if ps := r.URL.Port(); ps != "" {
+		n, err := strconv.Atoi(ps)
+		if err != nil {
+			return "", 0, false
+		}
+		port = n
+	}
+	return r.URL.Hostname(), port, true
 }
 
 func (p *Proxy) identify(r *http.Request) (string, bool) {
@@ -266,59 +276,5 @@ func (p *Proxy) tunnel(w http.ResponseWriter, upstream net.Conn) {
 func closeWrite(c net.Conn) {
 	if cw, ok := c.(interface{ CloseWrite() error }); ok {
 		_ = cw.CloseWrite()
-	}
-}
-
-// hopHeaders are removed when forwarding plain http requests and responses.
-var hopHeaders = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"}
-
-func stripHop(h http.Header) {
-	for _, f := range h.Values("Connection") {
-		for _, k := range strings.Split(f, ",") {
-			h.Del(strings.TrimSpace(k))
-		}
-	}
-	for _, k := range hopHeaders {
-		h.Del(k)
-	}
-}
-
-// forward sends one plain http request over upstream (one request per
-// connection) and copies the response back.
-func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstream net.Conn) {
-	defer upstream.Close()
-	out := r.Clone(r.Context())
-	out.RequestURI = ""
-	out.Header = r.Header.Clone()
-	stripHop(out.Header)
-	out.Close = true
-	if err := out.Write(upstream); err != nil {
-		http.Error(w, "a12s egress: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	res, err := http.ReadResponse(bufio.NewReader(upstream), out)
-	if err != nil {
-		http.Error(w, "a12s egress: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer res.Body.Close()
-	stripHop(res.Header)
-	for k, v := range res.Header {
-		w.Header()[k] = v
-	}
-	w.WriteHeader(res.StatusCode)
-	rc := http.NewResponseController(w)
-	buf := make([]byte, 32<<10)
-	for {
-		n, err := res.Body.Read(buf)
-		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
-				return
-			}
-			_ = rc.Flush()
-		}
-		if err != nil {
-			return
-		}
 	}
 }

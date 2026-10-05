@@ -202,7 +202,23 @@ func (c *Controller) handleTurn(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, 4<<20, &req) {
 		return
 	}
+	// Admission holds the Computer's gate until computerd has accepted the
+	// turn, so a sleep or restage that closes it next sees the turn.
+	// Busy comes from computerd's events and status: an idempotent retry
+	// of a finished request starts nothing.
+	c.mu.Lock()
+	rt := c.rtLocked(name)
+	c.mu.Unlock()
+	rt.admit.Lock()
+	defer rt.admit.Unlock()
 	cl, err := c.awake(name)
+	if err == nil {
+		c.mu.Lock()
+		if rt.closed {
+			err = errorf(http.StatusServiceUnavailable, api.ErrAsleep, "%s is stopping or being updated", name)
+		}
+		c.mu.Unlock()
+	}
 	if err != nil {
 		fail(w, err)
 		return
@@ -212,12 +228,6 @@ func (c *Controller) handleTurn(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	c.mu.Lock()
-	if rt := c.rtLocked(name); rt.phase == api.PhaseReady {
-		c.setPhaseLocked(name, api.PhaseBusy, nil)
-		rt.activeTurn = res.TurnID
-	}
-	c.mu.Unlock()
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -393,16 +403,18 @@ func (c *Controller) computerStatus(ctx context.Context, name string) api.Comput
 	}
 	if rec := c.state.Computers[name]; rec != nil {
 		cs.Generation, cs.Session, cs.CredentialGeneration = rec.Generation, rec.Session, rec.CredentialGeneration
+		cs.ResumePending = rec.ResumePending
+		cs.EgressMode = c.egressModeLocked(rec)
 		if rec.pending() {
 			cs.StagedGeneration = rec.StagedGeneration
 			cs.Warnings = append(cs.Warnings, fmt.Sprintf("generation %d staged; applies when idle (a12s apply --interrupt to force)", rec.StagedGeneration))
 		}
 	}
 	r := c.rtLocked(name)
-	cs.Phase, cs.Error, cs.ActiveTurn, cs.ResumePending = r.phase, r.failure, r.activeTurn, r.resumePending
+	cs.Phase, cs.Error, cs.ActiveTurn = r.phase, r.failure, r.activeTurn
 	c.mu.Unlock()
 
-	if comp.Egress.AllowsAll() {
+	if cs.EgressMode == api.EgressAllowAll {
 		cs.Warnings = append(cs.Warnings, `egress allows any public host ("*")`)
 	}
 	if cs.Phase == api.PhaseReady || cs.Phase == api.PhaseBusy {
@@ -413,6 +425,10 @@ func (c *Controller) computerStatus(ctx context.Context, name string) api.Comput
 			cs.Warnings = append(cs.Warnings, "computerd did not answer: "+err.Error())
 		} else {
 			cs.Session, cs.ActiveTurn, cs.ResumePending = st.Session, st.ActiveTurn, st.ResumePending
+			cs.Phase = api.PhaseReady
+			if st.ActiveTurn != "" || st.Phase == "busy" {
+				cs.Phase = api.PhaseBusy
+			}
 			cs.CredentialGeneration = st.CredentialGeneration
 			cs.Harness = st.Harness
 			if st.ResumePending {

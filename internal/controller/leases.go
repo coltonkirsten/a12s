@@ -26,6 +26,8 @@ const (
 // tools: one holder per (drive, path), expiring unless renewed. In memory.
 type Leases struct {
 	now func() time.Time
+	// authorize refuses a lease the Computer may not hold.
+	authorize func(computer, drive string) error
 
 	mu    sync.Mutex
 	byKey map[leaseKey]*lease
@@ -53,9 +55,10 @@ type LeaseResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// NewLeases returns an empty lease table.
-func NewLeases() *Leases {
-	return &Leases{now: time.Now, byKey: map[leaseKey]*lease{}}
+// NewLeases returns an empty lease table; authorize decides which
+// Computer may lock on which drive.
+func NewLeases(authorize func(computer, drive string) error) *Leases {
+	return &Leases{now: time.Now, authorize: authorize, byKey: map[leaseKey]*lease{}}
 }
 
 // Handler serves the lease API. It must sit behind an mTLS listener: the
@@ -89,6 +92,10 @@ func (l *Leases) decode(w http.ResponseWriter, r *http.Request) (LeaseRequest, b
 	}
 	if !slices.Contains(peer(r), req.Computer) {
 		writeError(w, http.StatusForbidden, api.ErrUnauthorized, "client certificate is not "+req.Computer+"'s")
+		return req, false
+	}
+	if err := l.authorize(req.Computer, req.Drive); err != nil {
+		writeError(w, http.StatusForbidden, api.ErrUnauthorized, err.Error())
 		return req, false
 	}
 	req.Path = path.Clean("/" + req.Path)
