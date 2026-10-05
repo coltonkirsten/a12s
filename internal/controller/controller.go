@@ -109,15 +109,18 @@ type Controller struct {
 	// to; nil outside Docker.
 	selfAddrs func(ctx context.Context) (map[string]netip.Addr, error)
 
-	// applyMu serializes every change to Computers: Fleet applies, power,
-	// apply --interrupt, restarts.
-	applyMu sync.Mutex
+	// applyMu is held exclusively by Fleet-wide changes (apply, resume,
+	// drive rm) and shared by single-Computer ones (power, restarts, idle
+	// applies), which also take that Computer's lock: one slow Computer
+	// never delays another.
+	applyMu sync.RWMutex
 
 	mu       sync.Mutex // guards everything below
 	state    *State
 	creds    api.Credentials   // in memory only
 	presets  map[string][]byte // preset path -> tar
 	rt       map[string]*runtime
+	locks    map[string]*sync.Mutex // per Computer, see applyMu
 	clients  map[string]computerdClient
 	proxyIPs map[netip.Addr]string // Controller IP on a Computer network -> Computer
 	addrsAt  time.Time
@@ -140,6 +143,7 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		creds:    api.Credentials{},
 		presets:  map[string][]byte{},
 		rt:       map[string]*runtime{},
+		locks:    map[string]*sync.Mutex{},
 		clients:  map[string]computerdClient{},
 		proxyIPs: map[netip.Addr]string{},
 	}
@@ -153,6 +157,24 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		}, clientTLS)
 	}
 	return c, nil
+}
+
+// lockComputer takes applyMu shared and the Computer's own lock, and
+// returns the unlock.
+func (c *Controller) lockComputer(name string) func() {
+	c.applyMu.RLock()
+	c.mu.Lock()
+	l := c.locks[name]
+	if l == nil {
+		l = &sync.Mutex{}
+		c.locks[name] = l
+	}
+	c.mu.Unlock()
+	l.Lock()
+	return func() {
+		l.Unlock()
+		c.applyMu.RUnlock()
+	}
 }
 
 func (c *Controller) logf(format string, args ...any) { c.logger.Printf(format, args...) }

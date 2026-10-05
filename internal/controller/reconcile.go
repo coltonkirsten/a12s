@@ -162,7 +162,8 @@ type outcome struct {
 	err    error
 }
 
-// convergeAll converges Computers in parallel. applyMu must be held.
+// convergeAll converges Computers in parallel; each reports as soon as it
+// is done, whatever the others do. applyMu must be held exclusively.
 func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver.Observation, fresh bool) map[string]outcome {
 	var mu sync.Mutex
 	out := map[string]outcome{}
@@ -182,7 +183,8 @@ func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver
 
 // converge brings one Computer to the applied Fleet: unchanged ones only
 // get their power state enforced; a changed one is restaged now, or staged
-// for its next idle boundary when it is busy. applyMu must be held.
+// for its next idle boundary when it is busy. The caller holds applyMu
+// exclusively or the Computer's lock.
 func (c *Controller) converge(ctx context.Context, name string, obs driver.ComputerState, exists bool) (result, error) {
 	spec, hash, err := c.buildSpec(name)
 	if err != nil {
@@ -270,7 +272,8 @@ func (c *Controller) busy(ctx context.Context, name string) bool {
 }
 
 // restage stops the Computer if it runs, stages a new generation of the
-// applied spec, and starts it unless it should sleep. applyMu must be held.
+// applied spec, and starts it unless it should sleep. The caller holds
+// applyMu exclusively or the Computer's lock.
 func (c *Controller) restage(ctx context.Context, name string) error {
 	spec, hash, err := c.buildSpec(name)
 	if err != nil {
@@ -324,8 +327,7 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 
 // applyStaged applies a staged generation at an idle boundary.
 func (c *Controller) applyStaged(name string) {
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	defer c.lockComputer(name)()
 	c.mu.Lock()
 	rec := c.state.Computers[name]
 	due := rec != nil && rec.pending()
@@ -352,27 +354,39 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 	}
 	c.mu.Unlock()
 	sort.Strings(names)
-	for _, name := range names {
-		if c.busy(ctx, name) {
-			if !req.Interrupt {
-				res.Pending = append(res.Pending, name)
-				continue
+	applied := make([]bool, len(names))
+	errs := make([]error, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Go(func() {
+			if c.busy(ctx, name) {
+				if !req.Interrupt {
+					return
+				}
+				c.logf("%s: interrupting the active turn to apply the staged generation", name)
+				c.interrupt(ctx, name, time.Duration(req.Grace))
 			}
-			c.logf("%s: interrupting the active turn to apply the staged generation", name)
-			c.interrupt(ctx, name, time.Duration(req.Grace))
+			errs[i] = c.restage(ctx, name)
+			applied[i] = errs[i] == nil
+		})
+	}
+	wg.Wait()
+	for i, name := range names {
+		if applied[i] {
+			res.Applied = append(res.Applied, name)
+		} else if errs[i] == nil {
+			res.Pending = append(res.Pending, name)
 		}
-		if err := c.restage(ctx, name); err != nil {
-			return res, err
-		}
-		res.Applied = append(res.Applied, name)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return res, err
 	}
 	return res, nil
 }
 
 // SetPower is `a12s sleep` and `a12s wake`.
 func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerRequest) error {
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	defer c.lockComputer(name)()
 	c.mu.Lock()
 	rec := c.state.Computers[name]
 	inFleet := c.state.Fleet != nil && rec != nil

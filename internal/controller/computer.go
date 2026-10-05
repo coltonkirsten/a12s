@@ -425,8 +425,7 @@ func (c *Controller) died(ev driver.Event) {
 	}
 	name := ev.Computer
 	c.stopEvents(name)
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	defer c.lockComputer(name)()
 	if !c.unexpected(ev) {
 		return
 	}
