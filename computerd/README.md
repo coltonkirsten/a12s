@@ -12,6 +12,13 @@ Real-harness smoke run (temp dirs, throwaway openssl CA, lab credentials copied 
 `npm run build && node scripts/smoke.mjs claude-code` and `node scripts/smoke.mjs codex`
 (override `CLAUDE_BIN`, `CODEX_BIN`, `A12S_LAB_CREDS`). Steps: pong, resume, stop, restart_harness, restart+resume.
 
-Known limit (Layer 1): a harness that atomically replaces its credential file on token refresh leaves the refreshed
-token on the home drive until computerd notices (fs.watch, about a second; also after every turn and at start/stop),
-moves it onto the tmpfs secret (only if newer than the injected one) and restores the symlink.
+## Credential files
+- Recommended Claude credential for Computers: a `claude setup-token` token (`sk-ant-oat…`) as the raw `anthropic`
+  secret. computerd passes it as `CLAUDE_CODE_OAUTH_TOKEN`: no credential file, no refresh, nothing on any disk.
+  `sk-ant-api…` becomes `ANTHROPIC_API_KEY`; a JSON `anthropic` secret is symlinked as `$CLAUDE_CONFIG_DIR/.credentials.json`.
+- Refresh writes are in place, so they follow the symlink onto tmpfs: Codex 0.154.0 `codex-rs/login/src/auth/storage.rs`
+  `save()` opens `auth.json` with `OpenOptions` `truncate(true).write(true).create(true)` (mode 0600) and writes through
+  the path; Claude Code writes its credentials file with Node's `fs.writeFileSync`, which does the same.
+- Reclaim (fs.watch plus after-turn, start and stop) exists only for a harness that ever switches to atomic replacement:
+  it moves a newer on-disk file onto the tmpfs secret (temp + rename on tmpfs, dropped if an injection lands meanwhile)
+  and restores the symlink. Until it runs (about a second) such a token would sit on the home drive.

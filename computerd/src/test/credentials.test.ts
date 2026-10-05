@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { credentialGeneration, wireCredentials } from '../credentials.js';
@@ -96,4 +96,33 @@ test('an on-disk credential older than the injected one is discarded, not reclai
   assert.match(w.notes[0] ?? '', /older than the injected credential/);
   assert.equal(readlinkSync(link), secret);
   assert.match(readFileSync(secret, 'utf8'), /newly injected/);
+});
+
+test('a raw anthropic setup-token becomes CLAUDE_CODE_OAUTH_TOKEN; an API key stays ANTHROPIC_API_KEY', () => {
+  const cfg = testConfig({ credentials: ['anthropic'] });
+  writeFileSync(join(cfg.secretsDir, 'anthropic'), 'sk-ant-oat01-test\n');
+  assert.deepEqual(wireCredentials(cfg).env, { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test' });
+  writeFileSync(join(cfg.secretsDir, 'anthropic'), 'sk-ant-api03-test\n');
+  assert.deepEqual(wireCredentials(cfg).env, { ANTHROPIC_API_KEY: 'sk-ant-api03-test' });
+});
+
+test('an injection that lands between the reclaim check and its commit wins', async () => {
+  const { utimesSync } = await import('node:fs');
+  const cfg = testConfig({ credentials: ['openai'] });
+  const secret = join(cfg.secretsDir, 'openai');
+  const link = join(cfg.codexHome, 'auth.json');
+  writeFileSync(secret, '{"tokens":"injected v1"}');
+  utimesSync(secret, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  writeFileSync(link, '{"tokens":"refreshed on disk"}');
+  const w = wireCredentials(cfg, {
+    beforeCommit: () => {
+      writeFileSync(secret, '{"tokens":"injected v2, a longer value"}'); // the Controller's in-place write
+      writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+    },
+  });
+  assert.deepEqual(w.reclaimed, []);
+  assert.match(w.notes.join(), /injected during reclaim/);
+  assert.match(readFileSync(secret, 'utf8'), /injected v2/);
+  assert.equal(readlinkSync(link), secret);
+  assert.deepEqual(readdirSync(cfg.secretsDir).filter((f) => f.includes('a12s-tmp')), [], 'no temp left behind');
 });

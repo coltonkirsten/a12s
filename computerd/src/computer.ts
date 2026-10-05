@@ -370,6 +370,8 @@ export class Computer {
     }
   }
 
+  // wireCredentials is synchronous end to end (sync fs, spawnSync), so the watcher, after-turn, prompt-time and
+  // .generation paths cannot interleave inside computerd; the commit itself guards against the external injector.
   /** Returns true only if every declared credential is wired; failures are journaled (names, never values). */
   private wire(turn: string | null): boolean {
     const scope = { turn, session: this.session?.sessionId ?? null };
