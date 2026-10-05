@@ -80,6 +80,7 @@ export class ClaudeAdapter implements Adapter {
   private async pump(active: ActiveTurn, sessionId: string, out: EventQueue<AdapterEvent>, stderr: Tail, endInput: () => void): Promise<void> {
     const mapper = new ClaudeMapper(sessionId);
     let finished: AdapterEvent | null = null;
+    let threw = false;
     try {
       for await (const message of active.query) {
         for (const ev of mapper.map(message)) {
@@ -89,7 +90,9 @@ export class ClaudeAdapter implements Adapter {
         if (message.type === 'result') endInput();
       }
     } catch (err) {
-      out.push({ type: 'diagnostic', data: { message: `claude: ${(err as Error).message}`, stderr: stderr.toString() } });
+      // The SDK also throws after yielding an error result (an interrupt, say); the result already says it all.
+      threw = true;
+      if (!finished) out.push({ type: 'diagnostic', data: { message: `claude: ${(err as Error).message}`, stderr: stderr.toString() } });
     } finally {
       endInput();
       for (const t of active.timers) clearTimeout(t);
@@ -101,7 +104,7 @@ export class ClaudeAdapter implements Adapter {
       else if (finished.data.status === 'failed') out.push({ type: 'diagnostic', data: { message: 'claude: turn failed', stderr: stderr.toString() } });
       out.push(finished);
     } else {
-      if (!active.stopping) out.push({ type: 'diagnostic', data: { message: 'claude: exited without a result', stderr: stderr.toString() } });
+      if (!threw && !active.stopping) out.push({ type: 'diagnostic', data: { message: 'claude: exited without a result', stderr: stderr.toString() } });
       out.push({ type: 'turn.finished', data: { status: active.stopping ? 'interrupted' : 'failed', usage: null, error: 'no result' } });
     }
     out.end();
