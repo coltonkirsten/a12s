@@ -168,6 +168,8 @@ export class Computer {
         await this.adapter.restart(); // rotated credentials must not stay in a long-lived harness
         this.ackedGeneration = generation;
       }
+      // A stop may have landed during the awaits above: then nothing reaches the harness.
+      if (active.stopRequested) throw new Error('stopped before dispatch');
       run = await this.adapter.startTurn({
         prompt: req.prompt,
         sessionId: wanted,

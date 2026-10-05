@@ -208,3 +208,20 @@ test('browser tier: harness env carries NODE_PATH for Playwright', async () => {
   assert.equal(harnessEnv(deps('browser')).NODE_PATH, '/opt/a12s/playwright-mcp/node_modules');
   assert.equal(harnessEnv(deps('slim')).NODE_PATH, undefined);
 });
+
+test('a stop that lands during the pre-dispatch credential restart cancels without dispatching', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const { adapter, computer, finished } = setup(cfg);
+  await computer.start();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  let release!: () => void;
+  adapter.restartGate = new Promise((r) => (release = r));
+  const reply = computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish' });
+  await until(() => adapter.restarts === 1);
+  computer.stopTurn(String(computer.status().activeTurn));
+  release();
+  const t = await reply;
+  assert.equal(finished(t.turnId), 'interrupted');
+  assert.equal(adapter.inputs.length, 0, 'the prompt never reached the harness');
+});
