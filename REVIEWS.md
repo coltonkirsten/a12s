@@ -69,3 +69,17 @@ Verdict: not signed off. Round-1: 17 fixed, 1 rejection accepted (#20), 5 partia
 | 48 | Gate script `eval`s agent output on the host | accept | no `eval`; checks are functions over files |
 | 49 | Gate assertions not scoped to the new turn | accept | per-turn cursors; text must come from the stream, not the echoed prompt |
 | 50 | Unused helpers; two SSE parsers | accept | helpers deleted; one parser |
+
+## Round 3 — sign-off round at 30f50c1
+
+Verdict: not signed off. Round-2 verification: 20 fixed, #41 rejection accepted, #34 rejection not accepted, 5 partial (#24, #26, #30, #31, #35); 2 new (#51 blocker, #52).
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 24/26 | A failed computerd Status falls back to the cached phase; wake publishes Ready without Observe | accept | unknown status ⇒ not idle; wake confirms generation/power through Observe |
+| 30 | Fleet `egress.enforcement` applied immediately, not with the generation | accept | enforcement is part of the active policy and generation hash |
+| 31 | A malformed event followed by a valid one is skipped | accept | decode failure stops the stream and reconnects from the last good cursor |
+| 34 | Release-triggered bundle builds and a conformance test are §5 requirements | accept (rejection withdrawn) | `bundles.yml`: daily/dispatch discovery of upstream releases, build, conformance check, push to ghcr with `GITHUB_TOKEN`; `conformance.sh` asserts the flags and app-server methods the adapters use; the Codex schema diff stays Layer 2 |
+| 35 | Refresh writes could land on the home drive; reclaim races injection | accept, with evidence | Codex 0.154.0 `storage.rs save()` writes in place (`truncate+write+create`, follows the symlink → tmpfs); Node `writeFileSync` likewise; reclaim is a fallback, now serialized with wiring; raw `sk-ant-oat…` → `CLAUDE_CODE_OAUTH_TOKEN` (no file at all) is the recommended Claude credential |
+| 51 | Exclusive-drive swap between two idle Computers deadlocks | accept | obsolete attachment released at idle, detachment observed, then the new generation staged |
+| 52 | A corrupt cached preset cannot be repaired by `a12s up` | accept | existing cache entry hash-validated or replaced atomically |
