@@ -93,3 +93,12 @@ Verdict: not signed off; all round-3 items verified fixed (#35 main path fixed w
 | 53 | A swap submitted while both holders are busy never converges after the turns end (premature holder check in `applyStaged`) | accept | holder check removed; admission closed, idle confirmed, `restage` releases the obsolete attachment |
 | 54 | Recycled networks can inherit the proxy's cached address→Computer mapping (a Computer could get its peer's policy) | accept | mapping invalidated before network removal, refreshed before a replacement serves, fail closed without a verified mapping |
 | 55 | A malformed first journal event can be skipped because the initial cursor is empty | accept | cursor initialized from the validated `head` frame |
+
+## Round 5 — sign-off round at 0af4da0
+
+Verdict: not signed off; #53 and #55 verified fixed; #54 reopened as #56.
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 56 | A proxy-map refresh that starts after invalidation can publish the old `IP → A` mapping after B reused the address (epoch check doesn't cover the whole removal) | accept | refresh read/publish serialized with the whole invalidate-and-remove operation under one mutex; deterministic test holds the stale snapshot until after replacement verification |
+| 57 | Unknown-mapping denials younger than 1s are not logged | accept (small) | both return paths log |
