@@ -130,7 +130,7 @@ the proxy side, rejects private/link-local/metadata results, connects to the val
 - Driver is bound to one Fleet at construction; `EnsureBundle` returns the parsed `bundle.json` (the Controller needs `signInHosts`).
 - The preset is applied at stage time into the stopped container's `/home/agent`, only when that directory does not exist yet.
 - A prompt whose resume fails is accepted (200) and journals `turn.started` → `resume.failed` → `turn.finished failed`; the session id is kept.
-- SSE: only `gap` carries an `event:` line; a `?turn=` stream without a cursor replays that turn from its start.
+- SSE: only `gap` and `head` (`{seq}` after the journal replay, before live events) carry an `event:` line; a `?turn=` stream without a cursor replays that turn from its start.
 - A Controller `diagnostic` is journaled under the active turn with `source: "controller"`.
 
 ## Spec deviations

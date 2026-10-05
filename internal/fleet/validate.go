@@ -68,6 +68,9 @@ func (f *Fleet) Validate() error {
 		if !nameRE.MatchString(name) {
 			bad(field, "name must be a lowercase DNS label of at most 40 characters")
 		}
+		if name == "controller" {
+			bad(field, "\"controller\" is reserved for the Controller's certificate identity")
+		}
 		errs = append(errs, c.validate(field, f.Drives)...)
 		for _, m := range c.Drives {
 			if _, ok := f.Drives[m.Name]; ok {
