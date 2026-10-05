@@ -106,9 +106,19 @@ type ComputerStatus struct {
 	CredentialGeneration int64       `json:"credentialGeneration,omitempty"`
 	HomeSize             fleet.Bytes `json:"homeSize,omitzero"`
 	Drives               []string    `json:"drives,omitempty"`
+	// EgressMode is the egress policy the Controller enforces for this
+	// Computer now: EgressEnforced, EgressUnenforced or EgressAllowAll.
+	EgressMode string `json:"egressMode,omitempty"`
 	// Warnings are per Computer: egress allow "*", resume failed, and so on.
 	Warnings []string `json:"warnings,omitempty"`
 }
+
+// ComputerStatus.EgressMode values.
+const (
+	EgressEnforced   = "enforced"
+	EgressUnenforced = "unenforced"
+	EgressAllowAll   = "allow-all" // allow: ["*"]
+)
 
 // Session values for TurnRequest.Session besides an explicit session id.
 const (
