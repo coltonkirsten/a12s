@@ -21,7 +21,7 @@ symlinkSync(process.env.CLAUDE_BIN ?? join(process.env.HOME, '.local/bin/claude'
 symlinkSync(process.env.CODEX_BIN ?? '/opt/homebrew/bin/codex', join(T, 'bundle/bin/codex'));
 const cred = kind === 'codex' ? 'openai' : 'anthropic';
 copyFileSync(join(lab, `${cred}.json`), join(run, 'secrets', cred)); // never printed
-chmodSync(join(run, 'secrets', cred), 0o400);
+chmodSync(join(run, "secrets", cred), 0o600);
 
 const ssl = (...args) => execFileSync('openssl', args, { stdio: ['ignore', 'ignore', 'pipe'] });
 const ec = ['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes'];
