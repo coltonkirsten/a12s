@@ -1,0 +1,45 @@
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: lab }
+
+defaults:
+  resources: { cpu: 1, memory: 2Gi }
+  home: { size: 10Gi }
+  autonomy: full                     # maps to each harness's native permission flags
+  egress: { allow: [] }              # deny by default
+
+drives:
+  a12s-repo: { size: 20Gi, access: exclusive }
+  ux-scratch: { size: 5Gi,  access: exclusive }
+  reference:  { size: 5Gi,  access: shared }   # readOnly attachments only; shared-write allows writers
+
+computers:
+  scout:
+    harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
+    image: slim
+    credentials: [anthropic]
+    home: { preset: ./presets/scout }          # copied once, onto an empty home
+    drives: [{ name: reference, at: /work/ref, readOnly: true }]
+    egress: { allow: [api.anthropic.com] }
+
+  builder:
+    harness: { kind: codex, version: 0.154.0, model: gpt-6-astra }
+    image: slim
+    credentials: [openai, github]
+    drives: [{ name: a12s-repo, at: /work/a12s }]
+    egress: { allow: [api.openai.com, github.com, registry.npmjs.org] }
+
+  tester:
+    harness: { kind: claude-code, version: 2.1.280 }
+    image: browser
+    resources: { cpu: 2, memory: 4Gi }
+    credentials: [anthropic]
+    drives: [{ name: ux-scratch, at: /work/ux }]
+    egress: { allow: [api.anthropic.com, staging.example.com] }
+
+  reviewer:
+    harness: { kind: codex, version: 0.154.0 }
+    image: slim
+    credentials: [openai]
+    drives: [{ name: reference, at: /work/ref, readOnly: true }]
+    egress: { allow: [api.openai.com] }
