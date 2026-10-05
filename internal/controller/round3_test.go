@@ -98,6 +98,12 @@ func TestExclusiveDriveSwap(t *testing.T) {
 		f.Computers["builder"], f.Computers["tester"] = b, te
 	}
 	h.up(labFleet(t, swap), res.Lock, false)
+	t.Cleanup(func() {
+		if t.Failed() {
+			st := readState(t, h.dir)
+			t.Logf("builder %+v\ntester %+v\nlog:\n%s", *st.Computers["builder"], *st.Computers["tester"], h.log.String())
+		}
+	})
 	waitFor(t, func() bool {
 		return slices.Equal(h.d.mounts("drive-ux-scratch"), []string{"builder"}) && slices.Equal(h.d.mounts("drive-a12s-repo"), []string{"tester"})
 	})

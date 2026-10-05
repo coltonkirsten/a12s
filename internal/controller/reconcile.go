@@ -223,9 +223,22 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 	var held *driveHeld
 	if errors.As(err, &held) {
 		c.openAdmission(name)
-		return staged, c.stageLater(name, hash, obs.Generation, held.Error())
+		err := c.stageLater(name, hash, obs.Generation, held.Error())
+		c.retryIfFreed(ctx, name)
+		return staged, err
 	}
 	return restaged, err
+}
+
+// retryIfFreed re-checks, after the Computer's staged generation is
+// recorded, whether the drive it waits for is still held. A holder kicks
+// pending Computers only after its detachment is observed, so if that kick
+// came before this Computer was recorded pending, this check sees the
+// drive free and retries: no wakeup is lost.
+func (c *Controller) retryIfFreed(ctx context.Context, name string) {
+	if held, err := c.exclusiveHolder(ctx, name); err == nil && held == nil {
+		go c.applyStaged(name)
+	}
 }
 
 // stageLater records a generation to apply at the Computer's next idle
@@ -527,8 +540,13 @@ func (c *Controller) applyStaged(name string) {
 		c.openAdmission(name)
 		return
 	}
-	if err := c.restage(c.ctx, name); err != nil {
+	err := c.restage(c.ctx, name)
+	if err != nil {
 		c.openAdmission(name)
+	}
+	var held *driveHeld
+	if errors.As(err, &held) {
+		c.retryIfFreed(c.ctx, name)
 	}
 }
 
@@ -567,6 +585,7 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 			if errors.As(err, &held) {
 				c.openAdmission(name)
 				c.logf("%s: %v", name, err)
+				c.retryIfFreed(ctx, name)
 				return
 			}
 			errs[i] = err
