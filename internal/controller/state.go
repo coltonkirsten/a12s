@@ -112,9 +112,11 @@ func presetPath(stateDir, sum string) string {
 }
 
 // savePreset stores a preset tar whose content hash was verified as sum.
+// A cached entry is kept only if it still verifies; a corrupted one is
+// replaced atomically by the upload.
 func savePreset(stateDir, sum string, data []byte) error {
 	p := presetPath(stateDir, sum)
-	if _, err := os.Stat(p); err == nil {
+	if loadPreset(stateDir, sum) != nil {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
