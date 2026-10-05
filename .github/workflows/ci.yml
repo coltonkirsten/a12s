@@ -40,12 +40,63 @@ jobs:
       - run: npm run build
       - run: npm test
 
-  images:
+  # Tier images. slim uses the buildx GHA cache; browser is built on the default
+  # builder so it can use the freshly loaded slim image as its base.
+  tiers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - name: slim image
-        run: docker buildx build --load -f images/slim/Dockerfile -t a12s/slim:ci .
+        run: >-
+          docker buildx build --load -f images/slim/Dockerfile -t a12s/slim:dev
+          --cache-from type=gha,scope=slim --cache-to type=gha,scope=slim,mode=max .
+      - name: browser image
+        run: docker buildx build --builder default --load -f images/browser/Dockerfile -t a12s/browser:dev .
+      # Ubuntu 24.04 runners forbid unprivileged user namespaces via AppArmor;
+      # Chromium's sandbox needs them (that is what seccomp.json allows).
+      - name: allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Chromium sandbox (images/browser/README.md)
+        run: |
+          docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp \
+            --tmpfs /home/agent:uid=1000,gid=1000 -e HOME=/home/agent -w /home/agent \
+            --network none -v "$PWD/images/browser/test:/test:ro" --entrypoint node \
+            a12s/browser:dev /test/render.mjs | tee render.out
+          grep -q 'hello from chromium' render.out
+          grep -q 'adequately sandboxed' render.out
+
+  controller:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: controller image
+        run: >-
+          docker buildx build --load -f images/controller/Dockerfile -t a12s/controller:dev
+          --cache-from type=gha,scope=controller --cache-to type=gha,scope=controller,mode=max .
+      - name: binary runs (expects a config error, not a loader error)
+        run: |
+          if docker run --rm a12s/controller:dev > out.txt 2>&1; then cat out.txt; echo "expected non-zero exit"; exit 1; fi
+          cat out.txt
+          grep -q 'A12S_' out.txt
+
+  bundles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: claude-code bundle
         run: docker buildx build --load --build-arg VERSION=2.1.280 -t a12s/bundle-claude-code:2.1.280 images/bundles/claude-code
+      - name: codex bundle
+        run: docker buildx build --load --build-arg VERSION=0.154.0 -t a12s/bundle-codex:0.154.0 images/bundles/codex
+      - name: bundle binaries run
+        run: |
+          for ref in bundle-claude-code:2.1.280 bundle-codex:0.154.0; do
+            dir="$RUNNER_TEMP/${ref/:/-}"; mkdir -p "$dir"
+            id=$(docker create a12s/$ref /x)
+            docker cp "$id:/bundle/." "$dir"; docker rm "$id" > /dev/null
+            cat "$dir/bundle.json"; echo
+            HOME="$RUNNER_TEMP" "$dir/$(jq -r .bin "$dir/bundle.json")" --version
+          done
