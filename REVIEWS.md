@@ -102,3 +102,5 @@ Verdict: not signed off; #53 and #55 verified fixed; #54 reopened as #56.
 |---|---|---|---|
 | 56 | A proxy-map refresh that starts after invalidation can publish the old `IP → A` mapping after B reused the address (epoch check doesn't cover the whole removal) | accept | refresh read/publish serialized with the whole invalidate-and-remove operation under one mutex; deterministic test holds the stale snapshot until after replacement verification |
 | 57 | Unknown-mapping denials younger than 1s are not logged | accept (small) | both return paths log |
+
+Follow-up after round 5 (not an Astra finding): the controller package tests were flaky under full-package runs. Two causes, both fixed (`dbc10d9`, `1d1faba`): a lost wakeup when an exclusive drive is freed (a #51 follow-up, a real code fault), and restart tests that ran two Controllers on one state dir (the Controller now tracks its background goroutines and `Wait`s for them on shutdown). `go test ./internal/controller/ -count=10` and `-race -count=3` are green.
