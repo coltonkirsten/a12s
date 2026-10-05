@@ -80,3 +80,26 @@ func TestFollowEventsReopensAtMalformedEvent(t *testing.T) {
 		}
 	}
 }
+
+// #55: on a first subscription the cursor starts at the validated head, so
+// a malformed first live event is fetched again on reconnect.
+func TestFirstSubscriptionCursorStartsAtHead(t *testing.T) {
+	for name, tc := range map[string]struct{ body, want string }{
+		"head then bad event": {"event: head\ndata: {\"seq\":7}\n\nid: 8\ndata: {not json\n\n", "7"},
+		"empty journal":       {"event: head\ndata: {\"seq\":0}\n\nid: 1\ndata: {bad\n\n", "0"},
+		"malformed head":      {"event: head\ndata: {\"seq\":\"x\"}\n\n", ""},
+		"head without seq":    {"event: head\ndata: {}\n\n", ""},
+	} {
+		c := &Controller{rt: map[string]*runtime{"scout": {}}}
+		c.readEvents("scout", computerd.NewStream(io.NopCloser(strings.NewReader(tc.body))))
+		if got := c.rt["scout"].lastEventID; got != tc.want {
+			t.Errorf("%s: cursor = %q, want %q", name, got, tc.want)
+		}
+	}
+	// A head after a replay from a known cursor does not move it.
+	c := &Controller{rt: map[string]*runtime{"scout": {lastEventID: "1"}}}
+	c.readEvents("scout", computerd.NewStream(io.NopCloser(strings.NewReader("event: head\ndata: {\"seq\":9}\n\n"))))
+	if got := c.rt["scout"].lastEventID; got != "1" {
+		t.Errorf("known cursor moved to %q", got)
+	}
+}

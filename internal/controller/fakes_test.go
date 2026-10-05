@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
@@ -42,6 +43,10 @@ type fakeDriver struct {
 	// of one is recorded in violations.
 	exclusive  map[string]bool
 	violations []string
+	// ips is the Controller's address on each Computer network (by
+	// Computer), allocated when a network first appears, freed with it.
+	ips     map[string]netip.Addr
+	addrErr error
 }
 
 type fakeContainer struct {
@@ -192,6 +197,22 @@ func (d *fakeDriver) StageComputer(_ context.Context, spec driver.ComputerSpec) 
 	}
 	d.computers[spec.Name] = &fakeContainer{spec: spec, files: map[string][]byte{}}
 	d.record("stage %s %d", spec.Name, spec.Generation)
+	if d.ips == nil {
+		d.ips = map[string]netip.Addr{}
+	}
+	if _, ok := d.ips[spec.Name]; !ok { // the lowest free /29, as the Docker driver allocates
+	next:
+		for i := 0; ; i++ {
+			ip := netip.AddrFrom4([4]byte{10, 213, byte(i * 8 >> 8), byte(i*8 + 2)})
+			for _, used := range d.ips {
+				if used == ip {
+					continue next
+				}
+			}
+			d.ips[spec.Name] = ip
+			break
+		}
+	}
 	return nil
 }
 
@@ -265,6 +286,7 @@ func (d *fakeDriver) RemoveComputer(_ context.Context, name string) error {
 			d.cds.get(name).halt()
 		}
 		delete(d.computers, name)
+		delete(d.ips, name) // RemoveComputer deletes the network too
 		d.record("remove %s", name)
 	}
 	return nil
@@ -675,4 +697,36 @@ func (d *fakeDriver) twoWriters() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return slices.Clone(d.violations)
+}
+
+// controllerAddrs is the Docker driver's ControllerAddrs over the fake.
+func (d *fakeDriver) controllerAddrs(context.Context) (map[string]netip.Addr, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.addrErr != nil {
+		return nil, d.addrErr
+	}
+	out := map[string]netip.Addr{"a12s-lab": netip.MustParseAddr("172.19.0.2")}
+	for name, ip := range d.ips {
+		out["a12s-lab-"+name] = ip
+	}
+	return out, nil
+}
+
+func (d *fakeDriver) ip(name string) netip.Addr {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.ips[name]
+}
+
+func (d *fakeDriver) setIP(name string, ip netip.Addr) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ips[name] = ip
+}
+
+func (d *fakeDriver) setAddrErr(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.addrErr = err
 }

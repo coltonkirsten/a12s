@@ -329,6 +329,7 @@ func (c *Controller) release(ctx context.Context, name string, obs driver.Comput
 			return c.fail(name, err, true)
 		}
 	}
+	c.invalidateAddrs(name)
 	err := c.drv.RemoveComputer(ctx, name)
 	if err == nil {
 		err = c.confirm(ctx, name, "release of the old generation", func(_ driver.ComputerState, exists bool) bool { return !exists })
@@ -523,9 +524,9 @@ func (c *Controller) applyStaged(name string) {
 	if !due {
 		return
 	}
-	if held, err := c.exclusiveHolder(c.ctx, name); err != nil || held != nil {
-		return
-	}
+	// No holder check here: restage itself waits for a held drive, and
+	// first releases one this Computer holds that the holder needs (a swap
+	// whose turns have both ended).
 	c.closeAdmission(name)
 	if !c.idle(c.ctx, name) {
 		c.openAdmission(name)
@@ -633,6 +634,7 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	c.stopEvents(name)
+	c.invalidateAddrs(name)
 	err := c.drv.RemoveComputer(ctx, name)
 	if err == nil {
 		err = c.confirm(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })

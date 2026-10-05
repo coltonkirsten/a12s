@@ -129,3 +129,34 @@ func TestCorruptPresetIsRepairedByUp(t *testing.T) {
 		t.Fatal("up did not repair the cached preset")
 	}
 }
+
+// #53: a swap submitted while both holders are busy converges once both
+// turns end, with no further command and never two attachments.
+func TestExclusiveDriveSwapWhileBothBusy(t *testing.T) {
+	h := newHarness(t)
+	res := h.up(labFleet(t, nil), nil, false)
+	builder, tester := h.cds.get("builder"), h.cds.get("tester")
+	builder.StartTurn(context.Background(), api.TurnRequest{RequestID: "b", Prompt: "x"})
+	tester.StartTurn(context.Background(), api.TurnRequest{RequestID: "t", Prompt: "x"})
+	h.waitPhase("builder", api.PhaseBusy)
+	h.waitPhase("tester", api.PhaseBusy)
+	swap := func(f *fleet.Fleet) {
+		b, te := f.Computers["builder"], f.Computers["tester"]
+		b.Drives, te.Drives = []fleet.DriveMount{{Name: "ux-scratch", At: "/work/ux"}}, []fleet.DriveMount{{Name: "a12s-repo", At: "/work/a12s"}}
+		f.Computers["builder"], f.Computers["tester"] = b, te
+	}
+	if out := h.up(labFleet(t, swap), res.Lock, false); !slices.Equal(out.Staged, []string{"builder", "tester"}) {
+		t.Fatalf("up = %+v", out)
+	}
+	builder.finish(api.TurnCompleted)
+	time.Sleep(30 * time.Millisecond) // builder releases a12s-repo and waits for ux-scratch
+	tester.finish(api.TurnCompleted)
+	waitFor(t, func() bool {
+		return slices.Equal(h.d.mounts("drive-ux-scratch"), []string{"builder"}) && slices.Equal(h.d.mounts("drive-a12s-repo"), []string{"tester"})
+	})
+	h.waitPhase("builder", api.PhaseReady)
+	h.waitPhase("tester", api.PhaseReady)
+	if v := h.d.twoWriters(); len(v) > 0 {
+		t.Fatalf("two writers: %v", v)
+	}
+}
