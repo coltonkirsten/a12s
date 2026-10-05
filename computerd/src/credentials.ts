@@ -160,6 +160,7 @@ export function wireCredentials(cfg: Config, hooks: { beforeCommit?: () => void 
     if (r.kind === 'other') return void failures.push(`${path} is not a file or symlink; left alone`);
     if (r.kind === 'file') {
       // Only a file written after the tmpfs secret is a refresh; an older one would undo a newer injection.
+      // Equal mtimes (Linux timestamps are tick-coarse) are ambiguous: the injected secret wins.
       const seen = stamp(cfg, name);
       if ((r.mtimeMs ?? 0) <= seen.mtimeMs) notes.push(`${path} was older than the injected credential; discarded`);
       else if (!r.content || !isJsonObject(r.content)) notes.push(`${path} held no valid credential JSON; replaced by the injected one`);

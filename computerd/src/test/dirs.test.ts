@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadConfig } from '../config.js';
@@ -18,7 +17,9 @@ test('A12S_DRIVES parses; absent is fine', () => {
 
 test('only empty, root-owned (here: test-owned), rw mount roots are handed over; symlinks never', () => {
   const cfg = testConfig();
-  const work = mkdtempSync(join(tmpdir(), 'computerd-test-drives-'));
+  // Not os.tmpdir() (/tmp on Linux) nor the checkout (/home/runner on CI): the handover rightly refuses both as
+  // reserved. /var/tmp is world-writable on Linux and macOS.
+  const work = mkdtempSync('/var/tmp/computerd-test-drives-');
   const at = (n: string) => join(work, n);
   for (const n of ['fresh', 'used', 'ro']) mkdirSync(at(n));
   writeFileSync(join(at('used'), 'x'), '');

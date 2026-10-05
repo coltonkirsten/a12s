@@ -27,11 +27,12 @@ test('the control API accepts only the controller identity, even among CA-signed
     { ca, cert: readFileSync(p('localhost.crt')), key: readFileSync(p('localhost.key')), requestCert: true, rejectUnauthorized: true },
     controllerOnly((_req, res) => res.end('{"phase":"ready"}')),
   );
-  await new Promise<void>((r) => server.listen(0, 'localhost', r));
+  // An explicit address: 'localhost' may bind ::1 while the client resolves 127.0.0.1 (seen on Linux).
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as AddressInfo).port;
   const get = (cn: string) =>
     new Promise<number>((resolve, reject) => {
-      const req = request({ host: 'localhost', port, path: '/v1/status', ca, cert: readFileSync(p(`${cn}.crt`)), key: readFileSync(p(`${cn}.key`)) }, (res) => {
+      const req = request({ host: '127.0.0.1', servername: 'localhost', port, path: '/v1/status', ca, cert: readFileSync(p(`${cn}.crt`)), key: readFileSync(p(`${cn}.key`)) }, (res) => {
         res.resume();
         resolve(res.statusCode ?? 0);
       });

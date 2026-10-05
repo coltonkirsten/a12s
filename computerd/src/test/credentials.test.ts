@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { credentialGeneration, wireCredentials } from '../credentials.js';
@@ -68,6 +68,8 @@ test('wiring never replaces a regular credential file before its content is on t
   const secret = join(cfg.secretsDir, 'openai');
   const link = join(cfg.codexHome, 'auth.json');
   writeFileSync(secret, '{"tokens":"old"}');
+  // Linux timestamps are tick-coarse: two quick writes often share an mtime, and a tie means "injected wins".
+  utimesSync(secret, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
   writeFileSync(link, '{"tokens":"refreshed"}'); // left by a harness before computerd could reclaim it
   const w = wireCredentials(cfg);
   assert.deepEqual(w.reclaimed, ['openai']);
@@ -84,7 +86,6 @@ test('wiring never replaces a regular credential file before its content is on t
 });
 
 test('an on-disk credential older than the injected one is discarded, not reclaimed', async () => {
-  const { utimesSync } = await import('node:fs');
   const cfg = testConfig({ credentials: ['openai'] });
   const secret = join(cfg.secretsDir, 'openai');
   const link = join(cfg.codexHome, 'auth.json');
@@ -107,7 +108,6 @@ test('a raw anthropic setup-token becomes CLAUDE_CODE_OAUTH_TOKEN; an API key st
 });
 
 test('an injection that lands between the reclaim check and its commit wins', async () => {
-  const { utimesSync } = await import('node:fs');
   const cfg = testConfig({ credentials: ['openai'] });
   const secret = join(cfg.secretsDir, 'openai');
   const link = join(cfg.codexHome, 'auth.json');
