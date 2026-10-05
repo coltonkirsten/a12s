@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A stand-in for the Claude Code binary speaking the SDK's stream-json protocol. Mode comes from FAKE_MODE.
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const mode = process.env.FAKE_MODE ?? 'normal';
@@ -37,6 +37,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (m.type !== 'user') return;
   out({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: [], mcp_servers: [], model: 'fake', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: 'fake' });
   if (mode === 'hang' || mode === 'ignore-term') return;
+  if (mode === 'refresh') {
+    // Like a real token refresh: write a temp file and rename it over the credentials symlink.
+    const file = `${process.env.CLAUDE_CONFIG_DIR}/.credentials.json`;
+    writeFileSync(`${file}.tmp`, '{"claudeAiOauth":{"accessToken":"refreshed"}}');
+    renameSync(`${file}.tmp`, file);
+  }
   for (const text of ['po', 'ng']) {
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
   }

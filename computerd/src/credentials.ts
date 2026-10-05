@@ -1,4 +1,4 @@
-import { chownSync, lchownSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { chownSync, lchownSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AGENT_GID, AGENT_UID, type Config } from './config.js';
 
@@ -47,11 +47,48 @@ function linkTo(cfg: Config, link: string, target: string): void {
   renameSync(tmp, link);
 }
 
+/** Credential files a harness rewrites on token refresh, by secret name. */
+function harnessCredentialFiles(cfg: Config): [string, string][] {
+  return [
+    ['anthropic', join(cfg.claudeConfigDir, '.credentials.json')],
+    ['openai', join(cfg.codexHome, 'auth.json')],
+  ];
+}
+
+/**
+ * A harness refreshing a subscription token replaces our symlink with a regular file on the home drive.
+ * Move that content back onto the tmpfs secret, delete the on-disk copy and restore the symlink.
+ * Returns the names reclaimed.
+ */
+export function reclaimCredentials(cfg: Config): string[] {
+  const reclaimed: string[] = [];
+  for (const [name, link] of harnessCredentialFiles(cfg)) {
+    const secret = join(cfg.secretsDir, name);
+    try {
+      if (!lstatSync(link).isFile() || !lstatSync(secret).isFile()) continue;
+    } catch {
+      continue;
+    }
+    const fresh = readFileSync(link);
+    if (isJsonObject(fresh.toString('utf8'))) {
+      const tmp = `${secret}.a12s-tmp`;
+      writeFileSync(tmp, fresh, { mode: 0o600 });
+      if (cfg.isRoot) chownSync(tmp, AGENT_UID, AGENT_GID);
+      renameSync(tmp, secret);
+    }
+    rmSync(link, { force: true });
+    linkTo(cfg, link, secret);
+    reclaimed.push(name);
+  }
+  return reclaimed;
+}
+
 /**
  * Wires `/run/a12s/secrets/<name>` by name: anthropic and openai JSON files become symlinks in the
  * harness config dirs, raw keys become env, github becomes GH_TOKEN/GITHUB_TOKEN. Other names stay files.
  */
 export function wireCredentials(cfg: Config): Wiring {
+  reclaimCredentials(cfg); // a refreshed token left on disk (crash before reclaim) is newer than the secret: keep it
   const env: Record<string, string> = {};
   let names: string[] = [];
   try {

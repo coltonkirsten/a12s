@@ -3,7 +3,7 @@ import { chownSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
-import { credentialGeneration, wireCredentials } from './credentials.js';
+import { credentialGeneration, reclaimCredentials, wireCredentials } from './credentials.js';
 import type { Journal } from './journal.js';
 
 export interface SessionRecord {
@@ -43,7 +43,7 @@ interface ActiveTurn {
   resolveDone: () => void;
 }
 
-const CONTINUE_PROMPT = 'Continue.';
+const CONTINUE_PROMPT = 'a12s restarted your harness at your request and resumed this session. Continue the task you were working on.';
 const PRECHECK_TIMEOUT_MS = 60_000;
 
 /** One Computer's runtime state: admission, the active turn, the session record, harness restarts. */
@@ -212,6 +212,7 @@ export class Computer {
   }
 
   private endTurn(active: ActiveTurn): void {
+    this.reclaim(active.turnId);
     if (this.active === active) this.active = null;
     active.resolveDone();
   }
@@ -285,6 +286,17 @@ export class Computer {
       await Promise.race([a.done, new Promise((r) => setTimeout(r, flushMs).unref())]);
     }
     await this.adapter.close();
+    this.reclaim(null);
+  }
+
+  /** Moves any credential file a harness rewrote on the home drive back onto tmpfs. */
+  private reclaim(turn: string | null): void {
+    try {
+      const names = reclaimCredentials(this.cfg);
+      if (names.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names }, { turn, session: this.session?.sessionId ?? null });
+    } catch (err) {
+      this.journal.append('diagnostic', { message: `credential reclaim failed: ${(err as Error).message}` }, { turn });
+    }
   }
 
   private async precheck(session: SessionRecord): Promise<string | null> {
