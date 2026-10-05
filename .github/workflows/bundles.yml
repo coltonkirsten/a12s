@@ -1,0 +1,114 @@
+# Auto-build HarnessBundles when upstream releases land (design §5): discover the
+# latest Claude Code and Codex versions, and for each one not yet in ghcr, build
+# linux/amd64 + linux/arm64, run the conformance check on both, then push.
+# The fetch stage runs on the build platform, so the build needs no emulation;
+# only the arm64 conformance run uses QEMU.
+name: bundles
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      claude_version:
+        description: Claude Code version (default latest)
+        required: false
+      codex_version:
+        description: Codex version (default latest rust-v release)
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: bundles
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      todo: ${{ steps.todo.outputs.todo }}
+    steps:
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: latest upstream versions
+        id: versions
+        env:
+          CLAUDE_IN: ${{ inputs.claude_version }}
+          CODEX_IN: ${{ inputs.codex_version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          claude="${CLAUDE_IN:-$(curl -fsSL https://downloads.claude.ai/claude-code-releases/latest)}"
+          codex="${CODEX_IN:-$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/openai/codex/releases?per_page=50' \
+            | jq -r '[.[] | select(.draft == false and .prerelease == false)
+                          | .tag_name | select(test("^rust-v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0] | ltrimstr("rust-v")')}"
+          for v in "$claude" "$codex"; do [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version '$v'"; exit 1; }; done
+          echo "claude=$claude" >> "$GITHUB_OUTPUT"
+          echo "codex=$codex" >> "$GITHUB_OUTPUT"
+      - name: skip versions already published
+        id: todo
+        env:
+          REPO: ghcr.io/${{ github.repository }}
+          CLAUDE: ${{ steps.versions.outputs.claude }}
+          CODEX: ${{ steps.versions.outputs.codex }}
+        run: |
+          repo="${REPO,,}"
+          todo='[]'
+          for kv in "claude-code=$CLAUDE" "codex=$CODEX"; do
+            kind="${kv%%=*}" version="${kv#*=}"
+            if docker manifest inspect "$repo/bundle-$kind:$version" > /dev/null 2>&1; then
+              echo "$kind $version: already published"
+            else
+              echo "$kind $version: to build"
+              todo=$(jq -c --arg k "$kind" --arg v "$version" '. + [{kind: $k, version: $v}]' <<<"$todo")
+            fi
+          done
+          echo "todo=$todo" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    if: needs.discover.outputs.todo != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.todo) }}
+    env:
+      KIND: ${{ matrix.kind }}
+      VERSION: ${{ matrix.version }}
+      SOURCE: https://github.com/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build and conformance-check each platform
+        run: |
+          for arch in amd64 arm64; do
+            docker buildx build --platform "linux/$arch" --load --build-arg VERSION="$VERSION" \
+              --label "org.opencontainers.image.source=$SOURCE" \
+              -t "local/bundle-$KIND:$VERSION-$arch" "images/bundles/$KIND"
+            DOCKER_DEFAULT_PLATFORM="linux/$arch" images/bundles/conformance.sh "$KIND" "$VERSION" "local/bundle-$KIND:$VERSION-$arch"
+          done
+      # Same builder and inputs as above, so the fetch layer comes from the build cache: the
+      # pushed image is the one that passed conformance.
+      - name: push
+        env:
+          REPO: ghcr.io/${{ github.repository }}
+        run: |
+          repo="${REPO,,}"
+          docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg VERSION="$VERSION" \
+            --label "org.opencontainers.image.source=$SOURCE" \
+            -t "$repo/bundle-$KIND:$VERSION" "images/bundles/$KIND"
