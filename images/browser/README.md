@@ -26,7 +26,10 @@ Docker's default profile (moby `docker-v29.2.0`,
 `vendor/github.com/moby/profiles/seccomp/default.json`) plus one rule allowing
 `clone`, `unshare`, `setns` and `chroot` unconditionally, so Chromium's
 namespace sandbox works without `CAP_SYS_ADMIN` and without `--no-sandbox`.
-Without it Chromium fails with "No usable sandbox!".
+Without it Chromium fails with "No usable sandbox!". Linux hosts that restrict
+unprivileged user namespaces with AppArmor (Ubuntu 23.10+, including GitHub
+runners) also need `sysctl kernel.apparmor_restrict_unprivileged_userns=0`;
+Docker Desktop does not.
 
 ## Verified (Docker 29.2, arm64, no network)
 
