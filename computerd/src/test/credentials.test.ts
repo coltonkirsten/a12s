@@ -75,6 +75,7 @@ test('wiring never replaces a regular credential file before its content is on t
   renameSync(link + '.new', link);
   const w2 = wireCredentials(cfg);
   assert.deepEqual(w2.reclaimed, []);
-  assert.match(w2.problems[0] ?? '', /no valid credential JSON/);
+  assert.match(w2.notes[0] ?? '', /no valid credential JSON/);
+  assert.deepEqual(w2.failures, []);
   assert.match(readFileSync(secret, 'utf8'), /refreshed/, 'garbage never overwrites the secret');
 });

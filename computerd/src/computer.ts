@@ -60,6 +60,7 @@ export class Computer {
   /** The credential generation actually in effect: wired, and any long-lived harness restarted with it. */
   private ackedGeneration: number | null = null;
   private credentialTimer: NodeJS.Timeout | null = null;
+  private failedGeneration: number | null = null;
 
   constructor(
     private readonly cfg: Config,
@@ -93,14 +94,13 @@ export class Computer {
       this.journal.append('resume.failed', { sessionId: null, reason: this.sessionDamaged, at: 'wake' });
     }
     const generation = credentialGeneration(this.cfg); // read before wiring: never acknowledge more than was applied
-    const wiring = this.wire(null);
-    if (wiring?.missing.length) this.journal.append('diagnostic', { message: 'credentials not injected', names: wiring.missing });
+    const wired = this.wire(null);
     if (this.session) {
       this.resumePending = true;
       const reason = await this.precheck(this.session);
       if (reason) this.journal.append('resume.failed', { sessionId: this.session.sessionId, reason, at: 'wake' }, { session: this.session.sessionId });
     }
-    this.ackedGeneration = generation; // no harness process holds older credentials yet
+    if (wired) this.ackedGeneration = generation; // no harness process holds older credentials yet
     this.base = 'ready';
     this.lifecycle('ready');
     this.credentialTimer = setInterval(() => void this.applyCredentials(), this.credentialPollMs);
@@ -163,8 +163,7 @@ export class Computer {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
       const generation = credentialGeneration(this.cfg);
-      this.wire(turnId);
-      if (generation !== this.ackedGeneration) {
+      if (this.wire(turnId) && generation !== this.ackedGeneration) {
         await this.adapter.restart(); // rotated credentials must not stay in a long-lived harness
         this.ackedGeneration = generation;
       }
@@ -280,9 +279,9 @@ export class Computer {
     const session = this.session;
     try {
       const generation = credentialGeneration(this.cfg);
-      this.wire(null);
+      const wired = this.wire(null);
       await this.adapter.restart();
-      this.ackedGeneration = generation;
+      if (wired) this.ackedGeneration = generation;
       if (session) {
         const reason = await this.precheck(session);
         if (reason) {
@@ -307,10 +306,15 @@ export class Computer {
   /** At an idle boundary, applies a new credential generation: rewire, restart the harness, then acknowledge. */
   private async applyCredentials(): Promise<void> {
     const generation = credentialGeneration(this.cfg);
-    if (generation === this.ackedGeneration || this.base !== 'ready' || this.active || this.restarting) return;
+    if (generation === this.ackedGeneration || generation === this.failedGeneration) return;
+    if (this.base !== 'ready' || this.active || this.restarting) return;
     this.restarting = true;
     try {
-      this.wire(null);
+      if (!this.wire(null)) {
+        this.failedGeneration = generation; // retried at the next turn or the next injection, not every poll
+        return;
+      }
+      this.failedGeneration = null;
       await this.adapter.restart();
       this.ackedGeneration = generation;
       this.journal.append('lifecycle', { phase: 'credentials-applied', credentialGeneration: generation }, { session: this.session?.sessionId ?? null });
@@ -337,17 +341,20 @@ export class Computer {
   }
 
   /** (Re)wires credentials, moving any file a harness rewrote on the home drive back onto tmpfs. */
-  private wire(turn: string | null): Wiring | null {
+  /** Returns true only if every declared credential is wired; failures are journaled (names, never values). */
+  private wire(turn: string | null): boolean {
+    const scope = { turn, session: this.session?.sessionId ?? null };
+    let w: Wiring;
     try {
-      const w = wireCredentials(this.cfg);
-      const scope = { turn, session: this.session?.sessionId ?? null };
-      if (w.reclaimed.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names: w.reclaimed }, scope);
-      for (const p of w.problems) this.journal.append('diagnostic', { message: `credential wiring: ${p}` }, scope);
-      return w;
+      w = wireCredentials(this.cfg);
     } catch (err) {
-      this.journal.append('diagnostic', { message: `credential wiring failed: ${(err as Error).message}` }, { turn });
-      return null;
+      this.journal.append('diagnostic', { message: `credential wiring failed: ${(err as Error).message}` }, scope);
+      return false;
     }
+    if (w.reclaimed.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names: w.reclaimed }, scope);
+    for (const n of w.notes) this.journal.append('diagnostic', { message: `credential wiring: ${n}` }, scope);
+    if (w.failures.length) this.journal.append('diagnostic', { message: 'credential wiring failed', failures: w.failures }, scope);
+    return w.failures.length === 0;
   }
 
   private async precheck(session: SessionRecord): Promise<string | null> {

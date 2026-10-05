@@ -14,8 +14,10 @@ export interface Wiring {
   missing: string[];
   /** Names whose harness-rewritten file was moved back onto tmpfs. */
   reclaimed: string[];
-  /** Problems worth a diagnostic (no secret values). */
-  problems: string[];
+  /** Why a declared credential is not wired (no secret values). Non-empty = the generation is not applied. */
+  failures: string[];
+  /** Worth a diagnostic, but the credential is wired. */
+  notes: string[];
 }
 
 const AGENTFS = join(dirname(fileURLToPath(import.meta.url)), 'agentfs.js');
@@ -110,25 +112,28 @@ export function wireCredentials(cfg: Config): Wiring {
     if (secrets.has(name) && isJsonObject(secrets.get(name)!)) links.push([name, link]);
   }
   const reclaimed: string[] = [];
-  const problems: string[] = [];
+  const failures: string[] = [];
+  const notes: string[] = [];
   const toLink: AgentFsOp[] = [];
   agentFs(cfg, links.map(([, path]) => ({ op: 'inspect', path }))).forEach((r, i) => {
     const [name, path] = links[i]!;
     const target = join(cfg.secretsDir, name);
-    if (!r.ok) return void problems.push(`${path}: ${r.error}`);
+    if (!r.ok) return void failures.push(`${path}: ${r.error}`);
     if (r.kind === 'symlink' && r.target === target) return;
-    if (r.kind === 'other') return void problems.push(`${path} is not a file or symlink; left alone`);
+    if (r.kind === 'other') return void failures.push(`${path} is not a file or symlink; left alone`);
     if (r.kind === 'file') {
       if (r.content && isJsonObject(r.content)) {
         writeSecret(cfg, name, r.content);
         reclaimed.push(name);
-      } else problems.push(`${path} held no valid credential JSON; replaced by the injected one`);
+      } else notes.push(`${path} held no valid credential JSON; replaced by the injected one`);
     }
     toLink.push({ op: 'link', path, target });
   });
   agentFs(cfg, toLink).forEach((r, i) => {
-    if (!r.ok) problems.push(`${toLink[i]!.path}: ${r.error}`);
+    if (!r.ok) failures.push(`${toLink[i]!.path}: ${r.error}`);
   });
   const present = [...secrets.keys()];
-  return { env: credentialEnv(cfg), present, missing: cfg.credentials.filter((n) => !present.includes(n)), reclaimed, problems };
+  const missing = cfg.credentials.filter((n) => !present.includes(n));
+  if (missing.length) failures.push(`not injected: ${missing.join(', ')}`);
+  return { env: credentialEnv(cfg), present, missing, reclaimed, failures, notes };
 }
