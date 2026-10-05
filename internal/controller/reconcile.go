@@ -329,6 +329,7 @@ func (c *Controller) release(ctx context.Context, name string, obs driver.Comput
 			return c.fail(name, err, true)
 		}
 	}
+	c.invalidateAddrs(name)
 	err := c.drv.RemoveComputer(ctx, name)
 	if err == nil {
 		err = c.confirm(ctx, name, "release of the old generation", func(_ driver.ComputerState, exists bool) bool { return !exists })
@@ -633,6 +634,7 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	c.stopEvents(name)
+	c.invalidateAddrs(name)
 	err := c.drv.RemoveComputer(ctx, name)
 	if err == nil {
 		err = c.confirm(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })

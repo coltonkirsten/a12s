@@ -128,6 +128,8 @@ type Controller struct {
 	clients  map[string]computerdClient
 	proxyIPs map[netip.Addr]string // Controller IP on a Computer network -> Computer
 	addrsAt  time.Time
+	// addrsEpoch counts invalidations; a refresh that raced one is dropped.
+	addrsEpoch uint64
 }
 
 // New returns a Controller over drv, loading its state from cfg.StateDir.
@@ -318,27 +320,70 @@ func Run(ctx context.Context, cfg Config) error {
 
 // refreshAddrs rebuilds the map from the Controller's address on each
 // Computer network to that Computer.
-func (c *Controller) refreshAddrs(ctx context.Context) {
+func (c *Controller) refreshAddrs(ctx context.Context) error {
 	if c.selfAddrs == nil {
-		return
+		return nil
 	}
-	addrs, err := c.selfAddrs(ctx)
-	if err != nil {
-		c.logf("egress proxy: %v", err)
-		return
+	for range 3 {
+		c.mu.Lock()
+		epoch := c.addrsEpoch
+		c.mu.Unlock()
+		addrs, err := c.selfAddrs(ctx)
+		if err != nil {
+			c.logf("egress proxy: %v", err)
+			return err
+		}
+		c.mu.Lock()
+		if c.addrsEpoch != epoch { // a network went away meanwhile: read again
+			c.mu.Unlock()
+			continue
+		}
+		c.addrsAt = time.Now()
+		c.proxyIPs = map[netip.Addr]string{}
+		if c.state.Fleet != nil {
+			for name := range c.state.Fleet.Computers {
+				if ip, ok := addrs[c.containerName(name)]; ok {
+					c.proxyIPs[ip] = name
+				}
+			}
+		}
+		c.mu.Unlock()
+		return nil
+	}
+	return errors.New("egress proxy: networks kept changing during refresh")
+}
+
+// invalidateAddrs forgets a Computer's address before its network is
+// removed: a replacement network may reuse the subnet, and the address,
+// for another Computer, which must never inherit this one's policy.
+func (c *Controller) invalidateAddrs(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for ip, n := range c.proxyIPs {
+		if n == name {
+			delete(c.proxyIPs, ip)
+		}
+	}
+	c.addrsEpoch++
+}
+
+// verifyAddr refreshes the mapping from the engine and requires the
+// Computer's network to be in it, before the Computer starts serving.
+func (c *Controller) verifyAddr(ctx context.Context, name string) error {
+	if c.selfAddrs == nil {
+		return nil
+	}
+	if err := c.refreshAddrs(ctx); err != nil {
+		return err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.addrsAt = time.Now()
-	c.proxyIPs = map[netip.Addr]string{}
-	if c.state.Fleet == nil {
-		return
-	}
-	for name := range c.state.Fleet.Computers {
-		if ip, ok := addrs[c.containerName(name)]; ok {
-			c.proxyIPs[ip] = name
+	for _, n := range c.proxyIPs {
+		if n == name {
+			return nil
 		}
 	}
+	return fmt.Errorf("the Controller has no address on %s's network; egress would not be identifiable", name)
 }
 
 // identify maps the proxy's local address to the Computer on that network.
@@ -356,6 +401,9 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	name, ok = c.proxyIPs[local]
+	if !ok {
+		c.logf("egress proxy: refused a connection on %s: no verified Computer for that address", local)
+	}
 	return name, ok
 }
 

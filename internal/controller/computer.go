@@ -171,6 +171,9 @@ func (c *Controller) start(ctx context.Context, name string) error {
 	if len(missing) > 0 {
 		return c.fail(name, &credentialsMissing{names: missing}, true)
 	}
+	if err := c.verifyAddr(ctx, name); err != nil {
+		return c.fail(name, err, true)
+	}
 	if err := c.drv.SetPower(ctx, name, driver.PowerAwake, gen); err != nil {
 		return c.fail(name, err, true)
 	}
