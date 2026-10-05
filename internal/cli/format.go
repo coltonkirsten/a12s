@@ -36,10 +36,20 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	if len(r.Removed) > 0 {
 		lines = append(lines, "removed "+strings.Join(r.Removed, ", ")+" (drives kept)")
 	}
-	if len(lines) == 0 {
+	if len(lines) == 0 && len(r.Errors) == 0 {
 		lines = append(lines, "no changes")
 	}
 	return lines
+}
+
+// UpErrors lists the Computers that did not converge, `<computer>: <reason>`,
+// in name order.
+func UpErrors(r *api.PutFleetResponse) []string {
+	var out []string
+	for _, name := range sortedKeys(r.Errors) {
+		out = append(out, name+": "+r.Errors[name])
+	}
+	return out
 }
 
 // ShortID abbreviates a session or turn id for a status row.
@@ -51,10 +61,10 @@ func ShortID(id string) string {
 	return id[:n] + "…"
 }
 
-// WriteStatus prints one row per Computer, then every warning. f, the local
-// Fleet file, is optional; it marks Computers whose egress allows "*".
-func WriteStatus(w io.Writer, st *api.StatusResponse, f *fleet.Fleet) {
-	unenforced := st.EgressEnforcement == fleet.EnforcementUnenforced
+// WriteStatus prints one row per Computer, then every warning. A row's egress
+// marker comes from the Controller's observed EgressMode, never from the
+// local Fleet file, which may not be applied.
+func WriteStatus(w io.Writer, st *api.StatusResponse) {
 	var rows [][]string
 	for _, c := range st.Computers {
 		cells := []string{c.Name, phase(c)}
@@ -85,11 +95,8 @@ func WriteStatus(w io.Writer, st *api.StatusResponse, f *fleet.Fleet) {
 		if c.StagedGeneration > c.Generation {
 			extra = append(extra, fmt.Sprintf("staged gen %d", c.StagedGeneration))
 		}
-		if spec, ok := lookup(f, c.Name); ok && spec.Egress.AllowsAll() {
-			extra = append(extra, `EGRESS ALLOW "*"`)
-		}
-		if unenforced {
-			extra = append(extra, "EGRESS UNENFORCED")
+		if m := egressMarker(st, c); m != "" {
+			extra = append(extra, m)
 		}
 		cells = append(cells, strings.Join(extra, "  "))
 		rows = append(rows, cells)
@@ -108,12 +115,21 @@ func phase(c api.ComputerStatus) string {
 	return p
 }
 
-func lookup(f *fleet.Fleet, name string) (fleet.Computer, bool) {
-	if f == nil {
-		return fleet.Computer{}, false
+// egressMarker is the row's loud egress marker, "" when egress is enforced.
+// A Controller that reports no EgressMode falls back to the Fleet-wide
+// enforcement it observed.
+func egressMarker(st *api.StatusResponse, c api.ComputerStatus) string {
+	mode := c.EgressMode
+	if mode == "" && st.EgressEnforcement == fleet.EnforcementUnenforced {
+		mode = api.EgressUnenforced
 	}
-	c, ok := f.Computers[name]
-	return c, ok
+	switch mode {
+	case api.EgressAllowAll:
+		return `EGRESS ALLOW "*"`
+	case api.EgressUnenforced:
+		return "EGRESS UNENFORCED"
+	}
+	return ""
 }
 
 // StatusWarnings lists everything `a12s status` must say loudly: Fleet

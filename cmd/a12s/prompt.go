@@ -243,10 +243,8 @@ func runLogs(g *globals, args []string) error {
 		Path:       computerPath(pos[0], "/events"),
 		After:      *since,
 		SendCursor: true,
-	}
-	if !*follow {
-		// The stream never ends by itself; a replay is done once it goes quiet.
-		s.Idle = 2 * time.Second
+		// Without --follow, stop at computerd's replay boundary.
+		UntilHead: !*follow,
 	}
 	err = s.Run(ctx, func(e api.Event) (bool, error) {
 		fmt.Println(cli.LogLine(e))

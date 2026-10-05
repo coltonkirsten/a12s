@@ -4,12 +4,10 @@
 package computerd
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
+	"github.com/coltonkirsten/a12s/internal/sse"
 )
 
 // Dialer opens a raw connection to a Computer's computerd, for example
@@ -195,63 +194,25 @@ func (m Message) Decode() (api.Event, error) {
 // Stream reads SSE messages.
 type Stream struct {
 	body io.ReadCloser
-	r    *bufio.Reader
+	r    *sse.Reader
 }
 
 // NewStream parses an SSE body.
 func NewStream(body io.ReadCloser) *Stream {
-	return &Stream{body: body, r: bufio.NewReaderSize(body, 64<<10)}
+	return &Stream{body: body, r: sse.NewReader(body)}
 }
 
 // Close ends the stream.
 func (s *Stream) Close() error { return s.body.Close() }
 
-// Next returns the next message; comments (keepalives) are skipped. At the
-// end of the stream it returns io.EOF.
+// Next returns the next complete message; comments (keepalives) are
+// skipped. At the end of the stream it returns io.EOF, or
+// io.ErrUnexpectedEOF when the stream ended inside a message, which is
+// discarded, never returned.
 func (s *Stream) Next() (Message, error) {
-	var m Message
-	var data [][]byte
-	seen := false
-	for {
-		line, err := s.r.ReadBytes('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) && len(line) == 0 {
-				return Message{}, io.EOF
-			}
-			if !errors.Is(err, io.EOF) {
-				return Message{}, err
-			}
-		}
-		line = bytes.TrimRight(line, "\r\n")
-		if len(line) == 0 {
-			if seen {
-				m.Data = bytes.Join(data, []byte("\n"))
-				return m, nil
-			}
-			if err != nil {
-				return Message{}, io.EOF
-			}
-			continue
-		}
-		if line[0] == ':' {
-			continue
-		}
-		field, value, _ := bytes.Cut(line, []byte(":"))
-		value = bytes.TrimPrefix(value, []byte(" "))
-		switch string(field) {
-		case "id":
-			m.ID, seen = string(value), true
-		case "event":
-			m.Event, seen = string(value), true
-		case "data":
-			data, seen = append(data, append([]byte(nil), value...)), true
-		}
-		if err != nil { // EOF without a final blank line
-			if seen {
-				m.Data = bytes.Join(data, []byte("\n"))
-				return m, nil
-			}
-			return Message{}, io.EOF
-		}
+	f, err := s.r.Next()
+	if err != nil {
+		return Message{}, err
 	}
+	return Message{ID: f.ID, Event: f.Event, Data: f.Data}, nil
 }

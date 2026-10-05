@@ -17,7 +17,7 @@ func runStatus(g *globals, args []string) error {
 	if len(pos) > 1 {
 		return usageError("status takes at most one Computer name")
 	}
-	c, f, err := g.connect()
+	c, _, err := g.connect()
 	if err != nil {
 		return err
 	}
@@ -41,6 +41,6 @@ func runStatus(g *globals, args []string) error {
 	} else if len(st.Computers) == 0 {
 		fmt.Println("no Computers (run a12s up)")
 	}
-	cli.WriteStatus(os.Stdout, st, f)
+	cli.WriteStatus(os.Stdout, st)
 	return nil
 }

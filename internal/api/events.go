@@ -43,6 +43,16 @@ const (
 // unknown or ahead of the journal.
 const SSEGap = "gap"
 
+// SSEHead is the SSE event name computerd sends once, right after replaying
+// the journal on a new connection: everything up to HeadData.Seq has been
+// sent. What follows is live.
+const SSEHead = "head"
+
+// HeadData is the data of an SSEHead event.
+type HeadData struct {
+	Seq int64 `json:"seq"`
+}
+
 // The Data payloads below mirror what computerd/src/computer.ts and its
 // adapters emit; fields computerd adds later are ignored.
 
