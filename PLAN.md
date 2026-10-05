@@ -71,6 +71,8 @@ bundles: { "claude-code@2.1.280": "sha256:…", "codex@0.154.0": "sha256:…" }
 presets: { "./presets/scout": "sha256:…" }   # content hash of the directory
 ```
 `a12s up` resolves and appends missing entries; it never changes an existing one.
+`.github/workflows/bundles.yml` builds each new upstream release daily (amd64+arm64), runs `images/bundles/conformance.sh`, and publishes
+`ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>` (private); the local refs above stay the defaults, and `fleet.lock` pins whichever ref by image ID.
 
 ### Secrets and TLS (§6)
 Controller holds credential material in memory only (the CLI reads the bindings file on the host and sends it with
