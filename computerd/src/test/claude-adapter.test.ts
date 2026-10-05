@@ -39,9 +39,10 @@ test('claude: maps deltas, tools and the result; passes the pinned flags', async
   assert.equal(fin.data.usage?.outputTokens, 2);
   const a = args();
   assert.match(run.sessionId, /^[0-9a-f-]{36}$/);
-  for (const f of [`--session-id=${run.sessionId}`, '--setting-sources=user,project,local', '--strict-mcp-config', '--include-partial-messages', '--allow-dangerously-skip-permissions']) {
+  for (const f of [`--session-id=${run.sessionId}`, '--setting-sources=user,project,local', '--include-partial-messages', '--allow-dangerously-skip-permissions']) {
     assert.ok(a.includes(f), f);
   }
+  assert.ok(!a.includes('--strict-mcp-config'));
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'bypassPermissions');
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"a12s"'));
 });

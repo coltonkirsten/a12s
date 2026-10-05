@@ -53,9 +53,9 @@ function mcpServers(cfg: Config): Record<string, McpServer> {
     a12s: { command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'systemtools.js')], env: { A12S_SOCK: cfg.sockPath } },
   };
   if (cfg.imageTier === 'browser') {
-    const args = ['--headless', '--browser', 'chromium', '--executable-path', '/usr/bin/chromium'];
+    const args = ['/opt/a12s/playwright-mcp/node_modules/@playwright/mcp/cli.js', '--config', '/opt/a12s/playwright-mcp/config.json'];
     if (cfg.proxy) args.push('--proxy-server', cfg.proxy);
-    servers.playwright = { command: '/opt/a12s/playwright-mcp/node_modules/.bin/playwright-mcp', args };
+    servers.playwright = { command: process.execPath, args, cwd: cfg.agentHome };
   }
   return servers;
 }

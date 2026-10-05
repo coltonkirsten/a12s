@@ -65,7 +65,7 @@ export class ClaudeAdapter implements Adapter {
       mcpServers: Object.fromEntries(
         Object.entries(input.mcpServers).map(([name, s]) => [name, { type: 'stdio' as const, command: s.command, args: s.args, env: s.env ?? {} }]),
       ),
-      strictMcpConfig: true,
+      strictMcpConfig: false, // agent-written MCP configs on the home drive must load after restart_harness
       includePartialMessages: true,
       ...(input.autonomy === 'full'
         ? { permissionMode: 'bypassPermissions' as const, allowDangerouslySkipPermissions: true }

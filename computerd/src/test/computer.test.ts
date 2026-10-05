@@ -100,7 +100,7 @@ test('restart_harness: restarts after the turn, resumes, emits harness.restarted
   adapter.finish();
   await until(() => adapter.inputs.length === 2);
   assert.equal(adapter.restarts, 1);
-  assert.deepEqual(adapter.inputs[1]?.prompt, 'Continue.');
+  assert.match(adapter.inputs[1]?.prompt ?? '', /^a12s restarted your harness at your request/);
   assert.equal(adapter.inputs[1]?.sessionId, t.sessionId);
   const all = types();
   assert.ok(all.indexOf('harness.restarted') > all.indexOf('turn.finished'));

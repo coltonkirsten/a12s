@@ -4,6 +4,8 @@ export interface McpServer {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  /** Codex honours this; Claude starts MCP servers in the turn's cwd (/home/agent by default). */
+  cwd?: string;
 }
 
 export interface TurnInput {

@@ -23,6 +23,7 @@ export function mcpConfigArgs(servers: Record<string, McpServer>): string[] {
   for (const [name, s] of Object.entries(servers)) {
     args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(s.command)}`);
     args.push('-c', `mcp_servers.${name}.args=${JSON.stringify(s.args)}`);
+    if (s.cwd) args.push('-c', `mcp_servers.${name}.cwd=${JSON.stringify(s.cwd)}`);
     for (const [k, v] of Object.entries(s.env ?? {})) args.push('-c', `mcp_servers.${name}.env.${k}=${JSON.stringify(v)}`);
   }
   return args;

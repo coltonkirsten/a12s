@@ -22,8 +22,8 @@ function setup(mode: string, autonomy: 'full' | 'restricted' = 'full') {
 const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
 
 test('codex: mcp servers become -c overrides', () => {
-  assert.deepEqual(mcpConfigArgs({ a12s: { command: '/n', args: ['a b'], env: { K: 'v' } } }), [
-    '-c', 'mcp_servers.a12s.command="/n"', '-c', 'mcp_servers.a12s.args=["a b"]', '-c', 'mcp_servers.a12s.env.K="v"',
+  assert.deepEqual(mcpConfigArgs({ a12s: { command: '/n', args: ['a b'], env: { K: 'v' }, cwd: '/home/agent' } }), [
+    '-c', 'mcp_servers.a12s.command="/n"', '-c', 'mcp_servers.a12s.args=["a b"]', '-c', 'mcp_servers.a12s.cwd="/home/agent"', '-c', 'mcp_servers.a12s.env.K="v"',
   ]);
 });
 
