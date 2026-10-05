@@ -1,0 +1,88 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { ResumeError, type AdapterEvent, type TurnInput } from '../adapters/adapter.js';
+import { CodexAdapter, mcpConfigArgs } from '../adapters/codex.js';
+import { collect, fixtures, testConfig } from './helpers.js';
+
+const fake = join(fixtures, 'fake-codex.js');
+
+function setup(mode: string, autonomy: 'full' | 'restricted' = 'full') {
+  const cfg = testConfig({ autonomy, harness: { kind: 'codex', version: '0.0.0', model: null } });
+  const logFile = join(cfg.runDir, 'codex.jsonl');
+  const mcp = { a12s: { command: '/usr/bin/node', args: ['/opt/x.js'], env: { A12S_SOCK: '/run/s.sock' } } };
+  const adapter = new CodexAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_LOG: logFile }), mcpServers: mcp }, fake, { termAfterMs: 300, killAfterMs: 300 });
+  const input: TurnInput = { prompt: 'reply with pong', sessionId: null, cwd: cfg.agentHome, model: 'gpt-x', autonomy, mcpServers: mcp };
+  after(() => adapter.close());
+  const log = () => readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, any>);
+  return { adapter, input, log };
+}
+
+const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
+
+test('codex: mcp servers become -c overrides', () => {
+  assert.deepEqual(mcpConfigArgs({ a12s: { command: '/n', args: ['a b'], env: { K: 'v' } } }), [
+    '-c', 'mcp_servers.a12s.command="/n"', '-c', 'mcp_servers.a12s.args=["a b"]', '-c', 'mcp_servers.a12s.env.K="v"',
+  ]);
+});
+
+test('codex: handshake, thread/start, events, and a declined approval in restricted mode', async () => {
+  const { adapter, input, log } = setup('normal', 'restricted');
+  const run = await adapter.startTurn(input);
+  assert.equal(run.sessionId, 'thr_1');
+  const evs = await collect(run.events);
+  assert.deepEqual(evs.map((e) => e.type), ['tool.started', 'permission', 'tool.finished', 'text.delta', 'text.delta', 'turn.finished']);
+  assert.deepEqual(evs[1]?.data, { decision: 'deny', kind: 'commandExecution', detail: { command: 'ls', cwd: '/' } });
+  assert.equal(finished(evs).status, 'completed');
+  assert.deepEqual(finished(evs).usage, { thread: { totalTokens: 9 }, last: { totalTokens: 5 } });
+  const msgs = log();
+  assert.ok((msgs[0]?.argv as string[]).includes('app-server'));
+  assert.deepEqual(msgs.slice(1, 3).map((m) => m.method), ['initialize', 'initialized']);
+  assert.equal(msgs[1]?.params.clientInfo.name, 'a12s');
+  const start = msgs.find((m) => m.method === 'thread/start');
+  assert.deepEqual([start?.params.approvalPolicy, start?.params.sandbox, start?.params.model], ['on-request', 'workspace-write', 'gpt-x']);
+  assert.deepEqual(msgs.find((m) => m.id === 'srv_1')?.result, { decision: 'decline' });
+  await adapter.close();
+});
+
+test('codex: full autonomy uses never + danger-full-access; resume of a loaded thread skips thread/resume', async () => {
+  const { adapter, input, log } = setup('normal');
+  const first = await adapter.startTurn(input);
+  await collect(first.events);
+  const second = await adapter.startTurn({ ...input, sessionId: first.sessionId });
+  assert.equal(finished(await collect(second.events)).status, 'completed');
+  const msgs = log();
+  const start = msgs.find((m) => m.method === 'thread/start');
+  assert.deepEqual([start?.params.approvalPolicy, start?.params.sandbox], ['never', 'danger-full-access']);
+  assert.equal(msgs.filter((m) => m.method === 'thread/resume').length, 0);
+  assert.equal(msgs.filter((m) => m.method === 'turn/start').length, 2);
+  await adapter.close();
+});
+
+test('codex: precheck and resume failures surface as reasons / ResumeError', async () => {
+  const { adapter, input } = setup('normal');
+  assert.equal(await adapter.precheck('thr_9'), null);
+  assert.match((await adapter.precheck('thr_missing')) ?? '', /no rollout/);
+  await assert.rejects(adapter.startTurn({ ...input, sessionId: 'thr_missing' }), ResumeError);
+  await adapter.close();
+});
+
+test('codex: stop sends turn/interrupt and the turn ends interrupted', async () => {
+  const { adapter, input, log } = setup('hang');
+  const run = await adapter.startTurn(input);
+  setTimeout(() => void adapter.stop(), 100);
+  assert.equal(finished(await collect(run.events)).status, 'interrupted');
+  assert.ok(log().some((m) => m.method === 'turn/interrupt'));
+  await adapter.close();
+});
+
+test('codex: an app-server that ignores interrupt is killed; turn ends interrupted, restart resumes cleanly', async () => {
+  const { adapter, input } = setup('ignore-interrupt');
+  const run = await adapter.startTurn(input);
+  setTimeout(() => void adapter.stop(), 100);
+  assert.equal(finished(await collect(run.events)).status, 'interrupted');
+  await adapter.restart();
+  assert.equal(await adapter.precheck(run.sessionId), null);
+  await adapter.close();
+});

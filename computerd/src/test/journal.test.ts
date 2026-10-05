@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { Journal } from '../journal.js';
+import { testConfig } from './helpers.js';
+
+test('journal appends with increasing seq, filters by turn, and survives reopen', () => {
+  const cfg = testConfig();
+  const path = join(cfg.stateDir, 'journal.db');
+  const j = new Journal(path, 'scout');
+  const seen: number[] = [];
+  j.subscribe((e) => seen.push(e.seq));
+  const a = j.append('lifecycle', { phase: 'ready' });
+  const b = j.acceptTurn('r1', 't_1', 'h1', { resumed: false }, 's1');
+  const c = j.append('text.delta', { text: 'hi' }, { turn: 't_1', session: 's1' });
+  j.append('turn.finished', { status: 'completed', usage: null }, { turn: 't_1', session: 's1' });
+  assert.deepEqual([a.seq, b.seq, c.seq], [1, 2, 3]);
+  assert.deepEqual(seen, [1, 2, 3, 4]);
+  assert.deepEqual(b, { v: 1, computer: 'scout', session: 's1', turn: 't_1', seq: 2, ts: b.ts, type: 'turn.started', data: { resumed: false } });
+  assert.deepEqual(j.after(0, 't_1', 10).map((e) => e.type), ['turn.started', 'text.delta', 'turn.finished']);
+  assert.deepEqual(j.after(2, null, 1).map((e) => e.seq), [3]);
+  assert.deepEqual(j.findRequest('r1'), { turnId: 't_1', bodyHash: 'h1' });
+  assert.deepEqual(j.turnInfo('t_1'), { session: 's1', finished: 'completed' });
+  j.close();
+
+  const again = new Journal(path, 'scout');
+  assert.equal(again.lastSeq(), 4);
+  assert.equal(again.append('lifecycle', {}).seq, 5);
+  assert.throws(() => again.acceptTurn('r1', 't_2', 'h2', {}, null), /UNIQUE/);
+  assert.equal(again.lastSeq(), 5, 'a failed acceptTurn writes nothing');
+  again.close();
+});

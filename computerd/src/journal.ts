@@ -1,0 +1,133 @@
+import { DatabaseSync } from 'node:sqlite';
+
+export interface EventEnvelope {
+  v: 1;
+  computer: string;
+  session: string | null;
+  turn: string | null;
+  seq: number;
+  ts: string;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export interface Scope {
+  turn?: string | null;
+  session?: string | null;
+}
+
+interface EventRow {
+  seq: number;
+  turn: string | null;
+  session: string | null;
+  ts: string;
+  type: string;
+  data: string;
+}
+
+type Listener = (event: EventEnvelope) => void;
+
+/** Append-only event journal. computerd is its only reader and writer. */
+export class Journal {
+  private readonly db: DatabaseSync;
+  private readonly listeners = new Set<Listener>();
+
+  constructor(path: string, private readonly computer: string) {
+    this.db = new DatabaseSync(path);
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = FULL;
+      CREATE TABLE IF NOT EXISTS events (
+        seq INTEGER PRIMARY KEY, turn TEXT, session TEXT, ts TEXT NOT NULL, type TEXT NOT NULL, data JSON NOT NULL);
+      CREATE INDEX IF NOT EXISTS events_turn ON events(turn, seq);
+      CREATE TABLE IF NOT EXISTS turns (request_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL UNIQUE, body_hash TEXT NOT NULL);
+    `);
+  }
+
+  append(type: string, data: Record<string, unknown>, scope: Scope = {}): EventEnvelope {
+    const event = this.insert(type, data, scope);
+    this.publish(event);
+    return event;
+  }
+
+  private insert(type: string, data: Record<string, unknown>, scope: Scope): EventEnvelope {
+    const ts = new Date().toISOString();
+    const turn = scope.turn ?? null;
+    const session = scope.session ?? null;
+    const r = this.db
+      .prepare('INSERT INTO events (turn, session, ts, type, data) VALUES (?, ?, ?, ?, ?)')
+      .run(turn, session, ts, type, JSON.stringify(data));
+    return { v: 1, computer: this.computer, session, turn, seq: Number(r.lastInsertRowid), ts, type, data };
+  }
+
+  private publish(event: EventEnvelope): void {
+    for (const l of this.listeners) l(event);
+  }
+
+  /** Records a turn's requestId and its turn.started event atomically. */
+  acceptTurn(requestId: string, turnId: string, bodyHash: string, started: Record<string, unknown>, session: string | null): EventEnvelope {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('INSERT INTO turns (request_id, turn_id, body_hash) VALUES (?, ?, ?)').run(requestId, turnId, bodyHash);
+      const event = this.insert('turn.started', started, { turn: turnId, session });
+      this.db.exec('COMMIT');
+      this.publish(event);
+      return event;
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  findRequest(requestId: string): { turnId: string; bodyHash: string } | undefined {
+    const row = this.db.prepare('SELECT turn_id, body_hash FROM turns WHERE request_id = ?').get(requestId) as
+      | { turn_id: string; body_hash: string }
+      | undefined;
+    return row && { turnId: row.turn_id, bodyHash: row.body_hash };
+  }
+
+  /** The first and last events of a turn, for idempotent replies and stop. */
+  turnInfo(turnId: string): { session: string | null; finished: string | null } | undefined {
+    const started = this.db.prepare("SELECT session FROM events WHERE turn = ? AND type = 'turn.started' LIMIT 1").get(turnId) as
+      | { session: string | null }
+      | undefined;
+    if (!started) return undefined;
+    const fin = this.db.prepare("SELECT data FROM events WHERE turn = ? AND type = 'turn.finished' LIMIT 1").get(turnId) as
+      | { data: string }
+      | undefined;
+    return { session: started.session, finished: fin ? String(JSON.parse(fin.data).status) : null };
+  }
+
+  lastSeq(): number {
+    const row = this.db.prepare('SELECT MAX(seq) AS m FROM events').get() as { m: number | null };
+    return row.m ?? 0;
+  }
+
+  /** Events with seq > after, oldest first. */
+  after(after: number, turn: string | null, limit: number): EventEnvelope[] {
+    const rows = (
+      turn
+        ? this.db.prepare('SELECT * FROM events WHERE seq > ? AND turn = ? ORDER BY seq LIMIT ?').all(after, turn, limit)
+        : this.db.prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq LIMIT ?').all(after, limit)
+    ) as unknown as EventRow[];
+    return rows.map((r) => ({
+      v: 1,
+      computer: this.computer,
+      session: r.session,
+      turn: r.turn,
+      seq: r.seq,
+      ts: r.ts,
+      type: r.type,
+      data: JSON.parse(r.data) as Record<string, unknown>,
+    }));
+  }
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+}
