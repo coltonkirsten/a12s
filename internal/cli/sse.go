@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,10 +8,10 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
+	"github.com/coltonkirsten/a12s/internal/sse"
 )
 
 // GapError is returned when the server answers a cursor with an SSE `gap`
@@ -133,42 +132,19 @@ func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn f
 	}
 
 	last := after
-	r := bufio.NewReader(resp.Body)
-	var id, event string
-	var data strings.Builder
+	r := sse.NewReader(resp.Body)
 	for {
-		line, err := r.ReadString('\n')
+		f, err := r.Next()
 		if err != nil {
 			if errors.Is(context.Cause(ctx), errIdle) {
 				return last, true, nil
 			}
 			if err == io.EOF {
-				err = io.ErrUnexpectedEOF
+				err = io.ErrUnexpectedEOF // a live stream does not end by itself
 			}
 			return last, false, fmt.Errorf("event stream dropped after seq %d: %w", last, err)
 		}
-		line = strings.TrimRight(line, "\r\n")
-		if line != "" {
-			field, value, _ := strings.Cut(line, ":")
-			value = strings.TrimPrefix(value, " ")
-			switch field {
-			case "id":
-				id = value
-			case "event":
-				event = value
-			case "data":
-				if data.Len() > 0 {
-					data.WriteByte('\n')
-				}
-				data.WriteString(value)
-			}
-			continue
-		}
-		// A blank line dispatches the event.
-		ev, payload := event, data.String()
-		evID := id
-		id, event = "", ""
-		data.Reset()
+		ev, payload, evID := f.Event, string(f.Data), f.ID
 		if ev == api.SSEGap {
 			return last, true, &GapError{After: last, Data: payload}
 		}

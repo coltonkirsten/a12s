@@ -247,17 +247,19 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 		if err != nil {
 			return
 		}
-		if m.ID != "" {
-			c.mu.Lock()
-			c.rtLocked(name).lastEventID = m.ID
-			c.mu.Unlock()
-		}
 		if m.Event != "" {
 			continue
 		}
 		ev, err := m.Decode()
 		if err != nil {
 			continue
+		}
+		// The cursor moves only past an event that decoded, so a damaged
+		// one is fetched again on the next connection instead of skipped.
+		if m.ID != "" {
+			c.mu.Lock()
+			c.rtLocked(name).lastEventID = m.ID
+			c.mu.Unlock()
 		}
 		switch ev.Type {
 		case api.EventTurnStarted:

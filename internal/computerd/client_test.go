@@ -30,10 +30,8 @@ func TestStream(t *testing.T) {
 	if m, err = s.Next(); err != nil || string(m.Data) != "a\nb" {
 		t.Fatalf("multi-line data = %+v, %v", m, err)
 	}
-	if m, err = s.Next(); err != nil || m.ID != "5" || string(m.Data) != "tail" {
-		t.Fatalf("unterminated = %+v, %v", m, err)
-	}
-	if _, err = s.Next(); !errors.Is(err, io.EOF) {
-		t.Fatalf("end = %v", err)
+	// The unterminated final message is discarded, not published.
+	if m, err = s.Next(); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("unterminated = %+v, %v; want io.ErrUnexpectedEOF", m, err)
 	}
 }
