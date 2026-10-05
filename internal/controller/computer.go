@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -346,6 +347,24 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 		m, err := s.Next()
 		if err != nil {
 			return
+		}
+		if m.Event == api.SSEHead {
+			// A first subscription has no cursor and starts live: take
+			// the head as the cursor, so a reconnect after a malformed
+			// first event fetches that event again instead of starting
+			// at a later head.
+			var head struct {
+				Seq *int64 `json:"seq"`
+			}
+			if json.Unmarshal(m.Data, &head) != nil || head.Seq == nil || *head.Seq < 0 {
+				return
+			}
+			c.mu.Lock()
+			if r := c.rtLocked(name); r.lastEventID == "" {
+				r.lastEventID = strconv.FormatInt(*head.Seq, 10)
+			}
+			c.mu.Unlock()
+			continue
 		}
 		if m.Event != "" {
 			continue
