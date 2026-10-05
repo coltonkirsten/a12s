@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,8 +6,12 @@ import type { Config } from '../config.js';
 
 export const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
+const roots: string[] = [];
+process.on('exit', () => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
+
 export function testConfig(overrides: Partial<Config> = {}): Config {
   const root = mkdtempSync(join(tmpdir(), 'computerd-test-'));
+  roots.push(root);
   const homeRoot = join(root, 'home');
   const runDir = join(root, 'run');
   const cfg: Config = {
