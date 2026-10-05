@@ -28,6 +28,7 @@ export type AdapterEvent =
   | { type: 'permission'; data: { decision: 'allow' | 'deny'; kind: string; tool?: string; detail?: unknown } }
   | { type: 'diagnostic'; data: { message: string; [k: string]: unknown } }
   | { type: 'session.changed'; data: { from: string | null; to: string } }
+  | { type: 'resume.failed'; data: { sessionId: string; reason: string } }
   | { type: 'turn.finished'; data: { status: TurnStatus; usage: Record<string, unknown> | null; error?: string } };
 
 export interface RunningTurn {

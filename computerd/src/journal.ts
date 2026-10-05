@@ -88,14 +88,26 @@ export class Journal {
 
   /** The first and last events of a turn, for idempotent replies and stop. */
   turnInfo(turnId: string): { session: string | null; finished: string | null } | undefined {
-    const started = this.db.prepare("SELECT session FROM events WHERE turn = ? AND type = 'turn.started' LIMIT 1").get(turnId) as
-      | { session: string | null }
+    if (!this.db.prepare("SELECT 1 FROM events WHERE turn = ? AND type = 'turn.started' LIMIT 1").get(turnId)) return undefined;
+    // A new session's id is known only after dispatch (session.changed), so take the first one the turn recorded.
+    const started = this.db.prepare('SELECT session FROM events WHERE turn = ? AND session IS NOT NULL ORDER BY seq LIMIT 1').get(turnId) as
+      | { session: string }
       | undefined;
-    if (!started) return undefined;
     const fin = this.db.prepare("SELECT data FROM events WHERE turn = ? AND type = 'turn.finished' LIMIT 1").get(turnId) as
       | { data: string }
       | undefined;
-    return { session: started.session, finished: fin ? String(JSON.parse(fin.data).status) : null };
+    return { session: started?.session ?? null, finished: fin ? String(JSON.parse(fin.data).status) : null };
+  }
+
+  /** Accepted turns with no turn.finished: computerd died while they ran. */
+  unfinishedTurns(): { turnId: string; session: string | null }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT t.turn_id AS turnId FROM turns t WHERE NOT EXISTS
+           (SELECT 1 FROM events e WHERE e.turn = t.turn_id AND e.type = 'turn.finished') ORDER BY t.rowid`,
+      )
+      .all() as { turnId: string }[];
+    return rows.map((r) => ({ turnId: r.turnId, session: this.turnInfo(r.turnId)?.session ?? null }));
   }
 
   lastSeq(): number {

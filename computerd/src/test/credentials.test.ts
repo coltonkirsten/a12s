@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { credentialGeneration, wireCredentials } from '../credentials.js';
@@ -47,4 +47,34 @@ test('a credential file a harness rewrote on the home drive goes back to tmpfs a
   const diag = journal.after(0, t.turnId, 100).find((e) => e.type === 'diagnostic');
   assert.deepEqual(diag?.data, { message: 'refreshed credential moved back onto tmpfs', names: ['anthropic'] });
   journal.close();
+});
+
+test('only declared names are read, and a symlinked secret is refused', () => {
+  const cfg = testConfig({ credentials: ['github', 'anthropic'] });
+  writeFileSync(join(cfg.runDir, 'elsewhere'), 'ghp_planted');
+  symlinkSync(join(cfg.runDir, 'elsewhere'), join(cfg.secretsDir, 'github'));
+  writeFileSync(join(cfg.secretsDir, 'openai'), 'sk-undeclared');
+  writeFileSync(join(cfg.secretsDir, 'anthropic'), 'sk-ant-raw');
+  const w = wireCredentials(cfg);
+  assert.deepEqual(w.env, { ANTHROPIC_API_KEY: 'sk-ant-raw' });
+  assert.deepEqual([w.present, w.missing], [['anthropic'], ['github']]);
+});
+
+test('wiring never replaces a regular credential file before its content is on tmpfs', () => {
+  const cfg = testConfig({ credentials: ['openai'] });
+  const secret = join(cfg.secretsDir, 'openai');
+  const link = join(cfg.codexHome, 'auth.json');
+  writeFileSync(secret, '{"tokens":"old"}');
+  writeFileSync(link, '{"tokens":"refreshed"}'); // left by a harness before computerd could reclaim it
+  const w = wireCredentials(cfg);
+  assert.deepEqual(w.reclaimed, ['openai']);
+  assert.equal(readlinkSync(link), secret);
+  assert.match(readFileSync(secret, 'utf8'), /refreshed/);
+  writeFileSync(join(cfg.codexHome, 'tmp'), 'x');
+  writeFileSync(link + '.new', 'not json');
+  renameSync(link + '.new', link);
+  const w2 = wireCredentials(cfg);
+  assert.deepEqual(w2.reclaimed, []);
+  assert.match(w2.problems[0] ?? '', /no valid credential JSON/);
+  assert.match(readFileSync(secret, 'utf8'), /refreshed/, 'garbage never overwrites the secret');
 });

@@ -7,7 +7,7 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/systemtools.js dist/test/fixtures/fake-claude.js dist/test/fixtures/fake-codex.js",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/systemtools.js dist/agentfs.js dist/test/fixtures/fake-claude.js dist/test/fixtures/fake-codex.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 dist/test/"
   },

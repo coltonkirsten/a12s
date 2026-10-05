@@ -44,6 +44,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       if (m.params?.threadId === 'thr_missing') return send({ id: m.id, error: { code: -32600, message: 'no rollout found for thread id thr_missing' } });
       return send({ id: m.id, result: { thread: { id: m.params?.threadId } } });
     case 'turn/start': {
+      if (mode === 'stall') return; // never answers
       const turnId = `turn_${Date.now()}`;
       current = { threadId: String(m.params?.threadId), turnId };
       send({ id: m.id, result: { turn: { id: turnId, status: 'inProgress', items: [] } } });

@@ -6,11 +6,15 @@ export class StubAdapter implements Adapter {
   readonly sessions = new Set<string>();
   readonly inputs: TurnInput[] = [];
   restarts = 0;
+  /** When set, startTurn waits until stop() is called, then rejects. */
+  stallStart = false;
+  private cancelStart: (() => void) | null = null;
   private queue: EventQueue<AdapterEvent> | null = null;
   private n = 0;
 
   async startTurn(input: TurnInput) {
     this.inputs.push(input);
+    if (this.stallStart) await new Promise<void>((_, reject) => (this.cancelStart = () => reject(new Error('stopped before the turn started'))));
     if (input.sessionId && !this.sessions.has(input.sessionId)) throw new ResumeError(`no session ${input.sessionId}`);
     const sessionId = input.sessionId ?? `s_${++this.n}`;
     this.sessions.add(sessionId);
@@ -28,6 +32,7 @@ export class StubAdapter implements Adapter {
   }
 
   async stop(): Promise<void> {
+    if (this.cancelStart) return this.cancelStart();
     this.finish('interrupted');
   }
 

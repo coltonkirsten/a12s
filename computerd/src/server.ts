@@ -6,6 +6,7 @@ import type { Leases } from './leases.js';
 const MAX_BODY = 1 << 20;
 const KEEPALIVE_MS = 15_000;
 const REPLAY_PAGE = 500;
+const MAX_QUEUED = 10_000;
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 
@@ -89,8 +90,17 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
  * One SSE stream per Computer. `id:` is the journal seq. With Last-Event-ID the journal is replayed from that
  * point, then the stream goes live; a cursor the journal does not know gets `event: gap` and the stream goes live
  * from the head. Without a cursor, `?turn=` streams replay that turn from its start; unfiltered streams start live.
+ * Writes honour backpressure; a consumer that stays undrained for more than `maxQueued` live events is
+ * disconnected and resumes with Last-Event-ID.
  */
-export function streamEvents(req: IncomingMessage, res: ServerResponse, journal: Journal, turn: string | null, lastEventId: string | undefined): void {
+export function streamEvents(
+  req: IncomingMessage,
+  res: ServerResponse,
+  journal: Journal,
+  turn: string | null,
+  lastEventId: string | undefined,
+  maxQueued = MAX_QUEUED,
+): void {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
   const head = journal.lastSeq();
   let cursor = turn ? 0 : head;
@@ -101,26 +111,51 @@ export function streamEvents(req: IncomingMessage, res: ServerResponse, journal:
       cursor = head;
     } else cursor = n;
   }
-  const write = (e: EventEnvelope) => {
-    res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);
+  let closed = false;
+  let busy = true; // replaying or flushing; live events queue meanwhile
+  const queue: EventEnvelope[] = [];
+  const drained = () =>
+    new Promise<void>((resolve) => {
+      const done = () => (res.off('drain', done), res.off('close', done), resolve());
+      res.once('drain', done);
+      res.once('close', done);
+    });
+  /** Writes one event; resolves when the socket can take more. */
+  const write = async (e: EventEnvelope) => {
     cursor = e.seq;
+    if (!res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`)) await drained();
   };
-  // Replay and subscribe in one synchronous block: appends are synchronous too, so nothing slips in between.
-  for (;;) {
-    const page = journal.after(cursor, turn, REPLAY_PAGE);
-    page.forEach(write);
-    if (page.length < REPLAY_PAGE) break;
-  }
+  const flush = async () => {
+    busy = true;
+    for (let e = queue.shift(); e && !closed; e = queue.shift()) if (e.seq > cursor) await write(e);
+    busy = false;
+  };
+  // Subscribe before replaying: anything appended meanwhile is queued, and seq dedupes the overlap.
   const unsubscribe = journal.subscribe((e) => {
-    if (e.seq > cursor && (!turn || e.turn === turn)) write(e);
+    if (closed || (turn && e.turn !== turn)) return;
+    queue.push(e);
+    if (queue.length > maxQueued) return void res.destroy();
+    if (!busy) void flush();
   });
   const keepalive = setInterval(() => res.write(': keepalive\n\n'), KEEPALIVE_MS);
   const close = () => {
+    closed = true;
     unsubscribe();
     clearInterval(keepalive);
   };
   req.on('close', close);
   res.on('close', close);
+  void (async () => {
+    for (;;) {
+      const page = journal.after(cursor, turn, REPLAY_PAGE);
+      for (const e of page) {
+        if (closed) return;
+        await write(e);
+      }
+      if (page.length < REPLAY_PAGE) break;
+    }
+    await flush();
+  })();
 }
 
 /** System tools endpoints on the local unix socket (the agent's MCP server calls these). */

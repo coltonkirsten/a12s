@@ -115,3 +115,96 @@ test('shutdown closes admission and interrupts the active turn', async () => {
   assert.equal(finished(t.turnId), 'interrupted');
   assert.equal(await status(computer.submitTurn({ requestId: 'r2', session: 'new', prompt: 'x' })), 503);
 });
+
+test('acceptance is journaled before dispatch; a crash mid-turn ends it interrupted and never redispatches', async () => {
+  const { cfg, journal, adapter, computer } = setup();
+  await computer.start();
+  let journaledBeforeDispatch = false;
+  const original = adapter.startTurn.bind(adapter);
+  adapter.startTurn = async (input) => {
+    journaledBeforeDispatch = journal.findRequest('r1') !== undefined;
+    return original(input);
+  };
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish the release' });
+  assert.ok(journaledBeforeDispatch);
+  assert.equal(journal.turnInfo(t.turnId)?.session, t.sessionId, 'the new session id is recorded for idempotent replies');
+
+  // computerd dies here: no turn.finished. A new process over the same journal:
+  const fresh = new StubAdapter();
+  const after = new Computer(cfg, journal, fresh, {});
+  await after.start();
+  assert.equal(journal.turnInfo(t.turnId)?.finished, 'interrupted');
+  assert.equal(journal.after(0, t.turnId, 100).at(-1)?.data.error, 'computerd restarted');
+  assert.deepEqual(await after.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish the release' }), t);
+  assert.equal(fresh.inputs.length, 0, 'the retry did not reach the harness');
+});
+
+test('a damaged session record blocks session: current until session: new', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.stateDir, 'session.json'), '{"sessionId": 42');
+  const { adapter, computer, types } = setup(cfg);
+  await computer.start();
+  assert.deepEqual([computer.status().resumePending, computer.status().session], [true, null]);
+  assert.ok(types().includes('resume.failed'));
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'current', prompt: 'continue the migration' });
+  assert.deepEqual(types(t.turnId), ['turn.started', 'resume.failed', 'turn.finished']);
+  assert.equal(adapter.inputs.length, 0, 'never started a fresh session');
+  await computer.submitTurn({ requestId: 'r2', session: 'new', prompt: 'start over' });
+  adapter.finish();
+  assert.equal(computer.status().resumePending, false);
+});
+
+test('session record loading: missing is fresh, wrong shape is damaged', async () => {
+  const { loadSessionRecord } = await import('../computer.js');
+  const cfg = testConfig();
+  const p = join(cfg.stateDir, 'session.json');
+  assert.deepEqual(loadSessionRecord(p), { record: null, damaged: null });
+  writeFileSync(p, '{"sessionId":"s","harness":"vim","cwd":"/home/agent"}');
+  assert.match(loadSessionRecord(p).damaged ?? '', /damaged/);
+  writeFileSync(p, '{"sessionId":"s","harness":"codex","cwd":"/home/agent"}');
+  assert.deepEqual(loadSessionRecord(p), { record: { sessionId: 's', harness: 'codex', cwd: '/home/agent' }, damaged: null });
+});
+
+test('stop while the harness is still starting reaches the adapter and ends the turn interrupted', async () => {
+  const { adapter, computer, finished } = setup();
+  await computer.start();
+  adapter.stallStart = true;
+  const reply = computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  await until(() => computer.status().activeTurn !== null);
+  computer.stopTurn(String(computer.status().activeTurn));
+  const t = await reply;
+  assert.equal(finished(t.turnId), 'interrupted');
+  assert.equal(computer.status().phase, 'ready');
+});
+
+test('credential generation is acknowledged only once applied; a busy turn defers it to the idle boundary', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
+  const adapter = new StubAdapter();
+  const computer = new Computer(cfg, journal, adapter, {}, 20);
+  await computer.start();
+  assert.equal(computer.status().credentialGeneration, 1);
+
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'long' });
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(computer.status().credentialGeneration, 1, 'not while the harness still runs on the old credentials');
+  assert.equal(adapter.restarts, 0);
+  adapter.finish();
+  await until(() => computer.status().credentialGeneration === 2);
+  assert.equal(adapter.restarts, 1);
+  assert.equal(journal.turnInfo(t.turnId)?.finished, 'completed');
+
+  writeFileSync(join(cfg.secretsDir, '.generation'), '3\n');
+  await until(() => computer.status().credentialGeneration === 3);
+  assert.equal(adapter.restarts, 2, 'idle: restarted then acknowledged');
+  await computer.shutdown(100);
+});
+
+test('browser tier: harness env carries NODE_PATH for Playwright', async () => {
+  const { harnessEnv } = await import('../adapters/spawn.js');
+  const deps = (imageTier: string) => ({ cfg: testConfig({ imageTier }), credentialEnv: () => ({}), mcpServers: {} });
+  assert.equal(harnessEnv(deps('browser')).NODE_PATH, '/opt/a12s/playwright-mcp/node_modules');
+  assert.equal(harnessEnv(deps('slim')).NODE_PATH, undefined);
+});

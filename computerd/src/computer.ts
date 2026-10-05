@@ -3,7 +3,7 @@ import { chownSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
-import { credentialGeneration, reclaimCredentials, wireCredentials } from './credentials.js';
+import { credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import type { Journal } from './journal.js';
 
 export interface SessionRecord {
@@ -50,18 +50,23 @@ const PRECHECK_TIMEOUT_MS = 60_000;
 export class Computer {
   private base: 'starting' | 'ready' | 'stopping' = 'starting';
   private session: SessionRecord | null = null;
+  /** Why session.json could not be used; `session: current` fails until `new`, an explicit id, or a repair. */
+  private sessionDamaged: string | null = null;
   private resumePending = false;
   private active: ActiveTurn | null = null;
   private restarting = false;
   private restartRequested = false;
   private readonly inflight = new Map<string, { hash: string; reply: Promise<TurnReply> }>();
-  private adapterCredGeneration: number | null = null;
+  /** The credential generation actually in effect: wired, and any long-lived harness restarted with it. */
+  private ackedGeneration: number | null = null;
+  private credentialTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly cfg: Config,
     private readonly journal: Journal,
     private readonly adapter: Adapter,
     private readonly mcpServers: Record<string, McpServer>,
+    private readonly credentialPollMs = 2_000,
   ) {}
 
   get phase(): Phase {
@@ -76,21 +81,30 @@ export class Computer {
   /** Wake: load the session record, precheck it where the harness allows, then open admission. */
   async start(): Promise<void> {
     this.lifecycle('starting');
-    try {
-      this.session = JSON.parse(readFileSync(this.sessionPath, 'utf8')) as SessionRecord;
-    } catch {
-      this.session = null;
+    // Never redispatch: a turn accepted before a crash ends interrupted, and "continue" is the human's call.
+    for (const t of this.journal.unfinishedTurns()) {
+      this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'computerd restarted' }, { turn: t.turnId, session: t.session });
     }
-    const wiring = wireCredentials(this.cfg);
-    this.adapterCredGeneration = credentialGeneration(this.cfg);
-    if (wiring.missing.length) this.journal.append('diagnostic', { message: 'credentials not injected', names: wiring.missing });
+    const loaded = loadSessionRecord(this.sessionPath);
+    this.session = loaded.record;
+    this.sessionDamaged = loaded.damaged;
+    if (this.sessionDamaged) {
+      this.resumePending = true;
+      this.journal.append('resume.failed', { sessionId: null, reason: this.sessionDamaged, at: 'wake' });
+    }
+    const generation = credentialGeneration(this.cfg); // read before wiring: never acknowledge more than was applied
+    const wiring = this.wire(null);
+    if (wiring?.missing.length) this.journal.append('diagnostic', { message: 'credentials not injected', names: wiring.missing });
     if (this.session) {
       this.resumePending = true;
       const reason = await this.precheck(this.session);
       if (reason) this.journal.append('resume.failed', { sessionId: this.session.sessionId, reason, at: 'wake' }, { session: this.session.sessionId });
     }
+    this.ackedGeneration = generation; // no harness process holds older credentials yet
     this.base = 'ready';
     this.lifecycle('ready');
+    this.credentialTimer = setInterval(() => void this.applyCredentials(), this.credentialPollMs);
+    this.credentialTimer.unref();
   }
 
   status(): Record<string, unknown> {
@@ -99,7 +113,7 @@ export class Computer {
       session: this.session?.sessionId ?? null,
       activeTurn: this.active?.turnId ?? null,
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
-      credentialGeneration: credentialGeneration(this.cfg),
+      credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
     };
   }
@@ -107,7 +121,8 @@ export class Computer {
   /** POST /v1/turns. Resolves once the turn is journaled. Idempotent by requestId. */
   submitTurn(req: TurnRequest): Promise<TurnReply> {
     const hash = createHash('sha256').update(JSON.stringify([req.session, req.prompt, req.cwd ?? null])).digest('hex');
-    const prior = this.journal.findRequest(req.requestId) ?? this.inflight.get(req.requestId);
+    // In-flight first: its reply carries the session id a new session gets only after dispatch.
+    const prior = this.inflight.get(req.requestId) ?? this.journal.findRequest(req.requestId);
     if (prior) {
       const priorHash = 'bodyHash' in prior ? prior.bodyHash : prior.hash;
       if (priorHash !== hash) return Promise.reject(new HttpError(409, 'requestId was already used with a different body'));
@@ -139,16 +154,19 @@ export class Computer {
       cwd,
     };
 
+    // Durable acceptance first: once this commits, a retry of the same requestId can never dispatch again.
+    this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
     let run;
     try {
+      if (req.session === 'current' && this.sessionDamaged) throw new ResumeError(this.sessionDamaged);
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
-      wireCredentials(this.cfg);
       const generation = credentialGeneration(this.cfg);
-      if (generation !== this.adapterCredGeneration) {
+      this.wire(turnId);
+      if (generation !== this.ackedGeneration) {
         await this.adapter.restart(); // rotated credentials must not stay in a long-lived harness
-        this.adapterCredGeneration = generation;
+        this.ackedGeneration = generation;
       }
       run = await this.adapter.startTurn({
         prompt: req.prompt,
@@ -161,7 +179,11 @@ export class Computer {
     } catch (err) {
       const message = (err as Error).message;
       const scope = { turn: turnId, session: wanted };
-      this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
+      if (active.stopRequested) {
+        this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'stopped before the harness started' }, scope);
+        this.endTurn(active);
+        return { turnId, sessionId: wanted };
+      }
       if (err instanceof ResumeError) {
         this.resumePending = true;
         this.journal.append('resume.failed', { sessionId: wanted, reason: message, at: 'prompt' }, scope);
@@ -174,11 +196,11 @@ export class Computer {
     }
 
     const sessionId = run.sessionId;
-    this.journal.acceptTurn(req.requestId, turnId, hash, started, sessionId);
     if (sessionId !== previous?.sessionId) {
       this.journal.append('session.changed', { from: previous?.sessionId ?? null, to: sessionId }, { turn: turnId, session: sessionId });
     }
     this.saveSession({ sessionId, harness: this.cfg.harness.kind, cwd });
+    this.sessionDamaged = null;
     if (wanted === null) this.resumePending = false;
     active.started = true;
     if (active.stopRequested) void this.adapter.stop();
@@ -196,6 +218,7 @@ export class Computer {
           session = ev.data.to;
           this.saveSession({ sessionId: session, harness: this.cfg.harness.kind, cwd: this.session?.cwd ?? this.cfg.agentHome });
         }
+        if (ev.type === 'resume.failed') this.resumePending = true; // the session record stays as it was
         if (ev.type === 'turn.finished') status = ev.data.status;
         this.journal.append(ev.type, ev.data, { turn: active.turnId, session });
       }
@@ -209,10 +232,11 @@ export class Computer {
     if (resumed && status === 'completed') this.resumePending = false;
     this.endTurn(active);
     if (this.restartRequested) void this.restartHarness(active.turnId, status);
+    else void this.applyCredentials();
   }
 
   private endTurn(active: ActiveTurn): void {
-    this.reclaim(active.turnId);
+    this.wire(active.turnId);
     if (this.active === active) this.active = null;
     active.resolveDone();
   }
@@ -223,7 +247,7 @@ export class Computer {
     if (a && a.turnId === turnId) {
       if (!a.stopRequested) {
         a.stopRequested = true;
-        if (a.started) void this.adapter.stop();
+        void this.adapter.stop(); // also cancels a turn the adapter is still starting
       }
       return { turnId, status: 'stopping' };
     }
@@ -253,7 +277,10 @@ export class Computer {
     let resumed = false;
     const session = this.session;
     try {
+      const generation = credentialGeneration(this.cfg);
+      this.wire(null);
       await this.adapter.restart();
+      this.ackedGeneration = generation;
       if (session) {
         const reason = await this.precheck(session);
         if (reason) {
@@ -275,10 +302,28 @@ export class Computer {
     }
   }
 
+  /** At an idle boundary, applies a new credential generation: rewire, restart the harness, then acknowledge. */
+  private async applyCredentials(): Promise<void> {
+    const generation = credentialGeneration(this.cfg);
+    if (generation === this.ackedGeneration || this.base !== 'ready' || this.active || this.restarting) return;
+    this.restarting = true;
+    try {
+      this.wire(null);
+      await this.adapter.restart();
+      this.ackedGeneration = generation;
+      this.journal.append('lifecycle', { phase: 'credentials-applied', credentialGeneration: generation }, { session: this.session?.sessionId ?? null });
+    } catch (err) {
+      this.journal.append('diagnostic', { message: `applying credential generation ${generation} failed: ${(err as Error).message}` });
+    } finally {
+      this.restarting = false;
+    }
+  }
+
   /** Closes admission, interrupts the active turn and waits (bounded) for it to finish. */
   async shutdown(flushMs = 20_000): Promise<void> {
     if (this.base === 'stopping') return;
     this.base = 'stopping';
+    if (this.credentialTimer) clearInterval(this.credentialTimer);
     this.lifecycle('stopping');
     const a = this.active;
     if (a) {
@@ -286,16 +331,20 @@ export class Computer {
       await Promise.race([a.done, new Promise((r) => setTimeout(r, flushMs).unref())]);
     }
     await this.adapter.close();
-    this.reclaim(null);
+    this.wire(null);
   }
 
-  /** Moves any credential file a harness rewrote on the home drive back onto tmpfs. */
-  private reclaim(turn: string | null): void {
+  /** (Re)wires credentials, moving any file a harness rewrote on the home drive back onto tmpfs. */
+  private wire(turn: string | null): Wiring | null {
     try {
-      const names = reclaimCredentials(this.cfg);
-      if (names.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names }, { turn, session: this.session?.sessionId ?? null });
+      const w = wireCredentials(this.cfg);
+      const scope = { turn, session: this.session?.sessionId ?? null };
+      if (w.reclaimed.length) this.journal.append('diagnostic', { message: 'refreshed credential moved back onto tmpfs', names: w.reclaimed }, scope);
+      for (const p of w.problems) this.journal.append('diagnostic', { message: `credential wiring: ${p}` }, scope);
+      return w;
     } catch (err) {
-      this.journal.append('diagnostic', { message: `credential reclaim failed: ${(err as Error).message}` }, { turn });
+      this.journal.append('diagnostic', { message: `credential wiring failed: ${(err as Error).message}` }, { turn });
+      return null;
     }
   }
 
@@ -327,4 +376,25 @@ export class Computer {
       { session: this.session?.sessionId ?? null },
     );
   }
+}
+
+/** Distinguishes "never had a session" (no file) from a record that exists but cannot be trusted. */
+export function loadSessionRecord(path: string): { record: SessionRecord | null; damaged: string | null } {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { record: null, damaged: null };
+    return { record: null, damaged: `session record unreadable: ${(err as Error).message}` };
+  }
+  try {
+    const r = JSON.parse(text) as Partial<SessionRecord>;
+    const ok =
+      typeof r === 'object' && r !== null && typeof r.sessionId === 'string' && r.sessionId !== '' &&
+      (r.harness === 'claude-code' || r.harness === 'codex') && typeof r.cwd === 'string' && r.cwd.startsWith('/');
+    if (ok) return { record: { sessionId: r.sessionId!, harness: r.harness!, cwd: r.cwd! }, damaged: null };
+  } catch {
+    // fall through
+  }
+  return { record: null, damaged: 'session record is damaged (expected {sessionId, harness, cwd})' };
 }
