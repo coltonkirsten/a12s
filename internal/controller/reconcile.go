@@ -75,8 +75,8 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		previous = c.state.Fleet.Computers
 	}
 	c.state.Fleet, c.state.Lock = f, lock
+	maps.Copy(c.state.BundleHosts, hosts)
 	c.creds = maps.Clone(creds)
-	c.presets = req.Presets
 	for _, name := range f.ComputerNames() {
 		rec := c.state.Computers[name]
 		if rec == nil {
@@ -87,13 +87,13 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 			c.state.Computers[name] = rec
 		}
 		rec.Restarts = 0
-		rec.SignInHosts = hosts[f.Computers[name].Harness.BundleKey()]
 	}
 	err = c.saveLocked()
 	c.mu.Unlock()
 	if err != nil {
 		return api.PutFleetResponse{}, err
 	}
+	prunePresets(c.cfg.StateDir, lock.Presets)
 
 	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}}
 	obs, err := c.drv.Observe(ctx)
@@ -124,7 +124,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		res.Removed = append(res.Removed, name)
 	}
 
-	outcomes := c.convergeAll(ctx, f.ComputerNames(), obs, true)
+	outcomes := c.convergeAll(ctx, f.ComputerNames(), obs)
 	for _, name := range f.ComputerNames() {
 		o := outcomes[name]
 		_, existed := previous[name]
@@ -164,7 +164,7 @@ type outcome struct {
 
 // convergeAll converges Computers in parallel; each reports as soon as it
 // is done, whatever the others do. applyMu must be held exclusively.
-func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver.Observation, fresh bool) map[string]outcome {
+func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver.Observation) map[string]outcome {
 	var mu sync.Mutex
 	out := map[string]outcome{}
 	var wg sync.WaitGroup
@@ -203,23 +203,109 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 		c.mu.Lock()
 		if rec.StagedGeneration != 0 { // the Fleet went back to what runs
 			rec.StagedGeneration, rec.StagedHash = 0, ""
-			_ = c.saveLocked()
 		}
+		// Same spec hash, so the same egress, bundle and drives: this only
+		// fills in state written before Active existed.
+		rec.Active = c.activeLocked(name)
+		_ = c.saveLocked()
 		c.mu.Unlock()
 		return unchanged, c.ensurePower(ctx, name, running)
 	}
-	if running && c.busy(ctx, name) {
-		c.mu.Lock()
-		if rec.StagedHash != hash {
-			rec.StagedGeneration = max(rec.Generation, rec.StagedGeneration, obs.Generation) + 1
-			rec.StagedHash = hash
+	if running {
+		// Closed before the idle check, so no prompt slips in between.
+		c.closeAdmission(name)
+		if c.busy(ctx, name) {
+			c.openAdmission(name)
+			return staged, c.stageLater(name, hash, obs.Generation, "applies when the current turn ends")
 		}
-		err := c.saveLocked()
-		c.mu.Unlock()
-		c.logf("%s: generation %d staged; applies when the current turn ends", name, rec.StagedGeneration)
-		return staged, err
 	}
-	return restaged, c.restage(ctx, name)
+	err = c.restage(ctx, name)
+	var held *driveHeld
+	if errors.As(err, &held) {
+		c.openAdmission(name)
+		return staged, c.stageLater(name, hash, obs.Generation, held.Error())
+	}
+	return restaged, err
+}
+
+// stageLater records a generation to apply at the Computer's next idle
+// boundary, or once a drive it needs is released.
+func (c *Controller) stageLater(name, hash string, observed int64, why string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rec := c.state.Computers[name]
+	if rec.StagedHash != hash {
+		rec.StagedGeneration = max(rec.Generation, rec.StagedGeneration, observed) + 1
+		rec.StagedHash = hash
+	}
+	c.logf("%s: generation %d staged; %s", name, rec.StagedGeneration, why)
+	return c.saveLocked()
+}
+
+// activeLocked is the configuration the Computer's current Fleet entry
+// makes active when its generation is staged.
+func (c *Controller) activeLocked(name string) Active {
+	comp := c.state.Fleet.Computers[name]
+	return Active{
+		Allow:       slices.Clone(comp.Egress.Allow),
+		SignInHosts: slices.Clone(c.state.BundleHosts[comp.Harness.BundleKey()]),
+		Drives:      slices.Clone(comp.Drives),
+	}
+}
+
+// driveHeld means an exclusive drive the new generation attaches is still
+// attached to another Computer (whose own change waits for its idle
+// boundary). It is a dependency, not a failure.
+type driveHeld struct{ drive, holder string }
+
+func (e *driveHeld) Error() string {
+	return "waits for " + e.holder + " to release exclusive drive " + e.drive
+}
+
+// exclusiveHolder returns the first exclusive drive of the Computer's
+// Fleet entry that another Computer has attached, as observed.
+func (c *Controller) exclusiveHolder(ctx context.Context, name string) (*driveHeld, error) {
+	c.mu.Lock()
+	f := c.state.Fleet
+	comp := f.Computers[name]
+	c.mu.Unlock()
+	var exclusive []string
+	for _, m := range comp.Drives {
+		if f.Drives[m.Name].Access == fleet.AccessExclusive {
+			exclusive = append(exclusive, m.Name)
+		}
+	}
+	if len(exclusive) == 0 {
+		return nil, nil
+	}
+	obs, err := c.drv.Observe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range exclusive {
+		for _, other := range obs.Drives[driver.WorkDriveID(d)].AttachedTo {
+			if other != name {
+				return &driveHeld{drive: d, holder: other}, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// kickPending retries staged generations, for example one that waited for
+// a drive the just-changed Computer released.
+func (c *Controller) kickPending(except string) {
+	c.mu.Lock()
+	var names []string
+	for name, rec := range c.state.Computers {
+		if name != except && rec.pending() {
+			names = append(names, name)
+		}
+	}
+	c.mu.Unlock()
+	for _, name := range names {
+		go c.applyStaged(name)
+	}
 }
 
 // ensurePower enforces the desired power of an up-to-date Computer.
@@ -228,7 +314,10 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 	rec := c.state.Computers[name]
 	r := c.rtLocked(name)
 	desired, phase := rec.DesiredPower, r.phase
-	rotate := r.credsHash != "" && r.credsHash != c.credsHashLocked(c.state.Fleet.Computers[name].Credentials)
+	// After a Controller restart nothing is known to be injected: material
+	// that is present and not known to be in the Computer is injected.
+	material := c.credsHashLocked(c.state.Fleet.Computers[name].Credentials)
+	rotate := material != "" && r.credsHash != material
 	c.mu.Unlock()
 	switch {
 	case desired == driver.PowerAsleep && running:
@@ -279,6 +368,20 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	if err != nil {
 		return c.fail(name, err, false)
 	}
+	if held, err := c.exclusiveHolder(ctx, name); err != nil {
+		return c.fail(name, err, true)
+	} else if held != nil {
+		return held
+	}
+	c.mu.Lock()
+	preset := c.state.Fleet.Computers[name].Home.Preset
+	sum := c.state.Lock.Presets[preset]
+	c.mu.Unlock()
+	if preset != "" {
+		if spec.Preset = loadPreset(c.cfg.StateDir, sum); spec.Preset == nil {
+			return c.fail(name, fmt.Errorf("preset %s (%s) is not stored; run a12s up to send it", preset, sum), true)
+		}
+	}
 	obs, exists, err := c.observeOne(ctx, name)
 	if err != nil {
 		return c.fail(name, err, true)
@@ -296,10 +399,12 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	}
 	c.mu.Unlock()
 
+	c.closeAdmission(name)
 	if exists && obs.Power == driver.PowerAwake {
 		c.setPhase(name, api.PhaseStopping, nil)
+		c.finalStatus(ctx, name)
 		c.stopEvents(name)
-		if err := c.drv.SetPower(ctx, name, driver.PowerAsleep, obs.Generation); err != nil {
+		if err := c.stop(ctx, name, obs.Generation); err != nil {
 			return c.fail(name, err, true)
 		}
 	}
@@ -307,9 +412,17 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	if err := c.drv.StageComputer(ctx, spec); err != nil {
 		return c.fail(name, err, true)
 	}
+	err = c.confirm(ctx, name, fmt.Sprintf("generation %d staged", spec.Generation), func(st driver.ComputerState, exists bool) bool {
+		return exists && st.Generation == spec.Generation && !st.Running
+	})
+	if err != nil {
+		return c.fail(name, err, true)
+	}
 	c.mu.Lock()
 	rec.Generation, rec.SpecHash = spec.Generation, hash
 	rec.StagedGeneration, rec.StagedHash = 0, ""
+	// The new generation's egress policy and drives take effect now.
+	rec.Active = c.activeLocked(name)
 	desired := rec.DesiredPower
 	err = c.saveLocked()
 	c.mu.Unlock()
@@ -318,6 +431,7 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	}
 	c.logf("%s: generation %d staged", name, spec.Generation)
 	c.setTransition(name, false)
+	c.kickPending(name)
 	if desired == driver.PowerAwake {
 		return c.start(ctx, name)
 	}
@@ -332,10 +446,20 @@ func (c *Controller) applyStaged(name string) {
 	rec := c.state.Computers[name]
 	due := rec != nil && rec.pending()
 	c.mu.Unlock()
-	if !due || c.busy(c.ctx, name) {
+	if !due {
 		return
 	}
-	_ = c.restage(c.ctx, name)
+	if held, err := c.exclusiveHolder(c.ctx, name); err != nil || held != nil {
+		return
+	}
+	c.closeAdmission(name)
+	if c.busy(c.ctx, name) {
+		c.openAdmission(name)
+		return
+	}
+	if err := c.restage(c.ctx, name); err != nil {
+		c.openAdmission(name)
+	}
 }
 
 // Apply is `a12s apply [--interrupt --grace D]`: apply staged generations
@@ -359,15 +483,24 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 	var wg sync.WaitGroup
 	for i, name := range names {
 		wg.Go(func() {
+			c.closeAdmission(name)
 			if c.busy(ctx, name) {
 				if !req.Interrupt {
+					c.openAdmission(name)
 					return
 				}
 				c.logf("%s: interrupting the active turn to apply the staged generation", name)
 				c.interrupt(ctx, name, time.Duration(req.Grace))
 			}
-			errs[i] = c.restage(ctx, name)
-			applied[i] = errs[i] == nil
+			err := c.restage(ctx, name)
+			var held *driveHeld
+			if errors.As(err, &held) {
+				c.openAdmission(name)
+				c.logf("%s: %v", name, err)
+				return
+			}
+			errs[i] = err
+			applied[i] = err == nil
 		})
 	}
 	wg.Wait()
@@ -426,7 +559,11 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	c.stopEvents(name)
-	if err := c.drv.RemoveComputer(ctx, name); err != nil {
+	err := c.drv.RemoveComputer(ctx, name)
+	if err == nil {
+		err = c.confirm(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
+	}
+	if err != nil {
 		c.setTransition(name, false)
 		return err
 	}
@@ -434,9 +571,10 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	delete(c.state.Computers, name)
 	delete(c.rt, name)
 	delete(c.clients, name)
-	err := c.saveLocked()
+	err = c.saveLocked()
 	c.mu.Unlock()
 	c.logf("%s: removed (drives kept)", name)
+	c.kickPending(name)
 	return err
 }
 
@@ -511,6 +649,9 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 			if pin := lock.Presets[p]; pin != "" && pin != sum {
 				return nil, nil, invalid("preset %s changed since fleet.lock pinned it (%s, now %s); remove the pin to accept it", p, pin, sum)
 			}
+			if err := savePreset(c.cfg.StateDir, sum, data); err != nil {
+				return nil, nil, err
+			}
 			lock.PinPreset(p, sum)
 		}
 	}
@@ -538,8 +679,8 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 }
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
-// Lock (generation unset), and the hash of what makes a generation: image,
-// bundle, resources, drives, environment and egress.
+// Lock (generation and preset unset), and the hash of what makes a
+// generation: image, bundle, resources, drives, environment and egress.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -566,7 +707,6 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Memory:      int64(comp.Resources.Memory),
 		HomeDrive:   driver.HomeDriveID(name),
 		Credentials: comp.Credentials,
-		Preset:      c.presets[comp.Home.Preset],
 	}
 	if spec.Tier == fleet.TierBrowser {
 		spec.Seccomp = browser.Seccomp

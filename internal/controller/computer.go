@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
@@ -27,6 +29,53 @@ type runtime struct {
 	lastEventID  string
 	// credsHash identifies the credential material last injected.
 	credsHash string
+	// admit is held from a prompt's admission check until computerd has
+	// accepted it; closed (guarded by Controller.mu) stops admission while
+	// the Controller stops or restages the Computer.
+	admit  sync.Mutex
+	closed bool
+}
+
+// closeAdmission stops new prompts and waits for one being admitted:
+// afterwards computerd's status shows every accepted turn.
+func (c *Controller) closeAdmission(name string) {
+	c.mu.Lock()
+	r := c.rtLocked(name)
+	c.mu.Unlock()
+	r.admit.Lock()
+	c.mu.Lock()
+	r.closed = true
+	c.mu.Unlock()
+	r.admit.Unlock()
+}
+
+func (c *Controller) openAdmission(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rtLocked(name).closed = false
+}
+
+// confirm reads the Computer back through Observe until want holds: a
+// Driver call returning is not proof that it took effect (§4).
+func (c *Controller) confirm(ctx context.Context, name, what string, want func(st driver.ComputerState, exists bool) bool) error {
+	deadline := time.Now().Add(c.timing.ReadBack)
+	for {
+		st, exists, err := c.observeOne(ctx, name)
+		if err == nil && want(st, exists) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err == nil {
+				err = fmt.Errorf("observed generation %d, power %s, exists %v", st.Generation, st.Power, exists)
+			}
+			return fmt.Errorf("%s: %s not observed: %w", name, what, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(c.timing.Poll):
+		}
+	}
 }
 
 func (c *Controller) rtLocked(name string) *runtime {
@@ -132,6 +181,7 @@ func (c *Controller) start(ctx context.Context, name string) error {
 	if err := c.waitReady(ctx, name); err != nil {
 		return c.fail(name, err, true)
 	}
+	c.openAdmission(name)
 	c.subscribe(name)
 	return nil
 }
@@ -170,11 +220,47 @@ func (c *Controller) waitReady(ctx context.Context, name string) error {
 	}
 }
 
+// recordStatus keeps computerd's session and resumePending, persisted so an
+// asleep Computer shows them.
+func (c *Controller) recordStatus(name string, st api.ComputerdStatus) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recordStatusLocked(name, st)
+}
+
+func (c *Controller) recordStatusLocked(name string, st api.ComputerdStatus) {
+	r := c.rtLocked(name)
+	r.resumePending = st.ResumePending
+	rec := c.state.Computers[name]
+	if rec == nil {
+		return
+	}
+	changed := rec.ResumePending != st.ResumePending
+	rec.ResumePending = st.ResumePending
+	if st.Session != "" && rec.Session != st.Session {
+		rec.Session, changed = st.Session, true
+	}
+	if changed {
+		_ = c.saveLocked()
+	}
+}
+
+// finalStatus records computerd's last status before the Controller stops
+// the Computer.
+func (c *Controller) finalStatus(ctx context.Context, name string) {
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if st, err := c.client(name).Status(sctx); err == nil {
+		c.recordStatus(name, st)
+	}
+}
+
 // observeStatus takes phase, active turn, session and resumePending from
 // computerd's status.
 func (c *Controller) observeStatus(name string, st api.ComputerdStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.recordStatusLocked(name, st)
 	r := c.rtLocked(name)
 	if r.transition {
 		return
@@ -189,11 +275,7 @@ func (c *Controller) observeStatus(name string, st api.ComputerdStatus) {
 		phase = api.PhaseStopping
 	}
 	c.setPhaseLocked(name, phase, nil)
-	r.activeTurn, r.resumePending = st.ActiveTurn, st.ResumePending
-	if rec := c.state.Computers[name]; rec != nil && st.Session != "" && rec.Session != st.Session {
-		rec.Session = st.Session
-		_ = c.saveLocked()
-	}
+	r.activeTurn = st.ActiveTurn
 }
 
 // subscribe follows the Computer's event stream to track Ready ⇄ Busy.
@@ -247,18 +329,17 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 		if err != nil {
 			return
 		}
-		if m.ID != "" {
-			c.mu.Lock()
-			c.rtLocked(name).lastEventID = m.ID
-			c.mu.Unlock()
-		}
 		if m.Event != "" {
 			continue
 		}
 		ev, err := m.Decode()
-		if err != nil {
+		if err != nil || m.ID == "" {
 			continue
 		}
+		// The cursor moves only past events that decoded.
+		c.mu.Lock()
+		c.rtLocked(name).lastEventID = m.ID
+		c.mu.Unlock()
 		switch ev.Type {
 		case api.EventTurnStarted:
 			c.mu.Lock()
@@ -278,6 +359,32 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			}
 			c.mu.Unlock()
 			c.maybeApplyStaged(name)
+		case api.EventSessionChanged:
+			var d struct {
+				To string `json:"to"`
+			}
+			if json.Unmarshal(ev.Data, &d) == nil && d.To != "" {
+				c.mu.Lock()
+				if rec := c.state.Computers[name]; rec != nil && rec.Session != d.To {
+					rec.Session = d.To
+					_ = c.saveLocked()
+				}
+				c.mu.Unlock()
+			}
+		case api.EventResumeFailed:
+			c.mu.Lock()
+			c.rtLocked(name).resumePending = true
+			if rec := c.state.Computers[name]; rec != nil && !rec.ResumePending {
+				rec.ResumePending = true
+				_ = c.saveLocked()
+			}
+			c.mu.Unlock()
+		case api.EventLifecycle:
+			sctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+			if st, err := c.client(name).Status(sctx); err == nil {
+				c.recordStatus(name, st)
+			}
+			cancel()
 		}
 	}
 }
@@ -305,6 +412,7 @@ func (c *Controller) attach(ctx context.Context, name string) error {
 		return err
 	}
 	c.observeStatus(name, st)
+	c.openAdmission(name)
 	c.subscribe(name)
 	return nil
 }
@@ -320,6 +428,7 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	c.closeAdmission(name)
 	obs, ok, err := c.observeOne(ctx, name)
 	if err != nil {
 		return err
@@ -333,12 +442,23 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
 	c.interrupt(ctx, name, c.timing.SleepFlush)
+	c.finalStatus(ctx, name)
 	c.stopEvents(name)
-	if err := c.drv.SetPower(ctx, name, driver.PowerAsleep, obs.Generation); err != nil {
+	if err := c.stop(ctx, name, obs.Generation); err != nil {
 		return c.fail(name, err, true)
 	}
 	c.setPhase(name, api.PhaseAsleep, nil)
 	return nil
+}
+
+// stop powers the Computer down and reads that back.
+func (c *Controller) stop(ctx context.Context, name string, gen int64) error {
+	if err := c.drv.SetPower(ctx, name, driver.PowerAsleep, gen); err != nil {
+		return err
+	}
+	return c.confirm(ctx, name, "power asleep", func(st driver.ComputerState, exists bool) bool {
+		return !exists || st.Power == driver.PowerAsleep
+	})
 }
 
 // interrupt stops the active turn, if any, and waits up to grace for it

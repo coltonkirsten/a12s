@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/computerd"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
+	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
 // APIPort is where the CLI API listens, on the Fleet bridge only.
@@ -74,6 +77,7 @@ type Timing struct {
 	SleepFlush     time.Duration // §7: bounded flush of an interrupted turn
 	RestartBackoff time.Duration // first restart delay after an unexpected death; doubles
 	MaxRestarts    int           // then Error{retryable}
+	ReadBack       time.Duration // a Driver change showing in Observe
 }
 
 var defaultTiming = Timing{
@@ -82,6 +86,7 @@ var defaultTiming = Timing{
 	SleepFlush:     20 * time.Second,
 	RestartBackoff: time.Second,
 	MaxRestarts:    3,
+	ReadBack:       10 * time.Second,
 }
 
 // computerdClient is what the Controller needs from computerd.
@@ -117,8 +122,7 @@ type Controller struct {
 
 	mu       sync.Mutex // guards everything below
 	state    *State
-	creds    api.Credentials   // in memory only
-	presets  map[string][]byte // preset path -> tar
+	creds    api.Credentials // in memory only
 	rt       map[string]*runtime
 	locks    map[string]*sync.Mutex // per Computer, see applyMu
 	clients  map[string]computerdClient
@@ -141,7 +145,6 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		ctx:      context.Background(),
 		state:    st,
 		creds:    api.Credentials{},
-		presets:  map[string][]byte{},
 		rt:       map[string]*runtime{},
 		locks:    map[string]*sync.Mutex{},
 		clients:  map[string]computerdClient{},
@@ -217,7 +220,16 @@ func (c *Controller) Start(ctx context.Context) {
 			c.logf("resume: %v", err)
 			return
 		}
-		c.convergeAll(ctx, f.ComputerNames(), obs, false)
+		// Finish removals an apply had not completed: owned Computers the
+		// Fleet no longer declares go (their drives stay).
+		for _, name := range slices.Sorted(maps.Keys(obs.Computers)) {
+			if _, ok := f.Computers[name]; !ok {
+				if err := c.removeComputer(ctx, name); err != nil {
+					c.logf("resume: remove %s: %v", name, err)
+				}
+			}
+		}
+		c.convergeAll(ctx, f.ComputerNames(), obs)
 		c.refreshAddrs(ctx)
 	}()
 }
@@ -275,7 +287,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	servers := []*http.Server{
 		{Handler: c.Handler(), ReadHeaderTimeout: 10 * time.Second},
-		{Handler: NewLeases().Handler(), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
+		{Handler: NewLeases(c.authorizeLease).Handler(), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
 		{Handler: NewProxy(c.identify, c.policy, c.denied), ReadHeaderTimeout: 10 * time.Second},
 	}
 	c.Start(ctx)
@@ -347,23 +359,46 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	return name, ok
 }
 
-// policy is a Computer's egress policy under the applied Fleet.
+// policy is a Computer's egress policy: that of its active generation.
 func (c *Controller) policy(name string) (Policy, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	f := c.state.Fleet
-	if f == nil {
+	rec := c.state.Computers[name]
+	if c.state.Fleet == nil || rec == nil {
 		return Policy{}, false
 	}
-	comp, ok := f.Computers[name]
-	if !ok {
-		return Policy{}, false
+	return NewPolicy(rec.Active.Allow, rec.Active.SignInHosts, c.state.Fleet.Egress.Unenforced()), true
+}
+
+// egressMode is the active egress mode of a Computer, for status.
+func (c *Controller) egressModeLocked(rec *Record) string {
+	switch {
+	case c.state.Fleet != nil && c.state.Fleet.Egress.Unenforced():
+		return api.EgressUnenforced
+	case slices.Contains(rec.Active.Allow, fleet.AllowAll):
+		return api.EgressAllowAll
 	}
-	var hosts []string
-	if rec := c.state.Computers[name]; rec != nil {
-		hosts = rec.SignInHosts
+	return api.EgressEnforced
+}
+
+// authorizeLease allows a lease only on a shared-write drive the Computer's
+// active generation attaches writable.
+func (c *Controller) authorizeLease(computer, drive string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rec := c.state.Computers[computer]
+	if c.state.Fleet == nil || rec == nil {
+		return fmt.Errorf("%s is not a Computer of this Fleet", computer)
 	}
-	return NewPolicy(comp.Egress.Allow, hosts, f.Egress.Unenforced()), true
+	if d, ok := c.state.Fleet.Drives[drive]; !ok || d.Access != fleet.AccessSharedWrite {
+		return fmt.Errorf("drive %s is not a shared-write drive", drive)
+	}
+	for _, m := range rec.Active.Drives {
+		if m.Name == drive && !m.ReadOnly {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s does not attach drive %s writable", computer, drive)
 }
 
 // denied journals a denied egress request in the Computer (§8 gate 7).
