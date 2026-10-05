@@ -144,3 +144,13 @@ the proxy side, rejects private/link-local/metadata results, connects to the val
 - **Secret file mode** is 0600, not 0400 (see Secrets and TLS): a 0400 file breaks subscription token refresh.
 - **Token refresh is one-way**: a token refreshed inside a Computer is not written back to the host bindings; re-run `a12s up` with a fresh binding to rotate.
 - **Controller restart** forgets credentials (they are never on disk); `a12s status` says so and `a12s up` re-sends them.
+
+## Open items (Layer 2 or later)
+- Shutdown tracker: detached fleet/apply/power workers are not counted, so `Controller.Wait` can return while one still runs (review #58).
+- The #56 proxy-map race test uses a 50 ms window for the competing refresh; synchronize it explicitly (review #59).
+- Credential reclaim vs. `docker exec` injection: a microsecond window remains between the compare-and-swap check and the rename; a shared `flock` on `/run/a12s/secrets/.lock` would close it (review #35).
+- Codex app-server protocol schema diff per bundle (adapter-check recommendation; `conformance.sh` asserts the methods the adapter uses, not the full schema).
+- Under a claude.ai subscription login, Claude Code loads the account's claude.ai connectors (Gmail, Calendar, Drive) into a Computer's session; the egress proxy blocks them (`mcp-proxy.anthropic.com` diagnostics) and the agent mentions they are unauthorized. A `claude setup-token` credential (`CLAUDE_CODE_OAUTH_TOKEN`) is the recommended Claude credential for Computers.
+- Subscription tokens: the lab bindings use the Mac's keychain OAuth pair; refresh-token rotation inside a Computer is not written back to the host bindings.
+- `bundles.yml` has not yet run on GitHub (ghcr login/push and the arm64 QEMU conformance path are untested there).
+- Plain `http://` egress is refused under enforced policy (CONNECT only); apt/http mirrors inside a Computer need `allow: ["*"]` or HTTPS mirrors.

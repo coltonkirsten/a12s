@@ -104,3 +104,9 @@ Verdict: not signed off; #53 and #55 verified fixed; #54 reopened as #56.
 | 57 | Unknown-mapping denials younger than 1s are not logged | accept (small) | both return paths log |
 
 Follow-up after round 5 (not an Astra finding): the controller package tests were flaky under full-package runs. Two causes, both fixed (`dbc10d9`, `1d1faba`): a lost wakeup when an exclusive drive is freed (a #51 follow-up, a real code fault), and restart tests that ran two Controllers on one state dir (the Controller now tracks its background goroutines and `Wait`s for them on shutdown). `go test ./internal/controller/ -count=10` and `-race -count=3` are green.
+
+## Round 6 — sign-off at 6dbd03a
+
+**Signed off.** #56, #57 and the follow-up verified fixed; no Layer 1 blocker. Two Layer 2 should-fix notes, recorded in PLAN.md "Open items": #58 (detached fleet/apply/power workers are not counted by the shutdown tracker) and #59 (the #56 race test gives the competing refresh a 50 ms window; synchronize it explicitly).
+
+Totals: 6 rounds, 59 findings (1–59): 55 accepted and fixed, 2 rejected and accepted by Astra (#20, #41), 1 rejection withdrawn and implemented (#34), 1 accepted with a documented residual (#35), 2 carried to Layer 2 (#58, #59).
