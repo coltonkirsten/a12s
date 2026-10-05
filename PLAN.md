@@ -50,18 +50,19 @@ Fleet `F`, Computer `C`, Drive `D`. Labels: `a12s.fleet`, `a12s.computer`,
   It spawns the harness as uid/gid 1000 (`agent`). Nothing else runs as root.
 - Mounts: home drive at `/home` (computerd creates `/home/agent` 1000:1000 and `/home/.a12s` root 0700 — journal,
   session record; the agent can neither open nor rename it); work drives at their `at:`; bundle cache ro at
-  `/opt/a12s/bundles`; tmpfs `/run/a12s` (root 0700; `secrets/` 1000:1000 0700, `tls/` root 0700, `sock/` 0755);
+  `/opt/a12s/bundles`; tmpfs `/run/a12s` (root 0711; `secrets/` root 0711 with agent-owned 0600 files, `tls/` root 0700, `sock/` 0755);
   tmpfs `/tmp`; `--init` so orphaned harness children are reaped. No host mounts, no Docker socket, no ports.
   `/run/a12s` is 0711 (the agent must traverse into `secrets/` and `sock/`, and still cannot open `tls/`).
 - Env set by the driver: `A12S_COMPUTER`, `A12S_FLEET`, `A12S_GENERATION`, `A12S_HARNESS_KIND` (`claude-code`|`codex`),
   `A12S_HARNESS_VERSION`, `A12S_MODEL` (optional), `A12S_AUTONOMY` (`full`|`restricted`), `A12S_IMAGE_TIER` (`slim`|`browser`|`custom`),
-  `A12S_BUNDLE=/opt/a12s/bundles/<kind>-<version>`, `A12S_CREDENTIALS=anthropic,openai,…`,
+  `A12S_BUNDLE=/opt/a12s/bundles/<kind>-<version>-<imageID[:12]>`, `A12S_CREDENTIALS=anthropic,openai,…`,
+  `A12S_DRIVES=<at>:rw,<at>:ro,…` (computerd chowns an empty, root-owned rw mount root to 1000:1000),
   `A12S_PROXY=http://a12s-F-controller:3128`, `A12S_CONTROLLER=https://a12s-F-controller:7443`.
 
 ### HarnessBundle image
 OCI image whose filesystem is `/bundle/{bundle.json, bin/<binary>, …}` (Codex ships its release package layout beside `bin/codex`). `bundle.json`:
 `{"kind":"claude-code","version":"2.1.280","arch":"arm64","bin":"bin/claude","signInHosts":["api.anthropic.com","platform.claude.com", …]}`.
-The Controller extracts it into the bundle cache as `/opt/a12s/bundles/<kind>-<version>/` and adds
+The Controller extracts it into the bundle cache as `/opt/a12s/bundles/<kind>-<version>-<imageID[:12]>/` (keyed by image identity, so a re-tagged image never reuses old files) and adds
 `signInHosts` to that Computer's egress allowlist. Default image refs: `a12s/bundle-<kind>:<version>`;
 tiers `a12s/slim:dev`, `a12s/browser:dev`; controller `a12s/controller:dev`. `fleet.lock` pins image IDs:
 ```yaml
@@ -125,6 +126,7 @@ the proxy side, rejects private/link-local/metadata results, connects to the val
 `POST /v1/diagnostics` to that computerd. Internal networks use `gateway_mode_ipv4=isolated`; there is no other route.
 
 ### Decisions taken during implementation
+- computerd does every filesystem step under `/home/agent` (config dirs, credential symlinks, reclaim) as uid 1000 (`dist/agentfs.js`) and refuses symlinks in place of directories it manages; it reads only the credential names in `A12S_CREDENTIALS`, with `O_NOFOLLOW`.
 - Driver is bound to one Fleet at construction; `EnsureBundle` returns the parsed `bundle.json` (the Controller needs `signInHosts`).
 - The preset is applied at stage time into the stopped container's `/home/agent`, only when that directory does not exist yet.
 - A prompt whose resume fails is accepted (200) and journals `turn.started` → `resume.failed` → `turn.finished failed`; the session id is kept.

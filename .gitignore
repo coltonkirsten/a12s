@@ -6,3 +6,4 @@ a12s.bindings.yaml
 node_modules/
 *.log
 .DS_Store
+examples/lab/fleet.lock
