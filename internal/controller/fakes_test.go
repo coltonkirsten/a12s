@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -220,11 +221,12 @@ func (d *fakeDriver) Exec(_ context.Context, name string, cmd []string, stdin io
 	if c == nil || !c.running {
 		return -1, "", fmt.Errorf("exec %s: not running", name)
 	}
-	if len(cmd) != 7 || cmd[0] != "sh" || cmd[2] != writeScript || !asRoot {
+	if len(cmd) != 8 || cmd[0] != "sh" || cmd[2] != writeScript || !asRoot {
 		return 1, "unexpected command", nil
 	}
 	data, _ := io.ReadAll(stdin)
 	c.files[cmd[4]+" "+cmd[5]+" "+cmd[6]] = data
+	c.files[path.Dir(cmd[4])+" dir"] = []byte(cmd[7])
 	d.record("write %s %s", name, cmd[4])
 	return 0, "", nil
 }
@@ -292,6 +294,8 @@ type fakeComputerd struct {
 	diagnostics []string
 	// keepRunningOnStop leaves the turn running when it is stopped.
 	keepRunningOnStop bool
+	// broken never starts listening (a computerd that fails readiness).
+	broken bool
 }
 
 var errDown = fmt.Errorf("connection refused")
@@ -299,7 +303,13 @@ var errDown = fmt.Errorf("connection refused")
 func (f *fakeComputerd) boot() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.up, f.active = true, ""
+	f.up, f.active = !f.broken, ""
+}
+
+func (f *fakeComputerd) setBroken(b bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.broken = b
 }
 
 func (f *fakeComputerd) halt() {

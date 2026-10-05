@@ -59,6 +59,10 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 			t.Errorf("scout: %s not injected", f)
 		}
 	}
+	scoutFiles := h.d.get("scout").files
+	if string(scoutFiles[secretsDir+" dir"]) != "0711" || string(scoutFiles[tlsDir+" dir"]) != "0700" {
+		t.Errorf("dir modes: secrets %q, tls %q", scoutFiles[secretsDir+" dir"], scoutFiles[tlsDir+" dir"])
+	}
 	if g := h.d.file("scout", generationFile, "0:0", "0644"); string(g) != "1\n" {
 		t.Errorf(".generation = %q", g)
 	}
@@ -336,5 +340,52 @@ func TestAdmission(t *testing.T) {
 	res := h.up(labFleet(t, nil), lock, false)
 	if res.Lock.Images["slim"] != "sha256:slim1" || h.d.get("scout").spec.Image != "sha256:slim1" {
 		t.Fatalf("pin changed: %v, runs %s", res.Lock.Images, h.d.get("scout").spec.Image)
+	}
+}
+
+func TestIdleSleepDoesNotWaitForTheFlush(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), nil, false)
+	start := time.Now()
+	if err := h.c.SetPower(context.Background(), "builder", api.PowerRequest{State: api.PowerAsleep}); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d >= h.c.timing.SleepFlush {
+		t.Fatalf("idle sleep took %s (flush is %s)", d, h.c.timing.SleepFlush)
+	}
+}
+
+// One Computer failing readiness must not delay the others (wake --all
+// sends one request per Computer, concurrently).
+func TestFailingWakeDoesNotDelayOthers(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), nil, false)
+	ctx := context.Background()
+	for _, name := range lab4 {
+		if err := h.c.SetPower(ctx, name, api.PowerRequest{State: api.PowerAsleep}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.cds.get("tester").setBroken(true)
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		done <- h.c.SetPower(ctx, "tester", api.PowerRequest{State: api.PowerAwake, Credentials: labCreds})
+	}()
+	waitFor(t, func() bool { return h.phase("tester") == api.PhaseStarting })
+	for _, name := range []string{"builder", "reviewer", "scout"} {
+		go h.c.SetPower(ctx, name, api.PowerRequest{State: api.PowerAwake, Credentials: labCreds})
+	}
+	for _, name := range []string{"builder", "reviewer", "scout"} {
+		h.waitPhase(name, api.PhaseReady)
+	}
+	if d := time.Since(start); d >= h.c.timing.ReadyTimeout/2 {
+		t.Fatalf("others were Ready only after %s", d)
+	}
+	if h.phase("tester") != api.PhaseStarting {
+		t.Fatalf("tester = %s", h.phase("tester"))
+	}
+	if err := <-done; err == nil || h.phase("tester") != api.PhaseError {
+		t.Fatalf("tester wake = %v, phase %s", err, h.phase("tester"))
 	}
 }
