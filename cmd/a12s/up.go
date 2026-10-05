@@ -13,15 +13,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// putFleetRequest is api.PutFleetRequest plus Presets: preset tars keyed by
-// the preset path as written in the Fleet. The Controller branch adds the
-// same field to api.PutFleetRequest; once merged, the outer field shadows
-// the embedded one with identical JSON, and this wrapper can go.
-type putFleetRequest struct {
-	api.PutFleetRequest
-	Presets map[string][]byte `json:"presets,omitempty"`
-}
-
 func runUp(g *globals, args []string) error {
 	fs := g.flags("up")
 	asleep := fs.Bool("asleep", false, "create new Computers asleep")
@@ -66,10 +57,7 @@ func runUp(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	req := putFleetRequest{
-		PutFleetRequest: api.PutFleetRequest{Fleet: f, Lock: lock, Credentials: creds, Asleep: *asleep},
-		Presets:         presets,
-	}
+	req := api.PutFleetRequest{Fleet: f, Lock: lock, Credentials: creds, Asleep: *asleep, Presets: presets}
 	var resp api.PutFleetResponse
 	if err := c.Do(ctx, "PUT", "/v1/fleet", req, &resp); err != nil {
 		return err

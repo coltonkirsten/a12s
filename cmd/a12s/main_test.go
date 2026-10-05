@@ -92,7 +92,7 @@ func TestPresetsPinAndRefuseChange(t *testing.T) {
 }
 
 func TestPutFleetRequestJSON(t *testing.T) {
-	req := putFleetRequest{PutFleetRequest: api.PutFleetRequest{Asleep: true}, Presets: map[string][]byte{"./p": []byte("tar")}}
+	req := api.PutFleetRequest{Asleep: true, Presets: map[string][]byte{"./p": []byte("tar")}}
 	b, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
