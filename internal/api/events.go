@@ -43,11 +43,16 @@ const (
 // unknown or ahead of the journal.
 const SSEGap = "gap"
 
+// The Data payloads below mirror what computerd/src/computer.ts and its
+// adapters emit; fields computerd adds later are ignored.
+
 // TurnStartedData is Data of turn.started.
 type TurnStartedData struct {
-	HarnessVersion string `json:"harnessVersion"`
-	Model          string `json:"model,omitempty"`
-	Resumed        bool   `json:"resumed"`
+	Harness Harness `json:"harness"` // kind and version
+	Model   string  `json:"model,omitempty"`
+	Resumed bool    `json:"resumed"`
+	Prompt  string  `json:"prompt"`
+	Cwd     string  `json:"cwd"`
 }
 
 // TextDeltaData is Data of text.delta.
@@ -62,24 +67,35 @@ const (
 	TurnInterrupted = "interrupted"
 )
 
-// TurnFinishedData is Data of turn.finished.
+// TurnFinishedData is Data of turn.finished. Usage is the harness's own
+// usage object, or null.
 type TurnFinishedData struct {
 	Status string          `json:"status"`
+	Usage  json.RawMessage `json:"usage"`
 	Error  string          `json:"error,omitempty"`
-	Usage  json.RawMessage `json:"usage,omitempty"`
 }
 
-// DiagnosticData is Data of diagnostic, and the body of computerd's
-// POST /v1/diagnostics (the Controller reports denied egress this way).
+// DiagnosticData is Data of diagnostic: a message plus event-specific fields
+// (names, source, ...). As the body of computerd's POST /v1/diagnostics it is
+// {message, data}; computerd journals that with source "controller".
 type DiagnosticData struct {
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+	Source  string          `json:"source,omitempty"`
 }
+
+// Where a resume failed, in ResumeFailedData.At.
+const (
+	ResumeAtWake    = "wake"
+	ResumeAtPrompt  = "prompt"
+	ResumeAtRestart = "restart"
+)
 
 // ResumeFailedData is Data of resume.failed.
 type ResumeFailedData struct {
-	Session string `json:"session"`
-	Reason  string `json:"reason"`
+	SessionID string `json:"sessionId"`
+	Reason    string `json:"reason"`
+	At        string `json:"at"` // ResumeAtWake, ResumeAtPrompt or ResumeAtRestart
 }
 
 // ComputerdStatus is computerd's GET /v1/status.

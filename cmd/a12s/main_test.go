@@ -111,7 +111,7 @@ func TestTurnPrinter(t *testing.T) {
 		return api.Event{Turn: "t_41", Type: typ, Data: json.RawMessage(data)}
 	}
 	for _, e := range []api.Event{
-		ev(api.EventTurnStarted, `{"harnessVersion":"0.154.0","model":"gpt-6-astra","resumed":false}`),
+		ev(api.EventTurnStarted, `{"harness":{"kind":"codex","version":"0.154.0"},"model":"gpt-6-astra","resumed":false,"prompt":"p","cwd":"/home/agent"}`),
 		ev(api.EventTextDelta, `{"text":"Adding a "}`),
 		ev(api.EventTextDelta, `{"text":"health check."}`),
 		ev(api.EventToolStarted, `{"name":"apply_patch"}`),
@@ -163,7 +163,7 @@ func TestPromptEndToEnd(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			if n == 1 {
-				send(1, api.EventTurnStarted, `{"harnessVersion":"2.1.280","model":"claude-fable-5-1","resumed":true}`)
+				send(1, api.EventTurnStarted, `{"harness":{"kind":"claude-code","version":"2.1.280"},"model":"claude-fable-5-1","resumed":true,"prompt":"p","cwd":"/home/agent"}`)
 				send(2, api.EventTextDelta, `{"text":"The word "}`)
 				panic(http.ErrAbortHandler)
 			}

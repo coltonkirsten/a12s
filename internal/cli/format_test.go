@@ -95,11 +95,11 @@ ux-old      work  -     exclusive  -  ORPHANED
 }
 
 func TestTurnLines(t *testing.T) {
-	got := TurnStartedLine("t_41", "codex", api.TurnStartedData{HarnessVersion: "0.154.0", Model: "gpt-6-astra"})
+	got := TurnStartedLine("t_41", "codex", api.TurnStartedData{Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, Model: "gpt-6-astra"})
 	if got != "turn t_41 started (codex 0.154.0, gpt-6-astra, resumed: false)" {
 		t.Errorf("got %q", got)
 	}
-	got = TurnStartedLine("t_2", "claude-code", api.TurnStartedData{HarnessVersion: "2.1.280", Resumed: true})
+	got = TurnStartedLine("t_2", "claude-code", api.TurnStartedData{Harness: api.Harness{Version: "2.1.280"}, Resumed: true})
 	if got != "turn t_2 started (claude-code 2.1.280, resumed: true)" {
 		t.Errorf("got %q", got)
 	}
@@ -123,7 +123,7 @@ func TestEventAndLogLines(t *testing.T) {
 		{ev(api.EventToolFinished, `{"name":"Bash","isError":true}`), "[tool] Bash failed"},
 		{ev(api.EventDiagnostic, `{"message":"egress denied: evil.com:443"}`), "[diagnostic] egress denied: evil.com:443"},
 		{ev(api.EventPermission, `{"tool": "Write", "decision": "deny"}`), `[permission] {"tool":"Write","decision":"deny"}`},
-		{ev(api.EventResumeFailed, `{"session":"s","reason":"no session file"}`), "[resume.failed] no session file"},
+		{ev(api.EventResumeFailed, `{"sessionId":"s","reason":"no session file","at":"wake"}`), "[resume.failed] no session file"},
 		{ev(api.EventLifecycle, ``), "[lifecycle] "},
 	} {
 		if got := EventLine(c.e); got != c.want {

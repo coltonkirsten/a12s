@@ -55,7 +55,7 @@ func TestStreamReconnectExactlyOnce(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		switch n {
 		case 1:
-			writeEvent(t, w, 1, api.EventTurnStarted, `{"harnessVersion":"2.1.280","resumed":false}`)
+			writeEvent(t, w, 1, api.EventTurnStarted, `{"harness":{"kind":"claude-code","version":"2.1.280"},"resumed":false,"prompt":"p","cwd":"/home/agent"}`)
 			writeEvent(t, w, 2, api.EventTextDelta, `{"text":"hel"}`)
 			writeEvent(t, w, 3, api.EventTextDelta, `{"text":"lo"}`)
 			// Half an event, then the connection dies.

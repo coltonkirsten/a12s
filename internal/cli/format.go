@@ -193,9 +193,12 @@ func writeTable(w io.Writer, rows [][]string) {
 }
 
 // TurnStartedLine is `turn t_41 started (codex 0.154.0, gpt-6-astra, resumed: false)`.
-// kind is the harness kind; the event carries only the version and model.
+// The event names the harness; kind is the fallback when it does not.
 func TurnStartedLine(turn, kind string, d api.TurnStartedData) string {
-	parts := []string{strings.TrimSpace(kind + " " + d.HarnessVersion)}
+	if d.Harness.Kind != "" {
+		kind = d.Harness.Kind
+	}
+	parts := []string{strings.TrimSpace(kind + " " + d.Harness.Version)}
 	if d.Model != "" {
 		parts = append(parts, d.Model)
 	}
