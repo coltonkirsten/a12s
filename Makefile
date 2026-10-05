@@ -4,6 +4,7 @@ GO ?= go
 
 build:
 	$(GO) build ./...
+	$(GO) build -o bin/a12s ./cmd/a12s
 
 test:
 	$(GO) test ./...
