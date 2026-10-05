@@ -60,3 +60,28 @@ func TestReadyIsReadBack(t *testing.T) {
 		t.Fatalf("scout = %s, want Error", h.phase("scout"))
 	}
 }
+
+// #30: the Fleet's egress enforcement is part of a Computer's generation:
+// a busy Computer keeps its enforcement until its staged generation applies.
+func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
+	h := newHarness(t)
+	res := h.up(labFleet(t, nil), nil, false)
+	scout := h.cds.get("scout")
+	scout.StartTurn(context.Background(), api.TurnRequest{RequestID: "r1", Prompt: "x"})
+	h.waitPhase("scout", api.PhaseBusy)
+	out := h.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), res.Lock, false)
+	if !slices.Equal(out.Staged, []string{"scout"}) || !slices.Equal(out.Updated, []string{"builder", "reviewer", "tester"}) {
+		t.Fatalf("up = %+v", out)
+	}
+	if p, _ := h.c.policy("scout"); p.Check("anything.example", 443) == "" {
+		t.Fatal("busy scout became unenforced before its generation applied")
+	}
+	if p, _ := h.c.policy("builder"); p.Check("anything.example", 443) != "" {
+		t.Fatal("idle builder did not become unenforced")
+	}
+	if cs := h.c.computerStatus(context.Background(), "scout"); cs.EgressMode != api.EgressEnforced {
+		t.Fatalf("scout mode = %q", cs.EgressMode)
+	}
+	scout.finish(api.TurnCompleted)
+	waitFor(t, func() bool { p, _ := h.c.policy("scout"); return p.Check("anything.example", 443) == "" })
+}

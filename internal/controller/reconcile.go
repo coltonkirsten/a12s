@@ -250,6 +250,7 @@ func (c *Controller) activeLocked(name string) Active {
 		Allow:       slices.Clone(comp.Egress.Allow),
 		SignInHosts: slices.Clone(c.state.BundleHosts[comp.Harness.BundleKey()]),
 		Drives:      slices.Clone(comp.Drives),
+		Unenforced:  c.state.Fleet.Egress.Unenforced(),
 	}
 }
 
@@ -696,7 +697,8 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
 // Lock (generation and preset unset), and the hash of what makes a
-// generation: image, bundle, resources, drives, environment and egress.
+// generation: image, bundle, resources, drives, environment, egress and
+// the Fleet's egress enforcement.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -737,7 +739,9 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Drives        []driver.Mount
 		Env           []string
 		Egress        []string
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress})
+		// Omitted when enforced, so enforced generations keep their hash.
+		Unenforced bool `json:",omitempty"`
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced()})
 	if err != nil {
 		return spec, "", err
 	}

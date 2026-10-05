@@ -352,12 +352,16 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 		}
 	}
 	res.CredentialsLoaded = len(c.creds) > 0 || !needCreds
+	unenforced := false // in any Computer's active generation
+	for _, rec := range c.state.Computers {
+		unenforced = unenforced || rec.Active.Unenforced
+	}
 	c.mu.Unlock()
 	if f == nil {
 		res.Warnings = append(res.Warnings, "no Fleet applied; run a12s up")
 		return res
 	}
-	if f.Egress.Unenforced() {
+	if unenforced {
 		res.EgressEnforcement = fleet.EnforcementUnenforced
 		res.Warnings = append(res.Warnings, "egress is NOT enforced (egress.enforcement: unenforced)")
 	}

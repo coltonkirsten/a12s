@@ -63,6 +63,9 @@ type Active struct {
 	SignInHosts []string `json:"signInHosts,omitempty"`
 	// Drives are the attachments, which authorize leases.
 	Drives []fleet.DriveMount `json:"drives,omitempty"`
+	// Unenforced is the Fleet's egress.enforcement: unenforced when this
+	// generation was staged.
+	Unenforced bool `json:"unenforced,omitempty"`
 }
 
 // pending reports whether a staged change waits for idle.
