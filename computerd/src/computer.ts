@@ -50,6 +50,8 @@ const PRECHECK_TIMEOUT_MS = 60_000;
 export class Computer {
   private base: 'starting' | 'ready' | 'stopping' = 'starting';
   private session: SessionRecord | null = null;
+  /** Why session.json could not be used; `session: current` fails until `new`, an explicit id, or a repair. */
+  private sessionDamaged: string | null = null;
   private resumePending = false;
   private active: ActiveTurn | null = null;
   private restarting = false;
@@ -80,10 +82,12 @@ export class Computer {
     for (const t of this.journal.unfinishedTurns()) {
       this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'computerd restarted' }, { turn: t.turnId, session: t.session });
     }
-    try {
-      this.session = JSON.parse(readFileSync(this.sessionPath, 'utf8')) as SessionRecord;
-    } catch {
-      this.session = null;
+    const loaded = loadSessionRecord(this.sessionPath);
+    this.session = loaded.record;
+    this.sessionDamaged = loaded.damaged;
+    if (this.sessionDamaged) {
+      this.resumePending = true;
+      this.journal.append('resume.failed', { sessionId: null, reason: this.sessionDamaged, at: 'wake' });
     }
     const wiring = wireCredentials(this.cfg);
     this.adapterCredGeneration = credentialGeneration(this.cfg);
@@ -148,6 +152,7 @@ export class Computer {
     this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
     let run;
     try {
+      if (req.session === 'current' && this.sessionDamaged) throw new ResumeError(this.sessionDamaged);
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
@@ -189,6 +194,7 @@ export class Computer {
       this.journal.append('session.changed', { from: previous?.sessionId ?? null, to: sessionId }, { turn: turnId, session: sessionId });
     }
     this.saveSession({ sessionId, harness: this.cfg.harness.kind, cwd });
+    this.sessionDamaged = null;
     if (wanted === null) this.resumePending = false;
     active.started = true;
     if (active.stopRequested) void this.adapter.stop();
@@ -337,4 +343,25 @@ export class Computer {
       { session: this.session?.sessionId ?? null },
     );
   }
+}
+
+/** Distinguishes "never had a session" (no file) from a record that exists but cannot be trusted. */
+export function loadSessionRecord(path: string): { record: SessionRecord | null; damaged: string | null } {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { record: null, damaged: null };
+    return { record: null, damaged: `session record unreadable: ${(err as Error).message}` };
+  }
+  try {
+    const r = JSON.parse(text) as Partial<SessionRecord>;
+    const ok =
+      typeof r === 'object' && r !== null && typeof r.sessionId === 'string' && r.sessionId !== '' &&
+      (r.harness === 'claude-code' || r.harness === 'codex') && typeof r.cwd === 'string' && r.cwd.startsWith('/');
+    if (ok) return { record: { sessionId: r.sessionId!, harness: r.harness!, cwd: r.cwd! }, damaged: null };
+  } catch {
+    // fall through
+  }
+  return { record: null, damaged: 'session record is damaged (expected {sessionId, harness, cwd})' };
 }

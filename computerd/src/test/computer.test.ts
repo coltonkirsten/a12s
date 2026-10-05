@@ -138,3 +138,29 @@ test('acceptance is journaled before dispatch; a crash mid-turn ends it interrup
   assert.deepEqual(await after.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish the release' }), t);
   assert.equal(fresh.inputs.length, 0, 'the retry did not reach the harness');
 });
+
+test('a damaged session record blocks session: current until session: new', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.stateDir, 'session.json'), '{"sessionId": 42');
+  const { adapter, computer, types } = setup(cfg);
+  await computer.start();
+  assert.deepEqual([computer.status().resumePending, computer.status().session], [true, null]);
+  assert.ok(types().includes('resume.failed'));
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'current', prompt: 'continue the migration' });
+  assert.deepEqual(types(t.turnId), ['turn.started', 'resume.failed', 'turn.finished']);
+  assert.equal(adapter.inputs.length, 0, 'never started a fresh session');
+  await computer.submitTurn({ requestId: 'r2', session: 'new', prompt: 'start over' });
+  adapter.finish();
+  assert.equal(computer.status().resumePending, false);
+});
+
+test('session record loading: missing is fresh, wrong shape is damaged', async () => {
+  const { loadSessionRecord } = await import('../computer.js');
+  const cfg = testConfig();
+  const p = join(cfg.stateDir, 'session.json');
+  assert.deepEqual(loadSessionRecord(p), { record: null, damaged: null });
+  writeFileSync(p, '{"sessionId":"s","harness":"vim","cwd":"/home/agent"}');
+  assert.match(loadSessionRecord(p).damaged ?? '', /damaged/);
+  writeFileSync(p, '{"sessionId":"s","harness":"codex","cwd":"/home/agent"}');
+  assert.deepEqual(loadSessionRecord(p), { record: { sessionId: 's', harness: 'codex', cwd: '/home/agent' }, damaged: null });
+});
