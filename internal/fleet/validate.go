@@ -15,6 +15,7 @@ var (
 	nameRE       = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 	versionRE    = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
 	credentialRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	mountRE      = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 	hostRE       = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
@@ -155,6 +156,10 @@ func (c Computer) validate(field string, drives map[string]Drive) []error {
 }
 
 func checkMountPoint(at string) error {
+	if !mountRE.MatchString(at) {
+		// Mount points travel in A12S_DRIVES as "<at>:<mode>,..."; ',' and ':' would forge entries.
+		return fmt.Errorf("%q may only contain letters, digits, '.', '_', '-' and '/'", at)
+	}
 	if !path.IsAbs(at) || path.Clean(at) != at {
 		return fmt.Errorf("%q must be a clean absolute path", at)
 	}
