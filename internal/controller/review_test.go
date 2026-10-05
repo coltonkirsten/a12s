@@ -122,6 +122,9 @@ func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
 			t.Errorf("%s still pending", name)
 		}
 	}
+	if v := h.d.twoWriters(); len(v) > 0 {
+		t.Fatalf("two writers: %v", v)
+	}
 }
 
 // #26: a stage the Driver reports but Observe does not show is not

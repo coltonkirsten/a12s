@@ -38,6 +38,10 @@ type fakeDriver struct {
 	// ghostStarts makes Observe never show a container running (a start
 	// the substrate reported but that did not take).
 	lostStages, ghostStarts bool
+	// exclusive drives (as in the lab Fleet); staging a second attachment
+	// of one is recorded in violations.
+	exclusive  map[string]bool
+	violations []string
 }
 
 type fakeContainer struct {
@@ -58,8 +62,9 @@ func newFakeDriver(cds *fakeComputerds) *fakeDriver {
 			"a12s/bundle-claude-code:2.1.280": bundle("claude-code", "2.1.280", "sha256:claude1", "platform.claude.com"),
 			"a12s/bundle-codex:0.154.0":       bundle("codex", "0.154.0", "sha256:codex1", "auth.openai.com"),
 		},
-		events: make(chan driver.Event, 16),
-		cds:    cds,
+		events:    make(chan driver.Event, 16),
+		cds:       cds,
+		exclusive: map[string]bool{"drive-a12s-repo": true, "drive-ux-scratch": true},
 	}
 }
 
@@ -177,6 +182,13 @@ func (d *fakeDriver) StageComputer(_ context.Context, spec driver.ComputerSpec) 
 	}
 	if d.lostStages {
 		return nil
+	}
+	for _, m := range spec.Drives {
+		for other, c := range d.computers {
+			if other != spec.Name && d.exclusive[m.DriveID] && slices.ContainsFunc(c.spec.Drives, func(o driver.Mount) bool { return o.DriveID == m.DriveID }) {
+				d.violations = append(d.violations, fmt.Sprintf("%s staged with %s while %s attaches it", spec.Name, m.DriveID, other))
+			}
+		}
 	}
 	d.computers[spec.Name] = &fakeContainer{spec: spec, files: map[string][]byte{}}
 	d.record("stage %s %d", spec.Name, spec.Generation)
@@ -657,4 +669,10 @@ func (f *fakeComputerd) mute() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.up = false
+}
+
+func (d *fakeDriver) twoWriters() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.violations)
 }

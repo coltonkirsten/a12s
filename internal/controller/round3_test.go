@@ -85,3 +85,29 @@ func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
 	scout.finish(api.TurnCompleted)
 	waitFor(t, func() bool { p, _ := h.c.policy("scout"); return p.Check("anything.example", 443) == "" })
 }
+
+// #51: two idle Computers swapping exclusive drives converge: each releases
+// the drive the other needs, and no drive ever has two attachments.
+func TestExclusiveDriveSwap(t *testing.T) {
+	h := newHarness(t)
+	res := h.up(labFleet(t, nil), nil, false)
+	swap := func(f *fleet.Fleet) {
+		b, te := f.Computers["builder"], f.Computers["tester"]
+		b.Drives, te.Drives = []fleet.DriveMount{{Name: "ux-scratch", At: "/work/ux"}}, []fleet.DriveMount{{Name: "a12s-repo", At: "/work/a12s"}}
+		f.Computers["builder"], f.Computers["tester"] = b, te
+	}
+	h.up(labFleet(t, swap), res.Lock, false)
+	waitFor(t, func() bool {
+		return slices.Equal(h.d.mounts("drive-ux-scratch"), []string{"builder"}) && slices.Equal(h.d.mounts("drive-a12s-repo"), []string{"tester"})
+	})
+	h.waitPhase("builder", api.PhaseReady)
+	h.waitPhase("tester", api.PhaseReady)
+	for _, name := range []string{"builder", "tester"} {
+		if rec := readState(t, h.dir).Computers[name]; rec.pending() || rec.Generation < 2 {
+			t.Errorf("%s: %+v", name, rec)
+		}
+	}
+	if v := h.d.twoWriters(); len(v) > 0 {
+		t.Fatalf("two writers: %v", v)
+	}
+}

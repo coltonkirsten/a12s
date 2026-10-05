@@ -293,6 +293,55 @@ func (c *Controller) exclusiveHolder(ctx context.Context, name string) (*driveHe
 	return nil, nil
 }
 
+// holdsObsolete reports whether the active generation attaches an
+// exclusive drive the Computer's Fleet entry no longer attaches.
+func (c *Controller) holdsObsolete(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, rec := c.state.Fleet, c.state.Computers[name]
+	comp := f.Computers[name]
+	for _, old := range rec.Active.Drives {
+		if d, ok := f.Drives[old.Name]; ok && d.Access != fleet.AccessExclusive {
+			continue
+		}
+		if !slices.ContainsFunc(comp.Drives, func(m fleet.DriveMount) bool { return m.Name == old.Name }) {
+			return true
+		}
+	}
+	return false
+}
+
+// release stops and removes an idle Computer's old generation, which
+// detaches its drives, and reads that back; its new generation stays
+// staged until the drives it needs are free. The caller has closed
+// admission and found the Computer idle.
+func (c *Controller) release(ctx context.Context, name string, obs driver.ComputerState) error {
+	c.setTransition(name, true)
+	defer c.setTransition(name, false)
+	c.mu.Lock()
+	c.rtLocked(name).released = true
+	c.mu.Unlock()
+	if obs.Power == driver.PowerAwake {
+		c.setPhase(name, api.PhaseStopping, nil)
+		c.finalStatus(ctx, name)
+		c.stopEvents(name)
+		if err := c.stop(ctx, name, obs.Generation); err != nil {
+			return c.fail(name, err, true)
+		}
+	}
+	err := c.drv.RemoveComputer(ctx, name)
+	if err == nil {
+		err = c.confirm(ctx, name, "release of the old generation", func(_ driver.ComputerState, exists bool) bool { return !exists })
+	}
+	if err != nil {
+		return c.fail(name, err, true)
+	}
+	c.setPhase(name, api.PhaseProvisioning, nil)
+	c.logf("%s: generation %d removed to release its drives (drives kept)", name, obs.Generation)
+	c.kickPending(name)
+	return nil
+}
+
 // kickPending retries staged generations, for example one that waited for
 // a drive the just-changed Computer released.
 func (c *Controller) kickPending(except string) {
@@ -385,9 +434,20 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	if err != nil {
 		return c.fail(name, err, false)
 	}
+	obs, exists, err := c.observeOne(ctx, name)
+	if err != nil {
+		return c.fail(name, err, true)
+	}
 	if held, err := c.exclusiveHolder(ctx, name); err != nil {
 		return c.fail(name, err, true)
 	} else if held != nil {
+		// The holder may itself wait for a drive this Computer attaches
+		// (a swap): release that one first, so the holder can proceed.
+		if exists && c.holdsObsolete(name) {
+			if err := c.release(ctx, name, obs); err != nil {
+				return err
+			}
+		}
 		return held
 	}
 	c.mu.Lock()
@@ -398,10 +458,6 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 		if spec.Preset = loadPreset(c.cfg.StateDir, sum); spec.Preset == nil {
 			return c.fail(name, fmt.Errorf("preset %s (%s) is not stored; run a12s up to send it", preset, sum), true)
 		}
-	}
-	obs, exists, err := c.observeOne(ctx, name)
-	if err != nil {
-		return c.fail(name, err, true)
 	}
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
@@ -440,6 +496,7 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	rec.StagedGeneration, rec.StagedHash = 0, ""
 	// The new generation's egress policy and drives take effect now.
 	rec.Active = c.activeLocked(name)
+	c.rtLocked(name).released = false
 	desired := rec.DesiredPower
 	err = c.saveLocked()
 	c.mu.Unlock()

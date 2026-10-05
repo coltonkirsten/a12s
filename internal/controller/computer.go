@@ -34,6 +34,9 @@ type runtime struct {
 	// the Controller stops or restages the Computer.
 	admit  sync.Mutex
 	closed bool
+	// released is set while the old generation was removed to free its
+	// drives and the new one is not staged yet.
+	released bool
 }
 
 // closeAdmission stops new prompts and waits for one being admitted:
@@ -547,7 +550,7 @@ func (c *Controller) unexpected(ev driver.Event) bool {
 	defer c.mu.Unlock()
 	rec := c.state.Computers[ev.Computer]
 	r := c.rt[ev.Computer]
-	return rec != nil && r != nil && !r.transition && rec.DesiredPower == driver.PowerAwake && ev.Generation == rec.Generation
+	return rec != nil && r != nil && !r.transition && !r.released && rec.DesiredPower == driver.PowerAwake && ev.Generation == rec.Generation
 }
 
 func (c *Controller) removed(ev driver.Event) {
