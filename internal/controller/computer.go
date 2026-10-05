@@ -333,8 +333,10 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			continue
 		}
 		ev, err := m.Decode()
-		if err != nil || m.ID == "" {
-			continue
+		if err != nil || m.ID == "" || ev.Seq == 0 || ev.Type == "" {
+			// Never skip a malformed event: end this stream, and the next
+			// one starts again from the last good cursor.
+			return
 		}
 		// The cursor moves only past an event that decoded, so a damaged
 		// one is fetched again on the next connection instead of skipped.
