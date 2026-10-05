@@ -120,3 +120,45 @@ func TestComputerCertIsALeaseClient(t *testing.T) {
 		t.Fatalf("peer = %q", buf[:n])
 	}
 }
+
+// A Computer certificate cannot call another computerd (it has no
+// client-auth usage), and the lease listener refuses the Controller's own
+// client certificate: each identity works only where it belongs.
+func TestCertificateRoles(t *testing.T) {
+	ca, _ := LoadCA(t.TempDir(), "lab")
+	srv := startComputerd(t, ca, "tester", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.ComputerdStatus{Phase: "ready"})
+	}))
+	dial := func(ctx context.Context) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", srv.Listener.Addr().String())
+	}
+	scoutLeaf, _ := ca.ComputerCert("scout")
+	scoutCert, _ := scoutLeaf.TLS()
+	asScout := &tls.Config{Certificates: []tls.Certificate{scoutCert}, RootCAs: ca.Pool()}
+	if _, err := computerd.New("tester", dial, asScout).Status(context.Background()); err == nil {
+		t.Fatal("a Computer certificate called another computerd")
+	}
+	leaf, _ := ca.ControllerClientCert()
+	if c, _ := parseCert(leaf.CertPEM); c.Subject.CommonName != ControllerCN || len(c.DNSNames) != 0 {
+		t.Fatalf("controller cert: CN %q, SANs %v", c.Subject.CommonName, c.DNSNames)
+	}
+
+	serverTLS, _ := ca.ServerTLS("a12s-lab-controller")
+	lease := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	lease.Config.ErrorLog = log.New(io.Discard, "", 0)
+	lease.TLS = serverTLS
+	lease.StartTLS()
+	defer lease.Close()
+	controllerTLS, _ := ca.ClientTLS()
+	controllerTLS.ServerName = "a12s-lab-controller"
+	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: controllerTLS}}).Get(lease.URL); err == nil {
+		t.Fatal("the lease listener accepted the Controller's client certificate")
+	}
+	other, _ := LoadCA(t.TempDir(), "lab")
+	foreign, _ := other.ComputerCert("scout")
+	fc, _ := foreign.TLS()
+	foreignTLS := &tls.Config{Certificates: []tls.Certificate{fc}, RootCAs: ca.Pool(), ServerName: "a12s-lab-controller"}
+	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: foreignTLS}}).Get(lease.URL); err == nil {
+		t.Fatal("the lease listener accepted a foreign CA's certificate")
+	}
+}

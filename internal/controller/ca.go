@@ -122,16 +122,21 @@ type Leaf struct {
 // TLS returns the leaf as a tls.Certificate.
 func (l Leaf) TLS() (tls.Certificate, error) { return tls.X509KeyPair(l.CertPEM, l.KeyPEM) }
 
+// ControllerCN is the Controller's client identity. Only its certificate
+// carries client-auth usage; computerd requires both.
+const ControllerCN = "controller"
+
 // ComputerCert issues a Computer's certificate: computerd serves with it
-// (SAN = the Computer's name) and presents it to the Controller's lease
-// listener.
+// (SAN = the Computer's name). It has no client-auth usage, so it cannot
+// call another computerd; the Controller's lease listener alone accepts it
+// from a client (see ServerTLS).
 func (ca *CA) ComputerCert(computer string) (Leaf, error) {
-	return ca.issue(computer, []string{computer}, x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth)
+	return ca.issue(computer, []string{computer}, x509.ExtKeyUsageServerAuth)
 }
 
 // ControllerClientCert is what the Controller presents to computerd.
 func (ca *CA) ControllerClientCert() (Leaf, error) {
-	return ca.issue("controller", nil, x509.ExtKeyUsageClientAuth)
+	return ca.issue(ControllerCN, nil, x509.ExtKeyUsageClientAuth)
 }
 
 // ControllerServerCert serves the Controller's mTLS lease listener under
@@ -223,8 +228,10 @@ func (ca *CA) ClientTLS() (*tls.Config, error) {
 	return &tls.Config{Certificates: []tls.Certificate{cert}, RootCAs: ca.pool, MinVersion: tls.VersionTLS12}, nil
 }
 
-// ServerTLS is the Controller's mTLS listener config: served as host, and
-// every client must present a certificate issued by this CA.
+// ServerTLS is the lease listener's config: served as host, and every
+// client must present a Computer certificate issued by this CA (server-auth
+// usage, a DNS SAN naming the Computer). The Controller's own client
+// certificate is refused.
 func (ca *CA) ServerTLS(host string) (*tls.Config, error) {
 	leaf, err := ca.ControllerServerCert(host)
 	if err != nil {
@@ -236,8 +243,30 @@ func (ca *CA) ServerTLS(host string) (*tls.Config, error) {
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		ClientCAs:    ca.pool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		MinVersion:   tls.VersionTLS12,
+		// Verified below: the standard client verification demands
+		// client-auth usage, which Computer certificates do not carry.
+		ClientAuth: tls.RequireAnyClientCert,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			return ca.verifyComputer(cs.PeerCertificates)
+		},
+		MinVersion: tls.VersionTLS12,
 	}, nil
+}
+
+func (ca *CA) verifyComputer(chain []*x509.Certificate) error {
+	if len(chain) == 0 {
+		return errors.New("no client certificate")
+	}
+	inter := x509.NewCertPool()
+	for _, c := range chain[1:] {
+		inter.AddCert(c)
+	}
+	leaf := chain[0]
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: ca.pool, Intermediates: inter, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
+		return fmt.Errorf("client certificate: %w", err)
+	}
+	if len(leaf.DNSNames) != 1 {
+		return errors.New("client certificate does not name one Computer")
+	}
+	return nil
 }
