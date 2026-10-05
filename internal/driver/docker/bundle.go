@@ -29,9 +29,9 @@ const (
 var bundleNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._+-]{0,63}$`)
 
 // EnsureBundle extracts a HarnessBundle image's /bundle into the Fleet's
-// bundle cache volume as <kind>-<version>/. A throwaway container is created
-// from the bundle image (never started, so the image needs no shell) with the
-// cache volume mounted, and the files move through the archive API.
+// bundle cache volume as <kind>-<version>/. Throwaway containers are created
+// from the bundle image (never started, so the image needs no shell), one
+// with the cache volume mounted, and the files move through the archive API.
 // bundle.json is written last, so its presence marks a complete extraction.
 func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bundle, error) {
 	imageID, err := d.ensureImage(ctx, imageRef)
@@ -42,38 +42,28 @@ func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bund
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: %w", imageRef, err)
 	}
 
-	suffix := make([]byte, 4)
-	_, _ = rand.Read(suffix)
-	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name: "a12s-" + d.fleet + "-bundle-extract-" + hex.EncodeToString(suffix),
-		Config: &container.Config{
-			Image:      imageID,
-			Entrypoint: []string{"/a12s-never-started"},
-			Labels:     map[string]string{LabelFleet: d.fleet},
-		},
-		HostConfig: &container.HostConfig{
-			NetworkMode: "none",
-			Mounts: []mount.Mount{{
-				Type: mount.TypeVolume, Source: d.BundleVolume(), Target: extractMount,
-				VolumeOptions: &mount.VolumeOptions{NoCopy: true},
-			}},
-		},
-	})
+	// Two throwaway containers: Docker keeps a container locked while it
+	// streams an archive out of it, so copying out of and into the same
+	// container deadlocks once the bundle outgrows the socket buffers.
+	created, err := d.createExtractor(ctx, imageID, true)
 	if err != nil {
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: create extractor: %w", imageRef, err)
 	}
-	defer func() {
-		_, _ = d.cli.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true})
-	}()
+	defer d.removeExtractor(ctx, created)
+	source, err := d.createExtractor(ctx, imageID, false)
+	if err != nil {
+		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: create extractor: %w", imageRef, err)
+	}
+	defer d.removeExtractor(ctx, source)
 
-	m, err := d.readManifest(ctx, created.ID)
+	m, err := d.readManifest(ctx, source)
 	if err != nil {
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: %w", imageRef, err)
 	}
 	out := driver.Bundle{ImageID: imageID, Manifest: m}
 	dir := driver.BundleDir(m.Kind, m.Version)
 
-	_, err = d.cli.ContainerStatPath(ctx, created.ID, client.ContainerStatPathOptions{Path: path.Join(extractMount, dir, bundleManifest)})
+	_, err = d.cli.ContainerStatPath(ctx, created, client.ContainerStatPathOptions{Path: path.Join(extractMount, dir, bundleManifest)})
 	if err == nil {
 		return out, nil // already extracted
 	}
@@ -81,19 +71,47 @@ func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bund
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: stat cache: %w", imageRef, err)
 	}
 
-	src, err := d.cli.CopyFromContainer(ctx, created.ID, client.CopyFromContainerOptions{SourcePath: bundleSrc})
+	src, err := d.cli.CopyFromContainer(ctx, source, client.CopyFromContainerOptions{SourcePath: bundleSrc})
 	if err != nil {
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: read /bundle: %w", imageRef, err)
 	}
 	defer src.Content.Close()
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(rebaseBundleTar(src.Content, pw, path.Base(bundleSrc), dir)) }()
-	_, err = d.cli.CopyToContainer(ctx, created.ID, client.CopyToContainerOptions{DestinationPath: extractMount, Content: pr})
+	_, err = d.cli.CopyToContainer(ctx, created, client.CopyToContainerOptions{DestinationPath: extractMount, Content: pr})
 	pr.CloseWithError(err)
 	if err != nil {
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: write cache: %w", imageRef, err)
 	}
 	return out, nil
+}
+
+// createExtractor creates a never-started container from a bundle image,
+// with the bundle cache mounted when withCache, and returns its ID.
+func (d *Driver) createExtractor(ctx context.Context, imageID string, withCache bool) (string, error) {
+	suffix := make([]byte, 4)
+	_, _ = rand.Read(suffix)
+	host := &container.HostConfig{NetworkMode: "none"}
+	if withCache {
+		host.Mounts = []mount.Mount{{
+			Type: mount.TypeVolume, Source: d.BundleVolume(), Target: extractMount,
+			VolumeOptions: &mount.VolumeOptions{NoCopy: true},
+		}}
+	}
+	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: "a12s-" + d.fleet + "-bundle-extract-" + hex.EncodeToString(suffix),
+		Config: &container.Config{
+			Image:      imageID,
+			Entrypoint: []string{"/a12s-never-started"},
+			Labels:     map[string]string{LabelFleet: d.fleet},
+		},
+		HostConfig: host,
+	})
+	return created.ID, err
+}
+
+func (d *Driver) removeExtractor(ctx context.Context, id string) {
+	_, _ = d.cli.ContainerRemove(context.WithoutCancel(ctx), id, client.ContainerRemoveOptions{Force: true})
 }
 
 func (d *Driver) ensureBundleVolume(ctx context.Context) (bool, error) {
