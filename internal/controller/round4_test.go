@@ -122,3 +122,19 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	}
 }
 
+// #57: every refusal of an unmapped address is logged, including a cached
+// miss within a second of the last refresh.
+func TestUnknownAddressRefusalsAreLogged(t *testing.T) {
+	h := newHarness(t)
+	h.c.selfAddrs = h.d.controllerAddrs
+	h.up(labFleet(t, nil), nil, false)
+	unknown := netip.MustParseAddr("10.213.9.9")
+	for range 2 {
+		if _, ok := h.c.identify(unknown); ok {
+			t.Fatal("unknown address identified")
+		}
+	}
+	if n := strings.Count(h.log.String(), "refused a connection on 10.213.9.9"); n != 2 {
+		t.Fatalf("logged %d refusals, want 2:\n%s", n, h.log.String())
+	}
+}

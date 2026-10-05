@@ -400,8 +400,12 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	name, ok := c.proxyIPs[local]
 	stale := time.Since(c.addrsAt) > time.Second
 	c.mu.Unlock()
-	if ok || !stale {
-		return name, ok
+	if ok {
+		return name, true
+	}
+	if !stale {
+		c.logf("egress proxy: refused a connection on %s: no verified Computer for that address", local)
+		return "", false
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
