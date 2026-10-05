@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { createServer, get, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Computer } from '../computer.js';
 import { Journal } from '../journal.js';
-import { apiHandler } from '../server.js';
+import { apiHandler, streamEvents } from '../server.js';
 import { testConfig, until } from './helpers.js';
 import { StubAdapter } from './stub-adapter.js';
 
@@ -114,4 +115,50 @@ test('POST /v1/turns, ?turn= replays only that turn, diagnostics and status', as
   assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session']);
   assert.equal(st.phase, 'ready');
   assert.equal((await post(`/v1/turns/${turnId}/stop`, {})).body.status, 'completed');
+});
+
+/** A response whose socket is always full: every write needs a drain, delivered on the next tick. */
+class SlowRes extends EventEmitter {
+  frames: string[] = [];
+  destroyed = false;
+  drains = true;
+  writeHead() {}
+  write(chunk: string) {
+    this.frames.push(chunk);
+    if (this.drains) setImmediate(() => this.emit('drain'));
+    return false;
+  }
+  destroy() {
+    this.destroyed = true;
+    this.emit('close');
+  }
+  ids() {
+    return this.frames.filter((f) => f.startsWith('id: ')).map((f) => Number(f.slice(4, f.indexOf('\n'))));
+  }
+}
+
+test('backpressure: a paged replay waits for drain and live events arrive once, in order', async () => {
+  const cfg2 = testConfig();
+  const j = new Journal(join(cfg2.stateDir, 'journal.db'), 'c');
+  for (let i = 0; i < 1200; i++) j.append('text.delta', { text: String(i) });
+  const res = new SlowRes();
+  streamEvents(new EventEmitter() as never, res as never, j, null, '0');
+  await until(() => res.ids().length >= 10);
+  for (let i = 0; i < 50; i++) j.append('text.delta', { text: 'live' }); // appended mid-replay
+  await until(() => res.ids().length === 1250, 20_000);
+  assert.deepEqual(res.ids(), Array.from({ length: 1250 }, (_, i) => i + 1));
+  res.destroy();
+  j.close();
+});
+
+test('backpressure: a consumer that never drains is disconnected instead of buffering forever', async () => {
+  const cfg2 = testConfig();
+  const j = new Journal(join(cfg2.stateDir, 'journal.db'), 'c');
+  const res = new SlowRes();
+  res.drains = false;
+  streamEvents(new EventEmitter() as never, res as never, j, null, undefined, 5);
+  for (let i = 0; i < 10; i++) j.append('text.delta', { text: String(i) });
+  assert.equal(res.destroyed, true);
+  assert.equal(res.ids().length, 1, 'one write went out, then the stream stalled');
+  j.close();
 });
