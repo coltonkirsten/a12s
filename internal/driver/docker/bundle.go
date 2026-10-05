@@ -191,3 +191,12 @@ func (d *Driver) ensureImage(ctx context.Context, ref string) (string, error) {
 	}
 	return res.ID, nil
 }
+
+// EnsureImage returns the local image ID for ref, pulling it if missing.
+func (d *Driver) EnsureImage(ctx context.Context, ref string) (string, error) {
+	id, err := d.ensureImage(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("ensure image %s: %w", ref, err)
+	}
+	return id, nil
+}
