@@ -28,6 +28,11 @@ type PutFleetRequest struct {
 	Credentials Credentials  `json:"credentials,omitempty"`
 	// Asleep creates new Computers asleep (`a12s up --asleep`).
 	Asleep bool `json:"asleep,omitempty"`
+	// Presets holds each home preset as a tar stream (fleet.WritePresetTar),
+	// keyed by the preset path exactly as written in the Fleet. The
+	// Controller cannot read the host, so the CLI sends every preset the
+	// Fleet names. []byte is base64 in JSON.
+	Presets map[string][]byte `json:"presets,omitempty"`
 }
 
 // PutFleetResponse lists what applying the Fleet did, by Computer name.
@@ -38,6 +43,9 @@ type PutFleetResponse struct {
 	Removed []string `json:"removed"` // stopped and deleted; drives kept
 	// Lock is the lock after resolution; the CLI writes it back to fleet.lock.
 	Lock *fleet.Lock `json:"lock"`
+	// Errors maps a Computer to why it did not converge (it is in PhaseError).
+	// The rest of the Fleet was still applied.
+	Errors map[string]string `json:"errors,omitempty"`
 }
 
 // Phase is a Computer's Controller state (§7).

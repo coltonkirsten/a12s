@@ -420,3 +420,23 @@ func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 	}
 	return nil
 }
+
+// ControllerAddrs returns the controller container's IP on each network it
+// is attached to, by network name. The Controller uses it to find its own
+// address on the Fleet bridge (where the API listens) and on each Computer
+// network (which identifies the Computer behind an egress proxy connection).
+func (d *Driver) ControllerAddrs(ctx context.Context) (map[string]netip.Addr, error) {
+	res, err := d.cli.ContainerInspect(ctx, d.ControllerName(), client.ContainerInspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("inspect controller: %w", err)
+	}
+	out := map[string]netip.Addr{}
+	if res.Container.NetworkSettings != nil {
+		for name, ep := range res.Container.NetworkSettings.Networks {
+			if ep != nil && ep.IPAddress.IsValid() {
+				out[name] = ep.IPAddress.Unmap()
+			}
+		}
+	}
+	return out, nil
+}

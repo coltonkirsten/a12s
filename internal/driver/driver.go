@@ -29,6 +29,10 @@ type Driver interface {
 	// erases a drive. It reports whether the drive was created.
 	EnsureDrive(ctx context.Context, spec DriveSpec) (created bool, err error)
 
+	// EnsureImage makes an image available (pulling it if missing) and
+	// returns its image ID. ref may be a reference or an image ID.
+	EnsureImage(ctx context.Context, ref string) (imageID string, err error)
+
 	// EnsureBundle makes the HarnessBundle image available read-only to
 	// Computers at BundlePath(kind, version). It is idempotent and returns the
 	// image ID and the bundle's manifest.
