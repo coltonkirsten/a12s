@@ -114,6 +114,10 @@ type Controller struct {
 	// to; nil outside Docker.
 	selfAddrs func(ctx context.Context) (map[string]netip.Addr, error)
 
+	// bg counts the Controller's background goroutines (event streams,
+	// restarts, idle applies, the watch), so Stop can wait for them.
+	bg sync.WaitGroup
+
 	// applyMu is held exclusively by Fleet-wide changes (apply, resume,
 	// drive rm) and shared by single-Computer ones (power, restarts, idle
 	// applies), which also take that Computer's lock: one slow Computer
@@ -186,6 +190,23 @@ func (c *Controller) lockComputer(name string) func() {
 	}
 }
 
+// spawn runs f in a background goroutine that Stop waits for. Nothing new
+// starts once the Controller's context has ended.
+func (c *Controller) spawn(f func()) {
+	if c.ctx != nil && c.ctx.Err() != nil {
+		return
+	}
+	c.bg.Add(1)
+	go func() {
+		defer c.bg.Done()
+		f()
+	}()
+}
+
+// Wait returns once the background goroutines have ended; call it after
+// the context passed to Start is done.
+func (c *Controller) Wait() { c.bg.Wait() }
+
 func (c *Controller) logf(format string, args ...any) { c.logger.Printf(format, args...) }
 
 func (c *Controller) saveLocked() error {
@@ -211,8 +232,8 @@ func (c *Controller) containerName(name string) string { return "a12s-" + c.cfg.
 // It returns at once; work continues until ctx ends.
 func (c *Controller) Start(ctx context.Context) {
 	c.ctx = ctx
-	go c.watch(ctx)
-	go func() {
+	c.spawn(func() { c.watch(ctx) })
+	c.spawn(func() {
 		c.applyMu.Lock()
 		defer c.applyMu.Unlock()
 		c.mu.Lock()
@@ -237,7 +258,7 @@ func (c *Controller) Start(ctx context.Context) {
 		}
 		c.convergeAll(ctx, f.ComputerNames(), obs)
 		c.refreshAddrs(ctx)
-	}()
+	})
 }
 
 // Run is `a12s controller`: it serves the API on the Fleet bridge, the
@@ -313,6 +334,9 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 	for _, s := range servers {
 		_ = s.Shutdown(shut)
+	}
+	if ctx.Err() != nil {
+		c.Wait()
 	}
 	c.mu.Lock()
 	if serr := c.saveLocked(); serr != nil && err == nil {

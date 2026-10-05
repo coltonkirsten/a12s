@@ -522,12 +522,13 @@ func (f *fakeComputerd) CloseIdleConnections() {}
 
 // harness is a Controller over the fake driver.
 type harness struct {
-	t   *testing.T
-	c   *Controller
-	d   *fakeDriver
-	cds *fakeComputerds
-	dir string
-	log *bytes.Buffer
+	t    *testing.T
+	c    *Controller
+	d    *fakeDriver
+	cds  *fakeComputerds
+	dir  string
+	log  *bytes.Buffer
+	stop func()
 }
 
 func newHarness(t *testing.T) *harness {
@@ -557,17 +558,21 @@ func startHarness(t *testing.T, dir string, d *fakeDriver) *harness {
 	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(func() {
-		// Stop, then wait out in-flight reconciles before the state dir goes.
+	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf}
+	h.stop = sync.OnceFunc(func() {
 		cancel()
-		c.applyMu.Lock()
-		c.applyMu.Unlock()
-		time.Sleep(10 * time.Millisecond)
-		c.mu.Lock()
-		c.mu.Unlock()
+		c.Wait() // nothing of this Controller runs on after it stops
 	})
+	t.Cleanup(h.stop)
 	c.Start(ctx)
-	return &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf}
+	return h
+}
+
+// restart stops this Controller and starts a new one on the same state
+// dir and Driver, as a Controller container restart does.
+func (h *harness) restart() *harness {
+	h.stop()
+	return startHarness(h.t, h.dir, h.d)
 }
 
 type lockedWriter struct {

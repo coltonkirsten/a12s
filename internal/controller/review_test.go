@@ -158,7 +158,7 @@ func TestRestartFinishesRemovals(t *testing.T) {
 	if err := st.save(filepath.Join(h.dir, stateFile)); err != nil {
 		t.Fatal(err)
 	}
-	startHarness(t, h.dir, h.d)
+	h.restart()
 	waitFor(t, func() bool { return h.d.get("fifth").spec.Name == "" })
 	if !h.d.hasDrive("home-fifth") {
 		t.Fatal("home-fifth was destroyed")
@@ -170,7 +170,7 @@ func TestPresetsSurviveRestart(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
 	h.d.RemoveComputer(context.Background(), "scout") // lost: must be staged again
-	h2 := startHarness(t, h.dir, h.d)
+	h2 := h.restart()
 	h2.waitPhase("scout", api.PhaseError) // no credentials after the restart, but staged
 	if len(h.d.get("scout").spec.Preset) == 0 {
 		t.Fatal("scout was staged without its preset")
@@ -180,7 +180,7 @@ func TestPresetsSurviveRestart(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(h.dir, presetDir)); err != nil {
 		t.Fatal(err)
 	}
-	h3 := startHarness(t, h.dir, h.d)
+	h3 := h2.restart()
 	h3.waitPhase("scout", api.PhaseError)
 	if h.d.get("scout").spec.Name != "" {
 		t.Fatal("scout was staged without preset bytes")
@@ -241,7 +241,7 @@ func TestIdempotentRetryIsNotBusy(t *testing.T) {
 func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	h := newHarness(t)
 	res := h.up(labFleet(t, nil), nil, false)
-	h2 := startHarness(t, h.dir, h.d)
+	h2 := h.restart()
 	h2.waitPhase("builder", api.PhaseReady)
 	h.d.takeCalls()
 	fresh := api.Credentials{"anthropic": []byte(`{"new":1}`), "openai": []byte("sk-new"), "github": []byte("ghp_new")}

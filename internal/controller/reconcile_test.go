@@ -248,7 +248,7 @@ func TestControllerRestartForgetsCredentials(t *testing.T) {
 	}
 
 	// A new Controller on the same state volume attaches to what runs.
-	h2 := startHarness(t, h.dir, h.d)
+	h2 := h.restart()
 	h2.waitPhase("builder", api.PhaseReady)
 	h2.waitPhase("scout", api.PhaseAsleep)
 	st := h2.c.Status(context.Background())

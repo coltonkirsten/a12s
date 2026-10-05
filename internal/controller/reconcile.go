@@ -237,7 +237,7 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 // drive free and retries: no wakeup is lost.
 func (c *Controller) retryIfFreed(ctx context.Context, name string) {
 	if held, err := c.exclusiveHolder(ctx, name); err == nil && held == nil {
-		go c.applyStaged(name)
+		c.spawn(func() { c.applyStaged(name) })
 	}
 }
 
@@ -363,7 +363,7 @@ func (c *Controller) kickPending(except string) {
 	}
 	c.mu.Unlock()
 	for _, name := range names {
-		go c.applyStaged(name)
+		c.spawn(func() { c.applyStaged(name) })
 	}
 }
 

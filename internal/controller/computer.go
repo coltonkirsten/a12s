@@ -307,7 +307,7 @@ func (c *Controller) subscribe(name string) {
 	}
 	r.cancelEvents = cancel
 	c.mu.Unlock()
-	go c.followEvents(ctx, name)
+	c.spawn(func() { c.followEvents(ctx, name) })
 }
 
 func (c *Controller) stopEvents(name string) {
@@ -439,7 +439,7 @@ func (c *Controller) maybeApplyStaged(name string) {
 	due := rec != nil && rec.pending() && r.phase == api.PhaseReady && !r.transition
 	c.mu.Unlock()
 	if due {
-		go c.applyStaged(name)
+		c.spawn(func() { c.applyStaged(name) })
 	}
 }
 
@@ -554,7 +554,7 @@ func (c *Controller) watch(ctx context.Context) {
 			for ev := range events {
 				switch ev.Type {
 				case driver.EventDied:
-					go c.died(ev)
+					c.spawn(func() { c.died(ev) })
 				case driver.EventRemoved:
 					c.removed(ev)
 				}
