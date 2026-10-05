@@ -1,0 +1,8 @@
+{
+  "name": "a12s-playwright-mcp",
+  "private": true,
+  "description": "Pinned @playwright/mcp for the a12s browser tier",
+  "dependencies": {
+    "@playwright/mcp": "0.0.83"
+  }
+}
