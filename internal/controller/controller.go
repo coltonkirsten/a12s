@@ -120,6 +120,12 @@ type Controller struct {
 	// never delays another.
 	applyMu sync.RWMutex
 
+	// netMu serializes the proxy map's refresh (engine read and publish)
+	// against removing a Computer and its network (invalidate, remove,
+	// read back): a refresh can never publish an address whose network is
+	// being, or has been, removed and possibly reused by another Computer.
+	netMu sync.Mutex
+
 	mu       sync.Mutex // guards everything below
 	state    *State
 	creds    api.Credentials // in memory only
@@ -128,8 +134,6 @@ type Controller struct {
 	clients  map[string]computerdClient
 	proxyIPs map[netip.Addr]string // Controller IP on a Computer network -> Computer
 	addrsAt  time.Time
-	// addrsEpoch counts invalidations; a refresh that raced one is dropped.
-	addrsEpoch uint64
 }
 
 // New returns a Controller over drv, loading its state from cfg.StateDir.
@@ -324,38 +328,43 @@ func (c *Controller) refreshAddrs(ctx context.Context) error {
 	if c.selfAddrs == nil {
 		return nil
 	}
-	for range 3 {
-		c.mu.Lock()
-		epoch := c.addrsEpoch
-		c.mu.Unlock()
-		addrs, err := c.selfAddrs(ctx)
-		if err != nil {
-			c.logf("egress proxy: %v", err)
-			return err
-		}
-		c.mu.Lock()
-		if c.addrsEpoch != epoch { // a network went away meanwhile: read again
-			c.mu.Unlock()
-			continue
-		}
-		c.addrsAt = time.Now()
-		c.proxyIPs = map[netip.Addr]string{}
-		if c.state.Fleet != nil {
-			for name := range c.state.Fleet.Computers {
-				if ip, ok := addrs[c.containerName(name)]; ok {
-					c.proxyIPs[ip] = name
-				}
+	c.netMu.Lock()
+	defer c.netMu.Unlock()
+	addrs, err := c.selfAddrs(ctx)
+	if err != nil {
+		c.logf("egress proxy: %v", err)
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.addrsAt = time.Now()
+	c.proxyIPs = map[netip.Addr]string{}
+	if c.state.Fleet != nil {
+		for name := range c.state.Fleet.Computers {
+			if ip, ok := addrs[c.containerName(name)]; ok {
+				c.proxyIPs[ip] = name
 			}
 		}
-		c.mu.Unlock()
-		return nil
 	}
-	return errors.New("egress proxy: networks kept changing during refresh")
+	return nil
+}
+
+// removeNetworked removes a Computer, and so its network, and reads that
+// back, holding netMu throughout after dropping its proxy mapping.
+func (c *Controller) removeNetworked(ctx context.Context, name, what string) error {
+	c.netMu.Lock()
+	defer c.netMu.Unlock()
+	c.invalidateAddrs(name)
+	if err := c.drv.RemoveComputer(ctx, name); err != nil {
+		return err
+	}
+	return c.confirm(ctx, name, what, func(_ driver.ComputerState, exists bool) bool { return !exists })
 }
 
 // invalidateAddrs forgets a Computer's address before its network is
 // removed: a replacement network may reuse the subnet, and the address,
-// for another Computer, which must never inherit this one's policy.
+// for another Computer, which must never inherit this one's policy. The
+// caller holds netMu.
 func (c *Controller) invalidateAddrs(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -364,7 +373,6 @@ func (c *Controller) invalidateAddrs(name string) {
 			delete(c.proxyIPs, ip)
 		}
 	}
-	c.addrsEpoch++
 }
 
 // verifyAddr refreshes the mapping from the engine and requires the
@@ -392,8 +400,12 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	name, ok := c.proxyIPs[local]
 	stale := time.Since(c.addrsAt) > time.Second
 	c.mu.Unlock()
-	if ok || !stale {
-		return name, ok
+	if ok {
+		return name, true
+	}
+	if !stale {
+		c.logf("egress proxy: refused a connection on %s: no verified Computer for that address", local)
+		return "", false
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
