@@ -10,14 +10,14 @@ type DriveKind string
 
 const (
 	DriveHome DriveKind = "home"
-	DriveWork DriveKind = "drive"
+	DriveWork DriveKind = "work"
 )
 
-// HomeDriveID is the drive ID of a Computer's home drive.
-func HomeDriveID(computer string) string { return string(DriveHome) + "-" + computer }
+// HomeDriveID is the drive ID of a Computer's home drive: "home-<computer>".
+func HomeDriveID(computer string) string { return "home-" + computer }
 
-// WorkDriveID is the drive ID of a Fleet work drive.
-func WorkDriveID(drive string) string { return string(DriveWork) + "-" + drive }
+// WorkDriveID is the drive ID of a Fleet work drive: "drive-<name>".
+func WorkDriveID(drive string) string { return "drive-" + drive }
 
 // DriveSpec declares a drive.
 type DriveSpec struct {
