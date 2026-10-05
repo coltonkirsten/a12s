@@ -34,3 +34,38 @@ Verdict: not signed off. 23 findings: 9 blockers, 13 should-fix, 1 nit.
 | 21 | Failed preset copy reported as success on retry | accept | container removed on failure; `applied` marker written only after success |
 | 22 | CI doesn't build codex/browser or run the sandbox check | accept, except the Codex schema diff | CI builds all images and bundles and runs the Chromium sandbox test; the app-server schema diff is an open item, not Layer 1 |
 | 23 | Slim carries the SDK's unused bundled CLI | accept (already fixed in d962728) | `npm ci --omit=optional` |
+
+## Round 2 — full tree at 75707f1 (controller, computerd client, CLI; round-1 verification)
+
+Verdict: not signed off. Round-1: 17 fixed, 1 rejection accepted (#20), 5 partial (#5, #6, #14, #21, #22) carried into new findings.
+27 new findings (24–50): 10 blockers, 16 should-fix, 1 nit.
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 24 | Prompt admission races sleep/restage (ordinary `up` could interrupt a turn) | accept | admission serialized with lifecycle mutations; closed before idle check and sleep |
+| 25 | Moving an exclusive drive from busy A to B can create two writers | accept | B's attachment waits until A's old generation is observed gone |
+| 26 | Stage/power/remove not read back through `Observe` | accept | state published only after observation agrees |
+| 27 | Incomplete stage (preset pending) reported as success on same-generation retry | accept | bootstrap verified before the equal-generation return; cleanup failures reported |
+| 28 | Controller restart never finishes pending removals | accept | startup reconciles owned Computers absent from the Fleet |
+| 29 | Presets live only in memory; a restart stages without them | accept | preset tars persisted by content hash in the state dir; staging refuses without them |
+| 30 | Staged egress policy applied before the idle boundary | accept | policy follows the active generation |
+| 31 | Go SSE parser publishes an incomplete frame at EOF; cursor advances before decode | accept | one shared `internal/sse` parser; incomplete frames discarded; cursor advances after decode |
+| 32 | Idempotent retry of a completed request marks the Computer Busy | accept | Busy derived from computerd status/events |
+| 33 | A stop during the pre-dispatch credential restart still dispatches | accept | cancellation re-checked after restart and before `startTurn` |
+| 34 | CI lacks Codex schema diff, conformance tests, release-triggered bundle builds | **reject** | those are the adapter-check doc's "recommended edits for the next design revision (not applied)", not Layer 1 spec; logged as open items |
+| 35 | Refreshed tokens sit on the home drive until reclaim; reclaim can overwrite a newer secret | accept with a documented residual | reclaim within ~1s via `fs.watch`; never overwrite a newer tmpfs secret; the sub-second window is recorded as a Layer 1 limitation |
+| 36 | Failed credential wiring still acknowledged | accept | wiring errors propagate; `ackedGeneration` unchanged on failure |
+| 37 | Credential rotation skipped after Controller restart (empty hash) | accept | unknown hash ⇒ inject; hash set after success |
+| 38 | IPv6 zone bypasses private-prefix checks | accept | zoned addresses rejected |
+| 39 | Plain HTTP (port 80) forwarding allowed under enforced policy | accept | forwarding deleted; CONNECT only |
+| 40 | computerd accepts any CA-signed client cert (a Computer cert could drive another computerd) | accept | Controller cert CN `controller` required; Computer certs lose client-auth except for leases |
+| 41 | API token visible in `docker inspect` | **reject** | reading inspect requires the Docker socket, which is already full control of every Computer; the token adds no exposure |
+| 42 | Leases not authorized against drive access | accept | caller must have the `shared-write` drive attached writable |
+| 43 | Asleep status can show a stale session | accept | `session.changed`/`resume.failed`/`lifecycle` consumed; final status persisted before stop |
+| 44 | `a12s up` exits 0 with per-Computer errors | accept | errors printed, non-zero exit |
+| 45 | `logs` ends replay on a 2s idle timer | accept | computerd emits `event: head` after replay; `logs` stops there |
+| 46 | `*` row warning read from local YAML | accept | egress mode comes from Controller status |
+| 47 | Comma in a mount path injects a drive entry → journal dir handed to the agent | accept | mount paths restricted at validation; computerd refuses reserved paths |
+| 48 | Gate script `eval`s agent output on the host | accept | no `eval`; checks are functions over files |
+| 49 | Gate assertions not scoped to the new turn | accept | per-turn cursors; text must come from the stream, not the echoed prompt |
+| 50 | Unused helpers; two SSE parsers | accept | helpers deleted; one parser |
