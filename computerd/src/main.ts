@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   log(`starting for ${cfg.computer} (${cfg.harness.kind} ${cfg.harness.version}, ${cfg.autonomy}, root=${cfg.isRoot})`);
   prepareDirs(cfg);
-  for (const d of prepareDrives(cfg)) log(`work drive ${d} handed to the agent`);
+  for (const d of prepareDrives(cfg, log)) log(`work drive ${d} handed to the agent`);
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const tls = await waitForTls(cfg);
 

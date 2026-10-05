@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadConfig } from '../config.js';
-import { drivesToHandOver, prepareDirs } from '../dirs.js';
+import { drivesToHandOver, prepareDirs, reservedDrivePath } from '../dirs.js';
 import { testConfig } from './helpers.js';
 
 test('A12S_DRIVES parses; absent is fine', () => {
@@ -17,7 +18,8 @@ test('A12S_DRIVES parses; absent is fine', () => {
 
 test('only empty, root-owned (here: test-owned), rw mount roots are handed over; symlinks never', () => {
   const cfg = testConfig();
-  const at = (n: string) => join(cfg.runDir, n);
+  const work = mkdtempSync(join(tmpdir(), 'computerd-test-drives-'));
+  const at = (n: string) => join(work, n);
   for (const n of ['fresh', 'used', 'ro']) mkdirSync(at(n));
   writeFileSync(join(at('used'), 'x'), '');
   symlinkSync(cfg.stateDir, at('link'));
@@ -29,6 +31,7 @@ test('only empty, root-owned (here: test-owned), rw mount roots are handed over;
     { at: at('missing'), readOnly: false },
   ];
   assert.deepEqual(drivesToHandOver(cfg, process.getuid!()), [at('fresh')]);
+  rmSync(work, { recursive: true, force: true });
 });
 
 test('prepareDirs: modes per PLAN, and a symlink in place of a root-managed dir is refused', () => {
@@ -40,4 +43,17 @@ test('prepareDirs: modes per PLAN, and a symlink in place of a root-managed dir 
   symlinkSync(evil.stateDir, join(evil.homeRoot, 'elsewhere'));
   evil.agentHome = join(evil.homeRoot, 'elsewhere');
   assert.throws(() => prepareDirs(evil), /not a directory/);
+});
+
+test('reserved or ambiguous drive paths are never handed over', () => {
+  const cfg = testConfig();
+  for (const bad of ['/home/.a12s', '/home', '/run/a12s/secrets', '/opt/a12s/bundles', '/tmp/x', 'work/rel', '/work/../home/.a12s', '/work/a/', '/', join(cfg.homeRoot, '.a12s')]) {
+    assert.ok(reservedDrivePath(cfg, bad), bad);
+  }
+  assert.equal(reservedDrivePath(cfg, '/work/a12s'), null);
+  // A comma-injected list entry parses into its own path, and that path is refused.
+  const injected = loadConfig({ A12S_COMPUTER: 'c', A12S_HARNESS_KIND: 'codex', A12S_DRIVES: '/work/volume,/home/.a12s:rw' });
+  const logs: string[] = [];
+  assert.deepEqual(drivesToHandOver({ ...cfg, drives: injected.drives }, 0, (m) => logs.push(m)), []);
+  assert.match(logs.join('\n'), /"\/home\/.a12s" skipped: inside reserved \/home/);
 });

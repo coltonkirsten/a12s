@@ -1,4 +1,5 @@
 import { chmodSync, chownSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
+import { posix } from 'node:path';
 import { AGENT_GID, AGENT_UID, type Config } from './config.js';
 import { agentFs } from './credentials.js';
 
@@ -25,13 +26,27 @@ export function prepareDirs(cfg: Config): void {
   }
 }
 
+/** Why a drive path may never be handed to the agent, or null. Reserved: /home, /run/a12s, /opt/a12s, /tmp. */
+export function reservedDrivePath(cfg: Config, at: string): string | null {
+  if (!at.startsWith('/') || posix.normalize(at) !== at || at === '/' || at.endsWith('/')) return 'not an absolute, normalized path';
+  for (const r of ['/home', '/run/a12s', '/opt/a12s', '/tmp', cfg.homeRoot, cfg.runDir]) {
+    if (at === r || at.startsWith(`${r}/`)) return `inside reserved ${r}`;
+  }
+  return null;
+}
+
 /**
  * rw work drives whose mount root is root-owned and empty (a fresh volume) are handed to the agent.
  * Mount roots only; nothing inside is touched. `ownerUid` is 0 in the container (tests override it).
  */
-export function drivesToHandOver(cfg: Config, ownerUid = 0): string[] {
+export function drivesToHandOver(cfg: Config, ownerUid = 0, log: (m: string) => void = () => {}): string[] {
   return cfg.drives
     .filter((d) => !d.readOnly)
+    .filter((d) => {
+      const reason = reservedDrivePath(cfg, d.at);
+      if (reason) log(`work drive ${JSON.stringify(d.at)} skipped: ${reason}`);
+      return !reason;
+    })
     .filter((d) => {
       try {
         const st = lstatSync(d.at);
@@ -43,9 +58,9 @@ export function drivesToHandOver(cfg: Config, ownerUid = 0): string[] {
     .map((d) => d.at);
 }
 
-export function prepareDrives(cfg: Config): string[] {
+export function prepareDrives(cfg: Config, log: (m: string) => void): string[] {
   if (!cfg.isRoot) return [];
-  const paths = drivesToHandOver(cfg);
+  const paths = drivesToHandOver(cfg, 0, log);
   for (const p of paths) chownSync(p, AGENT_UID, AGENT_GID);
   return paths;
 }
