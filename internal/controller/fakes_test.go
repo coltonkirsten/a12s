@@ -47,6 +47,9 @@ type fakeDriver struct {
 	// Computer), allocated when a network first appears, freed with it.
 	ips     map[string]netip.Addr
 	addrErr error
+	// beforeRemove runs at the start of RemoveComputer (the network still
+	// exists).
+	beforeRemove func(name string)
 }
 
 type fakeContainer struct {
@@ -279,6 +282,9 @@ func (d *fakeDriver) file(name, path, owner, mode string) []byte {
 }
 
 func (d *fakeDriver) RemoveComputer(_ context.Context, name string) error {
+	if d.beforeRemove != nil {
+		d.beforeRemove(name)
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if c := d.computers[name]; c != nil {

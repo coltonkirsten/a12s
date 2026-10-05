@@ -329,12 +329,7 @@ func (c *Controller) release(ctx context.Context, name string, obs driver.Comput
 			return c.fail(name, err, true)
 		}
 	}
-	c.invalidateAddrs(name)
-	err := c.drv.RemoveComputer(ctx, name)
-	if err == nil {
-		err = c.confirm(ctx, name, "release of the old generation", func(_ driver.ComputerState, exists bool) bool { return !exists })
-	}
-	if err != nil {
+	if err := c.removeNetworked(ctx, name, "release of the old generation"); err != nil {
 		return c.fail(name, err, true)
 	}
 	c.setPhase(name, api.PhaseProvisioning, nil)
@@ -634,12 +629,7 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	c.stopEvents(name)
-	c.invalidateAddrs(name)
-	err := c.drv.RemoveComputer(ctx, name)
-	if err == nil {
-		err = c.confirm(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
-	}
-	if err != nil {
+	if err := c.removeNetworked(ctx, name, "removal"); err != nil {
 		c.setTransition(name, false)
 		return err
 	}
@@ -647,7 +637,7 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	delete(c.state.Computers, name)
 	delete(c.rt, name)
 	delete(c.clients, name)
-	err = c.saveLocked()
+	err := c.saveLocked()
 	c.mu.Unlock()
 	c.logf("%s: removed (drives kept)", name)
 	c.kickPending(name)

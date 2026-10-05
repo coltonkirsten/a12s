@@ -3,8 +3,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 )
@@ -64,3 +67,58 @@ func TestStartFailsClosedWithoutAVerifiedAddress(t *testing.T) {
 		t.Fatalf("started without a verified address: %v", calls)
 	}
 }
+
+// #56: a refresh that starts while a Computer's network is being removed
+// cannot snapshot that network and publish it after the address was reused
+// and verified by another Computer. The refresh is launched mid-removal and
+// held, if its snapshot still shows builder's network, until tester has
+// taken builder's address and verified it; then it may publish.
+func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var armed atomic.Bool
+	stale, release := make(chan struct{}), make(chan struct{})
+	h.c.selfAddrs = func(ctx context.Context) (map[string]netip.Addr, error) {
+		m, err := h.d.controllerAddrs(ctx)
+		if _, has := m["a12s-lab-builder"]; has && armed.CompareAndSwap(true, false) {
+			close(stale) // a stale snapshot: hold it
+			<-release
+		}
+		return m, err
+	}
+	h.up(labFleet(t, nil), nil, false)
+	ipB := h.d.ip("builder")
+
+	refreshed := make(chan struct{})
+	h.d.beforeRemove = func(name string) {
+		if name != "builder" {
+			return
+		}
+		armed.Store(true)
+		go func() { h.c.refreshAddrs(ctx); close(refreshed) }()
+		select { // give it every chance to snapshot during the removal
+		case <-stale:
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	obs, _, _ := h.c.observeOne(ctx, "builder")
+	if err := h.c.release(ctx, "builder", obs); err != nil {
+		t.Fatal(err)
+	}
+	armed.Store(false)
+	h.d.setIP("tester", ipB)                              // the address is reused...
+	if err := h.c.verifyAddr(ctx, "tester"); err != nil { // ...and verified
+		t.Fatal(err)
+	}
+	close(release)
+	<-refreshed
+	select {
+	case <-stale:
+		t.Error("a refresh snapshotted builder's network during its removal")
+	default:
+	}
+	if got, ok := h.c.identify(ipB); !ok || got != "tester" {
+		t.Fatalf("identify(reused address) = %q, %v; want tester", got, ok)
+	}
+}
+
