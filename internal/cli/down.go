@@ -134,8 +134,13 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 		if v.Labels[docker.LabelFleet] != fleetName {
 			continue
 		}
-		if id := v.Labels[docker.LabelDrive]; id != "" {
-			p.Drives = append(p.Drives, Drive{ID: id, Name: DriveName(id), Volume: v.Name})
+		if id, isDrive := v.Labels[docker.LabelDrive]; isDrive {
+			// A drive label without a value is still a drive: kept, never purged.
+			name := DriveName(id)
+			if id == "" {
+				name = v.Name
+			}
+			p.Drives = append(p.Drives, Drive{ID: id, Name: name, Volume: v.Name})
 		} else {
 			p.Volumes = append(p.Volumes, v.Name)
 		}
@@ -176,9 +181,9 @@ func DriveName(id string) string {
 // computerStopTimeout matches `a12s sleep`: computerd gets a bounded flush.
 const computerStopTimeout = docker.StopTimeout
 
-// Down removes the Fleet in two passes. First the Controller, so nothing
-// can restart, replace or recreate a Computer. Then it lists the Fleet
-// again and removes what is there now: Computers (stopped gracefully, in
+// Down removes the Fleet in two passes. First every Controller, so nothing
+// can restart, replace or recreate a Computer, listing again until none is
+// left. Then it removes what that last listing shows: Computers (stopped gracefully, in
 // parallel) and any other a12s container of the Fleet, then networks,
 // non-drive volumes and the Controller's files in the state directory.
 //
@@ -193,24 +198,33 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 	res := &DownResult{}
 	var errs []error
 
-	for _, c := range plan.Containers {
-		if c.Labels[docker.LabelRole] != docker.RoleController {
-			continue
+	// Remove every Controller, then list again; repeat while a listing still
+	// shows one (one replaced or started while the purge prompt was open).
+	// The plan itself is only trusted for which drives were confirmed.
+	var now *DownPlan
+	for round := 0; ; round++ {
+		var err error
+		if now, err = PlanDown(ctx, dc, plan.Fleet); err != nil {
+			return res, err
 		}
-		if err := removeContainer(ctx, dc, c, false); err != nil {
-			errs = append(errs, err)
-		} else {
-			res.Containers = append(res.Containers, containerName(c))
+		ctrl := controllers(now.Containers)
+		if len(ctrl) == 0 {
+			break
 		}
-	}
-	if len(errs) > 0 {
-		// A live Controller could recreate what we remove; stop here.
-		return res, errors.Join(errs...)
-	}
-
-	now, err := PlanDown(ctx, dc, plan.Fleet)
-	if err != nil {
-		return res, err
+		if round == maxControllerRounds {
+			return res, fmt.Errorf("a Controller of fleet %s keeps reappearing (%s); stop whatever starts it and run a12s down again", plan.Fleet, containerName(ctrl[0]))
+		}
+		for _, c := range ctrl {
+			if err := removeContainer(ctx, dc, c, false); err != nil {
+				errs = append(errs, err)
+			} else {
+				res.Containers = append(res.Containers, containerName(c))
+			}
+		}
+		if len(errs) > 0 {
+			// A live Controller could recreate what we remove; stop here.
+			return res, errors.Join(errs...)
+		}
 	}
 	first := len(res.Containers)
 	var mu sync.Mutex
@@ -251,7 +265,7 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 		confirmed[d] = true
 	}
 	for _, d := range now.Drives {
-		if !purge || !confirmed[d] {
+		if !purge || !confirmed[d] || d.ID == "" {
 			res.Kept = append(res.Kept, d)
 			continue
 		}
@@ -275,6 +289,19 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 	return res, errors.Join(errs...)
 }
 
+// maxControllerRounds bounds how often down removes a reappearing Controller.
+const maxControllerRounds = 3
+
+func controllers(cs []container.Summary) []container.Summary {
+	var out []container.Summary
+	for _, c := range cs {
+		if c.Labels[docker.LabelRole] == docker.RoleController {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func containerName(c container.Summary) string {
 	if len(c.Names) > 0 {
 		return strings.TrimPrefix(c.Names[0], "/")
@@ -293,8 +320,9 @@ func removeContainer(ctx context.Context, dc DownDocker, c container.Summary, gr
 			return fmt.Errorf("stop %s: %w", name, err)
 		}
 	}
-	if _, err := dc.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil &&
-		!cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
+	// Conflict (a removal already in progress) is an error, not success:
+	// down must know the container is gone before it goes on.
+	if _, err := dc.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("remove %s: %w", name, err)
 	}
 	return nil
@@ -334,7 +362,7 @@ func removeNetwork(ctx context.Context, dc DownDocker, fleetName, name string) e
 
 // removeVolume removes a volume after inspecting it again: it must still
 // carry the Fleet's label and the same drive ID (driveID "" means it must
-// still not be a drive). It is never force-removed, so Docker refuses one
+// carry no drive label at all). It is never force-removed, so Docker refuses one
 // that any container, a12s or not, still mounts.
 func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID string) error {
 	v, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
@@ -344,7 +372,8 @@ func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID s
 	if err != nil {
 		return fmt.Errorf("inspect volume %s: %w", name, err)
 	}
-	if v.Volume.Labels[docker.LabelFleet] != fleetName || v.Volume.Labels[docker.LabelDrive] != driveID {
+	id, isDrive := v.Volume.Labels[docker.LabelDrive]
+	if v.Volume.Labels[docker.LabelFleet] != fleetName || isDrive != (driveID != "") || id != driveID {
 		return fmt.Errorf("volume %s changed since it was listed; left alone", name)
 	}
 	if _, err := dc.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {

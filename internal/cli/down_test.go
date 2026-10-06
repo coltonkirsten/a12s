@@ -31,6 +31,8 @@ type fakeDocker struct {
 	stopFail string
 	// relabel changes a network's fleet label at inspect time.
 	relabel map[string]string
+	// conflict makes ContainerRemove of these names fail with Conflict.
+	conflict map[string]bool
 	// onRemove runs (under the lock) after a container is removed.
 	onRemove map[string]func()
 }
@@ -136,6 +138,9 @@ func (f *fakeDocker) ContainerRemove(_ context.Context, id string, o client.Cont
 	name, ok := f.byID(id)
 	if !ok {
 		return client.ContainerRemoveResult{}, cerrdefs.ErrNotFound
+	}
+	if f.conflict[name] {
+		return client.ContainerRemoveResult{}, cerrdefs.ErrConflict
 	}
 	if !o.Force || o.RemoveVolumes {
 		return client.ContainerRemoveResult{}, errors.New("unexpected remove options")
@@ -584,6 +589,101 @@ func TestDownRevalidatesVolumes(t *testing.T) {
 	}
 	if err := removeVolume(ctx, f2, "qs", "a12s-other-controller", ""); err == nil {
 		t.Error("removed another fleet's volume")
+	}
+}
+
+// A volume whose drive label is present but empty is still a drive: plain
+// down keeps it, purge keeps it too, and it is never treated as a cache.
+func TestDownEmptyDriveLabelIsKept(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	f.volumes["a12s-qs-odd"] = volume.Volume{Name: "a12s-qs-odd", Labels: labels("qs", "", "a12s.drive", "")}
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(plan.Volumes, "a12s-qs-odd") {
+		t.Fatal("empty drive label classified as a cache volume")
+	}
+	res, err := Down(ctx, f, plan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, vs := f.names(); !slices.Contains(vs, "a12s-qs-odd") {
+		t.Error("purged a drive with an empty label")
+	}
+	if !slices.Contains(res.Kept, Drive{Name: "a12s-qs-odd", Volume: "a12s-qs-odd"}) {
+		t.Errorf("kept %+v", res.Kept)
+	}
+	if err := removeVolume(ctx, f, "qs", "a12s-qs-odd", ""); err == nil {
+		t.Error("removed an empty-label drive as a non-drive volume")
+	}
+}
+
+// Conflict (a removal already in progress) is not success: with the
+// Controller, down stops before touching anything else.
+func TestDownControllerConflictStops(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	f.conflict = map[string]bool{"a12s-qs-controller": true}
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Down(ctx, f, plan, true); err == nil || !strings.Contains(err.Error(), "remove a12s-qs-controller") {
+		t.Fatalf("err %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("went on after the Controller conflict: %v", f.calls)
+	}
+}
+
+// A Controller that appeared after the plan (e.g. while the purge prompt
+// was open) is removed before any Computer, and its drive is not purged.
+func TestDownControllerStartedAfterThePlan(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	ctrl := f.containers["a12s-qs-controller"]
+	delete(f.containers, "a12s-qs-controller")
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl.ID = "id-ctrl-new"
+	f.containers["a12s-qs-controller"] = ctrl
+	f.volumes["a12s-qs-new"] = volume.Volume{Name: "a12s-qs-new", Labels: labels("qs", "", "a12s.drive", "drive-new")}
+	for _, n := range f.networks {
+		delete(n.Containers, "id-a12s-qs-controller")
+	}
+	if _, err := Down(ctx, f, plan, true); err != nil {
+		t.Fatal(err)
+	}
+	if f.calls[0] != "rm a12s-qs-controller" {
+		t.Errorf("calls %v", f.calls)
+	}
+	if _, _, vs := f.names(); !slices.Contains(vs, "a12s-qs-new") {
+		t.Error("purged a drive the operator was not shown")
+	}
+}
+
+func TestDownControllerKeepsReappearing(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	ctrl := f.containers["a12s-qs-controller"]
+	f.onRemove = map[string]func(){"a12s-qs-controller": func() { f.containers["a12s-qs-controller"] = ctrl }}
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Down(ctx, f, plan, false); err == nil || !strings.Contains(err.Error(), "keeps reappearing") {
+		t.Fatalf("err %v", err)
+	}
+	if cs, _, _ := f.names(); !slices.Contains(cs, "a12s-qs-hello") {
+		t.Error("removed Computers while a Controller was still coming back")
 	}
 }
 

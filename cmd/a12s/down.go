@@ -51,8 +51,14 @@ func runDown(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *purge && len(plan.Drives) > 0 && !*yes {
-		if !confirmPurge(os.Stdin, os.Stderr, name, plan.Drives) {
+	var purgeable []cli.Drive // a drive with a malformed (empty) label is always kept
+	for _, d := range plan.Drives {
+		if d.ID != "" {
+			purgeable = append(purgeable, d)
+		}
+	}
+	if *purge && len(purgeable) > 0 && !*yes {
+		if !confirmPurge(os.Stdin, os.Stderr, name, purgeable) {
 			return exitCode(1)
 		}
 	}
