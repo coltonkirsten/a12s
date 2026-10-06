@@ -37,7 +37,8 @@ func commands() []command {
 		{"sleep", "<name>... | --all", "sleep Computers (storage kept, no CPU or RAM)", runSleep},
 		{"wake", "<name>... | --all", "wake Computers; resume happens on the next prompt", runWake},
 		{"shell", "<name> [--root] [-- command...]", "audited terminal inside a Computer, outside the harness", runShell},
-		{"drive", "ls | rm <name> [--yes]", "list drives; rm is the only command that destroys data", runDrive},
+		{"drive", "ls | rm <name> [--yes]", "list drives; rm and down --purge are the only commands that destroy data", runDrive},
+		{"down", "[--purge [--yes]]", "remove Computers, Controller and network; keep drives (--purge destroys them)", runDown},
 		{"controller", "", "run the Controller (inside its container)", runControllerCmd},
 	}
 }

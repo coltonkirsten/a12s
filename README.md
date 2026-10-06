@@ -14,6 +14,7 @@ a12s prompt scout "hello"    # send a turn, stream its events
 a12s sleep --all             # stop processes, keep disks
 a12s wake --all              # resume happens on the next prompt
 a12s status                  # power, session, warnings
+a12s down                    # remove Computers and Controller, keep drives
 ```
 
 ## Quickstart (macOS, verified 2026-10-05)
@@ -40,13 +41,10 @@ normal: Claude Code also tries telemetry hosts that the allowlist blocks.
 
 Your Claude login reaches the Computer only through the bindings file: the token is injected into tmpfs at start and
 never written to the image or the disk. For Codex on a ChatGPT login, bind `openai` to a copy of `~/.codex/auth.json`;
-`examples/lab` shows a four-Computer Fleet with both. There is no `a12s down`; to delete the quickstart Fleet and its disk:
+`examples/lab` shows a four-Computer Fleet with both. To delete the quickstart Fleet and its disk:
 
 ```sh
-docker rm -f $(docker ps -aq --filter label=a12s.fleet=quickstart)
-docker volume rm $(docker volume ls -q --filter label=a12s.fleet=quickstart)
-docker network rm $(docker network ls -q --filter label=a12s.fleet=quickstart)
-rm -rf ~/.a12s/quickstart
+../../bin/a12s down --purge     # lists the drives and asks; plain `a12s down` keeps them
 ```
 
 Build everything with `make`; see `PLAN.md` for layout and `EXIT-GATE.md` for

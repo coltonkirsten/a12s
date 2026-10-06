@@ -226,7 +226,7 @@ The reason: "continue the approved migration," sent into a fresh session, would 
 
 **Interrupted turns stay interrupted.** Side effects may already have happened, so there is no automatic replay. The conversation survived, so "continue" works.
 
-**Removing a Computer from the Fleet** stops it and keeps its drives forever. `a12s status` lists orphaned drives loudly. Only `a12s drive rm <name>` destroys data. Checking out a branch with fewer Computers must never start a countdown that ends in deletion.
+**Removing a Computer from the Fleet** stops it and keeps its drives forever. `a12s status` lists orphaned drives loudly. Only two explicit, confirmed commands destroy data: `a12s drive rm <name>`, and `a12s down --purge`, which lists the Fleet's drives and asks before destroying them (`--yes` skips the question for scripts). Plain `a12s down` removes the Fleet's Computers, Controller, networks and Controller state, and keeps every drive; the next `a12s up` reattaches them. Checking out a branch with fewer Computers must never start a countdown that ends in deletion.
 
 ## 8. The exit gate
 
@@ -292,7 +292,12 @@ a12s wake <name> | --all            wake Computers; resume happens on the next p
 a12s shell <name>                   audited terminal inside a Computer, outside the harness
 
 a12s drive ls                       drives, sizes, what's attached, orphans
-a12s drive rm <name>                the only command that destroys data
+a12s drive rm <name> [--yes]        destroy one drive (asks first)
+
+a12s down                           remove the Fleet's Computers, Controller, networks and
+                                     Controller state; keep its drives
+a12s down --purge [--yes]           also destroy its drives (lists them and asks first)
+                                     drive rm and down --purge are the only commands that destroy data
 ```
 
 Example session:

@@ -24,6 +24,10 @@ var reservedPaths = []string{"/home", "/opt/a12s", "/run", "/tmp", "/proc", "/sy
 
 // Validate checks the Fleet against the §3 rules and returns every problem
 // found, joined, each prefixed with its field path.
+// ValidName reports whether s is a valid Fleet, Computer or drive name: a
+// lowercase DNS label of at most 40 characters.
+func ValidName(s string) bool { return nameRE.MatchString(s) }
+
 func (f *Fleet) Validate() error {
 	var errs []error
 	bad := func(field, format string, args ...any) {
