@@ -31,6 +31,8 @@ type fakeDocker struct {
 	stopFail string
 	// relabel changes a network's fleet label at inspect time.
 	relabel map[string]string
+	// onRemove runs (under the lock) after a container is removed.
+	onRemove map[string]func()
 }
 
 func labels(fleetName, role string, extra ...string) map[string]string {
@@ -60,15 +62,19 @@ func newFake() *fakeDocker {
 	addC("a12s-other-controller", labels("other", "controller"), container.StateRunning)
 	addC("a12s-other-hello", labels("other", "computer"), container.StateRunning)
 
-	addN := func(name string, l map[string]string) {
+	addN := func(name string, l map[string]string, members ...string) {
+		eps := map[string]network.EndpointResource{}
+		for _, m := range members {
+			eps["id-"+m] = network.EndpointResource{Name: m}
+		}
 		f.networks[name] = network.Inspect{
 			Network:    network.Network{Name: name, ID: "net-" + name, Labels: l},
-			Containers: map[string]network.EndpointResource{"stray-" + name: {}},
+			Containers: eps,
 		}
 	}
-	addN("a12s-qs", labels("qs", "controller"))
-	addN("a12s-qs-hello", labels("qs", "computer"))
-	addN("a12s-other", labels("other", "controller"))
+	addN("a12s-qs", labels("qs", "controller"), "a12s-qs-controller")
+	addN("a12s-qs-hello", labels("qs", "computer"), "a12s-qs-controller", "a12s-qs-hello")
+	addN("a12s-other", labels("other", "controller"), "a12s-other-controller")
 
 	addV := func(name string, l map[string]string) { f.volumes[name] = volume.Volume{Name: name, Labels: l} }
 	addV("a12s-qs-controller", labels("qs", "controller"))
@@ -135,7 +141,13 @@ func (f *fakeDocker) ContainerRemove(_ context.Context, id string, o client.Cont
 		return client.ContainerRemoveResult{}, errors.New("unexpected remove options")
 	}
 	delete(f.containers, name)
+	for _, n := range f.networks {
+		delete(n.Containers, id)
+	}
 	f.calls = append(f.calls, "rm "+name)
+	if hook := f.onRemove[name]; hook != nil {
+		hook()
+	}
 	return client.ContainerRemoveResult{}, nil
 }
 
@@ -163,18 +175,15 @@ func (f *fakeDocker) NetworkInspect(_ context.Context, id string, _ client.Netwo
 	return client.NetworkInspectResult{Network: n}, nil
 }
 
-func (f *fakeDocker) NetworkDisconnect(_ context.Context, id string, o client.NetworkDisconnectOptions) (client.NetworkDisconnectResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.networks[id].Containers, o.Container)
-	f.calls = append(f.calls, "disconnect "+o.Container+" "+id)
-	return client.NetworkDisconnectResult{}, nil
+func (f *fakeDocker) NetworkDisconnect(context.Context, string, client.NetworkDisconnectOptions) (client.NetworkDisconnectResult, error) {
+	return client.NetworkDisconnectResult{}, errors.New("down must never disconnect anything")
 }
 
-func (f *fakeDocker) NetworkRemove(_ context.Context, id string, _ client.NetworkRemoveOptions) (client.NetworkRemoveResult, error) {
+func (f *fakeDocker) NetworkRemove(_ context.Context, netID string, _ client.NetworkRemoveOptions) (client.NetworkRemoveResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.networks[id]; !ok {
+	id := strings.TrimPrefix(netID, "net-") // removal is by ID
+	if _, ok := f.networks[id]; !ok || netID == id {
 		return client.NetworkRemoveResult{}, cerrdefs.ErrNotFound
 	}
 	if len(f.networks[id].Containers) > 0 {
@@ -194,6 +203,16 @@ func (f *fakeDocker) VolumeList(_ context.Context, o client.VolumeListOptions) (
 		r.Items = append(r.Items, v)
 	}
 	return r, nil
+}
+
+func (f *fakeDocker) VolumeInspect(_ context.Context, id string, _ client.VolumeInspectOptions) (client.VolumeInspectResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.volumes[id]
+	if !ok {
+		return client.VolumeInspectResult{}, cerrdefs.ErrNotFound
+	}
+	return client.VolumeInspectResult{Volume: v}, nil
 }
 
 func (f *fakeDocker) VolumeRemove(_ context.Context, id string, o client.VolumeRemoveOptions) (client.VolumeRemoveResult, error) {
@@ -256,7 +275,7 @@ func TestDownKeepsDrives(t *testing.T) {
 			t.Errorf("list without the fleet label filter: %v", flt)
 		}
 	}
-	wantDrives := []Drive{{Name: "home-hello", Volume: "a12s-qs-home-hello"}, {Name: "notes", Volume: "a12s-qs-drive-notes"}}
+	wantDrives := []Drive{{ID: "home-hello", Name: "home-hello", Volume: "a12s-qs-home-hello"}, {ID: "drive-notes", Name: "notes", Volume: "a12s-qs-drive-notes"}}
 	if !slices.Equal(plan.Drives, wantDrives) {
 		t.Errorf("drives %+v", plan.Drives)
 	}
@@ -366,6 +385,9 @@ func TestDownNoController(t *testing.T) {
 	ctx := context.Background()
 	f := newFake()
 	delete(f.containers, "a12s-qs-controller")
+	for _, n := range f.networks {
+		delete(n.Containers, "id-a12s-qs-controller")
+	}
 	plan, err := PlanDown(ctx, f, "qs")
 	if err != nil {
 		t.Fatal(err)
@@ -432,15 +454,136 @@ func TestDownStateDirMustBeADirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.StateDir != "" {
-		t.Errorf("state dir %q", plan.StateDir)
+	if plan.StateDir != "" || len(plan.StateFiles) != 0 {
+		t.Errorf("state dir %q files %v", plan.StateDir, plan.StateFiles)
 	}
-	plan.StateDir = filepath.Join(home, ".a12s", "anthropic")
-	if _, err := Down(ctx, newFake(), plan, false); err == nil {
-		t.Error("removed a non-directory state dir")
+	if _, _, err := removeStateFiles(filepath.Join(home, ".a12s", "anthropic")); err == nil {
+		t.Error("treated a file as the state dir")
 	}
-	if _, err := os.Stat(plan.StateDir); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".a12s", "anthropic")); err != nil {
 		t.Errorf("credential file gone: %v", err)
+	}
+}
+
+// ~/.a12s/lab holds the credentials examples/lab binds: down removes only
+// controller.json and keeps the directory with the rest.
+func TestDownKeepsOtherFilesInStateDir(t *testing.T) {
+	home := withHome(t)
+	dir := filepath.Join(home, ".a12s", "qs")
+	for _, n := range []string{"anthropic.json", ".controller.json-123"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	f := newFake()
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.StateFiles) != 2 {
+		t.Errorf("state files %v", plan.StateFiles)
+	}
+	res, err := Down(ctx, f, plan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StateDir != "" || len(res.StateFiles) != 2 {
+		t.Errorf("state dir %q files %v", res.StateDir, res.StateFiles)
+	}
+	left, _ := os.ReadDir(dir)
+	if len(left) != 1 || left[0].Name() != "anthropic.json" {
+		t.Errorf("left %v", left)
+	}
+	if plan, _ := PlanDown(ctx, f, "qs"); !plan.Empty() {
+		t.Errorf("not empty after down: %+v", plan)
+	}
+}
+
+// The Controller replaced a Computer after the plan was made (a staged
+// generation). Down lists again once the Controller is gone, so the
+// replacement is removed too.
+func TestDownRelistsAfterTheController(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.onRemove = map[string]func(){"a12s-qs-controller": func() {
+		c := f.containers["a12s-qs-hello"]
+		c.ID = "id-hello-gen2"
+		f.containers["a12s-qs-hello"] = c
+		delete(f.networks["a12s-qs-hello"].Containers, "id-a12s-qs-hello")
+		f.networks["a12s-qs-hello"].Containers["id-hello-gen2"] = network.EndpointResource{Name: "a12s-qs-hello"}
+	}}
+	if _, err := Down(ctx, f, plan, false); err != nil {
+		t.Fatal(err)
+	}
+	cs, ns, _ := f.names()
+	if slices.Contains(cs, "a12s-qs-hello") || slices.Contains(ns, "a12s-qs-hello") {
+		t.Errorf("replacement left behind: %v %v", cs, ns)
+	}
+}
+
+// A container of another fleet (or not a12s at all) attached to the
+// Fleet's network is never disconnected; the network is left alone.
+func TestDownLeavesForeignEndpoints(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	f.networks["a12s-qs"].Containers["id-a12s-other-hello"] = network.EndpointResource{Name: "a12s-other-hello"}
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Down(ctx, f, plan, false)
+	if err == nil || !strings.Contains(err.Error(), "network a12s-qs is still used by a12s-other-hello") {
+		t.Fatalf("err %v", err)
+	}
+	if _, ns, _ := f.names(); !slices.Contains(ns, "a12s-qs") || slices.Contains(ns, "a12s-qs-hello") {
+		t.Errorf("networks %v", ns)
+	}
+}
+
+// Volumes are inspected again before removal: one recreated under the same
+// name by someone else, or a drive where the plan saw a cache volume, stays.
+// A drive that appeared after the purge prompt is not destroyed.
+func TestDownRevalidatesVolumes(t *testing.T) {
+	withHome(t)
+	ctx := context.Background()
+	f := newFake()
+	plan, err := PlanDown(ctx, f, "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.volumes["a12s-qs-home-hello"] = volume.Volume{Name: "a12s-qs-home-hello", Labels: labels("other", "")}
+	f.volumes["a12s-qs-late"] = volume.Volume{Name: "a12s-qs-late", Labels: labels("qs", "", "a12s.drive", "drive-late")}
+	res, err := Down(ctx, f, plan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, vs := f.names()
+	for _, want := range []string{"a12s-qs-home-hello", "a12s-qs-late"} {
+		if !slices.Contains(vs, want) {
+			t.Errorf("%s removed; left %v", want, vs)
+		}
+	}
+	if len(res.Destroyed) != 1 || res.Destroyed[0].Name != "notes" {
+		t.Errorf("destroyed %+v", res.Destroyed)
+	}
+	if !slices.Contains(res.Kept, Drive{ID: "drive-late", Name: "late", Volume: "a12s-qs-late"}) {
+		t.Errorf("kept %+v", res.Kept)
+	}
+
+	// Kind changed between listing and removal.
+	f2 := newFake()
+	if err := removeVolume(ctx, f2, "qs", "a12s-qs-home-hello", ""); err == nil || !strings.Contains(err.Error(), "changed since") {
+		t.Errorf("drive removed as a cache volume: %v", err)
+	}
+	if err := removeVolume(ctx, f2, "qs", "a12s-other-controller", ""); err == nil {
+		t.Error("removed another fleet's volume")
 	}
 }
 

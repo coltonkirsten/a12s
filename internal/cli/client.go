@@ -18,6 +18,12 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
+// controller.json and the prefix of its temp files while it is written.
+const (
+	controllerFileName   = "controller.json"
+	controllerTempPrefix = ".controller.json-"
+)
+
 // StateDir is ~/.a12s/<fleet>: where the CLI keeps controller.json.
 func StateDir(fleetName string) (string, error) {
 	home, err := os.UserHomeDir()
@@ -33,7 +39,7 @@ func ControllerFilePath(fleetName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "controller.json"), nil
+	return filepath.Join(dir, controllerFileName), nil
 }
 
 // ReadControllerFile reads controller.json. A missing file returns
@@ -67,7 +73,7 @@ func WriteControllerFile(fleetName string, cf *api.ControllerFile) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".controller.json-*")
+	tmp, err := os.CreateTemp(filepath.Dir(p), controllerTempPrefix+"*")
 	if err != nil {
 		return fmt.Errorf("write controller file: %w", err)
 	}

@@ -19,4 +19,4 @@ Result: **17 checks, 17 passed, all 8 items pass** (run 22:13–22:14 UTC on the
 Notes
 - Every Claude turn also journals denied egress to `mcp-proxy.anthropic.com` and `http-intake.logs.us5.datadoghq.com`, and Codex to `*.oaiusercontent.com`: non-essential traffic the allowlist blocks, visible as the spec intends.
 - `a12s up` never wakes a sleeping Computer (power is an operation, not a definition); a gate run therefore starts from a torn-down Fleet.
-- Teardown for a re-run is `docker rm/network rm/volume rm` by label `a12s.fleet=lab` plus `~/.a12s/lab/controller.json`; there is deliberately no `a12s down`.
+- Teardown for a re-run is `docker rm/network rm/volume rm` by label `a12s.fleet=lab` plus `~/.a12s/lab/controller.json`; there was deliberately no `a12s down` at the time (`a12s down --purge` does this since 2026-10-06).

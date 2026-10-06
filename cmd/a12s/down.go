@@ -95,6 +95,9 @@ func writeDown(w io.Writer, fleetName string, plan *cli.DownPlan, res *cli.DownR
 	for _, v := range res.Volumes {
 		fmt.Fprintln(w, "removed volume "+v)
 	}
+	for _, f := range res.StateFiles {
+		fmt.Fprintln(w, "removed "+f)
+	}
 	if res.StateDir != "" {
 		fmt.Fprintln(w, "removed "+res.StateDir)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -25,8 +26,9 @@ import (
 //
 // Only objects labeled a12s.fleet=<fleet> are touched, and each is checked
 // again before it is removed. Drives (volumes labeled a12s.drive) are kept
-// unless Purge is set; every other a12s volume of the Fleet (Controller
-// state with the CA, the bundle cache) is removed.
+// unless purge is set; every other a12s volume of the Fleet (Controller
+// state with the CA, the bundle cache) is removed. In ~/.a12s/<fleet> only
+// the CLI's own controller.json is removed.
 
 // DownDocker is the part of the Docker client that Down uses.
 type DownDocker interface {
@@ -37,6 +39,7 @@ type DownDocker interface {
 	NetworkInspect(ctx context.Context, id string, o client.NetworkInspectOptions) (client.NetworkInspectResult, error)
 	NetworkDisconnect(ctx context.Context, id string, o client.NetworkDisconnectOptions) (client.NetworkDisconnectResult, error)
 	NetworkRemove(ctx context.Context, id string, o client.NetworkRemoveOptions) (client.NetworkRemoveResult, error)
+	VolumeInspect(ctx context.Context, id string, o client.VolumeInspectOptions) (client.VolumeInspectResult, error)
 	VolumeList(ctx context.Context, o client.VolumeListOptions) (client.VolumeListResult, error)
 	VolumeRemove(ctx context.Context, id string, o client.VolumeRemoveOptions) (client.VolumeRemoveResult, error)
 }
@@ -45,6 +48,7 @@ var _ DownDocker = (*client.Client)(nil)
 
 // Drive is one drive volume of a Fleet, as `a12s drive ls` names it.
 type Drive struct {
+	ID     string // the a12s.drive label: "home-<computer>" or "drive-<name>"
 	Name   string // "home-<computer>" or the work drive's name
 	Volume string // the Docker volume
 }
@@ -56,12 +60,13 @@ type DownPlan struct {
 	Networks   []string
 	Volumes    []string // non-drive volumes: Controller state, bundle cache
 	Drives     []Drive
-	StateDir   string // ~/.a12s/<fleet>, "" when absent
+	StateDir   string   // ~/.a12s/<fleet>, "" when absent or not a directory
+	StateFiles []string // the CLI's own files in it (controller.json)
 }
 
 // Empty reports whether nothing of the Fleet exists, drives aside.
 func (p *DownPlan) Empty() bool {
-	return len(p.Containers) == 0 && len(p.Networks) == 0 && len(p.Volumes) == 0 && p.StateDir == ""
+	return len(p.Containers) == 0 && len(p.Networks) == 0 && len(p.Volumes) == 0 && len(p.StateFiles) == 0
 }
 
 // DownResult is what Down did.
@@ -69,9 +74,10 @@ type DownResult struct {
 	Containers []string // names
 	Networks   []string
 	Volumes    []string
-	StateDir   string  // removed, or ""
-	Kept       []Drive // drives left in place
-	Destroyed  []Drive // drives removed (purge only)
+	StateFiles []string // removed from the state dir
+	StateDir   string   // removed (it was empty after StateFiles), or ""
+	Kept       []Drive  // drives left in place
+	Destroyed  []Drive  // drives removed (purge only)
 }
 
 func fleetFilter(fleetName string) client.Filters {
@@ -129,7 +135,7 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 			continue
 		}
 		if id := v.Labels[docker.LabelDrive]; id != "" {
-			p.Drives = append(p.Drives, Drive{Name: DriveName(id), Volume: v.Name})
+			p.Drives = append(p.Drives, Drive{ID: id, Name: DriveName(id), Volume: v.Name})
 		} else {
 			p.Volumes = append(p.Volumes, v.Name)
 		}
@@ -143,6 +149,15 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 	}
 	if fi, err := os.Lstat(dir); err == nil && fi.IsDir() {
 		p.StateDir = dir
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, fmt.Errorf("state dir: %w", err)
+		}
+		for _, e := range entries {
+			if ownStateFile(e.Name()) {
+				p.StateFiles = append(p.StateFiles, filepath.Join(dir, e.Name()))
+			}
+		}
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
@@ -161,35 +176,46 @@ func DriveName(id string) string {
 // computerStopTimeout matches `a12s sleep`: computerd gets a bounded flush.
 const computerStopTimeout = docker.StopTimeout
 
-// Down removes what plan lists: the Controller first (so it cannot restart
-// or recreate anything), then Computers (stopped gracefully, in parallel)
-// and any other a12s container of the Fleet, then networks, non-drive
-// volumes and the state directory. Drives are removed only when purge is
-// true. Objects that vanished meanwhile are not errors, so down is
-// idempotent. It keeps going after a failure and returns every error.
+// Down removes the Fleet in two passes. First the Controller, so nothing
+// can restart, replace or recreate a Computer. Then it lists the Fleet
+// again and removes what is there now: Computers (stopped gracefully, in
+// parallel) and any other a12s container of the Fleet, then networks,
+// non-drive volumes and the Controller's files in the state directory.
+//
+// Drives are removed only when purge is true, and only the drives in
+// confirmed (the ones the operator was shown); a drive that appeared since
+// is kept. Every volume is inspected again right before removal and left
+// alone if it no longer belongs to the Fleet or changed kind.
+//
+// Objects that vanished meanwhile are not errors, so down is idempotent.
+// It keeps going after a failure and returns every error.
 func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*DownResult, error) {
 	res := &DownResult{}
 	var errs []error
 
-	var ctrl, rest []container.Summary
 	for _, c := range plan.Containers {
-		if c.Labels[docker.LabelRole] == docker.RoleController {
-			ctrl = append(ctrl, c)
-		} else {
-			rest = append(rest, c)
+		if c.Labels[docker.LabelRole] != docker.RoleController {
+			continue
 		}
-	}
-	for _, c := range ctrl {
 		if err := removeContainer(ctx, dc, c, false); err != nil {
 			errs = append(errs, err)
 		} else {
 			res.Containers = append(res.Containers, containerName(c))
 		}
 	}
+	if len(errs) > 0 {
+		// A live Controller could recreate what we remove; stop here.
+		return res, errors.Join(errs...)
+	}
+
+	now, err := PlanDown(ctx, dc, plan.Fleet)
+	if err != nil {
+		return res, err
+	}
 	first := len(res.Containers)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for _, c := range rest {
+	for _, c := range now.Containers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -206,37 +232,44 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 	wg.Wait()
 	sort.Strings(res.Containers[first:])
 
-	for _, name := range plan.Networks {
+	for _, name := range now.Networks {
 		if err := removeNetwork(ctx, dc, plan.Fleet, name); err != nil {
 			errs = append(errs, err)
 		} else {
 			res.Networks = append(res.Networks, name)
 		}
 	}
-	for _, name := range plan.Volumes {
-		if err := removeVolume(ctx, dc, name); err != nil {
+	for _, name := range now.Volumes {
+		if err := removeVolume(ctx, dc, plan.Fleet, name, ""); err != nil {
 			errs = append(errs, err)
 		} else {
 			res.Volumes = append(res.Volumes, name)
 		}
 	}
+	confirmed := map[Drive]bool{}
 	for _, d := range plan.Drives {
-		if !purge {
+		confirmed[d] = true
+	}
+	for _, d := range now.Drives {
+		if !purge || !confirmed[d] {
 			res.Kept = append(res.Kept, d)
 			continue
 		}
-		if err := removeVolume(ctx, dc, d.Volume); err != nil {
+		if err := removeVolume(ctx, dc, plan.Fleet, d.Volume, d.ID); err != nil {
 			errs = append(errs, fmt.Errorf("drive %s: %w", d.Name, err))
 			res.Kept = append(res.Kept, d)
 		} else {
 			res.Destroyed = append(res.Destroyed, d)
 		}
 	}
-	if plan.StateDir != "" {
-		if err := removeStateDir(plan.StateDir); err != nil {
+	if now.StateDir != "" {
+		files, removedDir, err := removeStateFiles(now.StateDir)
+		res.StateFiles = files
+		if removedDir {
+			res.StateDir = now.StateDir
+		}
+		if err != nil {
 			errs = append(errs, err)
-		} else {
-			res.StateDir = plan.StateDir
 		}
 	}
 	return res, errors.Join(errs...)
@@ -267,9 +300,10 @@ func removeContainer(ctx context.Context, dc DownDocker, c container.Summary, gr
 	return nil
 }
 
-// removeNetwork disconnects whatever is still attached (the Fleet's own
-// containers are gone by now) and removes the network, after checking it
-// still belongs to the Fleet.
+// removeNetwork removes a network after checking it still belongs to the
+// Fleet. It never disconnects anything: the Fleet's own containers are gone
+// by now, so a remaining endpoint is someone else's, and the network is
+// left alone with an error naming it.
 func removeNetwork(ctx context.Context, dc DownDocker, fleetName, name string) error {
 	n, err := dc.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
@@ -281,39 +315,82 @@ func removeNetwork(ctx context.Context, dc DownDocker, fleetName, name string) e
 	if n.Network.Labels[docker.LabelFleet] != fleetName {
 		return fmt.Errorf("network %s is not owned by fleet %s; left alone", name, fleetName)
 	}
-	for id := range n.Network.Containers {
-		_, _ = dc.NetworkDisconnect(ctx, name, client.NetworkDisconnectOptions{Container: id, Force: true})
+	if len(n.Network.Containers) > 0 {
+		var users []string
+		for id, ep := range n.Network.Containers {
+			if ep.Name != "" {
+				id = ep.Name
+			}
+			users = append(users, id)
+		}
+		sort.Strings(users)
+		return fmt.Errorf("network %s is still used by %s; left alone (disconnect them and run a12s down again)", name, strings.Join(users, ", "))
 	}
-	if _, err := dc.NetworkRemove(ctx, name, client.NetworkRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+	if _, err := dc.NetworkRemove(ctx, n.Network.ID, client.NetworkRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("remove network %s: %w", name, err)
 	}
 	return nil
 }
 
-// removeVolume removes a volume without force: Docker refuses one that any
-// container, a12s or not, still mounts.
-func removeVolume(ctx context.Context, dc DownDocker, name string) error {
+// removeVolume removes a volume after inspecting it again: it must still
+// carry the Fleet's label and the same drive ID (driveID "" means it must
+// still not be a drive). It is never force-removed, so Docker refuses one
+// that any container, a12s or not, still mounts.
+func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID string) error {
+	v, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect volume %s: %w", name, err)
+	}
+	if v.Volume.Labels[docker.LabelFleet] != fleetName || v.Volume.Labels[docker.LabelDrive] != driveID {
+		return fmt.Errorf("volume %s changed since it was listed; left alone", name)
+	}
 	if _, err := dc.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("remove volume %s: %w", name, err)
 	}
 	return nil
 }
 
-// removeStateDir removes ~/.a12s/<fleet> only if it is still a real
-// directory (never a symlink, never a file such as a credential).
-func removeStateDir(dir string) error {
+// removeStateFiles removes the files the CLI owns in ~/.a12s/<fleet>
+// (controller.json and its temp files), then the directory only if that
+// left it empty. Anything else there, such as credentials a bindings file
+// points at, is kept. It never follows a symlink.
+func removeStateFiles(dir string) (removed []string, removedDir bool, err error) {
 	fi, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("state dir: %w", err)
+		return nil, false, fmt.Errorf("state dir: %w", err)
 	}
 	if !fi.IsDir() {
-		return fmt.Errorf("%s is not a directory; left alone", dir)
+		return nil, false, fmt.Errorf("%s is not a directory; left alone", dir)
 	}
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("remove %s: %w", dir, err)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false, fmt.Errorf("state dir: %w", err)
 	}
-	return nil
+	for _, e := range entries {
+		if !ownStateFile(e.Name()) {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return removed, false, fmt.Errorf("remove %s: %w", p, err)
+		}
+		removed = append(removed, p)
+	}
+	if err := os.Remove(dir); err == nil {
+		return removed, true, nil
+	} else if errors.Is(err, fs.ErrNotExist) {
+		return removed, false, nil
+	}
+	return removed, false, nil // not empty: other files are kept
+}
+
+// ownStateFile reports whether a file in ~/.a12s/<fleet> is the CLI's own.
+func ownStateFile(name string) bool {
+	return name == controllerFileName || strings.HasPrefix(name, controllerTempPrefix)
 }
