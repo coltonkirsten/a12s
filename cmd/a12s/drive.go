@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
@@ -46,7 +44,7 @@ func driveLs(g *globals, args []string) error {
 	return nil
 }
 
-// driveRm is the only command that destroys data, so it asks first.
+// driveRm destroys data (as does down --purge), so it asks first.
 func driveRm(g *globals, args []string) error {
 	fs := g.flags("drive rm")
 	yes := fs.Bool("yes", false, "do not ask for confirmation")
@@ -64,8 +62,7 @@ func driveRm(g *globals, args []string) error {
 	}
 	if !*yes {
 		fmt.Fprintf(os.Stderr, "Destroy drive %s and everything on it? This cannot be undone. [y/N] ", name)
-		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		if !confirmed(os.Stdin) {
 			fmt.Fprintln(os.Stderr, "kept "+name)
 			return exitCode(1)
 		}
