@@ -81,9 +81,9 @@ credential file when they refresh a subscription token; after every turn compute
 it with a regular file, moving the fresh content back onto tmpfs so no token stays on the home drive),
 `/run/a12s/tls/{ca.crt,cert.pem,key.pem}` (root 0600), then `/run/a12s/secrets/.generation` (an integer) last. Each
 rename into `secrets/` holds the `flock` on `/run/a12s/secrets/.lock` (root 0600, created or repaired so by either side)
-and stamps the file's mtime at publication; computerd's reclaim takes the same lock for its compare-and-swap and rename
-(`dist/secretcommit.js`). A refresh written before the injection published reads as older and is discarded (reviews
-#35, #61, #62). A harness still running on the old credential that refreshes after the injection published is
+and touches the published file after the rename, under the lock; computerd's reclaim takes the same lock for its
+compare-and-swap and rename (`dist/secretcommit.js`). A refresh written before that touch reads as older (or, mtimes equal,
+ambiguous) and is discarded (reviews #35, #61, #62, #65). A harness still running on the old credential that refreshes after the injection published is
 reclaimed like any refresh; the next `a12s up` re-injects.
 computerd waits for the TLS files before listening, and reports `.generation` as `credentialGeneration`.
 Wiring by name inside computerd: `anthropic` — JSON → symlink `$CLAUDE_CONFIG_DIR/.credentials.json` to it, raw `sk-ant-oat…`

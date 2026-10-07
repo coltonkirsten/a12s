@@ -80,8 +80,8 @@ export function credentialEnv(cfg: Config): Record<string, string> {
  * redirected), so a crash never leaves a half moved secret. The Controller injects from outside this process, so the
  * commit is a compare-and-swap: if the secret or .generation changed since `seen`, the reclaim is dropped and the
  * injected material wins. The check and the rename run under the `.lock` flock the injection's rename also takes
- * (review #35), and the injection stamps its file's mtime at publication under that lock (#61), so a refresh staged
- * before it reads as older; an image without flock(1) falls back to the unlocked check, a microsecond window.
+ * (review #35), and the injection touches its file after publishing it under that lock (#61, #65), so a refresh
+ * written before then reads as older; an image without flock(1) falls back to the unlocked check, a microsecond window.
  */
 function writeSecret(cfg: Config, name: string, content: string, seen: SecretStamp, beforeCommit?: () => void): boolean {
   const path = join(cfg.secretsDir, name);

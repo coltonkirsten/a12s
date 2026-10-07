@@ -31,16 +31,17 @@ const (
 // (a symlink) and readers never see a partial file. The rename holds the
 // directory's .lock flock, which computerd's credential reclaim takes for its
 // compare-and-swap and rename (review #35); the lock file is root-only 0600
-// so the agent cannot hold it (#62). The temporary file is touched just
-// before the rename, under the lock, so its mtime is the publication time and
-// a harness refresh written while the injection was staged reads as older
-// (#61). An image without flock(1) renames unlocked.
+// so the agent cannot hold it (#62). The published file is touched after the
+// rename, still under the lock, so its mtime is at or after publication and
+// any harness refresh written before it reads as older (#61, #65); a reclaim
+// that saw the pre-touch stamp fails its locked compare-and-swap. An image
+// without flock(1) renames unlocked.
 const writeScript = `umask 077; d="${1%/*}"; t="$d/.a12s-write.$$"; l="$d/.lock"
 mkdir -p "$d" && chown 0:0 "$d" && chmod "$4" "$d" &&
 cat > "$t" && chown "$2" "$t" && chmod "$3" "$t" &&
 if command -v flock > /dev/null 2>&1; then
-  : >> "$l" && chown 0:0 "$l" && chmod 0600 "$l" && flock -w 10 "$l" sh -c 'touch "$1" && mv -f "$1" "$2"' sh "$t" "$1"
-else touch "$t" && mv -f "$t" "$1"; fi || { rm -f "$t"; exit 1; }`
+  : >> "$l" && chown 0:0 "$l" && chmod 0600 "$l" && flock -w 10 "$l" sh -c 'mv -f "$1" "$2" && touch "$2"' sh "$t" "$1"
+else mv -f "$t" "$1" && touch "$1"; fi || { rm -f "$t"; exit 1; }`
 
 // inject writes the Computer's credentials and a fresh certificate into its
 // tmpfs through Exec with stdin, then .generation last: computerd waits for
