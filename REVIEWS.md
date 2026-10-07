@@ -143,5 +143,15 @@ https://github.com/coltonkirsten/a12s/actions/runs/37549825263 (workflow_dispatc
 conformance OK on amd64 and arm64/QEMU, pushed) and https://github.com/coltonkirsten/a12s/actions/runs/37470145892
 (schedule: claude-code 2.1.291 and codex 0.160.1, same path).
 
-**Layer 1 DONE 2026-10-06.** Totals across Layer 1: 8 rounds, 65 findings; #58 and #59 closed here; #65 is fixed but
-was not re-reviewed (cap).
+### Post-closeout verification — Astra re-check of #65
+
+Astra's one-round check of `7bb5dad` (the round the two-round cap skipped) returned two findings:
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 66 | A `touch` that fails after the `mv` leaves the published secret with its pre-publication mtime, so a staged refresh reads as newer and is reclaimed over it | accept | on a failed touch the published file is removed and the write fails (`writeScript`, both branches); `TestWriteScriptTouchFailureRemovesPublishedFile` |
+| 67 | The no-flock fallback (reclaim and injection both unlocked) can still lose the injected secret | already documented | the #35 microsecond window for custom images without `flock(1)`; PLAN.md ("Custom images without `flock(1)`"); slim and browser tiers ship util-linux |
+
+Round 3: sign-off (Astra, `gpt-6-astra`, on the #65 fix and #66; #67 accepted as the documented no-flock limit). #65 is now re-reviewed.
+
+**Layer 1 DONE 2026-10-06.** Totals across Layer 1: 8 rounds, 65 findings; #58 and #59 closed here; #65 is fixed and re-reviewed (post-closeout round 3: sign-off; #66 and #67 raised there).
