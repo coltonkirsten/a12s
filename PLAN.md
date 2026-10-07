@@ -1,5 +1,13 @@
 # PLAN — a12s Layer 1
 
+**Status: DONE 2026-10-06.** Proof: exit gate 17/17, all 8 items (`EXIT-GATE.md`, `docs/exit-gate-2026-10-06.log`);
+CI https://github.com/coltonkirsten/a12s/actions/runs/37553747519; bundles on GitHub
+https://github.com/coltonkirsten/a12s/actions/runs/37549825263 (ghcr push, arm64 conformance); reviews in
+`REVIEWS.md` (Closeout). The Claude credential for Computers is a `claude setup-token` token
+(`CLAUDE_CODE_OAUTH_TOKEN`): long-lived and never rotated inside a Computer, so nothing needs writing back to the host.
+Whether a setup token also keeps the account's claude.ai connectors out of a session was not checked (the gate ran on an
+OAuth access token through the same path); if they load, the egress proxy blocks them.
+
 Spec: `docs/a12s-layer1-design.md` (sections cited as §N) plus
 `docs/adapter-check-2026-10-05.md` (adapter changes). Scope: Docker driver only;
 `slim` and `browser` image tiers; Claude Code and Codex harnesses.

@@ -112,3 +112,36 @@ Follow-up after round 5 (not an Astra finding): the controller package tests wer
 Totals: 6 rounds, 59 findings (1–59): 55 accepted and fixed, 2 rejected and accepted by Astra (#20, #41), 1 rejection withdrawn and implemented (#34), 1 accepted with a documented residual (#35), 2 carried to Layer 2 (#58, #59).
 
 Follow-up after sign-off (CI on Linux, not an Astra finding): `TestPresetsSurviveRestart` failed about 1 in 20 on ubuntu. Root cause was a real start-up ordering bug — the Controller's resume pass ran in a goroutine that took the apply lock late, so an `a12s up` landing right after a restart could be overtaken by the resume. `Start` now holds the apply lock until the resume pass finishes (`007fd6c`); 0 failures in 200 Linux runs afterwards, new `TestApplyWaitsForTheResume`. Two computerd tests also assumed macOS (coarse Linux mtimes; `/tmp` is a reserved drive path) and were fixed (`8219625`). The exit gate was re-run on the final tree: 17/17.
+
+## Closeout — 2026-10-06 (PR #3, Layer 1 leftovers #58, #59, #35 and the setup-token lab example)
+
+Two rounds, the cap Colton set. Raw reports: `~/raven-v2/deliverables/79166166dd4a/astra_r{1,2}.md`.
+
+### Closeout round 1 — at 05f1178
+
+Verdict: not signed off. 5 findings.
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 60 | spawn's context check and `bg.Add` race `Wait` (a worker admitted after the last one exits; zero-to-one Add during Wait) | accept | `Wait` sets `stopping` under `bgMu`; `spawn` checks it and Adds under the same mutex; `TestSpawnRefusedOnceWaitBegins` |
+| 61 | The injected file's mtime is its staging time, so a refresh written while the injection was staged reads as newer and is reclaimed over it | accept | the published file's mtime is set under the lock (finished in #65) |
+| 62 | computerd could create `.lock` 0644 (older Controller), letting the agent hold the flock | accept | both sides create or repair `.lock` as root 0600 (writeScript; computerd `secureLock`, `O_NOFOLLOW`) |
+| 63 | The lock test used a 500 ms window | accept | handshake: the holder waits for the reclaim's temp file |
+| 64 | The shutdown test never joined the detached caller | accept | the caller's result is received before the worker is released |
+
+### Closeout round 2 — at 90c25bd
+
+Verdict: not signed off. #60, #62, #63, #64 verified fixed; #61 partial, reopened as #65.
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 65 | `touch` before `mv`: a refresh written between them still reads as newer | accept | `mv` then `touch` of the published file, both under the lock (`7bb5dad`); a reclaim that stamped before the touch fails its locked compare-and-swap. Verified in a slim container: published mtime after the rename; not re-reviewed by Astra (two-round cap) |
+
+Proof for the closed tree (`7bb5dad`): CI https://github.com/coltonkirsten/a12s/actions/runs/37553747519 (Go, computerd on
+Linux incl. the flock test), exit gate 17/17 (`EXIT-GATE.md`, `docs/exit-gate-2026-10-06.log`), bundles
+https://github.com/coltonkirsten/a12s/actions/runs/37549825263 (workflow_dispatch: ghcr login, claude-code 2.1.292 built,
+conformance OK on amd64 and arm64/QEMU, pushed) and https://github.com/coltonkirsten/a12s/actions/runs/37470145892
+(schedule: claude-code 2.1.291 and codex 0.160.1, same path).
+
+**Layer 1 DONE 2026-10-06.** Totals across Layer 1: 8 rounds, 65 findings; #58 and #59 closed here; #65 is fixed but
+was not re-reviewed (cap).
