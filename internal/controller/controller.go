@@ -129,6 +129,9 @@ type Controller struct {
 	// read back): a refresh can never publish an address whose network is
 	// being, or has been, removed and possibly reused by another Computer.
 	netMu sync.Mutex
+	// netContended, if set (tests only), runs with the refresh's context
+	// when a refresh finds netMu held and is about to wait for it.
+	netContended func(ctx context.Context)
 
 	mu       sync.Mutex // guards everything below
 	state    *State
@@ -359,7 +362,12 @@ func (c *Controller) refreshAddrs(ctx context.Context) error {
 	if c.selfAddrs == nil {
 		return nil
 	}
-	c.netMu.Lock()
+	if !c.netMu.TryLock() {
+		if c.netContended != nil {
+			c.netContended(ctx) // tests: this refresh waits for a removal (review #59)
+		}
+		c.netMu.Lock()
+	}
 	defer c.netMu.Unlock()
 	addrs, err := c.selfAddrs(ctx)
 	if err != nil {

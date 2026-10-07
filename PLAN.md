@@ -79,10 +79,12 @@ Controller holds credential material in memory only (the CLI reads the bindings 
 `up` and `wake`). Injection: `docker exec -i` with the bytes on stdin into `/run/a12s/secrets/<name>` (1000:1000, 0600 — the harnesses rewrite their
 credential file when they refresh a subscription token; after every turn computerd restores the symlink if a harness replaced
 it with a regular file, moving the fresh content back onto tmpfs so no token stays on the home drive),
-`/run/a12s/tls/{ca.crt,cert.pem,key.pem}` (root 0600), then `/run/a12s/secrets/.generation` (an integer) last.
+`/run/a12s/tls/{ca.crt,cert.pem,key.pem}` (root 0600), then `/run/a12s/secrets/.generation` (an integer) last. Each
+rename into `secrets/` holds the `flock` on `/run/a12s/secrets/.lock`; computerd's reclaim takes the same lock for its
+compare-and-swap and rename (`dist/secretcommit.js`), so an injection always wins (review #35).
 computerd waits for the TLS files before listening, and reports `.generation` as `credentialGeneration`.
-Wiring by name inside computerd: `anthropic` — JSON → symlink `$CLAUDE_CONFIG_DIR/.credentials.json` to it, raw key →
-`ANTHROPIC_API_KEY`; `openai` — JSON → symlink `$CODEX_HOME/auth.json`, raw key → `OPENAI_API_KEY`; `github` → `GH_TOKEN`
+Wiring by name inside computerd: `anthropic` — JSON → symlink `$CLAUDE_CONFIG_DIR/.credentials.json` to it, raw `sk-ant-oat…`
+(`claude setup-token`, the recommended Claude credential) → `CLAUDE_CODE_OAUTH_TOKEN`, other raw key → `ANTHROPIC_API_KEY`; `openai` — JSON → symlink `$CODEX_HOME/auth.json`, raw key → `OPENAI_API_KEY`; `github` → `GH_TOKEN`
 and `GITHUB_TOKEN`. Other names: file only. `CLAUDE_CONFIG_DIR=/home/agent/.claude`, `CODEX_HOME=/home/agent/.codex`.
 The CA key lives on the controller's state volume; a server cert per Computer generation (SAN = computer name) and one
 controller client cert. computerd requires the client cert; the Controller verifies the server name.
@@ -142,15 +144,10 @@ the proxy side, rejects private/link-local/metadata results, connects to the val
   named container directly; a TTY relay through the Controller is deferred with the Kubernetes driver.
 - **Drive size on Docker**: named volumes cannot enforce a quota; `size` is recorded and `capabilities()` reports `driveQuota: false`.
 - **Secret file mode** is 0600, not 0400 (see Secrets and TLS): a 0400 file breaks subscription token refresh.
-- **Token refresh is one-way**: a token refreshed inside a Computer is not written back to the host bindings; re-run `a12s up` with a fresh binding to rotate.
+- **Token refresh is one-way**: a token refreshed inside a Computer is not written back to the host bindings; re-run `a12s up` with a fresh binding to rotate. The Claude examples bind a `claude setup-token` token, which is long-lived and never refreshed inside a Computer, so this applies only to JSON logins (Codex `auth.json`).
 - **Controller restart** forgets credentials (they are never on disk); `a12s status` says so and `a12s up` re-sends them.
 
 ## Open items (Layer 2 or later)
-- Shutdown tracker: detached fleet/apply/power workers are not counted, so `Controller.Wait` can return while one still runs (review #58).
-- The #56 proxy-map race test uses a 50 ms window for the competing refresh; synchronize it explicitly (review #59).
-- Credential reclaim vs. `docker exec` injection: a microsecond window remains between the compare-and-swap check and the rename; a shared `flock` on `/run/a12s/secrets/.lock` would close it (review #35).
+- Custom images without `flock(1)`: the injection renames and the reclaim commits unlocked (the #35 microsecond window). The slim and browser tiers ship it (util-linux).
 - Codex app-server protocol schema diff per bundle (adapter-check recommendation; `conformance.sh` asserts the methods the adapter uses, not the full schema).
-- Under a claude.ai subscription login, Claude Code loads the account's claude.ai connectors (Gmail, Calendar, Drive) into a Computer's session; the egress proxy blocks them (`mcp-proxy.anthropic.com` diagnostics) and the agent mentions they are unauthorized. A `claude setup-token` credential (`CLAUDE_CODE_OAUTH_TOKEN`) is the recommended Claude credential for Computers.
-- Subscription tokens: the lab bindings use the Mac's keychain OAuth pair; refresh-token rotation inside a Computer is not written back to the host bindings.
-- `bundles.yml` has not yet run on GitHub (ghcr login/push and the arm64 QEMU conformance path are untested there).
 - Plain `http://` egress is refused under enforced policy (CONNECT only); apt/http mirrors inside a Computer need `allow: ["*"]` or HTTPS mirrors.

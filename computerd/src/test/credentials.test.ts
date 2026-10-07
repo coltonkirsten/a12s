@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { credentialGeneration, wireCredentials } from '../credentials.js';
@@ -124,5 +125,26 @@ test('an injection that lands between the reclaim check and its commit wins', as
   assert.match(w.notes.join(), /injected during reclaim/);
   assert.match(readFileSync(secret, 'utf8'), /injected v2/);
   assert.equal(readlinkSync(link), secret);
+  assert.deepEqual(readdirSync(cfg.secretsDir).filter((f) => f.includes('a12s-tmp')), [], 'no temp left behind');
+});
+
+// #35: the reclaim's check and rename run under the `.lock` flock the Controller's injection takes around its rename.
+// An injection that holds the lock when the reclaim commits wins, however long it takes. Needs flock(1) (Linux).
+const hasFlock = spawnSync('flock', ['--version']).status === 0;
+test('a reclaim waits for an injection holding the secrets lock', { skip: !hasFlock && 'no flock(1) here' }, async () => {
+  const cfg = testConfig({ credentials: ['openai'] });
+  const secret = join(cfg.secretsDir, 'openai');
+  const link = join(cfg.codexHome, 'auth.json');
+  writeFileSync(secret, '{"tokens":"injected v1"}');
+  utimesSync(secret, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  writeFileSync(link, '{"tokens":"refreshed on disk"}');
+  const holder = spawn('flock', [join(cfg.secretsDir, '.lock'), 'sh', '-c', 'echo held; sleep 0.5; printf %s "$1" > "$2.t" && mv -f "$2.t" "$2" && echo 2 > "$3"', 'sh', '{"tokens":"injected v2"}', secret, join(cfg.secretsDir, '.generation')]);
+  const exited = new Promise((resolve) => holder.on('exit', resolve));
+  await new Promise<void>((resolve) => holder.stdout.once('data', () => resolve()));
+  const w = wireCredentials(cfg); // blocks on the lock until the injection is done
+  assert.equal(await exited, 0);
+  assert.deepEqual(w.reclaimed, []);
+  assert.match(w.notes.join(), /injected during reclaim/);
+  assert.match(readFileSync(secret, 'utf8'), /injected v2/);
   assert.deepEqual(readdirSync(cfg.secretsDir).filter((f) => f.includes('a12s-tmp')), [], 'no temp left behind');
 });

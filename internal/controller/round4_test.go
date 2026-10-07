@@ -72,7 +72,9 @@ func TestStartFailsClosedWithoutAVerifiedAddress(t *testing.T) {
 // cannot snapshot that network and publish it after the address was reused
 // and verified by another Computer. The refresh is launched mid-removal and
 // held, if its snapshot still shows builder's network, until tester has
-// taken builder's address and verified it; then it may publish.
+// taken builder's address and verified it; then it may publish. The removal
+// waits until the refresh has either snapshotted or is blocked behind it
+// (review #59): no timing window.
 func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -89,16 +91,23 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	h.up(labFleet(t, nil), nil, false)
 	ipB := h.d.ip("builder")
 
-	refreshed := make(chan struct{})
+	type probe struct{}
+	probeCtx := context.WithValue(ctx, probe{}, true)
+	refreshed, contended := make(chan struct{}), make(chan struct{})
+	h.c.netContended = func(ctx context.Context) {
+		if ctx.Value(probe{}) != nil {
+			close(contended)
+		}
+	}
 	h.d.beforeRemove = func(name string) {
 		if name != "builder" {
 			return
 		}
 		armed.Store(true)
-		go func() { h.c.refreshAddrs(ctx); close(refreshed) }()
-		select { // give it every chance to snapshot during the removal
+		go func() { h.c.refreshAddrs(probeCtx); close(refreshed) }()
+		select { // the refresh either snapshots during the removal or waits for it
 		case <-stale:
-		case <-time.After(50 * time.Millisecond):
+		case <-contended:
 		}
 	}
 	obs, _, _ := h.c.observeOne(ctx, "builder")

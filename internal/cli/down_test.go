@@ -470,12 +470,12 @@ func TestDownStateDirMustBeADirectory(t *testing.T) {
 	}
 }
 
-// ~/.a12s/lab holds the credentials examples/lab binds: down removes only
+// ~/.a12s/lab holds credentials examples/lab binds (openai.json): down removes only
 // controller.json and keeps the directory with the rest.
 func TestDownKeepsOtherFilesInStateDir(t *testing.T) {
 	home := withHome(t)
 	dir := filepath.Join(home, ".a12s", "qs")
-	for _, n := range []string{"anthropic.json", ".controller.json-123"} {
+	for _, n := range []string{"openai.json", ".controller.json-123"} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -497,7 +497,7 @@ func TestDownKeepsOtherFilesInStateDir(t *testing.T) {
 		t.Errorf("state dir %q files %v", res.StateDir, res.StateFiles)
 	}
 	left, _ := os.ReadDir(dir)
-	if len(left) != 1 || left[0].Name() != "anthropic.json" {
+	if len(left) != 1 || left[0].Name() != "openai.json" {
 		t.Errorf("left %v", left)
 	}
 	if plan, _ := PlanDown(ctx, f, "qs"); !plan.Empty() {

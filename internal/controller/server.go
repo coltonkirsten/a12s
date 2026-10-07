@@ -108,17 +108,22 @@ func (c *Controller) Handler() http.Handler {
 }
 
 // detached runs fn on the Controller's context so the work finishes even if
-// the caller disconnects, and waits for it while the caller is there.
+// the caller disconnects, and waits for it while the caller is there. The
+// work is a background goroutine Wait waits for (review #58); once the
+// Controller is stopping, nothing new starts.
 func detached[T any](c *Controller, r *http.Request, fn func(ctx context.Context) (T, error)) (T, error, bool) {
 	type res struct {
 		v   T
 		err error
 	}
 	done := make(chan res, 1)
-	go func() {
+	if !c.spawn(func() {
 		v, err := fn(c.ctx)
 		done <- res{v, err}
-	}()
+	}) {
+		var zero T
+		return zero, errorf(http.StatusServiceUnavailable, api.ErrInternal, "the Controller is shutting down"), true
+	}
 	select {
 	case x := <-done:
 		return x.v, x.err, true

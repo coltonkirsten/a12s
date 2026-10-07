@@ -28,10 +28,14 @@ const (
 // Controller creates it first, it ends the same). The bytes go to a
 // temporary file that only root can read until its owner and mode are set,
 // then rename over $1, so nothing is ever written through an existing path
-// (a symlink) and readers never see a partial file.
+// (a symlink) and readers never see a partial file. The rename holds the
+// directory's .lock flock, which computerd's credential reclaim takes for its
+// compare-and-swap and rename (review #35); an image without flock(1) renames
+// unlocked.
 const writeScript = `umask 077; d="${1%/*}"; t="$d/.a12s-write.$$"
 mkdir -p "$d" && chown 0:0 "$d" && chmod "$4" "$d" &&
-cat > "$t" && chown "$2" "$t" && chmod "$3" "$t" && mv -f "$t" "$1" || { rm -f "$t"; exit 1; }`
+cat > "$t" && chown "$2" "$t" && chmod "$3" "$t" &&
+if command -v flock > /dev/null 2>&1; then flock -w 10 "$d/.lock" mv -f "$t" "$1"; else mv -f "$t" "$1"; fi || { rm -f "$t"; exit 1; }`
 
 // inject writes the Computer's credentials and a fresh certificate into its
 // tmpfs through Exec with stdin, then .generation last: computerd waits for
