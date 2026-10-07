@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { chownSync, closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chownSync, closeSync, constants, fchmodSync, fchownSync, fstatSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentFsOp, AgentFsResult } from './agentfs.js';
 import { AGENT_GID, AGENT_UID, type Config } from './config.js';
+import { commitSecret, generationIn, readNoFollow, type SecretStamp, stampIn } from './secretcommit.js';
 
 export interface Wiring {
   /** Credential env for the harness only. Values are secrets: never log them. */
@@ -21,6 +22,7 @@ export interface Wiring {
 }
 
 const AGENTFS = join(dirname(fileURLToPath(import.meta.url)), 'agentfs.js');
+const SECRETCOMMIT = join(dirname(fileURLToPath(import.meta.url)), 'secretcommit.js');
 
 /** Runs filesystem ops inside the agent's home as uid/gid 1000 (as the current user in dev). */
 export function agentFs(cfg: Config, ops: AgentFsOp[]): AgentFsResult[] {
@@ -36,25 +38,9 @@ export function agentFs(cfg: Config, ops: AgentFsOp[]): AgentFsResult[] {
   return JSON.parse(r.stdout) as AgentFsResult[];
 }
 
-/** Reads a file in a root-owned tmpfs dir, refusing symlinks and anything but a regular file. */
-function readNoFollow(path: string): string | null {
-  let fd: number;
-  try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    return null;
-  }
-  try {
-    return fstatSync(fd).isFile() ? readFileSync(fd, 'utf8') : null;
-  } finally {
-    closeSync(fd);
-  }
-}
-
 /** The integer the Controller writes last to `.generation`, or null before the first injection. */
 export function credentialGeneration(cfg: Config): number | null {
-  const n = Number.parseInt(readNoFollow(join(cfg.secretsDir, '.generation'))?.trim() ?? '', 10);
-  return Number.isFinite(n) ? n : null;
+  return generationIn(cfg.secretsDir);
 }
 
 function isJsonObject(text: string): boolean {
@@ -89,11 +75,13 @@ export function credentialEnv(cfg: Config): Record<string, string> {
   return env;
 }
 
-/** Writes a secret back onto tmpfs (the secrets dir is root-owned, so the rename cannot be redirected). */
 /**
- * Moves reclaimed content onto the tmpfs secret: temp file + rename inside tmpfs, so a crash never leaves a half
- * moved secret. The Controller injects from outside this process, so the commit is a compare-and-swap: if the
- * secret or .generation changed since `seen`, the reclaim is dropped and the injected material wins.
+ * Moves reclaimed content onto the tmpfs secret: temp file + rename inside tmpfs (root-owned, so the rename cannot be
+ * redirected), so a crash never leaves a half moved secret. The Controller injects from outside this process, so the
+ * commit is a compare-and-swap: if the secret or .generation changed since `seen`, the reclaim is dropped and the
+ * injected material wins. The check and the rename run under the `.lock` flock the injection's rename also takes
+ * (review #35), and the injection touches its file after publishing it under that lock (#61, #65), so a refresh
+ * written before then reads as older; an image without flock(1) falls back to the unlocked check, a microsecond window.
  */
 function writeSecret(cfg: Config, name: string, content: string, seen: SecretStamp, beforeCommit?: () => void): boolean {
   const path = join(cfg.secretsDir, name);
@@ -101,28 +89,38 @@ function writeSecret(cfg: Config, name: string, content: string, seen: SecretSta
   writeFileSync(tmp, content, { mode: 0o600, flag: 'w' });
   if (cfg.isRoot) chownSync(tmp, AGENT_UID, AGENT_GID);
   beforeCommit?.();
-  if (!sameStamp(stamp(cfg, name), seen)) {
-    rmSync(tmp, { force: true });
-    return false;
-  }
-  renameSync(tmp, path);
-  return true;
+  const lock = join(cfg.secretsDir, '.lock');
+  secureLock(cfg, lock);
+  const args = JSON.stringify({ dir: cfg.secretsDir, name, tmp, seen });
+  const r = spawnSync('flock', ['-w', '10', lock, process.execPath, SECRETCOMMIT, args], {
+    env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return commitSecret(cfg.secretsDir, name, tmp, seen);
+  if (r.status === 0 && (r.stdout === 'committed' || r.stdout === 'stale')) return r.stdout === 'committed';
+  rmSync(tmp, { force: true });
+  throw new Error(`secret commit failed: ${r.error?.message ?? (r.stderr.trim() || `exit ${r.status}`)}`);
 }
 
-interface SecretStamp {
-  ino: number;
-  size: number;
-  mtimeMs: number;
-  generation: number | null;
+/**
+ * Creates the lock file, or repairs one created by an older peer, as root-only 0600 (review #62): the agent can
+ * traverse secrets/, and an agent-readable lock would let it hold the flock and stall reclaim and injection.
+ */
+function secureLock(cfg: Config, lock: string): void {
+  const fd = openSync(lock, constants.O_RDONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error(`${lock} is not a regular file`);
+    if (cfg.isRoot && (st.uid !== 0 || st.gid !== 0)) fchownSync(fd, 0, 0);
+    if ((st.mode & 0o777) !== 0o600) fchmodSync(fd, 0o600);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function stamp(cfg: Config, name: string): SecretStamp {
-  const st = lstatSync(join(cfg.secretsDir, name));
-  return { ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, generation: credentialGeneration(cfg) };
-}
-
-function sameStamp(a: SecretStamp, b: SecretStamp): boolean {
-  return a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.generation === b.generation;
+  return stampIn(cfg.secretsDir, name);
 }
 
 /** The credential files harnesses rewrite on refresh, as [dir, file name], for watching. */

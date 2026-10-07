@@ -1,8 +1,22 @@
-# Exit gate (§8) — run 2026-10-05 on mac-mini
+# Exit gate (§8)
+
+## Re-run 2026-10-06 on mac-mini (Layer 1 closeout)
+
+Docker Desktop 29.2.0 (linux/arm64, 4 GB), images rebuilt from the closeout code at `7bb5dad` (PR #3: #58, #59, #35,
+the round-1/2 closeout fixes #60–#65, and the setup-token lab example), Claude Code 2.1.280/2.1.281 and Codex 0.154.0
+HarnessBundles. `examples/lab` bindings as committed: `anthropic` is a raw `sk-ant-oat…` token in `~/.a12s/anthropic`,
+wired as `CLAUDE_CODE_OAUTH_TOKEN` (for this run, the Mac's current OAuth access token; a `claude setup-token` token
+takes the same path), `openai` the Codex login copy in `~/.a12s/lab/openai.json`, `github` from `GH_TOKEN`.
+Started from nothing (`a12s down --purge --yes`, no `fleet.lock`), `hack/exit-gate.sh` 00:51:01–00:52:12 UTC
+(2026-10-07 UTC, 2026-10-06 Pacific): **17 checks, 17 passed, all 8 items pass**. Raw log:
+`docs/exit-gate-2026-10-06.log` (344 lines, no secrets). The earlier commits of the branch also passed 17/17 (00:10
+and 00:44 UTC). Torn down afterwards with `a12s down --purge --yes`.
+
+## First pass — run 2026-10-05 on mac-mini
 
 Docker Desktop 29.2.0 (linux/arm64), real Claude Code 2.1.280/2.1.281 and Codex 0.154.0 HarnessBundles,
 Colton's subscription credentials injected from `~/.a12s/lab/` through `a12s.bindings.yaml`.
-Script: `hack/exit-gate.sh`. Raw log: `docs/exit-gate-2026-10-05.log` (459 lines, no secrets).
+Script: `hack/exit-gate.sh`. Raw log: `docs/exit-gate-2026-10-05.log` (459 lines, no secrets; not committed, `*.log` is git-ignored).
 Result: **17 checks, 17 passed, all 8 items pass** (run 22:13–22:14 UTC on the signed-off tree; earlier runs at 20:11, 20:57, 21:13, 21:23 and 21:46 also passed 17/17). The Fleet was started from nothing and left asleep.
 
 | # | Item | Evidence in the log |

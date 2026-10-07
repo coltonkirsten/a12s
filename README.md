@@ -39,9 +39,10 @@ cp a12s.bindings.yaml.example a12s.bindings.yaml   # anthropic -> ~/.a12s/anthro
 `prompt` prints `turn … started`, then `pong`, then `turn … completed`. An `[diagnostic] egress denied` line is
 normal: Claude Code also tries telemetry hosts that the allowlist blocks.
 
-Your Claude login reaches the Computer only through the bindings file: the token is injected into tmpfs at start and
-never written to the image or the disk. For Codex on a ChatGPT login, bind `openai` to a copy of `~/.codex/auth.json`;
-`examples/lab` shows a four-Computer Fleet with both. To delete the quickstart Fleet and its disk:
+Your Claude token reaches the Computer only through the bindings file: it is injected into tmpfs at start and never
+written to the image or the disk. A setup token is long-lived and is never rotated inside a Computer; bind it, not a
+copy of your interactive login. For Codex, bind `openai` to an OpenAI API key, or on a ChatGPT login to a copy of
+`~/.codex/auth.json`; `examples/lab` shows a four-Computer Fleet with both, using the same `~/.a12s/anthropic` token. To delete the quickstart Fleet and its disk:
 
 ```sh
 ../../bin/a12s down --purge     # lists the drives and asks; plain `a12s down` keeps them

@@ -117,6 +117,10 @@ type Controller struct {
 	// bg counts the Controller's background goroutines (event streams,
 	// restarts, idle applies, the watch), so Stop can wait for them.
 	bg sync.WaitGroup
+	// bgMu serializes admission to bg (spawn's check and Add) with Wait
+	// closing it, so no worker is added once Wait has begun (review #60).
+	bgMu     sync.Mutex
+	stopping bool
 
 	// applyMu is held exclusively by Fleet-wide changes (apply, resume,
 	// drive rm) and shared by single-Computer ones (power, restarts, idle
@@ -129,6 +133,9 @@ type Controller struct {
 	// read back): a refresh can never publish an address whose network is
 	// being, or has been, removed and possibly reused by another Computer.
 	netMu sync.Mutex
+	// netContended, if set (tests only), runs with the refresh's context
+	// when a refresh finds netMu held and is about to wait for it.
+	netContended func(ctx context.Context)
 
 	mu       sync.Mutex // guards everything below
 	state    *State
@@ -193,10 +200,13 @@ func (c *Controller) lockComputer(name string) func() {
 // spawn runs f in a background goroutine that Wait waits for, and reports
 // whether it did: nothing new starts once the Controller's context ended.
 func (c *Controller) spawn(f func()) bool {
-	if c.ctx != nil && c.ctx.Err() != nil {
+	c.bgMu.Lock()
+	if c.stopping || (c.ctx != nil && c.ctx.Err() != nil) {
+		c.bgMu.Unlock()
 		return false
 	}
 	c.bg.Add(1)
+	c.bgMu.Unlock()
 	go func() {
 		defer c.bg.Done()
 		f()
@@ -205,8 +215,14 @@ func (c *Controller) spawn(f func()) bool {
 }
 
 // Wait returns once the background goroutines have ended; call it after
-// the context passed to Start is done.
-func (c *Controller) Wait() { c.bg.Wait() }
+// the context passed to Start is done. From its first call on, spawn admits
+// nothing new.
+func (c *Controller) Wait() {
+	c.bgMu.Lock()
+	c.stopping = true
+	c.bgMu.Unlock()
+	c.bg.Wait()
+}
 
 func (c *Controller) logf(format string, args ...any) { c.logger.Printf(format, args...) }
 
@@ -359,7 +375,12 @@ func (c *Controller) refreshAddrs(ctx context.Context) error {
 	if c.selfAddrs == nil {
 		return nil
 	}
-	c.netMu.Lock()
+	if !c.netMu.TryLock() {
+		if c.netContended != nil {
+			c.netContended(ctx) // tests: this refresh waits for a removal (review #59)
+		}
+		c.netMu.Lock()
+	}
 	defer c.netMu.Unlock()
 	addrs, err := c.selfAddrs(ctx)
 	if err != nil {

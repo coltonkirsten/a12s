@@ -28,10 +28,20 @@ const (
 // Controller creates it first, it ends the same). The bytes go to a
 // temporary file that only root can read until its owner and mode are set,
 // then rename over $1, so nothing is ever written through an existing path
-// (a symlink) and readers never see a partial file.
-const writeScript = `umask 077; d="${1%/*}"; t="$d/.a12s-write.$$"
+// (a symlink) and readers never see a partial file. The rename holds the
+// directory's .lock flock, which computerd's credential reclaim takes for its
+// compare-and-swap and rename (review #35); the lock file is root-only 0600
+// so the agent cannot hold it (#62). The published file is touched after the
+// rename, still under the lock, so its mtime is at or after publication and
+// any harness refresh written before it reads as older (#61, #65); a reclaim
+// that saw the pre-touch stamp fails its locked compare-and-swap. An image
+// without flock(1) renames unlocked.
+const writeScript = `umask 077; d="${1%/*}"; t="$d/.a12s-write.$$"; l="$d/.lock"
 mkdir -p "$d" && chown 0:0 "$d" && chmod "$4" "$d" &&
-cat > "$t" && chown "$2" "$t" && chmod "$3" "$t" && mv -f "$t" "$1" || { rm -f "$t"; exit 1; }`
+cat > "$t" && chown "$2" "$t" && chmod "$3" "$t" &&
+if command -v flock > /dev/null 2>&1; then
+  : >> "$l" && chown 0:0 "$l" && chmod 0600 "$l" && flock -w 10 "$l" sh -c 'mv -f "$1" "$2" && touch "$2"' sh "$t" "$1"
+else mv -f "$t" "$1" && touch "$1"; fi || { rm -f "$t"; exit 1; }`
 
 // inject writes the Computer's credentials and a fresh certificate into its
 // tmpfs through Exec with stdin, then .generation last: computerd waits for
