@@ -34,14 +34,16 @@ const (
 // so the agent cannot hold it (#62). The published file is touched after the
 // rename, still under the lock, so its mtime is at or after publication and
 // any harness refresh written before it reads as older (#61, #65); a reclaim
-// that saw the pre-touch stamp fails its locked compare-and-swap. An image
+// that saw the pre-touch stamp fails its locked compare-and-swap. If the touch
+// fails the published file is removed and the write reports failure, so a
+// secret carrying a stale mtime is never left in place (#65 round 3). An image
 // without flock(1) renames unlocked.
 const writeScript = `umask 077; d="${1%/*}"; t="$d/.a12s-write.$$"; l="$d/.lock"
 mkdir -p "$d" && chown 0:0 "$d" && chmod "$4" "$d" &&
 cat > "$t" && chown "$2" "$t" && chmod "$3" "$t" &&
 if command -v flock > /dev/null 2>&1; then
-  : >> "$l" && chown 0:0 "$l" && chmod 0600 "$l" && flock -w 10 "$l" sh -c 'mv -f "$1" "$2" && touch "$2"' sh "$t" "$1"
-else mv -f "$t" "$1" && touch "$1"; fi || { rm -f "$t"; exit 1; }`
+  : >> "$l" && chown 0:0 "$l" && chmod 0600 "$l" && flock -w 10 "$l" sh -c 'mv -f "$1" "$2" && { touch "$2" || { rm -f "$2"; false; }; }' sh "$t" "$1"
+else mv -f "$t" "$1" && { touch "$1" || { rm -f "$1"; false; }; }; fi || { rm -f "$t"; exit 1; }`
 
 // inject writes the Computer's credentials and a fresh certificate into its
 // tmpfs through Exec with stdin, then .generation last: computerd waits for
