@@ -1,0 +1,344 @@
+00:10:19 == exit gate on 29.2.0 arm64 ==
+00:10:19 ## 1 one file: four Computers, both harnesses, slim and browser
+00:10:19 PASS 1 fleet declares four computers
+00:10:19 ## 2 one command: a12s up brings all four to Ready
+00:10:19 $ ../../bin/a12s up
+started controller a12s-lab-controller (a12s/controller:dev)
+pinned in fleet.lock: browser, slim, claude-code@2.1.280, codex@0.154.0, ./presets/scout
+created builder, reviewer, scout, tester (asleep: none)
+00:10:26 $ ../../bin/a12s status
+builder   Ready  session -  codex 0.154.0 gpt-6-astra             home 10Gi  drive a12s-repo
+reviewer  Ready  session -  codex 0.154.0                         home 10Gi  drive reference
+scout     Ready  session -  claude-code 2.1.280 claude-fable-5-1  home 10Gi  drive reference
+tester    Ready  session -  claude-code 2.1.280                   home 10Gi  drive ux-scratch
+00:10:26 PASS 2 all four Ready
+00:10:26 ## 3 streamed reply for each of the four
+turn t_febe4925f6662124 started (claude-code 2.1.280, claude-fable-5-1, resumed: false)
+pong
+turn t_febe4925f6662124 completed
+00:10:33 PASS 3 scout streams text to turn.finished
+turn t_53a2d0432b59c3f6 started (codex 0.154.0, gpt-6-astra, resumed: false)
+pong
+turn t_53a2d0432b59c3f6 completed
+00:10:37 PASS 3 builder streams text to turn.finished
+turn t_a83fb4a9e2a066f5 started (claude-code 2.1.280, resumed: false)
+pong
+turn t_a83fb4a9e2a066f5 completed
+00:10:41 PASS 3 tester streams text to turn.finished
+turn t_71f2fc5a70226f74 started (codex 0.154.0, resumed: false)
+pong
+turn t_71f2fc5a70226f74 completed
+00:10:45 PASS 3 reviewer streams text to turn.finished
+00:10:45 ## 4 sessions resume across sleep --all / wake --all
+00:10:45 $ ../../bin/a12s prompt scout Remember the secret word: tangerine-scout. Reply only: ok.
+turn t_ea150c0249a326ec started (claude-code 2.1.280, claude-fable-5-1, resumed: true)
+ok[diagnostic] egress denied
+
+turn t_ea150c0249a326ec completed
+00:10:54 $ ../../bin/a12s prompt builder Remember the secret word: tangerine-builder. Reply only: ok.
+turn t_4b83d8e31fa7a633 started (codex 0.154.0, gpt-6-astra, resumed: true)
+ok
+turn t_4b83d8e31fa7a633 completed
+00:10:55 $ ../../bin/a12s prompt tester Remember the secret word: tangerine-tester. Reply only: ok.
+turn t_5b841c44ce5f60f3 started (claude-code 2.1.280, resumed: true)
+ok[diagnostic] egress denied
+
+turn t_5b841c44ce5f60f3 completed
+00:10:58 $ ../../bin/a12s prompt reviewer Remember the secret word: tangerine-reviewer. Reply only: ok.
+turn t_73f2434d159b0b6c started (codex 0.154.0, resumed: true)
+ok
+turn t_73f2434d159b0b6c completed
+00:11:00 $ ../../bin/a12s sleep --all
+00:11:00 $ ../../bin/a12s status
+builder   Asleep  session 01a113b2…  codex 0.154.0 gpt-6-astra             home 10Gi  drive a12s-repo
+reviewer  Asleep  session 01a113b2…  codex 0.154.0                         home 10Gi  drive reference
+scout     Asleep  session 688aaf67…  claude-code 2.1.280 claude-fable-5-1  home 10Gi  drive reference
+tester    Asleep  session 87726812…  claude-code 2.1.280                   home 10Gi  drive ux-scratch
+00:11:00 PASS 4 all Asleep
+00:11:00 $ ../../bin/a12s wake --all
+00:11:02 $ ../../bin/a12s status
+builder   Ready (resumePending)  session 01a113b2…  codex 0.154.0 gpt-6-astra             home 10Gi  drive a12s-repo
+reviewer  Ready (resumePending)  session 01a113b2…  codex 0.154.0                         home 10Gi  drive reference
+scout     Ready (resumePending)  session 688aaf67…  claude-code 2.1.280 claude-fable-5-1  home 10Gi  drive reference
+tester    Ready (resumePending)  session 87726812…  claude-code 2.1.280                   home 10Gi  drive ux-scratch
+warning: builder: resume pending: the next prompt reopens the session
+warning: reviewer: resume pending: the next prompt reopens the session
+warning: scout: resume pending: the next prompt reopens the session
+warning: tester: resume pending: the next prompt reopens the session
+turn t_230f6daaf8c1fb3f started (claude-code 2.1.280, claude-fable-5-1, resumed: true)
+tangerine-scout
+turn t_230f6daaf8c1fb3f completed
+00:11:13 PASS 4 scout resumed: true and recalls the word
+turn t_335562133ccb70b2 started (codex 0.154.0, gpt-6-astra, resumed: true)
+tangerine-builder
+turn t_335562133ccb70b2 completed
+00:11:15 PASS 4 builder resumed: true and recalls the word
+turn t_621d27140c2dbb8b started (claude-code 2.1.280, resumed: true)
+tangerine-tester
+turn t_621d27140c2dbb8b completed
+00:11:19 PASS 4 tester resumed: true and recalls the word
+turn t_6b30b624c76776e8 started (codex 0.154.0, resumed: true)
+tangerine-reviewer
+turn t_6b30b624c76776e8 completed
+00:11:21 PASS 4 reviewer resumed: true and recalls the word
+00:11:21 ## 5 scaling is editing: add a fifth, only it is created; remove it, drives kept
+created fifth (asleep: none)
+00:11:22 PASS 5 only fifth created
+removed fifth (drives kept)
+00:11:23 $ ../../bin/a12s drive ls
+NAME           KIND  SIZE  ACCESS     ATTACHED
+a12s-repo      work  20Gi  exclusive  builder
+home-builder   home  10Gi  -          builder
+home-fifth     home  -     -          -  ORPHANED
+home-reviewer  home  10Gi  -          reviewer
+home-scout     home  10Gi  -          scout
+home-tester    home  10Gi  -          tester
+reference      work  5Gi   shared     reviewer,scout
+ux-scratch     work  5Gi   exclusive  tester
+00:11:23 $ ../../bin/a12s drive ls
+NAME           KIND  SIZE  ACCESS     ATTACHED
+a12s-repo      work  20Gi  exclusive  builder
+home-builder   home  10Gi  -          builder
+home-fifth     home  -     -          -  ORPHANED
+home-reviewer  home  10Gi  -          reviewer
+home-scout     home  10Gi  -          scout
+home-tester    home  10Gi  -          tester
+reference      work  5Gi   shared     reviewer,scout
+ux-scratch     work  5Gi   exclusive  tester
+00:11:23 PASS 5 fifth removed, home drive kept (orphan listed)
+00:11:23 ## 6 kill the SSE client mid-turn, reconnect with Last-Event-ID: no loss, no duplicates
+00:11:31 killed the logs client mid-turn at seq 34; reconnecting with Last-Event-ID 34
+turn t_b40561cec3dc97c2 started (claude-code 2.1.280, claude-fable-5-1, resumed: true)
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150[diagnostic] egress denied
+
+turn t_b40561cec3dc97c2 completed
+6: killed mid-turn=True; before kill 34 events, after reconnect 27; dupes=0, gaps=[]; numbers 1..150 complete=True; turn.finished seen=True
+00:11:35 PASS 6 reconnect lost nothing and duplicated nothing
+00:11:35 ## 7 a request to a host that isn't allowed is blocked and shows up as a diagnostic
+turn t_878e866375287e44 started (codex 0.154.0, gpt-6-astra, resumed: true)
+I’ll run the command and report its exit code and first output line.
+Exit code: 56
+First line: `curl: (56) CONNECT tunnel failed, response 403`
+turn t_878e866375287e44 completed
+37 turn.started {"harness":{"kind":"codex","version":"0.154.0"},"model":"gpt-6-astra","resumed":true,"prompt":"Run exactly this shell command and report its exit code and the first line of output: curl -sS -m 10 https://example.com","cwd":"/home/agent"}
+38 text.delta {"text":"I"}
+39 text.delta {"text":"’ll"}
+40 text.delta {"text":" run"}
+41 text.delta {"text":" the"}
+42 text.delta {"text":" command"}
+43 text.delta {"text":" and"}
+44 text.delta {"text":" report"}
+45 text.delta {"text":" its"}
+46 text.delta {"text":" exit"}
+47 text.delta {"text":" code"}
+48 text.delta {"text":" and"}
+49 text.delta {"text":" first"}
+50 text.delta {"text":" output"}
+51 text.delta {"text":" line"}
+52 text.delta {"text":".\n"}
+53 diagnostic {"message":"egress denied","data":{"host":"example.com","port":443,"reason":"host is not in the egress allowlist"},"source":"controller"}
+54 tool.started {"id":"exec-0149dc25-194e-4f10-a4ae-f755e7868e0b","name":"shell","input":{"command":"/bin/bash -lc 'curl -sS -m 10 https://example.com'","cwd":"/home/agent"}}
+55 tool.finished {"id":"exec-0149dc25-194e-4f10-a4ae-f755e7868e0b","name":"shell","isError":true,"output":{"exitCode":56,"output":"curl: (56) CONNECT tunnel failed, response 403\n"}}
+56 text.delta {"text":"Exit"}
+57 text.delta {"text":" code"}
+58 text.delta {"text":":"}
+59 text.delta {"text":" "}
+60 text.delta {"text":"56"}
+61 text.delta {"text":"\n"}
+62 text.delta {"text":"First"}
+63 text.delta {"text":" line"}
+64 text.delta {"text":":"}
+65 text.delta {"text":" `"}
+66 text.delta {"text":"curl"}
+67 text.delta {"text":":"}
+68 text.delta {"text":" ("}
+69 text.delta {"text":"56"}
+70 text.delta {"text":")"}
+71 text.delta {"text":" CONNECT"}
+72 text.delta {"text":" tunnel"}
+73 text.delta {"text":" failed"}
+74 text.delta {"text":","}
+75 text.delta {"text":" response"}
+76 text.delta {"text":" "}
+77 text.delta {"text":"403"}
+78 text.delta {"text":"`"}
+79 turn.finished {"status":"completed","usage":{"thread":{"totalTokens":70527,"inputTokens":70417,"cachedInputTokens":65536,"cacheWriteInputTokens":0,"outputTokens":110,"reasoningOutputTokens":0},"last":{"totalTokens":14259,"inputTokens":14232,"cachedInputTokens":13824,"cacheWriteInputTokens":0,"outputTokens":27,"reasoningOutputTokens":0}}}
+00:11:40 PASS 7 example.com denied with a diagnostic event (this turn)
+00:11:40 ## 8 bump the harness version in the lock; next turn uses it; no image rebuilt
+00:11:40 $ ../../bin/a12s up
+pinned in fleet.lock: claude-code@2.1.281
+updated scout
+00:11:44 $ cat fleet.lock
+images:
+  browser: sha256:437637dda3335e18fb57d997b75f896adf5909a67a4f936a6890a2e717cda9e7
+  slim: sha256:4e578d45294323e5ee6a7acfb256071681214bbce49ebe9ee2bf37d1ddc4d020
+bundles:
+  claude-code@2.1.280: sha256:765e2332b43bbfffcb7e8faf4951fdfc810b7095283ccb1e62f715d6bbe4ce8f
+  claude-code@2.1.281: sha256:77dbe11cc2bd8a08d8357f271703bc6d22a97c55314a8740e655ae6618cdfc00
+  codex@0.154.0: sha256:13432b1d0baf3ed3ff1d5a1bacd7ab234684b7a6ec8fbe4519e81fce85edc9e9
+presets:
+  ./presets/scout: sha256:68bb5fc02e4d797ebc92a0802017c58156d3a06acd73a04793b50def0cae9432
+turn t_3a1cb978d1f7ab28 started (claude-code 2.1.281, claude-fable-5-1, resumed: true)
+pong
+turn t_3a1cb978d1f7ab28 completed
+00:11:48 PASS 8 scout's next turn runs 2.1.281
+00:11:48 PASS 8 tier images unchanged
+00:11:48 == leaving the fleet asleep ==
+00:11:48 $ ../../bin/a12s sleep --all
+00:11:49 $ ../../bin/a12s status
+builder   Asleep  session 01a113b2…  codex 0.154.0 gpt-6-astra             home 10Gi  drive a12s-repo
+reviewer  Asleep  session 01a113b2…  codex 0.154.0                         home 10Gi  drive reference
+scout     Asleep  session 688aaf67…  claude-code 2.1.281 claude-fable-5-1  home 10Gi  drive reference
+tester    Asleep  session 87726812…  claude-code 2.1.280                   home 10Gi  drive ux-scratch
+warning: orphaned drive home-fifth: no Computer in the Fleet uses it (a12s drive rm home-fifth destroys it)
+warning: orphaned drives (no Computer in the Fleet uses them): home-fifth; a12s drive rm <name> destroys one
+00:11:49 == RESULT: 17 passed, 0 failed ==
