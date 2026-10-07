@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chownSync, rmSync, writeFileSync } from 'node:fs';
+import { chownSync, closeSync, constants, fchmodSync, fchownSync, fstatSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentFsOp, AgentFsResult } from './agentfs.js';
@@ -80,7 +80,8 @@ export function credentialEnv(cfg: Config): Record<string, string> {
  * redirected), so a crash never leaves a half moved secret. The Controller injects from outside this process, so the
  * commit is a compare-and-swap: if the secret or .generation changed since `seen`, the reclaim is dropped and the
  * injected material wins. The check and the rename run under the `.lock` flock the injection's rename also takes
- * (review #35); an image without flock(1) falls back to the unlocked check, a microsecond window.
+ * (review #35), and the injection stamps its file's mtime at publication under that lock (#61), so a refresh staged
+ * before it reads as older; an image without flock(1) falls back to the unlocked check, a microsecond window.
  */
 function writeSecret(cfg: Config, name: string, content: string, seen: SecretStamp, beforeCommit?: () => void): boolean {
   const path = join(cfg.secretsDir, name);
@@ -88,8 +89,10 @@ function writeSecret(cfg: Config, name: string, content: string, seen: SecretSta
   writeFileSync(tmp, content, { mode: 0o600, flag: 'w' });
   if (cfg.isRoot) chownSync(tmp, AGENT_UID, AGENT_GID);
   beforeCommit?.();
+  const lock = join(cfg.secretsDir, '.lock');
+  secureLock(cfg, lock);
   const args = JSON.stringify({ dir: cfg.secretsDir, name, tmp, seen });
-  const r = spawnSync('flock', ['-w', '10', join(cfg.secretsDir, '.lock'), process.execPath, SECRETCOMMIT, args], {
+  const r = spawnSync('flock', ['-w', '10', lock, process.execPath, SECRETCOMMIT, args], {
     env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
     encoding: 'utf8',
     timeout: 15_000,
@@ -98,6 +101,22 @@ function writeSecret(cfg: Config, name: string, content: string, seen: SecretSta
   if (r.status === 0 && (r.stdout === 'committed' || r.stdout === 'stale')) return r.stdout === 'committed';
   rmSync(tmp, { force: true });
   throw new Error(`secret commit failed: ${r.error?.message ?? (r.stderr.trim() || `exit ${r.status}`)}`);
+}
+
+/**
+ * Creates the lock file, or repairs one created by an older peer, as root-only 0600 (review #62): the agent can
+ * traverse secrets/, and an agent-readable lock would let it hold the flock and stall reclaim and injection.
+ */
+function secureLock(cfg: Config, lock: string): void {
+  const fd = openSync(lock, constants.O_RDONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error(`${lock} is not a regular file`);
+    if (cfg.isRoot && (st.uid !== 0 || st.gid !== 0)) fchownSync(fd, 0, 0);
+    if ((st.mode & 0o777) !== 0o600) fchmodSync(fd, 0o600);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function stamp(cfg: Config, name: string): SecretStamp {

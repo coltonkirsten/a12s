@@ -117,6 +117,10 @@ type Controller struct {
 	// bg counts the Controller's background goroutines (event streams,
 	// restarts, idle applies, the watch), so Stop can wait for them.
 	bg sync.WaitGroup
+	// bgMu serializes admission to bg (spawn's check and Add) with Wait
+	// closing it, so no worker is added once Wait has begun (review #60).
+	bgMu     sync.Mutex
+	stopping bool
 
 	// applyMu is held exclusively by Fleet-wide changes (apply, resume,
 	// drive rm) and shared by single-Computer ones (power, restarts, idle
@@ -196,10 +200,13 @@ func (c *Controller) lockComputer(name string) func() {
 // spawn runs f in a background goroutine that Wait waits for, and reports
 // whether it did: nothing new starts once the Controller's context ended.
 func (c *Controller) spawn(f func()) bool {
-	if c.ctx != nil && c.ctx.Err() != nil {
+	c.bgMu.Lock()
+	if c.stopping || (c.ctx != nil && c.ctx.Err() != nil) {
+		c.bgMu.Unlock()
 		return false
 	}
 	c.bg.Add(1)
+	c.bgMu.Unlock()
 	go func() {
 		defer c.bg.Done()
 		f()
@@ -208,8 +215,14 @@ func (c *Controller) spawn(f func()) bool {
 }
 
 // Wait returns once the background goroutines have ended; call it after
-// the context passed to Start is done.
-func (c *Controller) Wait() { c.bg.Wait() }
+// the context passed to Start is done. From its first call on, spawn admits
+// nothing new.
+func (c *Controller) Wait() {
+	c.bgMu.Lock()
+	c.stopping = true
+	c.bgMu.Unlock()
+	c.bg.Wait()
+}
 
 func (c *Controller) logf(format string, args ...any) { c.logger.Printf(format, args...) }
 
