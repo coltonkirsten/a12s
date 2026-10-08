@@ -15,6 +15,8 @@ interface ActiveTurn {
   usage: Record<string, unknown> | null;
   stopping: boolean;
   timer: NodeJS.Timeout | null;
+  /** turn.dispatched was emitted: the turn/start response or the first turn notification came in. */
+  dispatched: boolean;
 }
 
 /** `codex app-server -c mcp_servers.<name>.…` overrides; values are TOML, and JSON strings/arrays are valid TOML. */
@@ -27,6 +29,14 @@ export function mcpConfigArgs(servers: Record<string, McpServer>): string[] {
     for (const [k, v] of Object.entries(s.env ?? {})) args.push('-c', `mcp_servers.${name}.env.${k}=${JSON.stringify(v)}`);
   }
   return args;
+}
+
+/** Any turn notification from the harness is evidence it received the prompt; the first one, or the turn/start
+ * response, emits turn.dispatched ahead of the events (§4.6). */
+function received(t: ActiveTurn): void {
+  if (t.dispatched) return;
+  t.dispatched = true;
+  t.out.push({ type: 'turn.dispatched', data: {} });
 }
 
 /** Codex through one long-lived `codex app-server` child speaking newline-delimited JSON-RPC on stdio. */
@@ -85,7 +95,7 @@ export class CodexAdapter implements Adapter {
         if (reason) throw new ResumeError(reason);
       }
     }
-    const turn: ActiveTurn = { threadId, turnId: null, out: new EventQueue(), usage: null, stopping: false, timer: null };
+    const turn: ActiveTurn = { threadId, turnId: null, out: new EventQueue(), usage: null, stopping: false, timer: null, dispatched: false };
     this.turn = turn;
     try {
       // The model goes on every turn: a thread loaded by the wake precheck was resumed without it.
@@ -97,7 +107,7 @@ export class CodexAdapter implements Adapter {
       });
       turn.turnId = String(r.turn.id);
       // The turn/start response carrying the harness's turn id is Codex's evidence of receipt (§4.6).
-      turn.out.push({ type: 'turn.dispatched', data: {} });
+      received(turn);
     } catch (err) {
       this.turn = null;
       throw err;
@@ -282,6 +292,7 @@ export class CodexAdapter implements Adapter {
       const decision = 'decision' in result ? (['accept', 'approved'].includes(result.decision) ? 'allow' : 'deny') : kind === 'permissions' && full ? 'allow' : 'deny';
       const fields = ['command', 'cwd', 'reason', 'serverName', 'questions', 'permissions'] as const;
       const detail = Object.fromEntries(fields.filter((k) => p[k] !== undefined && p[k] !== null).map((k) => [k, p[k]]));
+      if (this.turn) received(this.turn);
       this.turn?.out.push({ type: 'permission', data: { decision, kind, detail } });
     } else {
       this.send({ id: msg.id, error: { code: -32601, message: `a12s computerd does not handle ${msg.method}` } });
@@ -294,15 +305,18 @@ export class CodexAdapter implements Adapter {
     if (!t || (p.threadId !== undefined && p.threadId !== t.threadId)) return;
     switch (method) {
       case 'item/agentMessage/delta':
+        received(t);
         if (p.delta) t.out.push({ type: 'text.delta', data: { text: String(p.delta) } });
         break;
       case 'item/started': {
         const tool = toolOf(p.item);
+        received(t);
         if (tool) t.out.push({ type: 'tool.started', data: { id: String(p.item.id), name: tool.name, input: tool.input } });
         break;
       }
       case 'item/completed': {
         const tool = toolOf(p.item);
+        received(t);
         if (tool) t.out.push({ type: 'tool.finished', data: { id: String(p.item.id), name: tool.name, isError: tool.isError, output: tool.output } });
         break;
       }
