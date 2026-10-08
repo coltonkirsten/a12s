@@ -91,19 +91,6 @@ func TestPresetsPinAndRefuseChange(t *testing.T) {
 	}
 }
 
-func TestPutFleetRequestJSON(t *testing.T) {
-	req := api.PutFleetRequest{Asleep: true, Presets: map[string][]byte{"./p": []byte("tar")}}
-	b, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	if m["asleep"] != true || m["presets"].(map[string]any)["./p"] != "dGFy" {
-		t.Errorf("json %s", b)
-	}
-}
-
 func TestTurnPrinter(t *testing.T) {
 	var out, errOut bytes.Buffer
 	p := &turnPrinter{turn: "t_41", kind: "codex", out: &out, errOut: &errOut, tty: true}

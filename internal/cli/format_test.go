@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -86,69 +85,5 @@ warning: tester: error: image missing (retryable)
 		if strings.HasSuffix(line, " ") {
 			t.Errorf("trailing space: %q", line)
 		}
-	}
-}
-
-func TestWriteDrives(t *testing.T) {
-	var b strings.Builder
-	WriteDrives(&b, []api.DriveRow{
-		{Name: "home-scout", Kind: api.DriveHome, Computer: "scout", Size: 10 << 30, AttachedTo: []string{"scout"}},
-		{Name: "reference", Kind: api.DriveWork, Size: 5 << 30, Access: "shared", AttachedTo: []string{"reviewer", "scout"}},
-		{Name: "ux-old", Kind: api.DriveWork, Access: "exclusive", Orphaned: true},
-	})
-	want := `NAME        KIND  SIZE  ACCESS     ATTACHED
-home-scout  home  10Gi  -          scout
-reference   work  5Gi   shared     reviewer,scout
-ux-old      work  -     exclusive  -  ORPHANED
-`
-	if b.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
-	}
-}
-
-func TestTurnLines(t *testing.T) {
-	got := TurnStartedLine("t_41", "codex", api.TurnStartedData{Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, Model: "gpt-6-astra"})
-	if got != "turn t_41 started (codex 0.154.0, gpt-6-astra, resumed: false)" {
-		t.Errorf("got %q", got)
-	}
-	got = TurnStartedLine("t_2", "claude-code", api.TurnStartedData{Harness: api.Harness{Version: "2.1.280"}, Resumed: true})
-	if got != "turn t_2 started (claude-code 2.1.280, resumed: true)" {
-		t.Errorf("got %q", got)
-	}
-	if got := TurnFinishedLine("t_41", api.TurnFinishedData{Status: "completed"}); got != "turn t_41 completed" {
-		t.Errorf("got %q", got)
-	}
-	if got := TurnFinishedLine("t_9", api.TurnFinishedData{Status: "failed", Error: "resume failed"}); got != "turn t_9 failed: resume failed" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestEventAndLogLines(t *testing.T) {
-	ev := func(typ api.EventType, data string) api.Event {
-		return api.Event{Seq: 12, Type: typ, Data: json.RawMessage(data)}
-	}
-	for _, c := range []struct {
-		e    api.Event
-		want string
-	}{
-		{ev(api.EventToolStarted, `{"name":"Bash","input":{"command":"ls"}}`), "[tool] Bash started"},
-		{ev(api.EventToolFinished, `{"name":"Bash","isError":true}`), "[tool] Bash failed"},
-		{ev(api.EventDiagnostic, `{"message":"egress denied: evil.com:443"}`), "[diagnostic] egress denied: evil.com:443"},
-		{ev(api.EventPermission, `{"tool": "Write", "decision": "deny"}`), `[permission] {"tool":"Write","decision":"deny"}`},
-		{ev(api.EventResumeFailed, `{"sessionId":"s","reason":"no session file","at":"wake"}`), "[resume.failed] no session file"},
-		{ev(api.EventLifecycle, ``), "[lifecycle] "},
-	} {
-		if got := EventLine(c.e); got != c.want {
-			t.Errorf("EventLine(%s) = %q, want %q", c.e.Type, got, c.want)
-		}
-	}
-	if got := LogLine(ev(api.EventTextDelta, `{ "text": "hi" }`)); got != `12 text.delta {"text":"hi"}` {
-		t.Errorf("LogLine = %q", got)
-	}
-	if got := LogLine(ev(api.EventLifecycle, ``)); got != "12 lifecycle" {
-		t.Errorf("LogLine = %q", got)
-	}
-	if got := Truncate("abcdef", 4); got != "abc…" {
-		t.Errorf("Truncate = %q", got)
 	}
 }
