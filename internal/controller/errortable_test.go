@@ -51,7 +51,9 @@ func TestErrorTable(t *testing.T) {
 		{"grant to a Service", func() string {
 			return parse(head + "    grants: { send: [db] }\nservices:\n  db:\n    image: x/y:1\n")
 		}},
-		{"egress.tcp on a Computer", func() string { return parse(head + "    egress: { allow: [], tcp: [{name: a, host: b.example, port: 1}] }\n") }},
+		{"egress.tcp on a Computer", func() string {
+			return parse(head + "    egress: { allow: [], tcp: [{name: a, host: b.example, port: 1}] }\n")
+		}},
 		{"no manifest in the image", func() string {
 			return fleet.ValidateService("db", fleet.Service{Image: "x/y"}, nil, "x/y", nil).Error()
 		}},
@@ -60,7 +62,11 @@ func TestErrorTable(t *testing.T) {
 			return fleet.ValidateService("pg", fleet.Service{Image: "postgres:17"}, m, "postgres:17", []string{"/data"}).Error()
 		}},
 		{"credential with no binding", func() string {
-			f := withServices(t, h.d, func(f *fleet.Fleet) { s := f.Services["clock"]; s.Credentials = []string{"postgres"}; f.Services["clock"] = s })
+			f := withServices(t, h.d, func(f *fleet.Fleet) {
+				s := f.Services["clock"]
+				s.Credentials = []string{"postgres"}
+				f.Services["clock"] = s
+			})
 			_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
 			return err.Error()
 		}},
