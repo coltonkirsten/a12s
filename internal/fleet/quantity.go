@@ -118,3 +118,15 @@ func (c *CPU) UnmarshalText(text []byte) error {
 	*c = v
 	return nil
 }
+
+// UnmarshalJSON accepts a JSON number (cores) as well as a string, as YAML does.
+func (c *CPU) UnmarshalJSON(b []byte) error {
+	t := strings.Trim(string(b), `"`)
+	return c.UnmarshalText([]byte(t))
+}
+
+// UnmarshalJSON accepts a JSON number (bytes) as well as a string ("512Mi").
+func (b *Bytes) UnmarshalJSON(data []byte) error {
+	t := strings.Trim(string(data), `"`)
+	return b.UnmarshalText([]byte(t))
+}
