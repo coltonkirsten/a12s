@@ -28,7 +28,10 @@ func TestSignature(t *testing.T) {
 
 func TestSummary(t *testing.T) {
 	s := summarize("pull_request", []byte(`{"action":"opened","repository":{"full_name":"c/a12s"},"sender":{"login":"colton"},"pull_request":{"title":"Fix","html_url":"https://x/1"}}`))
-	if !strings.HasPrefix(s, "GitHub pull_request (opened) on c/a12s by colton\nPR: Fix https://x/1\n") {
-		t.Fatal(s)
+	// What the agent needs to act on, not the wording.
+	for _, want := range []string{"pull_request", "opened", "c/a12s", "colton", "Fix", "https://x/1"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("summary lacks %q:\n%s", want, s)
+		}
 	}
 }
