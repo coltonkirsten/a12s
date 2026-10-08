@@ -94,8 +94,11 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		return api.PutFleetResponse{}, err
 	}
 	prunePresets(c.cfg.StateDir, lock.Presets)
+	if err := c.syncInboxes(ctx, f, api.PrincipalLocal); err != nil {
+		return api.PutFleetResponse{}, err
+	}
 
-	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}}
+	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: f.InboxWarnings()}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
 		return res, err

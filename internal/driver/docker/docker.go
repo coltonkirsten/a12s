@@ -27,6 +27,9 @@ const (
 	LabelRole       = "a12s.role"
 	LabelDrive      = "a12s.drive" // drive ID, on drive volumes
 	LabelSize       = "a12s.size"  // requested drive size in bytes (not enforced)
+	// LabelData marks the Fleet's data volume (fleet.db: inboxes, holds,
+	// tokens). Like a drive, it is kept by down and destroyed only by purge.
+	LabelData = "a12s.data"
 
 	RoleController = "controller"
 	RoleComputer   = "computer"

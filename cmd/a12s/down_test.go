@@ -39,7 +39,7 @@ func TestConfirmPurge(t *testing.T) {
 	drives := []cli.Drive{{Name: "home-hello", Volume: "a12s-qs-home-hello"}, {Name: "notes", Volume: "a12s-qs-drive-notes"}}
 	for in, want := range map[string]bool{"y\n": true, "YES\n": true, "\n": false, "n\n": false, "": false, "yep\n": false} {
 		var out bytes.Buffer
-		if got := confirmPurge(strings.NewReader(in), &out, "qs", drives); got != want {
+		if got := confirmPurge(strings.NewReader(in), &out, "qs", drives, nil, ""); got != want {
 			t.Errorf("answer %q: got %v", in, got)
 		}
 		s := out.String()

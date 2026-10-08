@@ -60,6 +60,9 @@ type DownPlan struct {
 	Networks   []string
 	Volumes    []string // non-drive volumes: Controller state, bundle cache
 	Drives     []Drive
+	// Data are the Fleet's data volumes (a12s.data: fleet.db with the
+	// inboxes). Kept like drives; destroyed only by purge.
+	Data       []string
 	StateDir   string   // ~/.a12s/<fleet>, "" when absent or not a directory
 	StateFiles []string // the CLI's own files in it (controller.json)
 }
@@ -71,13 +74,15 @@ func (p *DownPlan) Empty() bool {
 
 // DownResult is what Down did.
 type DownResult struct {
-	Containers []string // names
-	Networks   []string
-	Volumes    []string
-	StateFiles []string // removed from the state dir
-	StateDir   string   // removed (it was empty after StateFiles), or ""
-	Kept       []Drive  // drives left in place
-	Destroyed  []Drive  // drives removed (purge only)
+	Containers    []string // names
+	Networks      []string
+	Volumes       []string
+	StateFiles    []string // removed from the state dir
+	StateDir      string   // removed (it was empty after StateFiles), or ""
+	Kept          []Drive  // drives left in place
+	Destroyed     []Drive  // drives removed (purge only)
+	DataKept      []string // data volumes left in place
+	DataDestroyed []string // data volumes removed (purge only)
 }
 
 func fleetFilter(fleetName string) client.Filters {
@@ -134,6 +139,10 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 		if v.Labels[docker.LabelFleet] != fleetName {
 			continue
 		}
+		if _, isData := v.Labels[docker.LabelData]; isData {
+			p.Data = append(p.Data, v.Name)
+			continue
+		}
 		if id, isDrive := v.Labels[docker.LabelDrive]; isDrive {
 			// A drive label without a value is still a drive: kept, never purged.
 			name := DriveName(id)
@@ -146,6 +155,7 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 		}
 	}
 	sort.Strings(p.Volumes)
+	sort.Strings(p.Data)
 	sort.Slice(p.Drives, func(i, j int) bool { return p.Drives[i].Name < p.Drives[j].Name })
 
 	dir, err := StateDir(fleetName)
@@ -276,6 +286,22 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 			res.Destroyed = append(res.Destroyed, d)
 		}
 	}
+	confirmedData := map[string]bool{}
+	for _, v := range plan.Data {
+		confirmedData[v] = true
+	}
+	for _, v := range now.Data {
+		if !purge || !confirmedData[v] {
+			res.DataKept = append(res.DataKept, v)
+			continue
+		}
+		if err := removeDataVolume(ctx, dc, plan.Fleet, v); err != nil {
+			errs = append(errs, fmt.Errorf("data volume %s: %w", v, err))
+			res.DataKept = append(res.DataKept, v)
+		} else {
+			res.DataDestroyed = append(res.DataDestroyed, v)
+		}
+	}
 	if now.StateDir != "" {
 		files, removedDir, err := removeStateFiles(now.StateDir)
 		res.StateFiles = files
@@ -373,7 +399,31 @@ func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID s
 		return fmt.Errorf("inspect volume %s: %w", name, err)
 	}
 	id, isDrive := v.Volume.Labels[docker.LabelDrive]
+	if _, isData := v.Volume.Labels[docker.LabelData]; isData {
+		return fmt.Errorf("volume %s is a data volume; left alone", name)
+	}
 	if v.Volume.Labels[docker.LabelFleet] != fleetName || isDrive != (driveID != "") || id != driveID {
+		return fmt.Errorf("volume %s changed since it was listed; left alone", name)
+	}
+	if _, err := dc.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// removeDataVolume removes a data volume after inspecting it again: it must
+// still carry the Fleet's label and the data label, and no drive label.
+func removeDataVolume(ctx context.Context, dc DownDocker, fleetName, name string) error {
+	v, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect volume %s: %w", name, err)
+	}
+	_, isData := v.Volume.Labels[docker.LabelData]
+	_, isDrive := v.Volume.Labels[docker.LabelDrive]
+	if v.Volume.Labels[docker.LabelFleet] != fleetName || !isData || isDrive {
 		return fmt.Errorf("volume %s changed since it was listed; left alone", name)
 	}
 	if _, err := dc.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {

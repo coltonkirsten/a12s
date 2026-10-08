@@ -86,6 +86,19 @@ type Computer struct {
 	Credentials []string     `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 	Drives      []DriveMount `yaml:"drives,omitempty" json:"drives,omitempty"`
 	Egress      Egress       `yaml:"egress,omitempty" json:"egress,omitzero"`
+	// Inbox configures the Computer's inbox (enhancements §4.8, §4.13).
+	// Controller state, not container config: never hashed into a generation.
+	Inbox Inbox `yaml:"inbox,omitempty" json:"inbox,omitzero"`
+}
+
+// Inbox is a Computer's inbox configuration. Unset fields fall back to
+// defaults.inbox, then the built-in values.
+type Inbox struct {
+	MaxMessages *int64 `yaml:"maxMessages,omitempty" json:"maxMessages,omitempty"`
+	// MaxBytes is a size as written ("320Ki"); validated at admission.
+	MaxBytes *string `yaml:"maxBytes,omitempty" json:"maxBytes,omitempty"`
+	// Intro is the Batch intro; "" renders none, nil the default.
+	Intro *string `yaml:"intro,omitempty" json:"intro,omitempty"`
 }
 
 // Tier returns the image tier: slim, browser or custom.

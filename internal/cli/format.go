@@ -36,6 +36,9 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	if len(r.Removed) > 0 {
 		lines = append(lines, "removed "+strings.Join(r.Removed, ", ")+" (drives kept)")
 	}
+	for _, w := range r.Warnings {
+		lines = append(lines, "warning: "+w)
+	}
 	if len(lines) == 0 && len(r.Errors) == 0 {
 		lines = append(lines, "no changes")
 	}
@@ -97,6 +100,9 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		}
 		if m := egressMarker(st, c); m != "" {
 			extra = append(extra, m)
+		}
+		if in := InboxCell(c.Inbox); in != "" {
+			extra = append(extra, in)
 		}
 		cells = append(cells, strings.Join(extra, "  "))
 		rows = append(rows, cells)
@@ -296,4 +302,81 @@ func Truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// InboxCell is a Computer's inbox in one status cell: "inbox 3/200 · 12Ki",
+// with OVER and held markers; "" when the inbox is empty and unheld.
+func InboxCell(in *api.InboxSummary) string {
+	if in == nil || (in.Usage.Messages == 0 && !in.Held) {
+		return ""
+	}
+	s := fmt.Sprintf("inbox %d/%d · %s", in.Usage.Messages, in.Limits.MaxMessages.Value, kib(in.Usage.Bytes))
+	if in.OverLimit {
+		s += " OVER (refusing)"
+	}
+	if in.Held {
+		s += " HELD (" + in.HoldReason + ")"
+	}
+	return s
+}
+
+func kib(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%dB", n)
+	}
+	return fmt.Sprintf("%dKi", (n+1023)/1024)
+}
+
+// WriteInbox prints `a12s inbox`: a summary, then one row per Message.
+func WriteInbox(w io.Writer, l *api.InboxListResponse, bodies bool) {
+	held := "not held"
+	if l.Held {
+		held = "HELD (" + l.HoldReason + ")"
+		if l.Diagnostic != "" {
+			held += ": " + l.Diagnostic
+		}
+	}
+	orphan := ""
+	if l.Orphaned {
+		orphan = " · ORPHANED (no longer in the Fleet)"
+	}
+	fmt.Fprintf(w, "%s inbox · %d pending, %d claimed · %s%s\n", l.Computer, l.Pending, l.Claimed, held, orphan)
+	over := ""
+	if l.OverLimit {
+		over = " · OVER LIMIT: new messages are refused until it drains"
+	}
+	fmt.Fprintf(w, "limits %d messages (%s), %s (%s) · used %d, %s%s\n", l.Limits.MaxMessages.Value, l.Limits.MaxMessages.Source,
+		kib(l.Limits.MaxBytes.Value), l.Limits.MaxBytes.Source, l.Usage.Messages, kib(l.Usage.Bytes), over)
+	e := l.Ended24h
+	fmt.Fprintf(w, "last 24h: %d expired, %d replaced, %d withdrawn, %d discarded\n", e.Expired, e.Replaced, e.Withdrawn, e.Discarded)
+	if l.SessionOverride != "" {
+		fmt.Fprintf(w, "next Batch starts a %s session (inbox resume --new)\n", l.SessionOverride)
+	}
+	if len(l.Messages) == 0 {
+		return
+	}
+	rows := [][]string{{"SEQ", "ID", "FROM", "VIA", "AT", "STATE", "EXPIRES", "KEY"}}
+	for _, m := range l.Messages {
+		exp := "-"
+		if m.ExpiresAt != nil {
+			exp = m.ExpiresAt.Local().Format("15:04:05")
+		}
+		key := "-"
+		if m.ReplaceKey != "" {
+			key = fmt.Sprintf("%s (%d)", m.ReplaceKey, m.Superseded)
+		}
+		state := m.State
+		if m.Fresh {
+			state += " fresh"
+		}
+		rows = append(rows, []string{fmt.Sprint(m.Seq), m.ID, m.Sender, m.Via, m.CreatedAt.Local().Format("15:04:05"), state, exp, key})
+	}
+	writeTable(w, rows)
+	if bodies {
+		for _, m := range l.Messages {
+			if m.Body != nil {
+				fmt.Fprintf(w, "\n--- %s (seq %d, from %s via %s)\n%s\n", m.ID, m.Seq, m.Sender, m.Via, *m.Body)
+			}
+		}
+	}
 }

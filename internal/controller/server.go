@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,29 +81,34 @@ func decode(w http.ResponseWriter, r *http.Request, limit int64, v any) bool {
 	return true
 }
 
-// Handler is the CLI API (PLAN "Controller API"), behind the bearer token.
+// Handler is the owner API (PLAN "Controller API"), behind the owner
+// bearer token or a scoped token (enhancements §4.4).
 func (c *Controller) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /v1/fleet", c.handlePutFleet)
-	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /v1/fleet", allow("", "", c.handlePutFleet))
+	mux.HandleFunc("GET /v1/status", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, c.Status(r.Context()))
-	})
-	mux.HandleFunc("POST /v1/computers/{c}/turns", c.handleTurn)
-	mux.HandleFunc("GET /v1/computers/{c}/events", c.handleEvents)
-	mux.HandleFunc("POST /v1/computers/{c}/turns/{id}/stop", c.handleStop)
-	mux.HandleFunc("POST /v1/computers/{c}/power", c.handlePower)
-	mux.HandleFunc("POST /v1/apply", c.handleApply)
-	mux.HandleFunc("POST /v1/computers/{c}/shell", c.handleShell)
-	mux.HandleFunc("GET /v1/drives", c.handleDrives)
-	mux.HandleFunc("DELETE /v1/drives/{d}", c.handleRemoveDrive)
-	token := []byte("Bearer " + c.cfg.APIToken)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), token) != 1 {
-			writeError(w, http.StatusUnauthorized, api.ErrUnauthorized, "missing or wrong bearer token")
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	}))
+	mux.HandleFunc("POST /v1/computers/{c}/turns", allow("", "", c.handleTurn))
+	mux.HandleFunc("GET /v1/computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))
+	mux.HandleFunc("POST /v1/computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
+	mux.HandleFunc("POST /v1/computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
+	mux.HandleFunc("POST /v1/apply", allow("", "", c.handleApply))
+	mux.HandleFunc("POST /v1/computers/{c}/shell", allow("", "", c.handleShell))
+	mux.HandleFunc("GET /v1/drives", allow("", "", c.handleDrives))
+	mux.HandleFunc("DELETE /v1/drives/{d}", allow("", "", c.handleRemoveDrive))
+
+	mux.HandleFunc("POST /v1/computers/{c}/inbox", allow(api.ActionSend, "c", c.handleEnqueue))
+	mux.HandleFunc("GET /v1/computers/{c}/inbox", allow(api.ActionInbox, "c", c.handleInboxList))
+	mux.HandleFunc("GET /v1/computers/{c}/inbox/{id}", allowSendOrInbox(c.handleInboxGet))
+	mux.HandleFunc("DELETE /v1/computers/{c}/inbox/{id}", allowSendOrInbox(c.handleWithdraw))
+	mux.HandleFunc("POST /v1/computers/{c}/inbox/clear", allow(api.ActionInbox, "c", c.handleInboxClear))
+	mux.HandleFunc("POST /v1/computers/{c}/inbox/hold", allow(api.ActionInbox, "c", c.handleInboxHold))
+	mux.HandleFunc("POST /v1/computers/{c}/inbox/resume", allow(api.ActionInbox, "c", c.handleInboxResume))
+	mux.HandleFunc("POST /v1/tokens", allow("", "", c.handleTokenCreate))
+	mux.HandleFunc("GET /v1/tokens", allow("", "", c.handleTokens))
+	mux.HandleFunc("DELETE /v1/tokens/{name}", allow("", "", c.handleTokenDelete))
+	return c.authenticate(mux)
 }
 
 // detached runs fn on the Controller's context so the work finishes even if
@@ -381,6 +385,30 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 		wg.Go(func() { res.Computers[i] = c.computerStatus(ctx, name) })
 	}
 	wg.Wait()
+
+	if c.inbox != nil {
+		if sums, err := c.inbox.Inboxes(ctx); err == nil {
+			byName := map[string]api.InboxSummary{}
+			for _, s := range sums {
+				byName[s.Computer] = s
+				if s.Orphaned && s.Pending+s.Claimed > 0 {
+					res.OrphanedInboxes = append(res.OrphanedInboxes, s)
+					res.Warnings = append(res.Warnings, fmt.Sprintf("orphaned inbox %s: %d pending (a12s inbox clear %s --orphan discards them)", s.Computer, s.Pending, s.Computer))
+				}
+			}
+			for i := range res.Computers {
+				if s, ok := byName[res.Computers[i].Name]; ok {
+					res.Computers[i].Inbox = &s
+					if s.Held {
+						res.Computers[i].Warnings = append(res.Computers[i].Warnings, fmt.Sprintf("inbox held (%s); a12s inbox resume %s", s.HoldReason, s.Computer))
+					}
+					if s.OverLimit {
+						res.Computers[i].Warnings = append(res.Computers[i].Warnings, fmt.Sprintf("inbox over its limit (%d/%d); new messages are refused until it drains", s.Usage.Messages, s.Limits.MaxMessages.Value))
+					}
+				}
+			}
+		}
+	}
 
 	if drives, err := c.drives(ctx); err == nil {
 		var orphans []string

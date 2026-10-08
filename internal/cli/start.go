@@ -26,6 +26,7 @@ const (
 	DefaultControllerImage = "a12s/controller:dev"
 	ControllerPort         = "7000/tcp"
 	controllerStateDir     = "/var/lib/a12s"
+	controllerDataDir      = "/var/lib/a12s-data"
 	dockerSocket           = "/var/run/docker.sock"
 )
 
@@ -34,12 +35,14 @@ type ControllerNames struct {
 	Container string // a12s-F-controller
 	Volume    string // a12s-F-controller
 	Network   string // a12s-F
+	// Data is the Fleet's data volume (fleet.db), kept by down: a12s-F-data.
+	Data string
 }
 
 // NamesFor returns the Controller's object names for a Fleet.
 func NamesFor(fleetName string) ControllerNames {
 	name := "a12s-" + fleetName + "-controller"
-	return ControllerNames{Container: name, Volume: name, Network: "a12s-" + fleetName}
+	return ControllerNames{Container: name, Volume: name, Network: "a12s-" + fleetName, Data: "a12s-" + fleetName + "-data"}
 }
 
 // StartOptions configures EnsureController.
@@ -79,6 +82,9 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 		return nil, err
 	}
 	if err := ensureStateVolume(ctx, dc, n.Volume, o.Fleet, labels); err != nil {
+		return nil, err
+	}
+	if err := ensureDataVolume(ctx, dc, n.Data, o.Fleet); err != nil {
 		return nil, err
 	}
 
@@ -167,6 +173,26 @@ func ensureStateVolume(ctx context.Context, dc *client.Client, name, fleetName s
 	return nil
 }
 
+// ensureDataVolume creates the Fleet's data volume, labeled a12s.data so
+// that down keeps it like a drive.
+func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName string) error {
+	res, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+	if err == nil {
+		if res.Volume.Labels[docker.LabelFleet] != fleetName || res.Volume.Labels[docker.LabelData] == "" {
+			return fmt.Errorf("volume %s exists but is not the data volume of fleet %s", name, fleetName)
+		}
+		return nil
+	}
+	if !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("inspect volume %s: %w", name, err)
+	}
+	labels := map[string]string{docker.LabelFleet: fleetName, docker.LabelData: "fleet.db"}
+	if _, err := dc.VolumeCreate(ctx, client.VolumeCreateOptions{Name: name, Labels: labels}); err != nil {
+		return fmt.Errorf("create volume %s: %w", name, err)
+	}
+	return nil
+}
+
 // ControllerCreateOptions is the Controller container: Docker socket, state
 // volume, the Fleet's bridge network, API port published on loopback only.
 func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, labels map[string]string) client.ContainerCreateOptions {
@@ -175,7 +201,7 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 		Name: n.Container,
 		Config: &container.Config{
 			Image:        image,
-			Env:          []string{"A12S_FLEET=" + fleetName, "A12S_API_TOKEN=" + token},
+			Env:          []string{"A12S_FLEET=" + fleetName, "A12S_API_TOKEN=" + token, "A12S_DATA_DIR=" + controllerDataDir},
 			Labels:       labels,
 			ExposedPorts: network.PortSet{port: {}},
 		},
@@ -183,7 +209,10 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 			NetworkMode:   container.NetworkMode(n.Network),
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
 			Binds:         []string{dockerSocket + ":" + dockerSocket},
-			Mounts:        []mount.Mount{{Type: mount.TypeVolume, Source: n.Volume, Target: controllerStateDir}},
+			Mounts: []mount.Mount{
+				{Type: mount.TypeVolume, Source: n.Volume, Target: controllerStateDir},
+				{Type: mount.TypeVolume, Source: n.Data, Target: controllerDataDir},
+			},
 			PortBindings: network.PortMap{port: {{
 				HostIP:   netip.MustParseAddr("127.0.0.1"),
 				HostPort: "0",

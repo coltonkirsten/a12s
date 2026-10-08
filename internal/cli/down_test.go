@@ -83,6 +83,7 @@ func newFake() *fakeDocker {
 	addV("a12s-qs-bundles", labels("qs", ""))
 	addV("a12s-qs-home-hello", labels("qs", "", "a12s.drive", "home-hello", "a12s.computer", "hello"))
 	addV("a12s-qs-drive-notes", labels("qs", "", "a12s.drive", "drive-notes"))
+	addV("a12s-qs-data", labels("qs", "", "a12s.data", "fleet.db"))
 	addV("a12s-other-home-hello", labels("other", "", "a12s.drive", "home-hello"))
 	addV("a12s-other-controller", labels("other", "controller"))
 	addV("unrelated", nil)
@@ -309,8 +310,11 @@ func TestDownKeepsDrives(t *testing.T) {
 	if !slices.Equal(ns, []string{"a12s-other"}) {
 		t.Errorf("networks left %v", ns)
 	}
-	if !slices.Equal(vs, []string{"a12s-other-controller", "a12s-other-home-hello", "a12s-qs-drive-notes", "a12s-qs-home-hello", "unrelated"}) {
+	if !slices.Equal(vs, []string{"a12s-other-controller", "a12s-other-home-hello", "a12s-qs-data", "a12s-qs-drive-notes", "a12s-qs-home-hello", "unrelated"}) {
 		t.Errorf("volumes left %v", vs)
+	}
+	if !slices.Equal(plan.Data, []string{"a12s-qs-data"}) || !slices.Equal(res.DataKept, []string{"a12s-qs-data"}) {
+		t.Errorf("data volume: plan %v kept %v", plan.Data, res.DataKept)
 	}
 	if !slices.Equal(res.Kept, wantDrives) || len(res.Destroyed) != 0 {
 		t.Errorf("kept %+v destroyed %+v", res.Kept, res.Destroyed)
@@ -330,7 +334,7 @@ func TestDownKeepsDrives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Empty() || len(plan.Drives) != 2 {
+	if !plan.Empty() || len(plan.Drives) != 2 || len(plan.Data) != 1 {
 		t.Errorf("second plan %+v", plan)
 	}
 	n := len(f.calls)
@@ -355,8 +359,8 @@ func TestDownPurge(t *testing.T) {
 	if !slices.Equal(vs, []string{"a12s-other-controller", "a12s-other-home-hello", "unrelated"}) {
 		t.Errorf("volumes left %v", vs)
 	}
-	if len(res.Kept) != 0 || len(res.Destroyed) != 2 {
-		t.Errorf("kept %+v destroyed %+v", res.Kept, res.Destroyed)
+	if len(res.Kept) != 0 || len(res.Destroyed) != 2 || !slices.Equal(res.DataDestroyed, []string{"a12s-qs-data"}) {
+		t.Errorf("kept %+v destroyed %+v data %v", res.Kept, res.Destroyed, res.DataDestroyed)
 	}
 	// Drives go only after every container that could mount them.
 	last := slices.Index(f.calls, "rm a12s-qs-hello")
