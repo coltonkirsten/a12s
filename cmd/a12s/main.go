@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/coltonkirsten/a12s/internal/api"
@@ -46,6 +47,8 @@ func commands() []command {
 		{"lock", "update services/<svc>", "move a Service's pin in fleet.lock explicitly", runLock},
 		{"drive", "ls | rm <name> [--yes]", "list drives; rm and down --purge are the only commands that destroy data", runDrive},
 		{"down", "[--purge [--yes]]", "remove Computers, Controller and network; keep drives (--purge destroys them)", runDown},
+		{"doctor", "", "check Docker, images, bindings, the Controller and Service health; one fix per line", runDoctor},
+		{"completion", "bash|zsh", "print a shell completion script", runCompletion},
 		{"controller", "", "run the Controller (inside its container)", runControllerCmd},
 	}
 }
@@ -54,12 +57,16 @@ func commands() []command {
 type globals struct {
 	fleetPath    string
 	bindingsPath string
+	// json prints the result as JSON (events as JSON lines), §6.3.
+	json bool
+	// warnedF records that the deprecated -f was used for the Fleet file.
+	warnedF bool
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
 
 func run(args []string, stderr io.Writer) int {
-	g := &globals{fleetPath: "fleet.yaml"}
+	g := &globals{fleetPath: defaultFleetPath()}
 	fs := flag.NewFlagSet("a12s", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	g.register(fs)
@@ -97,7 +104,7 @@ func run(args []string, stderr io.Writer) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: a12s [-f fleet.yaml] [--bindings path] <command> [args]")
+	fmt.Fprintln(w, "usage: a12s [--fleet|-F fleet.yaml] [--bindings path] [--json] <command> [args]")
 	fmt.Fprintln(w)
 	for _, c := range commands() {
 		fmt.Fprintf(w, "  %-10s %-38s %s\n", c.name, c.args, c.summary)
@@ -137,8 +144,27 @@ func report(w io.Writer, c command, err error) int {
 }
 
 func (g *globals) register(fs *flag.FlagSet) {
-	fs.StringVar(&g.fleetPath, "f", g.fleetPath, "Fleet file; fleet.lock and "+cli.BindingsFile+" live beside it")
+	g.registerFleet(fs, true)
+}
+
+// registerFleet registers the global flags; withF keeps the deprecated -f
+// for the Fleet file (commands where -f means follow pass false).
+func (g *globals) registerFleet(fs *flag.FlagSet, withF bool) {
+	usage := "Fleet file; fleet.lock and " + cli.BindingsFile + " live beside it (default: $A12S_FLEET, then the nearest fleet.yaml upward)"
+	fs.StringVar(&g.fleetPath, "fleet", g.fleetPath, usage)
+	fs.StringVar(&g.fleetPath, "F", g.fleetPath, usage)
+	if withF {
+		fs.Func("f", "deprecated: use --fleet or -F", func(v string) error {
+			g.fleetPath = v
+			if !g.warnedF {
+				g.warnedF = true
+				fmt.Fprintln(os.Stderr, "a12s: -f for the Fleet file is deprecated and goes away in the next release; use --fleet or -F (-f will mean follow)")
+			}
+			return nil
+		})
+	}
 	fs.StringVar(&g.bindingsPath, "bindings", g.bindingsPath, "bindings file (default: "+cli.BindingsFile+" beside the Fleet file)")
+	fs.BoolVar(&g.json, "json", g.json, "print the result as JSON (events as JSON lines)")
 }
 
 // flags returns a FlagSet for a command that also accepts the global flags.
@@ -147,6 +173,47 @@ func (g *globals) flags(name string) *flag.FlagSet {
 	fs.SetOutput(io.Discard)
 	g.register(fs)
 	return fs
+}
+
+// flagsFollow is flags for a command where -f means follow.
+func (g *globals) flagsFollow(name string, follow *bool) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	g.registerFleet(fs, false)
+	fs.BoolVar(follow, "f", false, "follow")
+	fs.BoolVar(follow, "follow", false, "follow")
+	return fs
+}
+
+// defaultFleetPath is $A12S_FLEET, else the nearest fleet.yaml from the
+// working directory upward, else fleet.yaml (§6.3).
+func defaultFleetPath() string {
+	if p := os.Getenv("A12S_FLEET"); p != "" && (strings.HasSuffix(p, ".yaml") || strings.HasSuffix(p, ".yml") || strings.Contains(p, string(filepath.Separator))) {
+		return p
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "fleet.yaml"
+	}
+	for {
+		p := filepath.Join(dir, "fleet.yaml")
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			if rel, err := filepath.Rel(mustGetwd(), p); err == nil {
+				return rel
+			}
+			return p
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "fleet.yaml"
+		}
+		dir = parent
+	}
+}
+
+func mustGetwd() string {
+	d, _ := os.Getwd()
+	return d
 }
 
 // parse parses flags anywhere among the arguments (`a12s prompt scout --new
@@ -196,7 +263,7 @@ func (g *globals) presetDir(p string) string {
 func (g *globals) readFleet() (*fleet.Fleet, error) {
 	data, err := os.ReadFile(g.fleetPath)
 	if err != nil {
-		return nil, fmt.Errorf("read fleet: %w (use -f to point at the Fleet file)", err)
+		return nil, fmt.Errorf("read fleet: %w  fix: run in the Fleet's directory, or point at it with --fleet", err)
 	}
 	f, err := fleet.Decode(data)
 	if err != nil {

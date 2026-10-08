@@ -62,6 +62,9 @@ func runCreds(g *globals, args []string) error {
 	if err := cli.BindFile(g.bindings(), name, path); err != nil {
 		return err
 	}
+	if g.json {
+		return printJSON(map[string]string{"credential": name, "file": path, "bindings": g.bindings()})
+	}
 	fmt.Printf("%s saved to %s (0600) and bound in %s; a12s up sends it\n", name, path, g.bindings())
 	return nil
 }
@@ -122,6 +125,9 @@ func serviceLogin(g *globals, args []string) error {
 	}
 	if err := cli.BindFile(g.bindings(), l.Produces, path); err != nil {
 		return err
+	}
+	if g.json {
+		return printJSON(map[string]string{"service": name, "credential": l.Produces, "file": path, "bindings": g.bindings()})
 	}
 	fmt.Printf("logged in: %s saved to %s (0600) and bound; nothing is left in the container. Run a12s up to start %s with it.\n", l.Produces, path, name)
 	return nil

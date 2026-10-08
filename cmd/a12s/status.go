@@ -44,8 +44,11 @@ func runStatus(g *globals, args []string) error {
 			return fmt.Errorf("fleet %s has no Computer or Service %q", st.Fleet, pos[0])
 		}
 		st.Computers, st.Services = only, svc
-	} else if len(st.Computers) == 0 {
+	} else if len(st.Computers) == 0 && !g.json {
 		fmt.Println("no Computers (run a12s up)")
+	}
+	if g.json {
+		return printJSON(st)
 	}
 	cli.WriteStatus(os.Stdout, st)
 	return nil

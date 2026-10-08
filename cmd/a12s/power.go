@@ -88,6 +88,7 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	}
 
 	errs := make([]error, len(names))
+	results := make([]api.ComputerStatus, len(names))
 	var wg sync.WaitGroup
 	for i, n := range names {
 		reqs[i].State = state
@@ -104,12 +105,18 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 				errs[i] = fmt.Errorf("%s %s: %w", verb, n, err)
 				return
 			}
-			if cs.InboxCleared != nil {
+			results[i] = cs
+			if cs.InboxCleared != nil && !g.json {
 				fmt.Printf("%s: discarded %d pending message(s) (journaled with their bodies)\n", n, *cs.InboxCleared)
 			}
 		})
 	}
 	wg.Wait()
+	if g.json {
+		if err := printJSON(map[string]any{"computers": results}); err != nil {
+			return err
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -134,6 +141,9 @@ func runApply(g *globals, args []string) error {
 	req := api.ApplyRequest{Interrupt: *interrupt, Grace: api.Duration(*grace)}
 	if err := c.Do(ctx, "POST", "/v1/apply", req, &resp); err != nil {
 		return err
+	}
+	if g.json {
+		return printJSON(resp)
 	}
 	if len(resp.Applied) == 0 && len(resp.Pending) == 0 {
 		fmt.Println("nothing staged")

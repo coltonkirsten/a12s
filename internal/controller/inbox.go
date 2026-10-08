@@ -54,7 +54,8 @@ func (c *Controller) authenticate(next http.Handler) http.Handler {
 				return
 			}
 		}
-		writeError(w, http.StatusUnauthorized, api.ErrUnauthorized, "missing or wrong bearer token")
+		writeJSON(w, http.StatusUnauthorized, api.Error{Code: api.ErrUnauthorized, Message: "missing or wrong bearer token",
+			Fix: "use the owner token in ~/.a12s/<fleet>/controller.json (the CLI does), or a scoped token from a12s token create"})
 	})
 }
 

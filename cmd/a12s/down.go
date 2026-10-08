@@ -66,6 +66,12 @@ func runDown(g *globals, args []string) error {
 		}
 	}
 	res, derr := cli.Down(ctx, dc, plan, *purge)
+	if g.json {
+		if err := printJSON(res); err != nil {
+			return err
+		}
+		return derr
+	}
 	writeDown(os.Stdout, name, plan, res)
 	return derr
 }

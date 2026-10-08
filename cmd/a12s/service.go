@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"net/url"
@@ -36,7 +35,7 @@ func servicePath(name, suffix string) string {
 
 func serviceLs(g *globals, args []string) error {
 	fs := g.flags("service ls")
-	asJSON := fs.Bool("json", false, "print as JSON")
+	asJSON := &g.json
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -67,7 +66,7 @@ func serviceLs(g *globals, args []string) error {
 
 func serviceStatus(g *globals, args []string) error {
 	fs := g.flags("service status")
-	asJSON := fs.Bool("json", false, "print as JSON")
+	asJSON := &g.json
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -94,14 +93,8 @@ func serviceStatus(g *globals, args []string) error {
 
 func serviceLogs(g *globals, args []string) error {
 	// -f follows here (§6.3: the global -f becomes --fleet/-F).
-	fs := flag.NewFlagSet("service logs", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&g.fleetPath, "fleet", g.fleetPath, "Fleet file")
-	fs.StringVar(&g.fleetPath, "F", g.fleetPath, "Fleet file")
-	fs.StringVar(&g.bindingsPath, "bindings", g.bindingsPath, "bindings file")
 	var follow bool
-	fs.BoolVar(&follow, "f", false, "follow")
-	fs.BoolVar(&follow, "follow", false, "follow")
+	fs := g.flagsFollow("service logs", &follow)
 	tail := fs.Int("tail", 0, "only the last N lines of each part")
 	pos, err := parse(fs, args)
 	if err != nil {
