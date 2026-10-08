@@ -371,6 +371,9 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 		unenforced = unenforced || rec.Active.Unenforced
 	}
 	c.mu.Unlock()
+	if n := c.timeScaleNote(); n != "" {
+		res.Warnings = append(res.Warnings, n)
+	}
 	if f == nil {
 		res.Warnings = append(res.Warnings, "no Fleet applied; run a12s up")
 		return res
