@@ -160,7 +160,7 @@ func Open(path string) (*Store, error) {
 	// One connection: transactions are serialized in-process, which is the
 	// ordering §4.5 relies on, and SQLite never returns SQLITE_BUSY to us.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + batchSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("fleet.db schema: %w", err)
 	}
@@ -852,7 +852,8 @@ func (s *Store) ExpireDue(ctx context.Context) ([]string, error) {
 
 // expireTx expires due pending rows (of one Computer, or all with "").
 func expireTx(tx *sql.Tx, computer string, now time.Time) ([]string, error) {
-	q := `SELECT id, computer, expires_at FROM messages WHERE state = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`
+	// Strictly past: a now-or-never Message (expiresAt = createdAt) is claimable in its own transaction.
+	q := `SELECT id, computer, expires_at FROM messages WHERE state = 'pending' AND expires_at IS NOT NULL AND expires_at < ?`
 	args := []any{ms(now)}
 	if computer != "" {
 		q += ` AND computer = ?`

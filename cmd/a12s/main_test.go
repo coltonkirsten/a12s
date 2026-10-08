@@ -138,7 +138,7 @@ func TestTurnPrinter(t *testing.T) {
 // the event stream mid-turn: the output has every delta exactly once.
 func TestPromptEndToEnd(t *testing.T) {
 	var mu sync.Mutex
-	var turnReq api.TurnRequest
+	var enq api.EnqueueRequest
 	conns := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
@@ -146,11 +146,22 @@ func TestPromptEndToEnd(t *testing.T) {
 			return
 		}
 		switch {
-		case r.Method == "POST" && r.URL.Path == "/v1/computers/scout/turns":
+		case r.Method == "GET" && r.URL.Path == "/v1/status":
+			_ = json.NewEncoder(w).Encode(api.StatusResponse{Fleet: "lab", Computers: []api.ComputerStatus{{Name: "scout", Phase: api.PhaseBusy, ActiveTurn: "t_6"}}})
+		case r.Method == "POST" && r.URL.Path == "/v1/computers/scout/inbox":
 			mu.Lock()
-			_ = json.NewDecoder(r.Body).Decode(&turnReq)
+			_ = json.NewDecoder(r.Body).Decode(&enq)
 			mu.Unlock()
-			_ = json.NewEncoder(w).Encode(api.TurnResponse{TurnID: "t_7", SessionID: "s_1"})
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(api.EnqueueResponse{ID: "m_1", Seq: 1, State: api.MsgPending, Position: 0, Phase: api.PhaseBusy})
+		case r.Method == "GET" && r.URL.Path == "/v1/computers/scout/inbox/m_1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			snap, _ := json.Marshal(api.Event{V: 1, Computer: "scout", Seq: 1, Type: "snapshot", Data: json.RawMessage(`{"message":{"id":"m_1","state":"pending"},"held":false}`)})
+			fmt.Fprintf(w, "id: 1\ndata: %s\n\n", snap)
+			del, _ := json.Marshal(api.Event{V: 1, Computer: "scout", Seq: 3, Type: "delivered", Data: json.RawMessage(`{"turn":"t_7","batch":"b_1"}`)})
+			fmt.Fprintf(w, "id: 3\ndata: %s\n\n", del)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
 		case r.Method == "GET" && r.URL.Path == "/v1/computers/scout/events" && r.URL.Query().Get("turn") == "t_7":
 			mu.Lock()
 			conns++
@@ -163,7 +174,7 @@ func TestPromptEndToEnd(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			if n == 1 {
-				send(1, api.EventTurnStarted, `{"harness":{"kind":"claude-code","version":"2.1.280"},"model":"claude-fable-5-1","resumed":true,"prompt":"p","cwd":"/home/agent"}`)
+				send(1, api.EventTurnStarted, `{"harness":{"kind":"claude-code","version":"2.1.280"},"model":"claude-fable-5-1","resumed":true,"prompt":"p","cwd":"/home/agent","inbox":{"batch":"b_1","messages":[{"id":"m_1","sender":"local"},{"id":"m_0","sender":"cron:nightly-audit"}]}}`)
 				send(2, api.EventTextDelta, `{"text":"The word "}`)
 				panic(http.ErrAbortHandler)
 			}
@@ -198,15 +209,15 @@ func TestPromptEndToEnd(t *testing.T) {
 			t.Errorf("exit %d", code)
 		}
 	})
-	want := "turn t_7 started (claude-code 2.1.280, claude-fable-5-1, resumed: true)\nThe word was raven.\nturn t_7 completed\n"
+	want := "turn t_7 started (claude-code 2.1.280, claude-fable-5-1, resumed: true, batch of 2: yours + cron:nightly-audit)\nThe word was raven.\nturn t_7 completed\n"
 	if stdout != want {
 		t.Errorf("stdout %q, want %q", stdout, want)
 	}
-	if !strings.Contains(stderr, "[stream] reconnecting after seq 2") {
+	if !strings.Contains(stderr, "[stream] reconnecting after seq 2") || !strings.Contains(stderr, "queued: scout is busy with turn t_6 (0 messages ahead)") {
 		t.Errorf("stderr %q", stderr)
 	}
-	if turnReq.Prompt != "what was the word?" || turnReq.Session != api.SessionCurrent || len(turnReq.RequestID) != 36 {
-		t.Errorf("turn request %+v", turnReq)
+	if enq.Body != "what was the word?" || enq.Fresh || len(enq.IdempotencyKey) != 36 {
+		t.Errorf("enqueue %+v", enq)
 	}
 }
 

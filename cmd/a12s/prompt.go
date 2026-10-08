@@ -35,46 +35,31 @@ func runPrompt(g *globals, args []string) error {
 	}
 	kind := f.Computers[name].Harness.Kind
 
-	// Ctrl-C: before the turn is accepted, abort; after, ask the Computer to
-	// stop and keep streaming until turn.finished; a second Ctrl-C quits.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var mu sync.Mutex
-	var turnID string
-	interrupted := false
-	sigs := make(chan os.Signal, 2)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigs)
-	go func() {
-		for range sigs {
-			mu.Lock()
-			id, first := turnID, !interrupted
-			interrupted = true
-			mu.Unlock()
-			if id == "" || !first {
-				cancel()
-				return
-			}
-			dim(os.Stderr, "stopping turn "+id+" (Ctrl-C again to stop waiting)")
-			go func() {
-				sctx, scancel := context.WithTimeout(ctx, 30*time.Second)
-				defer scancel()
-				if err := c.Do(sctx, "POST", computerPath(name, "/turns/"+url.PathEscape(id)+"/stop"), struct{}{}, nil); err != nil {
-					fmt.Fprintf(os.Stderr, "a12s: stop %s: %v\n", id, err)
-				}
-			}()
-		}
-	}()
-
-	session := api.SessionCurrent
-	if *fresh {
-		session = api.SessionNew
+	// (1) An interactive command shouldn't hang until somebody wakes the Computer (§4.9).
+	st, err := status(ctx, c)
+	if err != nil {
+		return err
 	}
-	req := api.TurnRequest{RequestID: cli.NewRequestID(), Session: session, Prompt: text}
-	var tr api.TurnResponse
-	// The requestId makes a retry after a lost response safe: same turn.
+	var cs *api.ComputerStatus
+	for i := range st.Computers {
+		if st.Computers[i].Name == name {
+			cs = &st.Computers[i]
+		}
+	}
+	if cs == nil {
+		return fmt.Errorf("fleet %s has no Computer %q", st.Fleet, name)
+	}
+	if cs.Phase == api.PhaseAsleep || cs.Phase == api.PhaseStopping {
+		return &api.Error{Code: api.ErrAsleep, Message: name + " is asleep", Fix: fmt.Sprintf("a12s wake %s, or a12s send %s \"…\" to leave a message", name, name)}
+	}
+
+	// (2) Enqueue; the idempotency key makes a retry after a lost response safe.
+	req := api.EnqueueRequest{Body: text, Fresh: *fresh, IdempotencyKey: cli.NewRequestID()}
+	var res api.EnqueueResponse
 	for attempt := 1; ; attempt++ {
-		err = c.Do(ctx, "POST", computerPath(name, "/turns"), req, &tr)
+		err = c.Do(ctx, "POST", computerPath(name, "/inbox"), req, &res)
 		var apiErr *api.Error
 		if err == nil || errors.As(err, &apiErr) || ctx.Err() != nil || attempt == 3 {
 			break
@@ -82,16 +67,41 @@ func runPrompt(g *globals, args []string) error {
 		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 	}
 	if err != nil {
-		return promptError(name, err)
+		return err
 	}
-	mu.Lock()
-	turnID = tr.TurnID
-	mu.Unlock()
+	if res.State == api.MsgPending && (res.Position > 0 || cs.ActiveTurn != "") {
+		busy := ""
+		if cs.ActiveTurn != "" {
+			busy = " is busy with turn " + cs.ActiveTurn
+		}
+		dim(os.Stderr, fmt.Sprintf("queued: %s%s (%d messages ahead)", name, busy, res.Position))
+	}
 
-	tp := &turnPrinter{turn: tr.TurnID, kind: kind, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout)}
+	// Ctrl-C latches a cancel intent: withdraw while pending (again on every
+	// return), stop the Turn once delivered; a second Ctrl-C stops waiting.
+	f2 := &promptFollow{c: c, name: name, id: res.ID}
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+	go func() {
+		for range sigs {
+			if !f2.interrupt() {
+				dim(os.Stderr, "stopped waiting; withdraw it later with a12s inbox rm "+name+" "+res.ID)
+				cancel()
+				return
+			}
+		}
+	}()
+
+	// (3) Follow the Message until it is delivered, then its Turn.
+	turn, err := f2.waitDelivered(ctx)
+	if err != nil {
+		return err
+	}
+	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout)}
 	s := &cli.Stream{
 		Client: c,
-		Path:   computerPath(name, "/events?turn="+url.QueryEscape(tr.TurnID)),
+		Path:   computerPath(name, "/events?turn="+url.QueryEscape(turn)),
 		OnReconnect: func(after int64, err error) {
 			dim(os.Stderr, fmt.Sprintf("[stream] reconnecting after seq %d: %v", after, err))
 		},
@@ -100,32 +110,172 @@ func runPrompt(g *globals, args []string) error {
 		tp.endLine()
 		return err
 	}
-	mu.Lock()
-	wasInterrupted := interrupted
-	mu.Unlock()
 	switch {
 	case tp.status == api.TurnCompleted:
 		return nil
-	case wasInterrupted:
+	case f2.wasInterrupted():
 		return exitCode(130)
 	}
 	return exitCode(1)
 }
 
-func promptError(name string, err error) error {
-	switch {
-	case cli.HasCode(err, api.ErrBusy):
-		return fmt.Errorf("%s is busy with another turn (a12s stop %s interrupts it): %w", name, name, err)
-	case cli.HasCode(err, api.ErrAsleep):
-		return fmt.Errorf("%s is asleep (a12s wake %s): %w", name, name, err)
+// promptFollow follows one Message for `a12s prompt` and carries the
+// latched cancel intent.
+type promptFollow struct {
+	c    *cli.Client
+	name string
+	id   string
+
+	mu          sync.Mutex
+	interrupted bool
+	turn        string
+	presses     int
+}
+
+// interrupt handles one Ctrl-C; it returns false on the second.
+func (p *promptFollow) interrupt() bool {
+	p.mu.Lock()
+	p.presses++
+	p.interrupted = true
+	turn, presses := p.turn, p.presses
+	p.mu.Unlock()
+	if presses > 1 {
+		return false
 	}
-	return err
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if turn != "" {
+			dim(os.Stderr, "stopping turn "+turn+" (Ctrl-C again to stop waiting)")
+			if err := p.c.Do(ctx, "POST", computerPath(p.name, "/turns/"+url.PathEscape(turn)+"/stop"), struct{}{}, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "a12s: stop %s: %v\n", turn, err)
+			}
+			return
+		}
+		p.withdraw(ctx)
+	}()
+	return true
+}
+
+func (p *promptFollow) withdraw(ctx context.Context) {
+	err := p.c.Do(ctx, "DELETE", computerPath(p.name, "/inbox/"+url.PathEscape(p.id)), nil, nil)
+	switch {
+	case err == nil:
+		dim(os.Stderr, "withdrew "+p.id)
+	case cli.HasCode(err, api.ErrAlreadyClaimed):
+		dim(os.Stderr, "being delivered; will stop its turn")
+	default:
+		fmt.Fprintf(os.Stderr, "a12s: withdraw %s: %v\n", p.id, err)
+	}
+}
+
+func (p *promptFollow) wasInterrupted() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.interrupted
+}
+
+// waitDelivered follows the Message stream to its delivery and returns the
+// Turn. Held, withdrawn, discarded, expired and replaced end the command.
+func (p *promptFollow) waitDelivered(ctx context.Context) (string, error) {
+	var turn string
+	var end error
+	s := &cli.Stream{Client: p.c, Path: computerPath(p.name, "/inbox/"+url.PathEscape(p.id)+"/events")}
+	state := func(st, turnID string, data map[string]any) bool {
+		switch st {
+		case api.MsgDelivered:
+			turn = turnID
+			p.mu.Lock()
+			p.turn = turn
+			intent := p.interrupted
+			p.mu.Unlock()
+			if intent { // the cancel intent survives the claim: stop that Turn
+				go func() {
+					sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_ = p.c.Do(sctx, "POST", computerPath(p.name, "/turns/"+url.PathEscape(turn)+"/stop"), struct{}{}, nil)
+				}()
+			}
+			return true
+		case "returned":
+			dim(os.Stderr, "redelivering")
+			if p.wasInterrupted() {
+				go func() {
+					sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					p.withdraw(sctx)
+				}()
+			}
+		case api.MsgWithdrawn:
+			if p.wasInterrupted() {
+				end = exitCode(130)
+			} else {
+				end = fmt.Errorf("message %s was withdrawn", p.id)
+			}
+			return true
+		case api.MsgDiscarded, api.MsgExpired:
+			end = fmt.Errorf("message %s was %s before delivery", p.id, st)
+			return true
+		case api.MsgReplaced:
+			end = fmt.Errorf("message %s was replaced by %v", p.id, data["by"])
+			return true
+		}
+		return false
+	}
+	held := func(reason, diag string) {
+		fix := "a12s inbox resume " + p.name
+		if reason == api.HoldResumeFailed {
+			fix += " (after a repair), or a12s inbox resume " + p.name + " --new"
+		}
+		msg := p.name + "'s inbox is held (" + reason + ")"
+		if diag != "" {
+			msg += ": " + diag
+		}
+		end = &api.Error{Code: api.ErrorCode("held"), Message: msg + "; " + p.id + " waits in the inbox", Fix: fix}
+	}
+	err := s.Run(ctx, func(e api.Event) (bool, error) {
+		var data map[string]any
+		_ = json.Unmarshal(e.Data, &data)
+		switch string(e.Type) {
+		case "snapshot":
+			var snap struct {
+				Message    api.Message `json:"message"`
+				Held       bool        `json:"held"`
+				HoldReason string      `json:"holdReason"`
+				Diagnostic string      `json:"diagnostic"`
+			}
+			_ = json.Unmarshal(e.Data, &snap)
+			if state(snap.Message.State, snap.Message.Turn, nil) {
+				return true, nil
+			}
+			if snap.Held {
+				held(snap.HoldReason, snap.Diagnostic)
+				return true, nil
+			}
+		case "held":
+			r, _ := data["reason"].(string)
+			d, _ := data["diagnostic"].(string)
+			held(r, d)
+			return true, nil
+		default:
+			t, _ := data["turn"].(string)
+			if state(string(e.Type), t, data) {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return turn, end
 }
 
 // turnPrinter renders one turn's events: text to stdout as it arrives, the
 // start and end lines around it, everything else as one dim stderr line.
 type turnPrinter struct {
 	turn, kind  string
+	mine        string // the caller's Message id, for the batch line
 	out, errOut io.Writer
 	tty         bool // stdout is a terminal (shared with stderr)
 	midLine     bool // stdout's last text did not end a line
@@ -141,7 +291,7 @@ func (p *turnPrinter) handle(e api.Event) (bool, error) {
 		var d api.TurnStartedData
 		_ = json.Unmarshal(e.Data, &d)
 		p.endLine()
-		fmt.Fprintln(p.out, cli.TurnStartedLine(p.turn, p.kind, d))
+		fmt.Fprintln(p.out, cli.BatchStartedLine(p.turn, p.kind, p.mine, d))
 	case api.EventTextDelta:
 		var d api.TextDeltaData
 		_ = json.Unmarshal(e.Data, &d)

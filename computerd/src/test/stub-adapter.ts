@@ -8,6 +8,8 @@ export class StubAdapter implements Adapter {
   restarts = 0;
   /** When set, startTurn waits until stop() is called, then rejects. */
   stallStart = false;
+  /** When false, turns never report receipt (the harness died before it saw the prompt). */
+  autoDispatch = true;
   private cancelStart: (() => void) | null = null;
   private queue: EventQueue<AdapterEvent> | null = null;
   private n = 0;
@@ -20,8 +22,14 @@ export class StubAdapter implements Adapter {
     this.sessions.add(sessionId);
     const q = new EventQueue<AdapterEvent>();
     this.queue = q;
+    if (this.autoDispatch) q.push({ type: 'turn.dispatched', data: {} });
     q.push({ type: 'text.delta', data: { text: 'po' } });
     return { sessionId, events: q };
+  }
+
+  /** Reports receipt for the open turn (with autoDispatch off). */
+  dispatch(): void {
+    this.queue?.push({ type: 'turn.dispatched', data: {} });
   }
 
   finish(status: TurnStatus = 'completed'): void {

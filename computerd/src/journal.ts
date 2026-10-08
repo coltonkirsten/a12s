@@ -41,6 +41,8 @@ export class Journal {
         seq INTEGER PRIMARY KEY, turn TEXT, session TEXT, ts TEXT NOT NULL, type TEXT NOT NULL, data JSON NOT NULL);
       CREATE INDEX IF NOT EXISTS events_turn ON events(turn, seq);
       CREATE TABLE IF NOT EXISTS turns (request_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL UNIQUE, body_hash TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS refused (request_id TEXT PRIMARY KEY);
+      CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
     `);
   }
 
@@ -108,6 +110,60 @@ export class Journal {
       )
       .all() as { turnId: string }[];
     return rows.map((r) => ({ turnId: r.turnId, session: this.turnInfo(r.turnId)?.session ?? null }));
+  }
+
+  /** Tombstones a requestId a lookup-only replay did not find, journaling turn.refused (§4.11). */
+  refuse(requestId: string): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    let event: EventEnvelope;
+    try {
+      this.db.prepare('INSERT OR IGNORE INTO refused (request_id) VALUES (?)').run(requestId);
+      event = this.insert('turn.refused', { requestId }, {});
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    this.publish(event);
+  }
+
+  isRefused(requestId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM refused WHERE request_id = ?').get(requestId) !== undefined;
+  }
+
+  /** The restart_harness continuation still owed: journaled, neither dispatched nor abandoned. */
+  owedContinuation(): { id: string; parentTurn: string | null } | null {
+    const row = this.db
+      .prepare("SELECT data FROM events WHERE type = 'harness.restarted' ORDER BY seq DESC LIMIT 1")
+      .get() as { data: string } | undefined;
+    if (!row) return null;
+    const d = JSON.parse(row.data) as { continuation?: string | null; parentTurn?: string | null };
+    if (!d.continuation) return null;
+    const done = this.db
+      .prepare(
+        `SELECT 1 FROM events WHERE (type = 'turn.dispatched' OR type = 'continuation.abandoned')
+           AND json_extract(data, '$.continuation') = ? LIMIT 1`,
+      )
+      .get(d.continuation);
+    return done ? null : { id: d.continuation, parentTurn: d.parentTurn ?? null };
+  }
+
+  /** What settlement needs to know about one turn (§4.6). */
+  turnSummary(turnId: string): Record<string, unknown> | undefined {
+    const req = this.db.prepare('SELECT request_id FROM turns WHERE turn_id = ?').get(turnId) as { request_id: string } | undefined;
+    if (!req) return undefined;
+    const has = (type: string) => this.db.prepare('SELECT 1 FROM events WHERE turn = ? AND type = ? LIMIT 1').get(turnId, type) !== undefined;
+    const fin = this.db.prepare("SELECT data FROM events WHERE turn = ? AND type = 'turn.finished' LIMIT 1").get(turnId) as { data: string } | undefined;
+    const finished = fin ? (JSON.parse(fin.data) as { status?: string; error?: string }) : null;
+    return {
+      turnId,
+      requestId: req.request_id,
+      dispatched: has('turn.dispatched'),
+      resumeFailed: has('resume.failed'),
+      finished: finished?.status ?? null,
+      error: finished?.error ?? null,
+      session: this.turnInfo(turnId)?.session ?? null,
+    };
   }
 
   lastSeq(): number {

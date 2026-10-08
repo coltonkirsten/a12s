@@ -106,15 +106,15 @@ test('POST /v1/turns, ?turn= replays only that turn, diagnostics and status', as
   const s = stream(`/v1/events?turn=${turnId}`);
   await until(() => s.frames.some((f) => JSON.parse(f.data).type === 'turn.finished'));
   const evs = s.frames.filter((f) => !f.event).map((f) => JSON.parse(f.data));
-  assert.deepEqual(evs.map((e) => e.type), ['turn.started', 'session.changed', 'text.delta', 'diagnostic', 'turn.finished']);
+  assert.deepEqual(evs.map((e) => e.type), ['turn.started', 'session.changed', 'turn.dispatched', 'text.delta', 'diagnostic', 'turn.finished']);
   assert.ok(evs.every((e) => e.turn === turnId));
-  assert.deepEqual(evs[3].data, { message: 'egress denied', data: { host: 'evil.example' }, source: 'controller' });
+  assert.deepEqual(evs[4].data, { message: 'egress denied', data: { host: 'evil.example' }, source: 'controller' });
   s.close();
   const st = await new Promise<any>((resolve) => get(`${base}/v1/status`, (res) => {
     let t = '';
     res.on('data', (d) => (t += d)).on('end', () => resolve(JSON.parse(t)));
   }));
-  assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session']);
+  assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'continuation', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session']);
   assert.equal(st.phase, 'ready');
   assert.equal((await post(`/v1/turns/${turnId}/stop`, {})).body.status, 'completed');
 });

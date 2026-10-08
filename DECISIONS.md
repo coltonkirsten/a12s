@@ -35,3 +35,37 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
   replace key, as §4.12's "a12s send --replace" says.
 - **Purge counts.** `down --purge` lists the data volume with "inbox: N pending across M Computers, K held"
   when the Controller answers; offline it says the counts are unavailable rather than reading the volume.
+
+## S2: delivery
+
+- **Settlement reads a turn summary.** computerd gains `GET /v1/turns/{id}` → `{requestId, dispatched,
+  resumeFailed, finished, error}`, computed from its journal. The spec says settle "from the journal
+  (`GET /v1/events?turn=`)"; the summary is the same evidence in one call, so the drainer never re-reads a long
+  turn's stream to find two events.
+- **Wire JSON without HTML escaping.** Go's default encoder writes `<`, `>`, `&` as six-byte `\u00XX`; a Batch is
+  full of angle brackets. The Controller sends computerd its Turn requests through `api.MarshalWire`
+  (`SetEscapeHTML(false)`), and reservations are measured with the same encoder, so "the reservation is what
+  computerd receives" holds exactly and the 4 KiB preamble reserve covers the worst-case escaped intro (512 × `[`
+  → `&#91;`), which it would not under HTML escaping.
+- **Keyed Messages reserve the widest `superseded` (ten digits).** A count carried over on a return (§4.12)
+  then never changes a reservation, as gate 21 requires.
+- **The continuation obligation lives in computerd's journal, not `fleet.db`.** computerd mints `c_<ulid>`,
+  journals it in `harness.restarted`, reports it in `/v1/status` (recovered from the journal on restart) and
+  clears it in the same append as the continuation's `turn.dispatched` (or `continuation.abandoned`). The
+  Controller re-reads it at every idle boundary, so a second copy in `fleet.db` would only be a cache that can
+  disagree. The replay safety the spec wants comes from the immutable `requestId`.
+- **Which failures hold.** After dispatch, only `resume_failed` and a size refusal (`oversized`, recognized
+  from the error text) hold the inbox; any other failed Turn is just a failed Turn, as in L1, and the next Batch
+  is delivered. Before dispatch, a resume failure returns the Batch and holds `resume_failed`; three returns of
+  one Message hold `undeliverable`.
+- **Expiry is strictly past.** A row expires when `expiresAt < now`, so a now-or-never Message (`expiresAt =
+  createdAt`) can be claimed inside its own enqueue transaction; the return routine expires a row once
+  `now ≥ expiresAt`.
+- **`expires: 0` serializes on the Computer's lock.** The check (settle open Batches, Controller phase,
+  computerd status, hold), the insert-and-claim and the POST all happen under the Computer's lock, the same lock
+  the drainer and the reconciler take.
+- **The Message stream uses the journal's event envelope.** `GET …/inbox/{id}/events` emits `api.Event`
+  frames (`seq` = `inbox_events` id, type = the inbox event, plus a first `snapshot`), so the CLI reuses its
+  reconnecting `Last-Event-ID` reader unchanged. It also carries inbox-level `held`/`resumed`.
+- **Fresh-session line.** `a12s prompt` prints `batch of 3: yours + <other senders>` from `turn.started`'s
+  `inbox`, deduplicating sender labels.

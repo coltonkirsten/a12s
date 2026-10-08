@@ -37,6 +37,11 @@ const (
 	EventResumeFailed     EventType = "resume.failed"
 	EventLifecycle        EventType = "lifecycle"
 	EventHarnessRestarted EventType = "harness.restarted"
+	// Enhancements §4.5, §4.6, §4.11.
+	EventTurnDispatched        EventType = "turn.dispatched"
+	EventContinuationAbandoned EventType = "continuation.abandoned"
+	EventTurnRefused           EventType = "turn.refused"
+	EventInboxDiscarded        EventType = "inbox.discarded"
 )
 
 // SSEGap is the SSE event name sent instead of events when Last-Event-ID is
@@ -63,6 +68,44 @@ type TurnStartedData struct {
 	Resumed bool    `json:"resumed"`
 	Prompt  string  `json:"prompt"`
 	Cwd     string  `json:"cwd"`
+	// RequestID is the turn's requestId: a Batch id, a continuation id or
+	// a client's id.
+	RequestID string `json:"requestId,omitempty"`
+	// Inbox describes the Batch the turn carries (enhancements §4.5).
+	Inbox *TurnInbox `json:"inbox,omitempty"`
+	// Continuation is set on the restart_harness continuation turn.
+	Continuation string `json:"continuation,omitempty"`
+}
+
+// TurnInbox is the Batch a turn carries, copied by computerd into
+// turn.started so a client can find the turn that carries its Message.
+type TurnInbox struct {
+	Batch        string         `json:"batch"`
+	PendingAfter int            `json:"pendingAfter"`
+	Messages     []TurnInboxMsg `json:"messages"`
+}
+
+// TurnInboxMsg is one Message of a Batch, without its body.
+type TurnInboxMsg struct {
+	ID         string    `json:"id"`
+	Seq        int64     `json:"seq"`
+	Sender     string    `json:"sender"`
+	Via        string    `json:"via"`
+	CreatedAt  time.Time `json:"createdAt"`
+	Bytes      int64     `json:"bytes"`
+	Key        string    `json:"key,omitempty"`
+	Superseded *int64    `json:"superseded,omitempty"`
+}
+
+// TurnSummary is computerd's GET /v1/turns/{id}: what settlement needs.
+type TurnSummary struct {
+	TurnID       string `json:"turnId"`
+	RequestID    string `json:"requestId"`
+	Dispatched   bool   `json:"dispatched"`
+	ResumeFailed bool   `json:"resumeFailed"`
+	Finished     string `json:"finished,omitempty"` // "" while running
+	Error        string `json:"error,omitempty"`
+	Session      string `json:"session,omitempty"`
 }
 
 // TextDeltaData is Data of text.delta.
@@ -116,4 +159,7 @@ type ComputerdStatus struct {
 	Harness              Harness `json:"harness"`
 	CredentialGeneration int64   `json:"credentialGeneration"`
 	ResumePending        bool    `json:"resumePending,omitempty"`
+	// Continuation is the restart_harness continuation computerd owes; the
+	// Controller runs it at the next idle boundary.
+	Continuation string `json:"continuation,omitempty"`
 }

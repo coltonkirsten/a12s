@@ -76,6 +76,8 @@ export class ClaudeAdapter implements Adapter {
         Object.entries(input.mcpServers).map(([name, s]) => [name, { type: 'stdio' as const, command: s.command, args: s.args, env: s.env ?? {} }]),
       ),
       strictMcpConfig: false, // agent-written MCP configs on the home drive must load after restart_harness
+      // The CLI echoes each user message it took in: the evidence of receipt behind turn.dispatched (§4.6).
+      extraArgs: { 'replay-user-messages': null },
       includePartialMessages: true,
       ...(input.autonomy === 'full'
         ? { permissionMode: 'bypassPermissions' as const, allowDangerouslySkipPermissions: true }
@@ -192,6 +194,10 @@ function blocks(content: unknown): Block[] {
 export class ClaudeMapper {
   private readonly toolNames = new Map<string, string>();
   private readonly denied = new Set<string>();
+  /** The init record passed the session check; the user-message echo seen; turn.dispatched emitted. */
+  private initOk = false;
+  private echoed = false;
+  private dispatched = false;
 
   constructor(
     private sessionId: string,
@@ -208,6 +214,9 @@ export class ClaudeMapper {
         } else if (m.subtype === 'init' && m.session_id && m.session_id !== this.sessionId) {
           out.push({ type: 'session.changed', data: { from: this.sessionId, to: m.session_id } });
           this.sessionId = m.session_id;
+          this.initOk = true;
+        } else if (m.subtype === 'init') {
+          this.initOk = true;
         } else if (m.subtype === 'permission_denied') {
           this.denied.add(m.tool_use_id);
           out.push({ type: 'permission', data: { decision: 'deny', kind: 'tool', tool: m.tool_name, detail: { toolUseId: m.tool_use_id, reason: m.decision_reason_type } } });
@@ -231,6 +240,7 @@ export class ClaudeMapper {
         }
         break;
       case 'user':
+        if ((m as { isReplay?: boolean }).isReplay === true && m.parent_tool_use_id === null) this.echoed = true;
         for (const b of blocks(m.message.content)) {
           if (b.type === 'tool_result') {
             const id = String(b.tool_use_id);
@@ -258,6 +268,11 @@ export class ClaudeMapper {
         out.push({ type: 'turn.finished', data: { status: ok ? 'completed' : 'failed', usage, ...(error ? { error } : {}) } });
         break;
       }
+    }
+    // Receipt needs both the echo and an init that passed the identity check, in either order.
+    if (this.initOk && this.echoed && !this.dispatched) {
+      this.dispatched = true;
+      out.unshift({ type: 'turn.dispatched', data: {} });
     }
     return out;
   }

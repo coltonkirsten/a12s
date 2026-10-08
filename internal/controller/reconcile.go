@@ -547,6 +547,7 @@ func (c *Controller) applyStaged(name string) {
 	if err != nil {
 		c.openAdmission(name)
 	}
+	c.kick(name)
 	var held *driveHeld
 	if errors.As(err, &held) {
 		c.retryIfFreed(c.ctx, name)

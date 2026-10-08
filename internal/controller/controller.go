@@ -99,6 +99,7 @@ var defaultTiming = Timing{
 type computerdClient interface {
 	Status(ctx context.Context) (api.ComputerdStatus, error)
 	StartTurn(ctx context.Context, req api.TurnRequest) (api.TurnResponse, error)
+	TurnSummary(ctx context.Context, turnID string) (api.TurnSummary, error)
 	Stop(ctx context.Context, turnID string) error
 	Events(ctx context.Context, lastEventID, turn string) (*computerd.Stream, error)
 	Diagnostic(ctx context.Context, message string, data any) error
@@ -154,7 +155,10 @@ type Controller struct {
 	locks    map[string]*sync.Mutex // per Computer, see applyMu
 	clients  map[string]computerdClient
 	proxyIPs map[netip.Addr]string // Controller IP on a Computer network -> Computer
-	addrsAt  time.Time
+	drains   map[string]*drainState
+	// inboxBcast is closed and replaced on every inbox change (Message streams).
+	inboxBcast chan struct{}
+	addrsAt    time.Time
 }
 
 // New returns a Controller over drv, loading its state from cfg.StateDir.
@@ -317,6 +321,7 @@ func (c *Controller) Start(ctx context.Context) {
 		}
 		c.convergeAll(ctx, f.ComputerNames(), obs)
 		c.refreshAddrs(ctx)
+		c.kickAll()
 	})
 	if !resumed { // ctx already ended: nothing will release it
 		c.applyMu.Unlock()

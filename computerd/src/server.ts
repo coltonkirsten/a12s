@@ -4,7 +4,7 @@ import { HttpError, type Computer, type TurnRequest } from './computer.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { Leases } from './leases.js';
 
-const MAX_BODY = 1 << 20;
+const MAX_BODY = 2 << 20; // a 1 MiB render plus 2,000 inbox entries (enhancements §4.3)
 const KEEPALIVE_MS = 15_000;
 const REPLAY_PAGE = 500;
 const MAX_QUEUED = 10_000;
@@ -42,7 +42,18 @@ function str(body: Record<string, unknown>, key: string): string {
 }
 
 export function parseTurnRequest(body: Record<string, unknown>): TurnRequest {
-  const req: TurnRequest = { requestId: str(body, 'requestId'), session: str(body, 'session'), prompt: str(body, 'prompt') };
+  const continuation = body.continuation === true;
+  const req: TurnRequest = {
+    requestId: str(body, 'requestId'),
+    session: continuation ? 'current' : str(body, 'session'),
+    prompt: continuation ? '' : str(body, 'prompt'),
+  };
+  if (continuation) req.continuation = true;
+  if (body.lookupOnly === true) req.lookupOnly = true;
+  if (body.inbox !== undefined && body.inbox !== null) {
+    if (typeof body.inbox !== 'object' || Array.isArray(body.inbox)) throw new HttpError(400, 'inbox must be an object');
+    req.inbox = body.inbox as Record<string, unknown>;
+  }
   if (body.cwd !== undefined && body.cwd !== null) {
     const cwd = str(body, 'cwd');
     if (!cwd.startsWith('/')) throw new HttpError(400, 'cwd must be absolute');
@@ -80,6 +91,12 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
     const method = req.method ?? 'GET';
     if (path === '/v1/turns' && method === 'POST') {
       return send(res, 200, await computer.submitTurn(parseTurnRequest(await readJson(req))));
+    }
+    const summary = /^\/v1\/turns\/([^/]+)$/.exec(path);
+    if (summary && method === 'GET') {
+      const s = journal.turnSummary(decodeURIComponent(summary[1] ?? ''));
+      if (!s) throw new HttpError(404, 'unknown turn');
+      return send(res, 200, s);
     }
     const stop = /^\/v1\/turns\/([^/]+)\/stop$/.exec(path);
     if (stop && method === 'POST') return send(res, 200, computer.stopTurn(decodeURIComponent(stop[1] ?? '')));

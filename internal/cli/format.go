@@ -225,7 +225,29 @@ func TurnStartedLine(turn, kind string, d api.TurnStartedData) string {
 		parts = append(parts, d.Model)
 	}
 	parts = append(parts, fmt.Sprintf("resumed: %t", d.Resumed))
+	if d.Inbox != nil && len(d.Inbox.Messages) > 1 {
+		parts = append(parts, fmt.Sprintf("batch of %d", len(d.Inbox.Messages)))
+	}
 	return fmt.Sprintf("turn %s started (%s)", turn, strings.Join(parts, ", "))
+}
+
+// BatchStartedLine is TurnStartedLine for the turn carrying the caller's
+// Message: "batch of 3: yours + cron:nightly-audit, agent:scout".
+func BatchStartedLine(turn, kind, mine string, d api.TurnStartedData) string {
+	line := TurnStartedLine(turn, kind, d)
+	if d.Inbox == nil || len(d.Inbox.Messages) < 2 {
+		return line
+	}
+	var others []string
+	seen := map[string]bool{}
+	for _, m := range d.Inbox.Messages {
+		if m.ID != mine && !seen[m.Sender] {
+			seen[m.Sender] = true
+			others = append(others, m.Sender)
+		}
+	}
+	return strings.Replace(line, fmt.Sprintf("batch of %d", len(d.Inbox.Messages)),
+		fmt.Sprintf("batch of %d: yours + %s", len(d.Inbox.Messages), strings.Join(others, ", ")), 1)
 }
 
 // TurnFinishedLine is `turn t_41 completed`, with the error when there is one.

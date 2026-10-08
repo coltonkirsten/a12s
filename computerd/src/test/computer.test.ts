@@ -91,20 +91,90 @@ test('stop is idempotent and the turn ends interrupted; unknown turns are 404', 
   assert.throws(() => computer.stopTurn('t_nope'), (e: HttpError) => e.status === 404);
 });
 
-test('restart_harness: restarts after the turn, resumes, emits harness.restarted, continues', async () => {
-  const { journal, adapter, computer, types } = setup();
+test('restart_harness: restarts after the turn, owes a continuation, and runs it only for the Controller', async () => {
+  const { cfg, journal, adapter, computer, types, finished } = setup();
   await computer.start();
   const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'build an MCP' });
   computer.requestRestart();
   assert.equal(adapter.restarts, 0, 'not while the turn runs');
   adapter.finish();
-  await until(() => adapter.inputs.length === 2);
-  assert.equal(adapter.restarts, 1);
+  await until(() => adapter.restarts === 1 && computer.status().continuation !== null);
+  const owed = computer.status().continuation as string;
+  assert.match(owed, /^c_[0-9A-Z]{26}$/);
+  assert.equal(adapter.inputs.length, 1, 'computerd starts nothing itself');
+  const restarted = journal.after(0, null, 100).find((e) => e.type === 'harness.restarted');
+  assert.deepEqual([restarted?.data.continuation, restarted?.data.parentTurn], [owed, t.turnId]);
+  assert.ok(types().indexOf('harness.restarted') > types().indexOf('turn.finished'));
+
+  // Survives a computerd restart (owed state comes back from the journal).
+  const again = new Computer(cfg, journal, adapter, {});
+  await again.start();
+  assert.equal(again.status().continuation, owed);
+
+  // Only the owed id runs; the prompt is computerd's.
+  assert.equal(await status(again.submitTurn({ requestId: 'c_other', session: 'current', prompt: '', continuation: true })), 409);
+  const c = await again.submitTurn({ requestId: owed, session: 'current', prompt: '', continuation: true });
   assert.match(adapter.inputs[1]?.prompt ?? '', /^a12s restarted your harness at your request/);
   assert.equal(adapter.inputs[1]?.sessionId, t.sessionId);
-  const all = types();
-  assert.ok(all.indexOf('harness.restarted') > all.indexOf('turn.finished'));
+  await until(() => again.status().continuation === null);
+  const dispatched = journal.after(0, c.turnId, 100).find((e) => e.type === 'turn.dispatched');
+  assert.equal(dispatched?.data.continuation, owed, 'the flag clears in the same append as turn.dispatched');
+  adapter.finish();
+  await until(() => finished(c.turnId) === 'completed');
+  // A replay returns the same turn; it never runs twice.
+  assert.deepEqual(await again.submitTurn({ requestId: owed, session: 'current', prompt: '', continuation: true }), c);
+  assert.equal(adapter.inputs.length, 2);
   assert.equal(journal.after(0, null, 100).filter((e) => e.type === 'turn.started').at(-1)?.data.resumed, true);
+});
+
+test('a continuation that fails before dispatch is abandoned, not retried', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  computer.requestRestart();
+  adapter.finish();
+  await until(() => computer.status().continuation !== null);
+  const owed = computer.status().continuation as string;
+  adapter.autoDispatch = false;
+  const c = await computer.submitTurn({ requestId: owed, session: 'current', prompt: '', continuation: true });
+  adapter.finish('failed');
+  await until(() => finished(c.turnId) === 'failed');
+  assert.equal(computer.status().continuation, null);
+  assert.ok(journal.after(0, c.turnId, 100).some((e) => e.type === 'continuation.abandoned'));
+  assert.equal(journal.turnSummary(c.turnId)?.dispatched, false);
+});
+
+test('turn.dispatched is journaled once, inbox is copied into turn.started, and the summary settles', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const inbox = { batch: 'b_1', pendingAfter: 0, messages: [{ id: 'm_1', seq: 1 }] };
+  adapter.autoDispatch = false;
+  const t = await computer.submitTurn({ requestId: 'b_1', session: 'new', prompt: 'p', inbox });
+  assert.equal(journal.turnSummary(t.turnId)?.dispatched, false);
+  adapter.dispatch();
+  adapter.dispatch();
+  await until(() => journal.turnSummary(t.turnId)?.dispatched === true);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  const evs = journal.after(0, t.turnId, 100);
+  assert.equal(evs.filter((e) => e.type === 'turn.dispatched').length, 1);
+  assert.deepEqual(evs.find((e) => e.type === 'turn.started')?.data.inbox, inbox);
+  assert.deepEqual(journal.turnSummary(t.turnId), { turnId: t.turnId, requestId: 'b_1', dispatched: true, resumeFailed: false, finished: 'completed', error: null, session: t.sessionId });
+  // A changed inbox under the same requestId is a different body.
+  assert.equal(await status(computer.submitTurn({ requestId: 'b_1', session: 'new', prompt: 'p', inbox: { ...inbox, batch: 'b_2' } })), 409);
+});
+
+test('lookupOnly returns a known turn, else refuses the requestId for good', async () => {
+  const { journal, adapter, computer } = setup();
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'b_1', session: 'new', prompt: 'p' });
+  assert.deepEqual(await computer.submitTurn({ requestId: 'b_1', session: 'new', prompt: 'p', lookupOnly: true }), t);
+  adapter.finish();
+  assert.equal(await status(computer.submitTurn({ requestId: 'b_late', session: 'new', prompt: 'p', lookupOnly: true })), 404);
+  assert.ok(journal.after(0, null, 100).some((e) => e.type === 'turn.refused' && e.data.requestId === 'b_late'));
+  // The delayed original can never create that turn afterwards.
+  assert.equal(await status(computer.submitTurn({ requestId: 'b_late', session: 'new', prompt: 'p' })), 404);
+  assert.equal(adapter.inputs.length, 1);
 });
 
 test('shutdown closes admission and interrupts the active turn', async () => {
