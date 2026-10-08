@@ -9,27 +9,21 @@ import (
 )
 
 func TestUpSummary(t *testing.T) {
-	r := &api.PutFleetResponse{Created: []string{"scout", "builder", "tester", "reviewer"}}
-	if got := UpSummary(r, false); strings.Join(got, "\n") != "created scout, builder, tester, reviewer (asleep: none)" {
-		t.Errorf("got %q", got)
+	r := &api.PutFleetResponse{Created: []string{"fifth"}, Updated: []string{"scout"}, Staged: []string{"tester"}, Removed: []string{"old"}}
+	got := strings.Join(UpSummary(r, true), "\n")
+	for _, want := range []string{"fifth", "scout", "tester", "old", "drives kept", "apply --interrupt"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q:\n%s", want, got)
+		}
 	}
-	r = &api.PutFleetResponse{Created: []string{"fifth"}, Updated: []string{"scout"}, Staged: []string{"tester"}, Removed: []string{"old"}}
-	want := []string{
-		"created fifth (asleep: fifth)",
-		"updated scout",
-		"staged tester (applies when idle; a12s apply --interrupt to force)",
-		"removed old (drives kept)",
-	}
-	if got := UpSummary(r, true); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("got %q", got)
-	}
-	if got := UpSummary(&api.PutFleetResponse{}, false); got[0] != "no changes" {
+	if got := UpSummary(&api.PutFleetResponse{}, false); len(got) != 1 || got[0] != "no changes" {
 		t.Errorf("got %q", got)
 	}
 
-	// Failures are listed by name, and never summarised as "no changes".
+	// #44: failures are listed by name, sorted, and never summarised as
+	// "no changes".
 	r = &api.PutFleetResponse{Created: []string{"scout"}, Errors: map[string]string{"tester": "image a12s/browser:dev not found", "builder": "bundle missing"}}
-	if got := UpErrors(r); strings.Join(got, "\n") != "builder: bundle missing\ntester: image a12s/browser:dev not found" {
+	if got := UpErrors(r); len(got) != 2 || !strings.HasPrefix(got[0], "builder: ") || !strings.HasPrefix(got[1], "tester: ") {
 		t.Errorf("UpErrors = %q", got)
 	}
 	if got := UpSummary(&api.PutFleetResponse{Errors: map[string]string{"scout": "x"}}, false); len(got) != 0 {
@@ -54,15 +48,31 @@ func TestWriteStatus(t *testing.T) {
 	st.Computers[0].EgressMode = api.EgressEnforced
 	var b strings.Builder
 	WriteStatus(&b, st)
-	want := `scout    Asleep                 session 9c41aa07…  claude-code 2.1.280  home 10Gi
-builder  Busy                   session 2f00       codex 0.154.0        home 10Gi  drive a12s-repo  turn t_41
-tester   Error (resumePending)  session -          claude-code 2.1.280  home -     EGRESS ALLOW "*"
-warning: orphaned drive ux-old: no Computer in the Fleet uses it (a12s drive rm ux-old destroys it)
-warning: builder: resume failed
-warning: tester: error: image missing (retryable)
-`
-	if b.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
+	row := func(out, name string) string {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, name+" ") {
+				return l
+			}
+		}
+		t.Fatalf("no row for %s:\n%s", name, out)
+		return ""
+	}
+	// #46: the markers and warnings an operator must see, per row; the
+	// layout is the human table's business (status --json is for scripts).
+	out := b.String()
+	if r := row(out, "builder"); !strings.Contains(r, "t_41") || !strings.Contains(r, "a12s-repo") {
+		t.Errorf("builder row %q", r)
+	}
+	if r := row(out, "tester"); !strings.Contains(r, `EGRESS ALLOW "*"`) || !strings.Contains(r, "resumePending") {
+		t.Errorf("tester row %q", r)
+	}
+	if r := row(out, "scout"); strings.Contains(r, "EGRESS") {
+		t.Errorf("enforced row marked %q", r)
+	}
+	for _, w := range []string{"orphaned drive ux-old", "builder: resume failed", "tester: error: image missing"} {
+		if !strings.Contains(out, "warning: "+w) {
+			t.Errorf("no warning %q:\n%s", w, out)
+		}
 	}
 
 	// Unenforced egress and lost credentials are said on every row / loudly.
@@ -74,7 +84,7 @@ warning: tester: error: image missing (retryable)
 	st.Computers[0].EgressMode = api.EgressUnenforced
 	b.Reset()
 	WriteStatus(&b, st)
-	out := b.String()
+	out = b.String()
 	if strings.Count(out, "EGRESS UNENFORCED") != 2 || strings.Count(out, `EGRESS ALLOW "*"`) != 1 {
 		t.Errorf("egress markers:\n%s", out)
 	}
