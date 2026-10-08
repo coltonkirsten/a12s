@@ -329,22 +329,6 @@ test('failed credential wiring never advances the acknowledged generation', asyn
   await again.shutdown(100);
 });
 
-test('test hooks: fail-before-dispatch fails the turn before the harness sees it, once', async () => {
-  const { cfg, journal, adapter, computer, finished } = setup();
-  await computer.start();
-  const { mkdirSync, writeFileSync, existsSync } = await import('node:fs');
-  mkdirSync(join(cfg.stateDir, 'test-hooks'), { recursive: true });
-  writeFileSync(join(cfg.stateDir, 'test-hooks', 'fail-before-dispatch'), '');
-  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
-  await until(() => finished(t.turnId) === 'failed');
-  assert.equal(adapter.inputs.length, 0);
-  assert.equal(journal.turnSummary(t.turnId)?.dispatched, false);
-  assert.equal(existsSync(join(cfg.stateDir, 'test-hooks', 'fail-before-dispatch')), false);
-  const t2 = await computer.submitTurn({ requestId: 'r2', session: 'new', prompt: 'x' });
-  adapter.finish();
-  await until(() => finished(t2.turnId) === 'completed');
-});
-
 test('a continuation accepted but not dispatched before a crash is abandoned at startup, never owed forever', async () => {
   const { cfg, journal, adapter, computer } = setup();
   await computer.start();

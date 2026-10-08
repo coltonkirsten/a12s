@@ -73,10 +73,10 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
 ## S3: crash correctness and journaling
 
 - **Exit-gate test hooks are files, not flags.** computerd reads one-shot hook files from its root-only state dir
-  (`/home/.a12s/test-hooks/`: `exit-after-accept`, `exit-after-dispatch`, `fail-before-dispatch`,
-  `delay-before-dispatch` with seconds); the Controller reads `exit-after-claim` (optional delay in seconds)
-  from its state dir. Arming one takes `a12s shell --root` or `docker exec` into the Controller, i.e. powers
-  that can already kill those processes, so the hooks add no authority and need no build flag.
+  (`/home/.a12s/test-hooks/`: `exit-after-accept`, `exit-after-dispatch`). Arming one takes `a12s shell --root`,
+  a power that can already kill computerd, so the hooks add no authority and need no build flag. (2026-10-08,
+  test pass #18: `delay-before-dispatch`, `fail-before-dispatch` and the Controller's `exit-after-claim` were
+  removed: no gate armed them. Gate 5 crashes the Controller with a harness restart instead.)
 - **Journal flush placement.** The drainer seals owed `inbox.discarded` records after settling and before any
   claim, whenever the Computer is `Ready` or `Busy`; asleep, they wait in `fleet.db` (`journaled = 0`), and the
   first drain after a wake flushes them. Records are sent in chunks of about 1 MiB of bodies.
@@ -235,3 +235,11 @@ The 18 accepted findings of the one Astra pass are in REVIEWS.md ("Enhancements 
 knowing: the mTLS listener now fails closed on the Controller's own belief that a principal's container is up (as well
 as the registry), and `inbox resume --new` cancels an owed continuation through a new computerd endpoint,
 `POST /v1/continuation/cancel`, journaled as `continuation.abandoned {cancelled: true}`.
+
+## Test pass (#18)
+
+- **`fail-before-dispatch` is deleted with its test** (the pass's one open question). No gate script or Go test
+  armed it; the gates use `exit-after-accept`/`exit-after-dispatch`. The path it reached, a Turn that fails after
+  acceptance and before the harness sees it, is still covered by the resume-failure, continuation-abandoned and
+  stop-before-dispatch tests. Keeping a production file check only so a unit test can trip it costs more than it
+  guards. If a gate ever needs it, inject it through config rather than a live file read.

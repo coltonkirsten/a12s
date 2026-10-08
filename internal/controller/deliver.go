@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -160,7 +158,6 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 		return retry
 	}
 	c.logf("%s: claimed %s (%d messages)", name, b.ID, len(b.Request.Inbox.Messages))
-	c.testHookAfterClaim(name)
 	outcome := c.postBatch(ctx, name, b)
 	return outcome == postUnknown
 }
@@ -518,22 +515,4 @@ func (c *Controller) flushJournal(ctx context.Context, name string) bool {
 		}
 	}
 	return true
-}
-
-// testHookAfterClaim is the exit gate's Controller crash (gates 5 and 20): a
-// file in the Controller's state dir, armed with docker exec, kills the
-// Controller after a claim and before its POST, once. Its content, if any,
-// is how many seconds to wait first.
-func (c *Controller) testHookAfterClaim(name string) {
-	p := filepath.Join(c.cfg.StateDir, "test-hooks", "exit-after-claim")
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return
-	}
-	_ = os.Remove(p)
-	if n, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && n > 0 {
-		time.Sleep(time.Duration(min(n, 600)) * time.Second)
-	}
-	c.logf("%s: test hook: exiting after the claim, before the POST", name)
-	os.Exit(75)
 }
