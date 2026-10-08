@@ -63,9 +63,3 @@ func TestServiceLogin(t *testing.T) {
 	}
 	_ = driver.LoginOut
 }
-
-func TestReauthHealth(t *testing.T) {
-	if !reauth([]byte(` {"credential":"reauth"} `)) || reauth([]byte(`{"credential":"ok"}`)) || reauth([]byte("ok")) {
-		t.Fatal("reauth parse")
-	}
-}

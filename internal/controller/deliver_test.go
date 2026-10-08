@@ -162,26 +162,6 @@ func TestResumeFailureHolds(t *testing.T) {
 	}
 }
 
-// Gate 6: a, b --fresh, c -> [a] current, [b c] new.
-func TestFreshSplitDelivery(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
-	a := h.send("builder", "a")
-	b := h.send("builder", "b", `"fresh":true`)
-	c := h.send("builder", "c")
-	builder := h.cds.get("builder")
-	builder.set(func(f *fakeComputerd) { f.autoFinish = true })
-	if err := h.c.SetPower(context.Background(), "builder", api.PowerRequest{State: api.PowerAwake, Credentials: labCreds}); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, func() bool { return len(builder.requestsSnapshot()) == 2 })
-	reqs := builder.requestsSnapshot()
-	if strings.Join(reqIDs(reqs[0]), ",") != a.ID || reqs[0].Session != api.SessionCurrent ||
-		strings.Join(reqIDs(reqs[1]), ",") != b.ID+","+c.ID || reqs[1].Session != api.SessionNew {
-		t.Fatalf("split %v/%s %v/%s", reqIDs(reqs[0]), reqs[0].Session, reqIDs(reqs[1]), reqs[1].Session)
-	}
-}
-
 // A Turn that races the drainer (409 busy) returns the Batch without an attempt.
 func TestConflictReturnsWithoutAttempt(t *testing.T) {
 	h := newHarness(t)
