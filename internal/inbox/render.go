@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/coltonkirsten/a12s/internal/api"
 )
 
 // NonceLen is the hex length of a Batch nonce (8 random bytes).
@@ -62,10 +64,10 @@ func RenderFrame(n int, nonce string, f Frame) string {
 }
 
 // JSONLen is the length of s once JSON-encoded as a string value, without
-// the quotes, using Go's default encoder (which escapes <, > and & as
-// \u00XX): the most a string can grow on its way to computerd.
+// the quotes, exactly as the Controller sends it to computerd
+// (api.MarshalWire: no HTML escaping).
 func JSONLen(s string) int64 {
-	b, _ := json.Marshal(s)
+	b, _ := api.MarshalWire(s)
 	return int64(len(b) - 2)
 }
 
@@ -73,6 +75,12 @@ func JSONLen(s string) int64 {
 // frame with the widest index and a nonce, JSON-escaped as computerd
 // receives it (§4.3). The sum of a Batch's reservations bounds its
 // rendered messages, whatever position each takes.
+//
+// A keyed Message reserves the widest superseded count (ten digits), so a
+// count carried over on a return (§4.12) never changes its reservation.
 func Reserve(f Frame) int64 {
+	if f.ReplaceKey != "" {
+		f.Superseded = 9999999999
+	}
 	return JSONLen(RenderFrame(worstN, strings.Repeat("0", NonceLen), f))
 }

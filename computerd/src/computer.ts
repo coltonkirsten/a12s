@@ -17,6 +17,12 @@ export interface TurnRequest {
   session: string;
   prompt: string;
   cwd?: string;
+  /** The Controller's Batch description, copied into turn.started (enhancements §4.5). */
+  inbox?: Record<string, unknown>;
+  /** Runs the owed restart_harness continuation; requestId must be its id and prompt is computerd's own. */
+  continuation?: boolean;
+  /** Recovery replay: return the turn if this requestId is known, else refuse it for good (§4.11). */
+  lookupOnly?: boolean;
 }
 
 export interface TurnReply {
@@ -58,6 +64,8 @@ export class Computer {
   private restarting = false;
   private restartRequested = false;
   private readonly inflight = new Map<string, { hash: string; reply: Promise<TurnReply> }>();
+  /** The restart_harness continuation owed to the Controller (§4.5), by id. */
+  private owedContinuation: { id: string; parentTurn: string | null } | null = null;
   /** The credential generation actually in effect: wired, and any long-lived harness restarted with it. */
   private ackedGeneration: number | null = null;
   private credentialTimer: NodeJS.Timeout | null = null;
@@ -89,6 +97,7 @@ export class Computer {
     for (const t of this.journal.unfinishedTurns()) {
       this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'computerd restarted' }, { turn: t.turnId, session: t.session });
     }
+    this.owedContinuation = this.journal.owedContinuation();
     const loaded = loadSessionRecord(this.sessionPath);
     this.session = loaded.record;
     this.sessionDamaged = loaded.damaged;
@@ -119,12 +128,19 @@ export class Computer {
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
       credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
+      continuation: this.owedContinuation?.id ?? null,
     };
   }
 
   /** POST /v1/turns. Resolves once the turn is journaled. Idempotent by requestId. */
   submitTurn(req: TurnRequest): Promise<TurnReply> {
-    const hash = createHash('sha256').update(JSON.stringify([req.session, req.prompt, req.cwd ?? null])).digest('hex');
+    if (req.continuation) req = { ...req, prompt: CONTINUE_PROMPT, session: 'current' };
+    // lookupOnly is a mode of the call, not part of the request it replays.
+    const lookupOnly = req.lookupOnly === true;
+    const { lookupOnly: _lo, ...body } = req;
+    const hash = createHash('sha256')
+      .update(JSON.stringify(body.inbox || body.continuation ? [body.session, body.prompt, body.cwd ?? null, body.inbox ?? null, body.continuation ?? false] : [body.session, body.prompt, body.cwd ?? null]))
+      .digest('hex');
     // In-flight first: its reply carries the session id a new session gets only after dispatch.
     const prior = this.inflight.get(req.requestId) ?? this.journal.findRequest(req.requestId);
     if (prior) {
@@ -133,9 +149,17 @@ export class Computer {
       if ('reply' in prior) return prior.reply;
       return Promise.resolve({ turnId: prior.turnId, sessionId: this.journal.turnInfo(prior.turnId)?.session ?? null });
     }
+    if (this.journal.isRefused(req.requestId)) return Promise.reject(new HttpError(404, 'unknown_request: this requestId was refused by a lookup-only replay'));
+    if (lookupOnly) {
+      this.journal.refuse(req.requestId);
+      return Promise.reject(new HttpError(404, 'unknown_request: no turn was accepted for this requestId'));
+    }
     if (this.base !== 'ready') return Promise.reject(new HttpError(503, `computer is ${this.base}`));
+    if (req.continuation && this.owedContinuation?.id !== req.requestId) {
+      return Promise.reject(new HttpError(409, `no continuation ${req.requestId} is owed`));
+    }
     if (this.active || this.restarting) return Promise.reject(new HttpError(409, 'computer is busy'));
-    const reply = this.beginTurn(req, hash).finally(() => this.inflight.delete(req.requestId));
+    const reply = this.beginTurn(body, hash).finally(() => this.inflight.delete(req.requestId));
     this.inflight.set(req.requestId, { hash, reply });
     return reply;
   }
@@ -150,13 +174,16 @@ export class Computer {
     const previous = this.session;
     const wanted = req.session === 'new' ? null : req.session === 'current' ? (previous?.sessionId ?? null) : req.session;
     const cwd = req.cwd ?? previous?.cwd ?? this.cfg.agentHome;
-    const started = {
+    const started: Record<string, unknown> = {
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version },
       model: this.cfg.harness.model,
       resumed: wanted !== null,
       prompt: req.prompt,
       cwd,
+      requestId: req.requestId,
     };
+    if (req.inbox) started.inbox = req.inbox;
+    if (req.continuation) started.continuation = req.requestId;
 
     // Durable acceptance first: once this commits, a retry of the same requestId can never dispatch again.
     this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
@@ -195,6 +222,7 @@ export class Computer {
       } else {
         this.journal.append('diagnostic', { message: `harness failed to start the turn: ${message}` }, scope);
       }
+      this.abandonContinuation(req, message, scope);
       this.journal.append('turn.finished', { status: 'failed', usage: null, error: message }, scope);
       this.endTurn(active);
       return { turnId, sessionId: wanted };
@@ -209,16 +237,33 @@ export class Computer {
     if (wanted === null) this.resumePending = false;
     active.started = true;
     if (active.stopRequested) void this.adapter.stop();
-    void this.pump(active, sessionId, wanted !== null, run.events);
+    void this.pump(active, sessionId, wanted !== null, run.events, req);
     return { turnId, sessionId };
   }
 
-  private async pump(active: ActiveTurn, sessionId: string, resumed: boolean, events: AsyncIterable<AdapterEvent>): Promise<void> {
+  /** A continuation that failed before dispatch is dropped, never retried (§4.5). */
+  private abandonContinuation(req: TurnRequest, reason: string, scope: { turn: string | null; session: string | null }): void {
+    if (!req.continuation || this.owedContinuation?.id !== req.requestId) return;
+    this.owedContinuation = null;
+    this.journal.append('continuation.abandoned', { continuation: req.requestId, reason }, scope);
+  }
+
+  private async pump(active: ActiveTurn, sessionId: string, resumed: boolean, events: AsyncIterable<AdapterEvent>, req: TurnRequest): Promise<void> {
     let session = sessionId;
     let status: TurnStatus | null = null;
+    let dispatched = false;
     try {
       for await (const ev of events) {
         if (status) break;
+        if (ev.type === 'turn.dispatched') {
+          if (dispatched) continue;
+          dispatched = true;
+          // The owed flag clears in the same append as the continuation's receipt.
+          const cont = req.continuation && this.owedContinuation?.id === req.requestId ? req.requestId : null;
+          if (cont) this.owedContinuation = null;
+          this.journal.append('turn.dispatched', cont ? { continuation: cont } : {}, { turn: active.turnId, session });
+          continue;
+        }
         if (ev.type === 'session.changed') {
           session = ev.data.to;
           this.saveSession({ sessionId: session, harness: this.cfg.harness.kind, cwd: this.session?.cwd ?? this.cfg.agentHome });
@@ -230,6 +275,7 @@ export class Computer {
     } catch (err) {
       this.journal.append('diagnostic', { message: `adapter stream failed: ${(err as Error).message}` }, { turn: active.turnId, session });
     }
+    if (!dispatched) this.abandonContinuation(req, 'the harness never received the continuation', { turn: active.turnId, session });
     if (!status) {
       status = 'failed';
       this.journal.append('turn.finished', { status, usage: null, error: 'adapter ended without turn.finished' }, { turn: active.turnId, session });
@@ -293,17 +339,19 @@ export class Computer {
           this.journal.append('resume.failed', { sessionId: session.sessionId, reason, at: 'restart' }, { session: session.sessionId });
         } else resumed = true;
       }
-      this.journal.append('harness.restarted', { afterTurn, sessionId: session?.sessionId ?? null, resumed }, { session: session?.sessionId ?? null });
+      // A human stop (interrupted) or a failure does not get an automatic continuation. One that is owed is
+      // journaled with its id and run by the Controller at the next idle boundary (§4.5); computerd starts nothing.
+      const continuation = resumed && status === 'completed' && afterTurn ? `c_${ulid()}` : null;
+      if (continuation) this.owedContinuation = { id: continuation, parentTurn: afterTurn };
+      this.journal.append(
+        'harness.restarted',
+        { afterTurn, sessionId: session?.sessionId ?? null, resumed, continuation, parentTurn: continuation ? afterTurn : null },
+        { session: session?.sessionId ?? null },
+      );
     } catch (err) {
       this.journal.append('diagnostic', { message: `harness restart failed: ${(err as Error).message}` });
     } finally {
       this.restarting = false;
-    }
-    // A human stop (interrupted) or a failure does not get an automatic continuation.
-    if (resumed && status === 'completed' && afterTurn) {
-      await this.submitTurn({ requestId: `continue-${afterTurn}`, session: 'current', prompt: CONTINUE_PROMPT }).catch((err: Error) =>
-        this.journal.append('diagnostic', { message: `continuation turn not started: ${err.message}` }),
-      );
     }
   }
 
@@ -416,6 +464,22 @@ export class Computer {
       { session: this.session?.sessionId ?? null },
     );
   }
+}
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/** A ULID: 48-bit milliseconds and 80 random bits, Crockford base32. */
+export function ulid(now = Date.now()): string {
+  let t = '';
+  let ms = now;
+  for (let i = 0; i < 10; i++) {
+    t = CROCKFORD[ms % 32] + t;
+    ms = Math.floor(ms / 32);
+  }
+  const rnd = randomBytes(16);
+  let r = '';
+  for (let i = 0; i < 16; i++) r += CROCKFORD[(rnd[i] ?? 0) % 32];
+  return t + r;
 }
 
 /** Distinguishes "never had a session" (no file) from a record that exists but cannot be trusted. */

@@ -123,7 +123,11 @@ func (c *Controller) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k := callerOf(r)
-	res, err := c.inbox.Enqueue(r.Context(), inbox.Enqueue{Computer: name, Principal: k.principal, Req: req}, c.nowOrNever)
+	if req.Expires != nil && *req.Expires == 0 {
+		c.nowOrNeverEnqueue(w, r, name, k, req)
+		return
+	}
+	res, err := c.inbox.Enqueue(r.Context(), inbox.Enqueue{Computer: name, Principal: k.principal, Req: req}, nil)
 	if err != nil {
 		c.logf("%s: enqueue by %s refused: %v", name, k.principal, err)
 		inboxFail(w, err)
@@ -136,19 +140,6 @@ func (c *Controller) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, out)
-}
-
-// nowOrNever is the expires: 0 decision. Delivery lands in S2; until then
-// nothing can take a Message at once.
-func (c *Controller) nowOrNever(_ *inbox.Tx, m api.Message) *inbox.Error {
-	reason := "not_ready"
-	switch c.phase(m.Computer) {
-	case api.PhaseAsleep:
-		reason = "asleep"
-	case api.PhaseBusy:
-		reason = "busy"
-	}
-	return inbox.NotIdle(m.Computer, reason)
 }
 
 // ownOnly returns the via filter for get and withdraw: a caller without the
@@ -361,10 +352,13 @@ func (c *Controller) expiryLoop(ctx context.Context) {
 	}
 }
 
-// inboxChanged is the store's change hook: it re-arms the expiry timer.
-func (c *Controller) inboxChanged(string) {
+// inboxChanged is the store's change hook: it re-arms the expiry timer
+// and kicks the Computer's drainer.
+func (c *Controller) inboxChanged(name string) {
 	select {
 	case c.inboxKick <- struct{}{}:
 	default:
 	}
+	c.inboxBroadcast()
+	c.kick(name)
 }

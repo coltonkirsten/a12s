@@ -89,7 +89,10 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/status", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, c.Status(r.Context()))
 	}))
-	mux.HandleFunc("POST /v1/computers/{c}/turns", allow("", "", c.handleTurn))
+	mux.HandleFunc("POST /v1/computers/{c}/turns", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusGone, api.Error{Code: api.ErrGone, Message: "turns are started from the inbox now (one way in)",
+			Fix: "POST /v1/computers/" + r.PathValue("c") + "/inbox, or a12s prompt / a12s send"})
+	})
 	mux.HandleFunc("GET /v1/computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))
 	mux.HandleFunc("POST /v1/computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
 	mux.HandleFunc("POST /v1/computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
@@ -101,6 +104,7 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/computers/{c}/inbox", allow(api.ActionSend, "c", c.handleEnqueue))
 	mux.HandleFunc("GET /v1/computers/{c}/inbox", allow(api.ActionInbox, "c", c.handleInboxList))
 	mux.HandleFunc("GET /v1/computers/{c}/inbox/{id}", allowSendOrInbox(c.handleInboxGet))
+	mux.HandleFunc("GET /v1/computers/{c}/inbox/{id}/events", allowSendOrInbox(c.handleMessageEvents))
 	mux.HandleFunc("DELETE /v1/computers/{c}/inbox/{id}", allowSendOrInbox(c.handleWithdraw))
 	mux.HandleFunc("POST /v1/computers/{c}/inbox/clear", allow(api.ActionInbox, "c", c.handleInboxClear))
 	mux.HandleFunc("POST /v1/computers/{c}/inbox/hold", allow(api.ActionInbox, "c", c.handleInboxHold))
@@ -203,41 +207,6 @@ func (c *Controller) awake(name string) (computerdClient, error) {
 		return nil, errorf(http.StatusServiceUnavailable, api.ErrAsleep, "%s is %s", name, phase)
 	}
 	return c.client(name), nil
-}
-
-func (c *Controller) handleTurn(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("c")
-	var req api.TurnRequest
-	if !decode(w, r, 4<<20, &req) {
-		return
-	}
-	// Admission holds the Computer's gate until computerd has accepted the
-	// turn, so a sleep or restage that closes it next sees the turn.
-	// Busy comes from computerd's events and status: an idempotent retry
-	// of a finished request starts nothing.
-	c.mu.Lock()
-	rt := c.rtLocked(name)
-	c.mu.Unlock()
-	rt.admit.Lock()
-	defer rt.admit.Unlock()
-	cl, err := c.awake(name)
-	if err == nil {
-		c.mu.Lock()
-		if rt.closed {
-			err = errorf(http.StatusServiceUnavailable, api.ErrAsleep, "%s is stopping or being updated", name)
-		}
-		c.mu.Unlock()
-	}
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	res, err := cl.StartTurn(r.Context(), req)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
 }
 
 func (c *Controller) handleStop(w http.ResponseWriter, r *http.Request) {

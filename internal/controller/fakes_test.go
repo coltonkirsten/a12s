@@ -358,6 +358,19 @@ type fakeComputerd struct {
 	requests map[string]string // requestId -> turn
 	// gate, when set, holds StartTurn until it is closed.
 	gate chan struct{}
+	// reqs are the accepted requests, in order; dispatched and finished
+	// record each turn's receipt and outcome.
+	reqs       []api.TurnRequest
+	dispatched map[string]bool
+	finished   map[string]string
+	// noDispatch makes turns start without receipt (the harness died first);
+	// resumeFail makes them fail with resume.failed before receipt.
+	noDispatch, resumeFail bool
+	refused                map[string]bool
+	continuation           string
+	// conflictNext answers the next StartTurn 409 busy (a turn that raced
+	// the drainer); autoFinish completes every turn right after it starts.
+	conflictNext, autoFinish bool
 }
 
 func (f *fakeComputerd) sessionLocked() string {
@@ -415,7 +428,38 @@ func (f *fakeComputerd) Status(context.Context) (api.ComputerdStatus, error) {
 	if f.active != "" {
 		phase = "busy"
 	}
-	return api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}}, nil
+	return api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation}, nil
+}
+
+func (f *fakeComputerd) TurnSummary(_ context.Context, turn string) (api.TurnSummary, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.up {
+		return api.TurnSummary{}, errDown
+	}
+	for rid, t := range f.requests {
+		if t == turn {
+			return api.TurnSummary{TurnID: turn, RequestID: rid, Dispatched: f.dispatched[turn], Finished: f.finished[turn], ResumeFailed: f.resumeFail && !f.dispatched[turn] && f.finished[turn] != ""}, nil
+		}
+	}
+	return api.TurnSummary{}, &computerd.Error{Status: 404, Message: "unknown turn"}
+}
+
+// requestsSnapshot returns the accepted requests so far.
+func (f *fakeComputerd) requestsSnapshot() []api.TurnRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]api.TurnRequest(nil), f.reqs...)
+}
+
+// dispatch reports receipt for the active turn (with noDispatch set).
+func (f *fakeComputerd) dispatch() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.active != "" && !f.dispatched[f.active] {
+		f.dispatched[f.active] = true
+		f.emitLocked(api.EventTurnDispatched, f.active, map[string]any{})
+	}
 }
 
 func (f *fakeComputerd) StartTurn(_ context.Context, req api.TurnRequest) (api.TurnResponse, error) {
@@ -433,8 +477,22 @@ func (f *fakeComputerd) StartTurn(_ context.Context, req api.TurnRequest) (api.T
 	if turn, ok := f.requests[req.RequestID]; ok && req.RequestID != "" {
 		return api.TurnResponse{TurnID: turn, SessionID: f.sessionLocked()}, nil // idempotent retry
 	}
-	if f.active != "" {
+	if f.refused[req.RequestID] {
+		return api.TurnResponse{}, &computerd.Error{Status: 404, Message: "unknown_request"}
+	}
+	if req.LookupOnly {
+		if f.refused == nil {
+			f.refused = map[string]bool{}
+		}
+		f.refused[req.RequestID] = true
+		return api.TurnResponse{}, &computerd.Error{Status: 404, Message: "unknown_request"}
+	}
+	if f.active != "" || f.conflictNext {
+		f.conflictNext = false
 		return api.TurnResponse{}, &computerd.Error{Status: 409, Message: "computer is busy"}
+	}
+	if req.Continuation && req.RequestID != f.continuation {
+		return api.TurnResponse{}, &computerd.Error{Status: 409, Message: "no continuation owed"}
 	}
 	f.turns++
 	f.active = fmt.Sprintf("t_%d", f.turns)
@@ -442,13 +500,41 @@ func (f *fakeComputerd) StartTurn(_ context.Context, req api.TurnRequest) (api.T
 		f.requests = map[string]string{}
 	}
 	f.requests[req.RequestID] = f.active
-	f.emitLocked(api.EventTurnStarted, f.active, api.TurnStartedData{})
+	f.reqs = append(f.reqs, req)
+	if f.dispatched == nil {
+		f.dispatched, f.finished = map[string]bool{}, map[string]string{}
+	}
+	f.emitLocked(api.EventTurnStarted, f.active, api.TurnStartedData{RequestID: req.RequestID, Inbox: req.Inbox})
 	if req.Session == api.SessionNew {
 		from := f.sessionLocked()
 		f.session = fmt.Sprintf("s_%s_%d", f.name, f.turns)
 		f.emitLocked(api.EventSessionChanged, f.active, map[string]string{"from": from, "to": f.session})
 	}
+	if f.resumeFail {
+		turn := f.active
+		f.active = ""
+		f.finished[turn] = api.TurnFailed
+		f.emitLocked(api.EventResumeFailed, turn, map[string]string{"reason": "damaged"})
+		f.emitLocked(api.EventTurnFinished, turn, api.TurnFinishedData{Status: api.TurnFailed})
+		return api.TurnResponse{TurnID: turn, SessionID: f.sessionLocked()}, nil
+	}
+	if !f.noDispatch {
+		f.dispatched[f.active] = true
+		if req.Continuation {
+			f.continuation = ""
+		}
+		f.emitLocked(api.EventTurnDispatched, f.active, map[string]any{})
+	}
+	if f.autoFinish {
+		go f.finish(api.TurnCompleted)
+	}
 	return api.TurnResponse{TurnID: f.active, SessionID: f.sessionLocked()}, nil
+}
+
+func (f *fakeComputerd) set(fn func(f *fakeComputerd)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(f)
 }
 
 func (f *fakeComputerd) setGate(g chan struct{}) {
@@ -464,6 +550,10 @@ func (f *fakeComputerd) finish(status string) {
 	if f.active != "" {
 		turn := f.active
 		f.active = ""
+		if f.finished == nil {
+			f.finished = map[string]string{}
+		}
+		f.finished[turn] = status
 		f.emitLocked(api.EventTurnFinished, turn, api.TurnFinishedData{Status: status})
 	}
 }

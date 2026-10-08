@@ -29,7 +29,12 @@ export type AdapterEvent =
   | { type: 'diagnostic'; data: { message: string; [k: string]: unknown } }
   | { type: 'session.changed'; data: { from: string | null; to: string } }
   | { type: 'resume.failed'; data: { sessionId: string; reason: string } }
-  | { type: 'turn.finished'; data: { status: TurnStatus; usage: Record<string, unknown> | null; error?: string } };
+  | { type: 'turn.finished'; data: { status: TurnStatus; usage: Record<string, unknown> | null; error?: string } }
+  /**
+   * Evidence the harness received the prompt (enhancements §4.6): Claude's echo of the user message after the init
+   * record passed the session check, Codex's turn/start response. Emitted at most once, before any model output.
+   */
+  | { type: 'turn.dispatched'; data: Record<string, never> };
 
 export interface RunningTurn {
   /** The harness session this turn runs in. */

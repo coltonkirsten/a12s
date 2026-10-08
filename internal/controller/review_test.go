@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,11 +25,11 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 
 	turn := make(chan int, 1)
 	go func() {
-		res := h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r1","session":"current","prompt":"work"}`)
+		res := h.api("POST", "/v1/computers/scout/inbox", `{"body":"work"}`)
 		res.Body.Close()
 		turn <- res.StatusCode
 	}()
-	waitFor(t, func() bool { // the prompt holds admission inside StartTurn
+	waitFor(t, func() bool { // the drainer holds admission inside StartTurn
 		h.c.mu.Lock()
 		defer h.c.mu.Unlock()
 		r := h.c.rtLocked("scout")
@@ -48,8 +47,8 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 	}
 	scout.setGate(nil)
 	close(gate)
-	if code := <-turn; code != 200 {
-		t.Fatalf("admitted prompt = %d", code)
+	if code := <-turn; code != 201 {
+		t.Fatalf("enqueue = %d", code)
 	}
 	if err := <-slept; err != nil {
 		t.Fatal(err)
@@ -57,9 +56,10 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 	if !slices.Equal(scout.stopped(), []string{"t_1"}) {
 		t.Fatalf("sleep did not interrupt the admitted turn: stops %v", scout.stopped())
 	}
-	res := h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r2","session":"current","prompt":"x"}`)
-	if e := apiError(t, res); res.StatusCode != http.StatusServiceUnavailable || e.Code != api.ErrAsleep {
-		t.Fatalf("after sleep = %d %+v", res.StatusCode, e)
+	// Asleep, the inbox still accepts; nothing is delivered.
+	res := h.api("POST", "/v1/computers/scout/inbox", `{"body":"x"}`)
+	if m := decodeBody[api.EnqueueResponse](t, res); res.StatusCode != http.StatusCreated || m.State != api.MsgPending || m.Phase != api.PhaseAsleep {
+		t.Fatalf("after sleep = %d %+v", res.StatusCode, m)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestRestageClosesAdmission(t *testing.T) {
 	res := h.up(labFleet(t, nil), nil, false)
 	gate := make(chan struct{})
 	h.cds.get("reviewer").setGate(gate)
-	go h.api("POST", "/v1/computers/reviewer/turns", `{"requestId":"r1","session":"current","prompt":"x"}`)
+	go h.api("POST", "/v1/computers/reviewer/inbox", `{"body":"x"}`)
 	time.Sleep(20 * time.Millisecond)
 	done := make(chan api.PutFleetResponse, 1)
 	go func() {
@@ -214,25 +214,16 @@ func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 	}
 }
 
-// #32: retrying a finished request does not make the Computer Busy.
-func TestIdempotentRetryIsNotBusy(t *testing.T) {
+// The old turns endpoint is gone: one way in (enhancements §4.4).
+func TestTurnsEndpointIsGone(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
-	body := `{"requestId":"r1","session":"current","prompt":"hi"}`
-	h.api("POST", "/v1/computers/scout/turns", body).Body.Close()
-	h.waitPhase("scout", api.PhaseBusy)
-	h.cds.get("scout").finish(api.TurnCompleted)
-	h.waitPhase("scout", api.PhaseReady)
-	res := h.api("POST", "/v1/computers/scout/turns", body)
-	var tr api.TurnResponse
-	json.NewDecoder(res.Body).Decode(&tr)
-	res.Body.Close()
-	if tr.TurnID != "t_1" {
-		t.Fatalf("retry = %+v", tr)
+	res := h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r1","session":"current","prompt":"hi"}`)
+	if e := apiError(t, res); res.StatusCode != http.StatusGone || e.Code != api.ErrGone || !strings.Contains(e.Fix, "/inbox") {
+		t.Fatalf("turns = %d %+v", res.StatusCode, e)
 	}
-	time.Sleep(20 * time.Millisecond)
-	if h.phase("scout") != api.PhaseReady {
-		t.Fatalf("scout = %s after an idempotent retry", h.phase("scout"))
+	if n := len(h.cds.get("scout").requestsSnapshot()); n != 0 {
+		t.Fatalf("a turn started: %d", n)
 	}
 }
 
@@ -263,7 +254,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 func TestAsleepShowsTheLatestSession(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
-	h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r1","session":"new","prompt":"hi"}`).Body.Close()
+	h.api("POST", "/v1/computers/scout/inbox", `{"body":"hi","fresh":true}`).Body.Close()
 	waitFor(t, func() bool { return readState(t, h.dir).Computers["scout"].Session == "s_scout_1" })
 	h.cds.get("scout").finish(api.TurnCompleted)
 	h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep})

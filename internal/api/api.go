@@ -3,6 +3,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -140,6 +142,12 @@ type TurnRequest struct {
 	Session   string `json:"session"` // SessionCurrent, SessionNew or a session id
 	Prompt    string `json:"prompt"`
 	Cwd       string `json:"cwd,omitempty"`
+	// Inbox describes the Batch (enhancements §4.5).
+	Inbox *TurnInbox `json:"inbox,omitempty"`
+	// Continuation runs computerd's owed restart_harness continuation.
+	Continuation bool `json:"continuation,omitempty"`
+	// LookupOnly returns an existing turn or refuses the requestId (§4.11).
+	LookupOnly bool `json:"lookupOnly,omitempty"`
 }
 
 // TurnResponse is returned once the turn is durably accepted.
@@ -281,4 +289,18 @@ func (d *Duration) UnmarshalText(b []byte) error {
 	}
 	*d = Duration(v)
 	return nil
+}
+
+// MarshalWire encodes v as JSON without HTML escaping: '<', '>' and '&'
+// stay one byte each. The Controller sends Turn requests to computerd this
+// way, so a Batch's rendered size on the wire is what the inbox reserved
+// (enhancements §4.3).
+func MarshalWire(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }

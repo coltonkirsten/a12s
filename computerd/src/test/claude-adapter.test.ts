@@ -30,16 +30,16 @@ test('claude: maps deltas, tools and the result; passes the pinned flags', async
   const { adapter, input, args } = setup('normal');
   const run = await adapter.startTurn(input);
   const evs = await collect(run.events);
-  assert.deepEqual(types(evs), ['text.delta', 'text.delta', 'tool.started', 'tool.finished', 'turn.finished']);
+  assert.deepEqual(types(evs), ['turn.dispatched', 'text.delta', 'text.delta', 'tool.started', 'tool.finished', 'turn.finished']);
   assert.equal(evs.filter((e) => e.type === 'text.delta').map((e) => (e.data as { text: string }).text).join(''), 'pong');
-  assert.deepEqual(evs[2]?.data, { id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } });
-  assert.deepEqual(evs[3]?.data, { id: 'toolu_1', name: 'Bash', isError: false, output: 'hi' });
+  assert.deepEqual(evs[3]?.data, { id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } });
+  assert.deepEqual(evs[4]?.data, { id: 'toolu_1', name: 'Bash', isError: false, output: 'hi' });
   const fin = evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>;
   assert.equal(fin.data.status, 'completed');
   assert.equal(fin.data.usage?.outputTokens, 2);
   const a = args();
   assert.match(run.sessionId, /^[0-9a-f-]{36}$/);
-  for (const f of [`--session-id=${run.sessionId}`, '--setting-sources=user,project,local', '--include-partial-messages', '--allow-dangerously-skip-permissions']) {
+  for (const f of [`--session-id=${run.sessionId}`, '--setting-sources=user,project,local', '--include-partial-messages', '--allow-dangerously-skip-permissions', '--replay-user-messages']) {
     assert.ok(a.includes(f), f);
   }
   assert.ok(!a.includes('--strict-mcp-config'));
@@ -94,8 +94,17 @@ test('claude: a resume that comes up in another session is stopped and fails wit
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${id}.jsonl`), '{"type":"user"}\n');
   const evs = await collect((await adapter.startTurn({ ...input, sessionId: id })).events);
-  assert.deepEqual(evs.map((e) => e.type), ['resume.failed', 'turn.finished']);
+  assert.deepEqual(evs.map((e) => e.type), ['resume.failed', 'turn.finished'], 'a wrong-session init is a resume failure, never a receipt');
   const fin = (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
   assert.equal(fin.status, 'failed');
   assert.match(fin.error ?? '', /started session aaaaaaaa/);
+});
+
+test('claude: receipt needs the user-message echo and a passing init, in either order', async () => {
+  for (const [mode, want] of [['replay-first', true], ['no-replay', false]] as const) {
+    const { adapter, input } = setup(mode);
+    const evs = await collect((await adapter.startTurn(input)).events);
+    assert.equal(evs.filter((e) => e.type === 'turn.dispatched').length, want ? 1 : 0, mode);
+    if (want) assert.equal(evs[0]?.type, 'turn.dispatched', 'before any model output');
+  }
 });

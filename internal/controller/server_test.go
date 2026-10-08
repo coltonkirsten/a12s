@@ -52,17 +52,16 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("status = %d %+v", res.StatusCode, st)
 	}
 
-	// A turn passes through; a second one is busy (409 from computerd).
-	res = h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r1","session":"current","prompt":"hi"}`)
-	var turn api.TurnResponse
-	json.NewDecoder(res.Body).Decode(&turn)
-	if res.StatusCode != 200 || turn.TurnID != "t_1" {
-		t.Fatalf("turn = %d %+v", res.StatusCode, turn)
+	// A message is delivered as a turn; a second one waits in line.
+	res = h.api("POST", "/v1/computers/scout/inbox", `{"body":"hi"}`)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("enqueue = %d", res.StatusCode)
 	}
-	if e := apiError(t, h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r2","session":"current","prompt":"again"}`)); e.Code != api.ErrBusy {
-		t.Fatalf("busy = %+v", e)
+	h.waitPhase("scout", api.PhaseBusy)
+	if m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/scout/inbox", `{"body":"again"}`)); m.State != api.MsgPending {
+		t.Fatalf("second = %+v", m)
 	}
-	if e := apiError(t, h.api("POST", "/v1/computers/nobody/turns", `{}`)); e.Code != api.ErrNotFound {
+	if e := apiError(t, h.api("POST", "/v1/computers/nobody/inbox", `{"body":"x"}`)); e.Code != api.ErrNotFound {
 		t.Fatalf("unknown = %+v", e)
 	}
 
@@ -76,7 +75,7 @@ func TestAPI(t *testing.T) {
 	id, _ := r.ReadString('\n')
 	data, _ := r.ReadString('\n')
 	res.Body.Close()
-	if id != "id: 2\n" || !strings.Contains(data, `"type":"turn.finished"`) {
+	if id != "id: 3\n" || !strings.Contains(data, `"type":"turn.finished"`) {
 		t.Fatalf("event = %q %q", id, data)
 	}
 
@@ -88,12 +87,12 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("shell = %+v, diagnostics %v", sh, h.cds.get("builder").diagnostics)
 	}
 
-	// Sleep through the API; turns then get 503.
+	// Sleep through the API; messages then wait.
 	if res := h.api("POST", "/v1/computers/tester/power", `{"state":"asleep"}`); res.StatusCode != 200 {
 		t.Fatalf("sleep = %d", res.StatusCode)
 	}
-	if e := apiError(t, h.api("POST", "/v1/computers/tester/turns", `{"requestId":"r","session":"current","prompt":"x"}`)); e.Code != api.ErrAsleep {
-		t.Fatalf("asleep turn = %+v", e)
+	if m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/tester/inbox", `{"body":"x"}`)); m.State != api.MsgPending || m.Phase != api.PhaseAsleep {
+		t.Fatalf("asleep enqueue = %+v", m)
 	}
 
 	// Drives: an attached drive is refused; a detached one is destroyed.

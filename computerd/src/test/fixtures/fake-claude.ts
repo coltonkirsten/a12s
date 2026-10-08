@@ -36,7 +36,13 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     return;
   }
   if (m.type !== 'user') return;
+  // --replay-user-messages: the CLI echoes the user message it took in (the receipt behind turn.dispatched).
+  const replay = () => {
+    if (args.includes('--replay-user-messages') && mode !== 'no-replay') out({ type: 'user', isReplay: true, parent_tool_use_id: null, message: (m as { message?: unknown }).message });
+  };
+  if (mode === 'replay-first') replay();
   out({ ...(mode === 'wrong-session' ? { session_id: 'aaaaaaaa-0000-4000-8000-000000000000' } : {}), type: 'system', subtype: 'init', cwd: process.cwd(), tools: [], mcp_servers: [], model: 'fake', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: 'fake' });
+  if (mode !== 'replay-first') replay();
   if (mode === 'hang' || mode === 'ignore-term' || mode === 'wrong-session') return;
   if (mode === 'refresh') {
     // Like a real token refresh: write a temp file and rename it over the credentials symlink.

@@ -96,6 +96,8 @@ export class CodexAdapter implements Adapter {
         ...(input.model ? { model: input.model } : {}),
       });
       turn.turnId = String(r.turn.id);
+      // The turn/start response carrying the harness's turn id is Codex's evidence of receipt (§4.6).
+      turn.out.push({ type: 'turn.dispatched', data: {} });
     } catch (err) {
       this.turn = null;
       throw err;

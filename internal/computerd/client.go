@@ -86,6 +86,14 @@ func (c *Client) StartTurn(ctx context.Context, req api.TurnRequest) (api.TurnRe
 	return res, err
 }
 
+// TurnSummary is GET /v1/turns/{id}: dispatch and finish evidence for
+// settling a Batch (enhancements §4.6).
+func (c *Client) TurnSummary(ctx context.Context, turnID string) (api.TurnSummary, error) {
+	var s api.TurnSummary
+	err := c.do(ctx, http.MethodGet, "/v1/turns/"+url.PathEscape(turnID), nil, &s)
+	return s, err
+}
+
 // Stop is POST /v1/turns/{id}/stop; it is idempotent.
 func (c *Client) Stop(ctx context.Context, turnID string) error {
 	return c.do(ctx, http.MethodPost, "/v1/turns/"+url.PathEscape(turnID)+"/stop", struct{}{}, nil)
@@ -104,7 +112,7 @@ func (c *Client) Diagnostic(ctx context.Context, message string, data any) error
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
-		b, err := json.Marshal(in)
+		b, err := api.MarshalWire(in)
 		if err != nil {
 			return err
 		}

@@ -32,8 +32,8 @@ test('codex: handshake, thread/start, events, and a declined approval in restric
   const run = await adapter.startTurn(input);
   assert.equal(run.sessionId, 'thr_1');
   const evs = await collect(run.events);
-  assert.deepEqual(evs.map((e) => e.type), ['tool.started', 'permission', 'tool.finished', 'text.delta', 'text.delta', 'turn.finished']);
-  assert.deepEqual(evs[1]?.data, { decision: 'deny', kind: 'commandExecution', detail: { command: 'ls', cwd: '/' } });
+  assert.deepEqual(evs.map((e) => e.type), ['turn.dispatched', 'tool.started', 'permission', 'tool.finished', 'text.delta', 'text.delta', 'turn.finished']);
+  assert.deepEqual(evs[2]?.data, { decision: 'deny', kind: 'commandExecution', detail: { command: 'ls', cwd: '/' } });
   assert.equal(finished(evs).status, 'completed');
   assert.deepEqual(finished(evs).usage, { thread: { totalTokens: 9 }, last: { totalTokens: 5 } });
   const msgs = log();

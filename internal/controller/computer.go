@@ -195,6 +195,7 @@ func (c *Controller) start(ctx context.Context, name string) error {
 	c.observeStatus(name, st)
 	c.openAdmission(name)
 	c.subscribe(name)
+	c.kick(name)
 	return nil
 }
 
@@ -401,6 +402,15 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			}
 			c.mu.Unlock()
 			c.maybeApplyStaged(name)
+			c.kick(name)
+		case api.EventTurnDispatched, api.EventHarnessRestarted:
+			c.kick(name)
+		case api.EventContinuationAbandoned:
+			if c.inbox != nil {
+				if err := c.inbox.Hold(c.ctx, name, api.HoldResumeFailed, "the restart_harness continuation failed before the harness received it: a12s inbox resume "+name+" (--new for a fresh session)", "controller"); err != nil {
+					c.logf("%s: hold: %v", name, err)
+				}
+			}
 		case api.EventSessionChanged:
 			var d struct {
 				To string `json:"to"`
@@ -462,6 +472,7 @@ func (c *Controller) attach(ctx context.Context, name string) error {
 	c.observeStatus(name, st)
 	c.openAdmission(name)
 	c.subscribe(name)
+	c.kick(name)
 	return nil
 }
 
@@ -490,6 +501,9 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
 	c.interrupt(ctx, name, c.timing.SleepFlush)
+	// A claimed, undispatched Batch is returned; a dispatched one is
+	// delivered (§4.7). computerd is still up to answer.
+	c.settleOpen(ctx, name)
 	c.finalStatus(ctx, name)
 	c.stopEvents(name)
 	if err := c.stop(ctx, name, obs.Generation); err != nil {
