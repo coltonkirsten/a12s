@@ -38,6 +38,7 @@ const (
 	RoleService = "service"
 	RolePublish = "publish"
 	RoleInit    = "init"
+	RoleLogin   = "login"
 	// LabelService names the Service on its container, network and state drive.
 	LabelService = "a12s.service"
 )

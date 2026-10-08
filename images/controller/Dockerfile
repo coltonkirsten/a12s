@@ -7,7 +7,8 @@ WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/a12s ./cmd/a12s
+# The Go build cache is a cache mount, so the layer holds only the binary.
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/a12s ./cmd/a12s
 
 FROM debian:bookworm-slim
 RUN apt-get update \

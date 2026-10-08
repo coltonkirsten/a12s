@@ -171,3 +171,24 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
   as an egress `diagnostic` with the reason (`scout cannot reach db: computers.scout.uses does not list db`,
   `db is Asleep`), or audited on a calling Service. A refused send is a `403 no_grant` with the fix, audited
   for a Service and journaled as a diagnostic for a Computer.
+
+## S6: credentials and login
+
+- **The login container is a12s holding a memory-only container open.** `POST /v1/services/{s}/login` starts
+  `a12s-F-<svc>-login` from the pinned image as the manifest uid, no capabilities, read-only rootfs, on the
+  Service's own network (so the proxy applies the Service's egress policy). `/run/a12s` (holding `HOME`,
+  `XDG_*` and `$A12S_LOGIN_OUT`), `/tmp`, every image VOLUME, the manifest's tmpfs paths and the state path are
+  tmpfs; no state drive is mounted. Its process is `a12s login-hold`. The CLI execs the manifest command into it
+  on the terminal, then reads `$A12S_LOGIN_OUT` with `a12s login-read` over the exec stream, writes
+  `~/.a12s/<fleet>/<credential>` atomically 0600, binds it in the bindings file, and deletes the container.
+  The credential never passes through the Controller. `a12s up` (or `wake`) then injects it.
+- **`a12s creds set <name>`** lands here (not S8) because login shares its storage: the value comes from stdin
+  (not echoed on a terminal), goes to `~/.a12s/<fleet>/<name>` (0600, atomic) and is bound as `{file: …}`,
+  keeping the rest of the bindings file. `down` never deletes these files (it removes only `controller.json`).
+- **Reauth.** An HTTP health answer `{"credential": "reauth"}` makes the Service Unhealthy with
+  `credential: reauth  fix: a12s service login <svc>` on its status line. Rotation is not written back (open
+  question 3: "log in again after a sleep").
+- **Static credentials** were already injected through a12s-init in S4 (`/run/a12s/secrets/<name>`, the manifest
+  uid, 0400); a Service's `config.env` maps them (`POSTGRES_PASSWORD_FILE: /run/a12s/secrets/postgres`).
+- The controller image now builds with a Go build-cache mount, so each rebuild adds only the binary to the
+  build cache (the disk on mac-mini is tight).

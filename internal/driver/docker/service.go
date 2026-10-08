@@ -598,3 +598,103 @@ func (d *Driver) RefreshImage(ctx context.Context, ref string) (string, error) {
 	}
 	return res.ID, nil
 }
+
+// LoginName is a Service's login container.
+func (d *Driver) LoginName(service string) string { return d.ContainerName(service) + "-login" }
+
+// StartLogin creates and starts a Service's memory-only login container: the
+// pinned image run as the manifest uid with no capabilities, read-only
+// rootfs, HOME, XDG_* and $A12S_LOGIN_OUT under a tmpfs, every image VOLUME
+// on tmpfs, no state drive, on the Service's own network (so the Controller's
+// proxy applies the Service's egress policy). Its process is a12s holding the
+// container open; the CLI execs the login command into it.
+func (d *Driver) StartLogin(ctx context.Context, service string, spec driver.LoginSpec) (driver.Login, error) {
+	if spec.User == "" || strings.HasPrefix(spec.User, "0:") {
+		return driver.Login{}, fmt.Errorf("login %s: a login never runs as root", service)
+	}
+	if err := d.RemoveLogin(ctx, service); err != nil {
+		return driver.Login{}, err
+	}
+	if err := d.ensureInit(ctx, spec.Image); err != nil {
+		return driver.Login{}, fmt.Errorf("login %s: %w", service, err)
+	}
+	initExec, err := d.initExec()
+	if err != nil {
+		return driver.Login{}, err
+	}
+	netName, err := d.ensureNetworkFor(ctx, service, RoleService)
+	if err != nil {
+		return driver.Login{}, fmt.Errorf("login %s: %w", service, err)
+	}
+	if err := d.ConnectController(ctx, netName); err != nil {
+		return driver.Login{}, fmt.Errorf("login %s: %w", service, err)
+	}
+	uid, gid, _ := strings.Cut(spec.User, ":")
+	own := ",uid=" + uid + ",gid=" + gid
+	tmpfs := map[string]string{
+		"/tmp":      "rw,nosuid,nodev,mode=1777",
+		"/run/a12s": "rw,nosuid,nodev,noexec,mode=0700,size=16m" + own,
+	}
+	for _, p := range append(append([]string(nil), spec.Volumes...), spec.Tmpfs...) {
+		if p != "/tmp" && p != "/run/a12s" {
+			tmpfs[p] = "rw,nosuid,nodev,mode=0700" + own
+		}
+	}
+	env := append([]string{
+		"HOME=" + driver.LoginDir + "/home",
+		"XDG_CONFIG_HOME=" + driver.LoginDir + "/config",
+		"XDG_CACHE_HOME=" + driver.LoginDir + "/cache",
+		"XDG_DATA_HOME=" + driver.LoginDir + "/data",
+		"XDG_STATE_HOME=" + driver.LoginDir + "/state",
+		"A12S_LOGIN_OUT=" + driver.LoginOut,
+	}, spec.Env...)
+	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: d.LoginName(service),
+		Config: &container.Config{
+			Image:      spec.Image,
+			User:       spec.User,
+			Entrypoint: []string{initExec, "login-hold"},
+			Cmd:        []string{},
+			Env:        env,
+			Labels:     map[string]string{LabelFleet: d.fleet, LabelService: service, LabelRole: RoleLogin},
+		},
+		HostConfig: &container.HostConfig{
+			NetworkMode:    container.NetworkMode(netName),
+			RestartPolicy:  container.RestartPolicy{Name: container.RestartPolicyDisabled},
+			ReadonlyRootfs: true,
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			Tmpfs:          tmpfs,
+			Mounts: []mount.Mount{{
+				Type: mount.TypeVolume, Source: d.InitVolume(), Target: driver.InitDir, ReadOnly: true,
+				VolumeOptions: &mount.VolumeOptions{NoCopy: true},
+			}},
+		},
+		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{netName: {}}},
+	})
+	if err != nil {
+		return driver.Login{}, fmt.Errorf("login %s: create: %w", service, err)
+	}
+	if _, err := d.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		return driver.Login{}, fmt.Errorf("login %s: start: %w", service, d.discard(ctx, created.ID, err))
+	}
+	return driver.Login{Container: d.LoginName(service), User: spec.User, Read: []string{initExec, "login-read"}}, nil
+}
+
+// RemoveLogin deletes a Service's login container (and with it every tmpfs).
+func (d *Driver) RemoveLogin(ctx context.Context, service string) error {
+	res, err := d.cli.ContainerInspect(ctx, d.LoginName(service), client.ContainerInspectOptions{})
+	if isNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RoleLogin {
+		return fmt.Errorf("container %s is not a login container of fleet %s", d.LoginName(service), d.fleet)
+	}
+	if _, err := d.cli.ContainerRemove(ctx, res.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
+		return fmt.Errorf("remove login %s: %w", service, err)
+	}
+	return nil
+}
