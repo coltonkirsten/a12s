@@ -35,11 +35,14 @@ type BatchMessage struct {
 	Bytes int64
 }
 
+// nonceRead is the nonce's randomness; a test swaps it to force a clash.
+var nonceRead = rand.Read
+
 // newNonce draws a nonce that no body, metadata value or intro contains.
 func newNonce(texts []string) string {
 	for {
 		var b [8]byte
-		_, _ = rand.Read(b[:])
+		_, _ = nonceRead(b[:])
 		n := hex.EncodeToString(b[:])
 		clash := false
 		for _, t := range texts {

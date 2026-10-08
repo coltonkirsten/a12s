@@ -122,6 +122,29 @@ func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
 	return b, err
 }
 
+// buildRequest renders a Batch's immutable Turn request from its Messages
+// (no I/O), and returns the earliest expiry among them.
+func buildRequest(computer, id, session, intro string, now time.Time, msgs []*api.Message, pendingAfter int) (api.TurnRequest, *time.Time) {
+	var bms []BatchMessage
+	inbox := &api.TurnInbox{Batch: id, PendingAfter: pendingAfter}
+	var earliest *time.Time
+	for _, m := range msgs {
+		bm := BatchMessage{Frame: Frame{ID: m.ID, Sender: m.Sender, Via: m.Via, CreatedAt: m.CreatedAt, Body: *m.Body, Metadata: m.Metadata, ReplaceKey: m.ReplaceKey, Superseded: m.Superseded}, Seq: m.Seq, Bytes: m.Bytes}
+		bms = append(bms, bm)
+		im := api.TurnInboxMsg{ID: m.ID, Seq: m.Seq, Sender: m.Sender, Via: m.Via, CreatedAt: m.CreatedAt, Bytes: m.Bytes}
+		if m.ReplaceKey != "" {
+			sup := m.Superseded
+			im.Key, im.Superseded = m.ReplaceKey, &sup
+		}
+		inbox.Messages = append(inbox.Messages, im)
+		if m.ExpiresAt != nil && (earliest == nil || m.ExpiresAt.Before(*earliest)) {
+			t := *m.ExpiresAt
+			earliest = &t
+		}
+	}
+	return api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, intro, now, bms), Inbox: inbox}, earliest
+}
+
 // claimTx claims the next Batch of a Computer (§4.5 draining): expire due
 // Messages, take the pending snapshot up to the next fresh boundary, mark it
 // claimed, render it and store the immutable request. It returns nil when
@@ -176,28 +199,11 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	if msgs[0].Fresh || override {
 		session = api.SessionNew
 	}
-	var bms []BatchMessage
-	inbox := &api.TurnInbox{Batch: id, PendingAfter: len(all) - n}
-	var earliest *time.Time
-	for _, m := range msgs {
-		bm := BatchMessage{Frame: Frame{ID: m.ID, Sender: m.Sender, Via: m.Via, CreatedAt: m.CreatedAt, Body: *m.Body, Metadata: m.Metadata, ReplaceKey: m.ReplaceKey, Superseded: m.Superseded}, Seq: m.Seq, Bytes: m.Bytes}
-		bms = append(bms, bm)
-		im := api.TurnInboxMsg{ID: m.ID, Seq: m.Seq, Sender: m.Sender, Via: m.Via, CreatedAt: m.CreatedAt, Bytes: m.Bytes}
-		if m.ReplaceKey != "" {
-			sup := m.Superseded
-			im.Key, im.Superseded = m.ReplaceKey, &sup
-		}
-		inbox.Messages = append(inbox.Messages, im)
-		if m.ExpiresAt != nil && (earliest == nil || m.ExpiresAt.Before(*earliest)) {
-			t := *m.ExpiresAt
-			earliest = &t
-		}
-	}
 	var intro string
 	if err := tx.QueryRow(`SELECT intro FROM inboxes WHERE computer = ?`, computer).Scan(&intro); err != nil {
 		return nil, "", err
 	}
-	req := api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, intro, now, bms), Inbox: inbox}
+	req, earliest := buildRequest(computer, id, session, intro, now, msgs, len(all)-n)
 	b := &Batch{ID: id, Computer: computer, Request: req, Claimed: now, State: BatchClaimed, Override: override}
 	var notAfter any
 	if earliest != nil {

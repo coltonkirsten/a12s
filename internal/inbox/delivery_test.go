@@ -232,34 +232,58 @@ func TestRequestFitsComputerdLimit(t *testing.T) {
 }
 
 func TestNonceAvoidsBodies(t *testing.T) {
-	msgs := []BatchMessage{{Frame: Frame{ID: "m_1", Sender: "x", Via: "local", Body: "abc"}}}
-	for range 50 {
-		p := RenderBatch("c", "b_1", "", time.Now(), msgs)
-		if strings.Count(p, "</msg-") != 1 {
-			t.Fatal(p)
+	// The first two draws clash with a body and the metadata; the third is used.
+	draws := []byte{1, 2, 3}
+	old := nonceRead
+	t.Cleanup(func() { nonceRead = old })
+	nonceRead = func(b []byte) (int, error) {
+		for i := range b {
+			b[i] = draws[0]
 		}
+		draws = draws[1:]
+		return len(b), nil
+	}
+	clash1, clash2 := strings.Repeat("01", 8), strings.Repeat("02", 8)
+	msgs := []BatchMessage{{Frame: Frame{ID: "m_1", Sender: "x", Via: "local", Body: "a " + clash1 + " b", Metadata: map[string]string{"k": clash2}}}}
+	p := RenderBatch("c", "b_1", "", time.Now(), msgs)
+	if !strings.Contains(p, "</msg-"+strings.Repeat("03", 8)) || len(draws) != 0 {
+		t.Fatal(p)
 	}
 }
 
 // Gate 8 at the ceilings: 2,000 worst-case Messages (64-char senders and
-// keys, the widest principal and superseded counts) fit computerd's limit.
+// keys, the widest principal) fit computerd's limit. One Message goes through
+// the Store so its stored shape is real; the 2,000-Message request is then
+// built in memory by the same code claimTx uses (2,000 enqueues took 90s
+// under -race).
 func TestTwoThousandMessagesFit(t *testing.T) {
 	lim := Limits{MaxMessages: api.LimitValue{Value: 2000, Source: "computer"}, MaxBytes: api.LimitValue{Value: 1 << 20, Source: "computer"}}
-	s, _ := newStoreCfg(t, map[string]Config{"builder": {Limits: lim, Intro: strings.Repeat("[", 512)}})
-	for n := range 2000 {
-		key := strings.Repeat("k", 60) + string(rune('A'+n%26)) + string(rune('A'+n/26%26)) + string(rune('A'+n/676)) + "x"
-		_, err := s.Enqueue(context.Background(), Enqueue{Computer: "builder", Principal: "token:" + strings.Repeat("t", 63),
-			Req: api.EnqueueRequest{Body: "<", Sender: strings.Repeat("s", 64), ReplaceKey: key}}, nil)
-		if err != nil {
-			t.Fatalf("message %d: %v", n, err)
-		}
+	intro := strings.Repeat("[", 512)
+	s, _ := newStoreCfg(t, map[string]Config{"builder": {Limits: lim, Intro: intro}})
+	key := func(n int) string {
+		return strings.Repeat("k", 60) + string(rune('A'+n%26)) + string(rune('A'+n/26%26)) + string(rune('A'+n/676)) + "x"
 	}
-	b := claim(t, s, "builder")
-	data, _ := api.MarshalWire(b.Request)
-	if len(b.Request.Inbox.Messages) != 2000 || JSONLen(b.Request.Prompt) > lim.MaxBytes.Value || len(data) > 2<<20 {
-		t.Fatalf("%d messages, render %d, request %d", len(b.Request.Inbox.Messages), JSONLen(b.Request.Prompt), len(data))
+	r, err := s.Enqueue(context.Background(), Enqueue{Computer: "builder", Principal: "token:" + strings.Repeat("t", 63),
+		Req: api.EnqueueRequest{Body: "<", Sender: strings.Repeat("s", 64), ReplaceKey: key(0)}}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("2000 messages: render %d B, request %d B", JSONLen(b.Request.Prompt), len(data))
+	stored, err := s.Get(context.Background(), "builder", r.Message.ID, "", true)
+	if err != nil || stored.Body == nil {
+		t.Fatalf("get %+v, %v", stored, err)
+	}
+	msgs := make([]*api.Message, 2000)
+	for n := range msgs {
+		m := *stored
+		m.ReplaceKey, m.Seq = key(n), int64(n+1)
+		msgs[n] = &m
+	}
+	req, _ := buildRequest("builder", "b_"+NewULID(time.Now()), api.SessionCurrent, intro, time.Now(), msgs, 0)
+	data, _ := api.MarshalWire(req)
+	if len(req.Inbox.Messages) != 2000 || JSONLen(req.Prompt) > lim.MaxBytes.Value || len(data) > 2<<20 {
+		t.Fatalf("%d messages, render %d, request %d", len(req.Inbox.Messages), JSONLen(req.Prompt), len(data))
+	}
+	t.Logf("2000 messages: render %d B, request %d B", JSONLen(req.Prompt), len(data))
 }
 
 // Astra final review #7: a returned row is not replaced by an overdue one.
