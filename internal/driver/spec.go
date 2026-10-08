@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -123,6 +124,11 @@ type ComputerSpec struct {
 	// Seccomp is a seccomp profile (JSON) to run under instead of the
 	// substrate default; the browser tier ships one. Optional.
 	Seccomp string `json:"seccomp,omitempty"`
+	// Uses are the endpoints of the Services this Computer uses (A12S_USES).
+	Uses []Endpoint `json:"uses,omitempty"`
+	// Send are the Computers it may enqueue to (A12S_SEND), for computerd's
+	// send tool.
+	Send []string `json:"send,omitempty"`
 }
 
 // Env returns the environment every Computer gets (PLAN "Container").
@@ -144,6 +150,13 @@ func (s ComputerSpec) Env(fleet string) []string {
 	}
 	if s.Model != "" {
 		env = append(env, "A12S_MODEL="+s.Model)
+	}
+	if len(s.Uses) > 0 {
+		b, _ := json.Marshal(s.Uses)
+		env = append(env, "A12S_USES="+string(b))
+	}
+	if len(s.Send) > 0 {
+		env = append(env, "A12S_SEND="+strings.Join(s.Send, ","))
 	}
 	return env
 }

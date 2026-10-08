@@ -42,6 +42,13 @@ type ServiceRecord struct {
 type ServiceActive struct {
 	Allow      []string `json:"allow,omitempty"`
 	Unenforced bool     `json:"unenforced,omitempty"`
+	// Send, Uses and TCP are what it may do; Ports what it may be reached
+	// on; AllowPrivate the Fleet's egress.allowPrivate for its TCP egress.
+	Send         []string                     `json:"send,omitempty"`
+	Uses         []driver.Endpoint            `json:"uses,omitempty"`
+	TCP          []fleet.TCPEgress            `json:"tcp,omitempty"`
+	Ports        map[string]fleet.ServicePort `json:"ports,omitempty"`
+	AllowPrivate []string                     `json:"allowPrivate,omitempty"`
 }
 
 // serviceRuntime is a Service's in-memory state.
@@ -267,6 +274,17 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 			"NO_PROXY=" + noProxy, "no_proxy=" + noProxy,
 		},
 	}
+	if len(s.Grants.Send) > 0 {
+		spec.Env = append(spec.Env, "A12S_SEND="+strings.Join(s.Grants.Send, ","))
+	}
+	if uses := c.endpointsLocked(s.Uses); len(uses) > 0 {
+		b, _ := json.Marshal(uses)
+		spec.Env = append(spec.Env, "A12S_USES="+string(b))
+	}
+	if tcp := tcpEgressOf(s); len(tcp) > 0 {
+		b, _ := json.Marshal(tcp)
+		spec.Env = append(spec.Env, "A12S_EGRESS_TCP="+string(b))
+	}
 	if m.Resources != nil {
 		spec.CPUMillis, spec.Memory = m.Resources.CPU.Millis(), int64(m.Resources.Memory)
 	}
@@ -309,7 +327,15 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 
 func (c *Controller) activeServiceLocked(name string) ServiceActive {
 	s := c.state.Fleet.Services[name]
-	return ServiceActive{Allow: slices.Clone(s.Egress.Allow), Unenforced: c.state.Fleet.Egress.Unenforced()}
+	a := ServiceActive{
+		Allow: slices.Clone(s.Egress.Allow), Unenforced: c.state.Fleet.Egress.Unenforced(),
+		Send: slices.Clone(s.Grants.Send), Uses: c.endpointsLocked(s.Uses), TCP: slices.Clone(s.Egress.TCP),
+		AllowPrivate: slices.Clone(c.state.Fleet.Egress.AllowPrivate),
+	}
+	if m := c.state.Manifests[name]; m != nil {
+		a.Ports = maps.Clone(m.Ports)
+	}
+	return a
 }
 
 // observeService returns the Service as the Driver sees it now.
@@ -425,7 +451,7 @@ func (c *Controller) ensureServicePower(ctx context.Context, name string, runnin
 		return c.startService(ctx, name)
 	}
 	if rotate {
-		if err := c.injectService(ctx, name); err != nil {
+		if err := c.injectService(ctx, name, false); err != nil {
 			return c.failService(name, err)
 		}
 		c.auditf(name, "credentials re-injected")
@@ -484,6 +510,7 @@ func (c *Controller) restageService(ctx context.Context, name string, spec drive
 
 // stopService powers a Service down and reads that back.
 func (c *Controller) stopService(ctx context.Context, name string, gen int64) error {
+	c.unregisterCert(KindService, name)
 	if err := c.drv.SetServicePower(ctx, name, driver.PowerAsleep, gen); err != nil {
 		return err
 	}
@@ -527,7 +554,7 @@ func (c *Controller) startService(ctx context.Context, name string) error {
 	if err := c.drv.SetServicePower(ctx, name, driver.PowerAwake, gen); err != nil {
 		return c.failService(name, err)
 	}
-	if err := c.injectService(ctx, name); err != nil {
+	if err := c.injectService(ctx, name, true); err != nil {
 		return c.failService(name, err)
 	}
 	if err := c.confirmService(ctx, name, fmt.Sprintf("generation %d running", gen), func(st driver.ComputerState, exists bool) bool {
@@ -541,9 +568,10 @@ func (c *Controller) startService(ctx context.Context, name string) error {
 	return nil
 }
 
-// injectService writes the Service's credentials, config and .generation
-// into its tmpfs through a12s-init (no shell needed in the image).
-func (c *Controller) injectService(ctx context.Context, name string) error {
+// injectService writes the Service's credentials, config, at a start
+// (withCert) a fresh registered certificate, and .generation last into its
+// tmpfs through a12s-init (no shell needed in the image).
+func (c *Controller) injectService(ctx context.Context, name string, withCert bool) error {
 	c.mu.Lock()
 	s, ok := c.state.Fleet.Services[name]
 	rec := c.state.Services[name]
@@ -557,9 +585,10 @@ func (c *Controller) injectService(ctx context.Context, name string) error {
 		rec.CredentialGeneration++
 		err = c.saveLocked()
 	}
-	var gen int64
+	var gen, generation int64
+	var send []string
 	if rec != nil {
-		gen = rec.CredentialGeneration
+		gen, generation, send = rec.CredentialGeneration, rec.Generation, slices.Clone(rec.Active.Send)
 	}
 	hash := c.credsHashLocked(s.Credentials)
 	c.mu.Unlock()
@@ -587,6 +616,23 @@ func (c *Controller) injectService(ctx context.Context, name string) error {
 	}
 	if err := c.drv.ServiceWrite(ctx, name, "/run/a12s/config/config.json", "0:0", "0644", "0755", append(data, '\n')); err != nil {
 		return err
+	}
+	if withCert {
+		leaf, err := c.ca.ServiceCert(name, generation)
+		if err != nil {
+			return fmt.Errorf("inject %s: %w", name, err)
+		}
+		if err := c.registerCert(ctx, Principal{Kind: KindService, Name: name, Generation: generation}, leaf.Serial, send); err != nil {
+			return fmt.Errorf("inject %s: register certificate: %w", name, err)
+		}
+		for _, f := range []struct {
+			name string
+			data []byte
+		}{{"ca.crt", c.ca.CertPEM()}, {"cert.pem", leaf.CertPEM}, {"key.pem", leaf.KeyPEM}} {
+			if err := c.drv.ServiceWrite(ctx, name, tlsDir+"/"+f.name, user, "0400", "0711", f.data); err != nil {
+				return err
+			}
+		}
 	}
 	if err := c.drv.ServiceWrite(ctx, name, generationFile, "0:0", "0644", secretsDirMode, []byte(strconv.FormatInt(gen, 10)+"\n")); err != nil {
 		return err
@@ -841,6 +887,7 @@ func (c *Controller) removeService(ctx context.Context, name string) error {
 	c.stopHealth(name)
 	c.netMu.Lock()
 	c.invalidateAddrs(name)
+	c.unregisterCert(KindService, name)
 	err := c.drv.RemoveService(ctx, name)
 	if err == nil {
 		err = c.confirmService(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
@@ -882,6 +929,7 @@ func (c *Controller) serviceDied(ev driver.Event) {
 	}
 	name := ev.Computer
 	c.stopHealth(name)
+	c.unregisterCert(KindService, name)
 	defer c.lockComputer(name)()
 	if !c.unexpectedService(ev) {
 		return

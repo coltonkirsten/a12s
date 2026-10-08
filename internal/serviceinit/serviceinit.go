@@ -77,6 +77,9 @@ func Init(args []string, stderr io.Writer) error {
 	if err := exportConfigEnv(ConfigFile); err != nil {
 		return err
 	}
+	if err := wire(uid, gid); err != nil {
+		return err
+	}
 	if h := os.Getenv("HOME"); h == "" || h == "/root" {
 		os.Setenv("HOME", "/tmp")
 	}
@@ -305,6 +308,9 @@ func serve(ln net.Listener, target string, stderr io.Writer) error {
 }
 
 func closeWrite(c net.Conn) {
+	if b, ok := c.(*bufferedConn); ok {
+		c = b.Conn
+	}
 	if tc, ok := c.(*net.TCPConn); ok {
 		_ = tc.CloseWrite()
 	}

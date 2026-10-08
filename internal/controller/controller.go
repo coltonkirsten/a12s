@@ -414,15 +414,15 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	servers := []*http.Server{
 		{Handler: c.Handler(), ReadHeaderTimeout: 10 * time.Second},
-		{Handler: NewLeases(c.authorizeLease).Handler(), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
-		{Handler: NewProxy(c.identify, c.policy, c.denied), ReadHeaderTimeout: 10 * time.Second},
+		{Handler: c.MTLSHandler(NewLeases(c.authorizeLease).Handler()), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
+		{Handler: c.newProxy(), ReadHeaderTimeout: 10 * time.Second},
 	}
 	c.Start(ctx)
 	errc := make(chan error, 3)
 	go func() { errc <- servers[0].Serve(apiLn) }()
 	go func() { errc <- servers[1].Serve(tls.NewListener(leaseLn, serverTLS)) }()
 	go func() { errc <- servers[2].Serve(proxyLn) }()
-	c.logf("fleet %s: API on %s, leases on :%d (mTLS), egress proxy on :%d", cfg.Fleet, apiAddr, LeasePort, ProxyPort)
+	c.logf("fleet %s: API on %s, mTLS listener on :%d, egress proxy on :%d", cfg.Fleet, apiAddr, LeasePort, ProxyPort)
 
 	select {
 	case <-ctx.Done():
@@ -444,6 +444,12 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	c.mu.Unlock()
 	return err
+}
+
+func (c *Controller) newProxy() *Proxy {
+	p := NewProxy(c.identify, c.policy, c.denied)
+	p.Internal = c.internalTarget
+	return p
 }
 
 // refreshAddrs rebuilds the map from the Controller's address on each
@@ -489,6 +495,7 @@ func (c *Controller) removeNetworked(ctx context.Context, name, what string) err
 	c.netMu.Lock()
 	defer c.netMu.Unlock()
 	c.invalidateAddrs(name)
+	c.unregisterCert(KindComputer, name)
 	if err := c.drv.RemoveComputer(ctx, name); err != nil {
 		return err
 	}

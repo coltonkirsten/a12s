@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -303,6 +304,9 @@ func (f *Fleet) validateServices() []error {
 			if t.Port < 1 || t.Port > 65535 {
 				bad(sub+".port", "", "%d must be 1 to 65535", t.Port)
 			}
+			if a, err := netip.ParseAddr(t.Host); err == nil && isPrivate(a) && !f.allowsPrivate(a) {
+				bad(sub+".host", "add a range covering it to egress.allowPrivate (top level), or use a public host", "%s is a private address", t.Host)
+			}
 		}
 		errs = append(errs, f.validateGrants(field, s.Grants)...)
 		errs = append(errs, f.validateUses(field, name, s.Uses)...)
@@ -388,4 +392,67 @@ func checkServicePath(p string) error {
 		}
 	}
 	return nil
+}
+
+// isPrivate reports whether a is not a public unicast address.
+func isPrivate(a netip.Addr) bool {
+	a = a.Unmap()
+	return a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() ||
+		netip.MustParsePrefix("100.64.0.0/10").Contains(a)
+}
+
+func (f *Fleet) allowsPrivate(a netip.Addr) bool {
+	for _, s := range f.Egress.AllowPrivate {
+		if p, err := netip.ParsePrefix(s); err == nil && p.Contains(a.Unmap()) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAllowPrivate checks egress.allowPrivate: CIDRs of private ranges.
+func (f *Fleet) validateAllowPrivate() []error {
+	var errs []error
+	for _, s := range f.Egress.AllowPrivate {
+		p, err := netip.ParsePrefix(s)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("egress.allowPrivate: %q is not a CIDR  fix: write it as 10.0.0.0/8", s))
+		case p.Bits() == 0:
+			errs = append(errs, fmt.Errorf("egress.allowPrivate: %q opens everything  fix: name the private range the Service needs", s))
+		}
+	}
+	return errs
+}
+
+// GrantWarnings are non-fatal remarks shown by `a12s up`: a principal listed
+// in a power policy that can't send to the Computer never wakes it.
+func (f *Fleet) GrantWarnings() []string {
+	var out []string
+	for _, name := range f.ComputerNames() {
+		w := f.Computers[name].Power.WakeOnMessage
+		if w == nil {
+			continue
+		}
+		for _, pr := range w.From {
+			kind, who, _ := strings.Cut(pr, ":")
+			var send []string
+			field := ""
+			switch kind {
+			case "computer":
+				send, field = f.Computers[who].Grants.Send, "computers."+who+".grants.send"
+			case "service":
+				send, field = f.Services[who].Grants.Send, "services."+who+".grants.send"
+			default:
+				continue
+			}
+			if !slices.Contains(send, name) {
+				out = append(out, fmt.Sprintf("%s.power.wakeOnMessage.from: %s can't send to %s, so it never wakes it  fix: add %s to %s, or remove it", name, pr, name, name, field))
+			}
+		}
+	}
+	if len(f.Egress.AllowPrivate) > 0 {
+		out = append(out, fmt.Sprintf("egress.allowPrivate %s: Services' named TCP egress may reach these private ranges", strings.Join(f.Egress.AllowPrivate, ", ")))
+	}
+	return out
 }

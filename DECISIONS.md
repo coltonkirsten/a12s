@@ -140,3 +140,34 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
 - **Not yet (S5):** typed certificate SANs and the active-certificate registry, grants, `.a12s` routing, MCP
   wiring. A Service already reaches the internet only through the egress proxy with its own `egress.allow`;
   the proxy identifies it by network exactly as it does a Computer.
+
+## S5: identity, grants and reachability
+
+- **Typed identity.** Computer and Service certificates carry `a12s://<fleet>/<kind>/<name>/<generation>` as
+  their only URI SAN; Computers keep their DNS SAN (computerd's server name), Services get none. Both stay
+  server-auth only, so neither can act as a client of a computerd. The mTLS listener accepts a certificate only
+  when its serial and generation are the live registry entry (`cert_registry` in fleet.db).
+- **Registry lifecycle.** An entry is written as the certificate is issued at each start (after the container is
+  started, before the files are injected) with the active generation's `grants.send`, and deleted before every
+  stop, removal, release, and on a death before the restart. A credential rotation on a running Computer or
+  Service re-injects secrets only: it keeps the loaded certificate (computerd reads its TLS files once), so the
+  live serial stays valid. A Computer started before this change has no entry until its next start.
+- **Grants live in the generation.** `grants.send` and the resolved `uses` endpoints go into the container env
+  (`A12S_SEND`, `A12S_USES`, `A12S_EGRESS_TCP`), only when non-empty so existing hashes don't move; a grant
+  change therefore restages (a Service at once, a Computer at its idle boundary), and the registry snapshot is
+  always the active generation's.
+- **MCP names.** A used Service with one MCP port is registered as `a12s-<svc>`; with several, each as
+  `a12s-<svc>-<port>` (the spec names both forms; this keeps gate 12's `a12s-db`).
+- **The stdio bridge** (`computerd/dist/mcpbridge.js`) is a small Streamable-HTTP client written against the
+  wire format (JSON or SSE answers, `Mcp-Session-Id`), sending plain-HTTP absolute-URI requests through the
+  proxy. It does not open the optional server-initiated GET stream.
+- **TCP forwarders.** computerd listens on `127.0.0.1:0` per used TCP port; a12s-init binds the listeners as root
+  and hands them to a child `a12s service-forward` at the manifest uid before it execs the image, so the
+  forwarders outlive the exec. Each connection is a CONNECT to `<svc>.a12s:<port>` (or `<name>.egress.a12s`).
+- **Named egress checks, in order:** loopback/link-local/metadata/multicast/unspecified, then the Fleet's own
+  pools (the internal subnet pool and the /16 of the Controller's Fleet-bridge address), with no Fleet field
+  read; then private ranges only inside `egress.allowPrivate`; the resolved address is the one dialed.
+- **Denials.** A `.a12s` refusal or a 503 for a Service that is not Ready is journaled on the calling Computer
+  as an egress `diagnostic` with the reason (`scout cannot reach db: computers.scout.uses does not list db`,
+  `db is Asleep`), or audited on a calling Service. A refused send is a `403 no_grant` with the fix, audited
+  for a Service and journaled as a diagnostic for a Computer.

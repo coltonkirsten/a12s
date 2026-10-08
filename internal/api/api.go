@@ -284,6 +284,7 @@ const (
 	ErrIdempotencyConflict ErrorCode = "idempotency_conflict" // 409
 	ErrNotIdle             ErrorCode = "not_idle"             // 409: expires 0 and the Computer can't take it now
 	ErrForbidden           ErrorCode = "forbidden"            // 403
+	ErrNoGrant             ErrorCode = "no_grant"             // 403: send without grants.send
 	ErrGone                ErrorCode = "gone"                 // 410
 	ErrUnknownRequest      ErrorCode = "unknown_request"      // 404
 	// Withdraw of a Message that is no longer pending: 409 with its state.

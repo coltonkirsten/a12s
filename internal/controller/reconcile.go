@@ -132,7 +132,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		_ = c.inbox.ClearPaused(ctx) // a12s up resumes an auto-wake paused by a failed wake
 	}
 
-	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: f.InboxWarnings(),
+	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: append(f.InboxWarnings(), f.GrantWarnings()...),
 		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -345,6 +345,8 @@ func (c *Controller) activeLocked(name string) Active {
 		SignInHosts: slices.Clone(c.state.BundleHosts[comp.Harness.BundleKey()]),
 		Drives:      slices.Clone(comp.Drives),
 		Unenforced:  c.state.Fleet.Egress.Unenforced(),
+		Send:        slices.Clone(comp.Grants.Send),
+		Uses:        c.endpointsLocked(comp.Uses),
 	}
 }
 
@@ -478,7 +480,7 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 	case rotate:
 		// New material for a running Computer: computerd restarts the
 		// harness on its next turn when .generation changes.
-		if err := c.inject(ctx, name); err != nil {
+		if err := c.inject(ctx, name, false); err != nil {
 			return c.fail(name, err, true)
 		}
 		c.mu.Lock()
@@ -924,6 +926,8 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Memory:      int64(comp.Resources.Memory),
 		HomeDrive:   driver.HomeDriveID(name),
 		Credentials: comp.Credentials,
+		Uses:        c.endpointsLocked(comp.Uses),
+		Send:        slices.Clone(comp.Grants.Send),
 	}
 	if spec.Tier == fleet.TierBrowser {
 		spec.Seccomp = browser.Seccomp

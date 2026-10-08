@@ -70,6 +70,10 @@ type Active struct {
 	// Unenforced is the Fleet's egress.enforcement: unenforced when this
 	// generation was staged.
 	Unenforced bool `json:"unenforced,omitempty"`
+	// Send is grants.send and Uses the resolved endpoints of uses
+	// (enhancements §5.3, §5.4): what the mTLS listener and the proxy allow.
+	Send []string          `json:"send,omitempty"`
+	Uses []driver.Endpoint `json:"uses,omitempty"`
 }
 
 // pending reports whether a staged change waits for idle.

@@ -120,6 +120,7 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 		st := driver.ComputerState{Name: name, Generation: s.spec.Generation, Power: driver.PowerAsleep, Running: s.running}
 		if s.running {
 			st.Power = driver.PowerAwake
+			st.Address = "10.213.200." + fmt.Sprint(len(name))
 		}
 		obs.Services[name] = st
 	}

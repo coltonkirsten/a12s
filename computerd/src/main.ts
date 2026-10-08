@@ -13,7 +13,9 @@ import { credentialEnv } from './credentials.js';
 import { prepareDirs, prepareDrives } from './dirs.js';
 import { Journal } from './journal.js';
 import { Leases, type TlsMaterial } from './leases.js';
+import { sendToInbox } from './send.js';
 import { apiHandler, controllerOnly, localHandler } from './server.js';
+import { parseUses, wire } from './wiring.js';
 
 function log(message: string): void {
   process.stderr.write(`computerd: ${message}\n`);
@@ -32,8 +34,10 @@ async function waitForTls(cfg: Config): Promise<TlsMaterial> {
 }
 
 function mcpServers(cfg: Config): Record<string, McpServer> {
+  const systemEnv: Record<string, string> = { A12S_SOCK: cfg.sockPath };
+  if (cfg.send.length) systemEnv.A12S_SEND = cfg.send.join(',');
   const servers: Record<string, McpServer> = {
-    a12s: { command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'systemtools.js')], env: { A12S_SOCK: cfg.sockPath } },
+    a12s: { command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'systemtools.js')], env: systemEnv },
   };
   if (cfg.imageTier === 'browser') {
     const args = ['/opt/a12s/playwright-mcp/node_modules/@playwright/mcp/cli.js', '--config', '/opt/a12s/playwright-mcp/config.json'];
@@ -51,8 +55,9 @@ async function main(): Promise<void> {
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const tls = await waitForTls(cfg);
 
-  const servers = mcpServers(cfg);
-  const deps: HarnessDeps = { cfg, credentialEnv: () => credentialEnv(cfg), mcpServers: servers };
+  const wiring = await wire(parseUses(cfg.uses), cfg.proxy, log);
+  const servers = { ...wiring.mcpServers, ...mcpServers(cfg) };
+  const deps: HarnessDeps = { cfg, credentialEnv: () => credentialEnv(cfg), mcpServers: servers, wiringEnv: wiring.env };
   const adapter: Adapter = cfg.harness.kind === 'codex' ? new CodexAdapter(deps) : new ClaudeAdapter(deps);
   const computer = new Computer(cfg, journal, adapter, servers);
   const leases = new Leases(cfg, tls, (drive, path, why) =>
@@ -60,7 +65,7 @@ async function main(): Promise<void> {
   );
 
   rmSync(cfg.sockPath, { force: true });
-  const local = createHttpServer(localHandler(computer, leases));
+  const local = createHttpServer(localHandler(computer, leases, cfg.send.length ? (req) => sendToInbox(cfg, tls, req) : null));
   await new Promise<void>((r) => local.listen(cfg.sockPath, r));
   chmodSync(cfg.sockPath, 0o666);
 

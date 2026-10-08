@@ -18,6 +18,10 @@ export interface Config {
   /** Work drive mount points from A12S_DRIVES (`<at>:rw,<at>:ro,…`). */
   drives: { at: string; readOnly: boolean }[];
   proxy: string | null;
+  /** Computers this one may send to (A12S_SEND, from grants.send). */
+  send: string[];
+  /** Raw A12S_USES (the endpoints of the Services it uses). */
+  uses: string;
   controller: string | null;
   port: number;
   /** True when running as root inside the container; false in dev on a host. */
@@ -66,6 +70,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         return i > 0 ? { at: s.slice(0, i), readOnly: s.slice(i + 1) !== 'rw' } : { at: s, readOnly: true };
       }),
     proxy: env.A12S_PROXY || null,
+    send: (env.A12S_SEND ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    uses: env.A12S_USES ?? '',
     controller: env.A12S_CONTROLLER || null,
     port: Number((!isRoot && env.A12S_PORT) || 7443),
     isRoot,

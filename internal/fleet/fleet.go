@@ -67,6 +67,10 @@ type Metadata struct {
 type FleetEgress struct {
 	// Enforcement is "" (enforced), "enforced" or "unenforced".
 	Enforcement string `yaml:"enforcement,omitempty" json:"enforcement,omitempty"`
+	// AllowPrivate lets Services' egress.tcp reach these private ranges
+	// (enhancements §5.4). Loud; never covers the Fleet's own pools,
+	// loopback, link-local or metadata addresses.
+	AllowPrivate []string `yaml:"allowPrivate,omitempty" json:"allowPrivate,omitempty"`
 }
 
 // Unenforced reports whether the Fleet accepts unenforced egress.

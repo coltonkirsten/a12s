@@ -95,3 +95,35 @@ type ServiceSpec struct {
 	Env     []string      `json:"env,omitempty"`
 	Publish []PublishSpec `json:"publish,omitempty"`
 }
+
+// Endpoint is one declared port of a used Service, as wired into the user
+// (enhancements §5.4): reachable at <service>.a12s:<number> through the
+// egress proxy; Env is the variable that carries its address; Tool, when
+// set, is the MCP server name it is registered under.
+type Endpoint struct {
+	Service  string `json:"service"`
+	Port     string `json:"port"`
+	Number   int    `json:"number"`
+	Protocol string `json:"protocol"`
+	Env      string `json:"env"`
+	MCPPath  string `json:"mcpPath,omitempty"`
+	Tool     string `json:"tool,omitempty"`
+}
+
+// TCPEgress is a Service's named external TCP destination, reachable as
+// <name>.egress.a12s:<port> through the proxy and published to the Service
+// as Env=127.0.0.1:<local port> by a12s-init.
+type TCPEgress struct {
+	Name string `json:"name"`
+	Port int    `json:"port"`
+	Env  string `json:"env"`
+}
+
+// EnvName is A12S_<PREFIX>_<A>_<B> in upper case, '-' as '_'.
+func EnvName(prefix string, parts ...string) string {
+	out := "A12S_" + prefix
+	for _, p := range parts {
+		out += "_" + strings.ToUpper(strings.ReplaceAll(p, "-", "_"))
+	}
+	return out
+}

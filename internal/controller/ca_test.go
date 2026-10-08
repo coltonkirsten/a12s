@@ -42,7 +42,7 @@ func TestCAPersistsWithOwnerOnlyFiles(t *testing.T) {
 // certificate, requiring a client certificate from the CA.
 func startComputerd(t *testing.T, ca *CA, name string, h http.Handler) *httptest.Server {
 	t.Helper()
-	leaf, err := ca.ComputerCert(name)
+	leaf, err := ca.ComputerCert(name, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestComputerCertIsALeaseClient(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	leaf, _ := ca.ComputerCert("scout")
+	leaf, _ := ca.ComputerCert("scout", 1)
 	cert, _ := leaf.TLS()
 	tr := &http.Transport{TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}, RootCAs: ca.Pool(), ServerName: "a12s-lab-controller"}}
 	res, err := (&http.Client{Transport: tr}).Get(srv.URL)
@@ -132,7 +132,7 @@ func TestCertificateRoles(t *testing.T) {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", srv.Listener.Addr().String())
 	}
-	scoutLeaf, _ := ca.ComputerCert("scout")
+	scoutLeaf, _ := ca.ComputerCert("scout", 1)
 	scoutCert, _ := scoutLeaf.TLS()
 	asScout := &tls.Config{Certificates: []tls.Certificate{scoutCert}, RootCAs: ca.Pool()}
 	if _, err := computerd.New("tester", dial, asScout).Status(context.Background()); err == nil {
@@ -155,7 +155,7 @@ func TestCertificateRoles(t *testing.T) {
 		t.Fatal("the lease listener accepted the Controller's client certificate")
 	}
 	other, _ := LoadCA(t.TempDir(), "lab")
-	foreign, _ := other.ComputerCert("scout")
+	foreign, _ := other.ComputerCert("scout", 1)
 	fc, _ := foreign.TLS()
 	foreignTLS := &tls.Config{Certificates: []tls.Certificate{fc}, RootCAs: ca.Pool(), ServerName: "a12s-lab-controller"}
 	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: foreignTLS}}).Get(lease.URL); err == nil {

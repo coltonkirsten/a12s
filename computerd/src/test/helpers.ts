@@ -25,6 +25,8 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     credentials: [],
     drives: [],
     proxy: null,
+    send: [],
+    uses: '',
     controller: null,
     port: 0,
     isRoot: false,

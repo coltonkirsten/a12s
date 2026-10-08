@@ -92,6 +92,7 @@ func (f *Fleet) Validate() error {
 		}
 	}
 	errs = append(errs, f.validateServices()...)
+	errs = append(errs, f.validateAllowPrivate()...)
 	for _, d := range f.DriveNames() {
 		if f.Drives[d].Access == AccessExclusive && len(attached[d]) > 1 {
 			bad("drives."+d, "exclusive drive is attached to more than one Computer: %s", strings.Join(attached[d], ", "))

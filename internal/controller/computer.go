@@ -185,7 +185,7 @@ func (c *Controller) start(ctx context.Context, name string) error {
 		return c.fail(name, err, true)
 	}
 	c.client(name).CloseIdleConnections()
-	if err := c.inject(ctx, name); err != nil {
+	if err := c.inject(ctx, name, true); err != nil {
 		return c.fail(name, err, true)
 	}
 	c.mu.Lock()
@@ -519,8 +519,10 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	return nil
 }
 
-// stop powers the Computer down and reads that back.
+// stop powers the Computer down and reads that back. Its certificate is
+// refused from before the stop is issued.
 func (c *Controller) stop(ctx context.Context, name string, gen int64) error {
+	c.unregisterCert(KindComputer, name)
 	if err := c.drv.SetPower(ctx, name, driver.PowerAsleep, gen); err != nil {
 		return err
 	}
@@ -605,6 +607,7 @@ func (c *Controller) unexpected(ev driver.Event) bool {
 
 func (c *Controller) removed(ev driver.Event) {
 	if c.unexpected(ev) {
+		c.unregisterCert(KindComputer, ev.Computer)
 		c.stopEvents(ev.Computer)
 		_ = c.fail(ev.Computer, errors.New("container was removed outside a12s; run a12s up"), true)
 	}
@@ -619,6 +622,7 @@ func (c *Controller) died(ev driver.Event) {
 	}
 	name := ev.Computer
 	c.stopEvents(name)
+	c.unregisterCert(KindComputer, name)
 	defer c.lockComputer(name)()
 	if !c.unexpected(ev) {
 		return

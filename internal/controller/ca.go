@@ -12,8 +12,11 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,6 +24,7 @@ import (
 // Its key lives on the Controller's state volume; leaf certificates are
 // issued in memory and never written by the Controller.
 type CA struct {
+	fleet   string
 	cert    *x509.Certificate
 	key     *ecdsa.PrivateKey
 	certPEM []byte
@@ -60,7 +64,9 @@ func LoadCA(dir, fleet string) (*CA, error) {
 	if !ok {
 		return nil, errors.New("load CA: ca.key is not an ECDSA key")
 	}
-	return newCA(cert, key, certPEM), nil
+	ca := newCA(cert, key, certPEM)
+	ca.fleet = fleet
+	return ca, nil
 }
 
 func createCA(dir, fleet string) (*CA, error) {
@@ -98,7 +104,9 @@ func createCA(dir, fleet string) (*CA, error) {
 	if err := writeFileAtomic(filepath.Join(dir, caCertFile), certPEM, 0o600); err != nil {
 		return nil, fmt.Errorf("create CA: %w", err)
 	}
-	return newCA(cert, key, certPEM), nil
+	ca := newCA(cert, key, certPEM)
+	ca.fleet = fleet
+	return ca, nil
 }
 
 func newCA(cert *x509.Certificate, key *ecdsa.PrivateKey, certPEM []byte) *CA {
@@ -117,6 +125,9 @@ func (ca *CA) Pool() *x509.CertPool { return ca.pool }
 type Leaf struct {
 	CertPEM []byte
 	KeyPEM  []byte
+	// Serial is the certificate's serial number in hex: the active-
+	// certificate registry key (enhancements §5.3).
+	Serial string
 }
 
 // TLS returns the leaf as a tls.Certificate.
@@ -130,8 +141,56 @@ const ControllerCN = "controller"
 // (SAN = the Computer's name). It has no client-auth usage, so it cannot
 // call another computerd; the Controller's lease listener alone accepts it
 // from a client (see ServerTLS).
-func (ca *CA) ComputerCert(computer string) (Leaf, error) {
-	return ca.issue(computer, []string{computer}, x509.ExtKeyUsageServerAuth)
+func (ca *CA) ComputerCert(computer string, generation int64) (Leaf, error) {
+	return ca.issueTyped(computer, []string{computer}, Principal{Kind: KindComputer, Name: computer, Generation: generation})
+}
+
+// ServiceCert issues a Service's per-start certificate: a typed URI SAN and
+// no DNS name (a Service serves nothing a12s dials over TLS).
+func (ca *CA) ServiceCert(service string, generation int64) (Leaf, error) {
+	return ca.issueTyped(service, nil, Principal{Kind: KindService, Name: service, Generation: generation})
+}
+
+// Principal kinds on the mTLS listener.
+const (
+	KindComputer = "computer"
+	KindService  = "service"
+)
+
+// Principal is the typed identity in a certificate's URI SAN:
+// a12s://<fleet>/<kind>/<name>/<generation> (enhancements §5.3).
+type Principal struct {
+	Kind       string
+	Name       string
+	Generation int64
+}
+
+// String is "kind:name", the via of the Messages it sends.
+func (p Principal) String() string { return p.Kind + ":" + p.Name }
+
+func (ca *CA) principalURI(p Principal) *url.URL {
+	return &url.URL{Scheme: "a12s", Host: ca.fleet, Path: "/" + p.Kind + "/" + p.Name + "/" + strconv.FormatInt(p.Generation, 10)}
+}
+
+// PrincipalOf reads the typed identity of a verified certificate.
+func (ca *CA) PrincipalOf(leaf *x509.Certificate) (Principal, error) {
+	if len(leaf.URIs) != 1 {
+		return Principal{}, errors.New("certificate has no a12s identity")
+	}
+	u := leaf.URIs[0]
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if u.Scheme != "a12s" || u.Host != ca.fleet || len(parts) != 3 {
+		return Principal{}, fmt.Errorf("certificate identity %s is not of fleet %s", u, ca.fleet)
+	}
+	gen, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || (parts[0] != KindComputer && parts[0] != KindService) || parts[1] == "" {
+		return Principal{}, fmt.Errorf("certificate identity %s is malformed", u)
+	}
+	return Principal{Kind: parts[0], Name: parts[1], Generation: gen}, nil
+}
+
+func (ca *CA) issueTyped(cn string, dns []string, p Principal) (Leaf, error) {
+	return ca.issueURI(cn, dns, []*url.URL{ca.principalURI(p)}, x509.ExtKeyUsageServerAuth)
 }
 
 // ControllerClientCert is what the Controller presents to computerd.
@@ -146,6 +205,10 @@ func (ca *CA) ControllerServerCert(host string) (Leaf, error) {
 }
 
 func (ca *CA) issue(cn string, dns []string, usage ...x509.ExtKeyUsage) (Leaf, error) {
+	return ca.issueURI(cn, dns, nil, usage...)
+}
+
+func (ca *CA) issueURI(cn string, dns []string, uris []*url.URL, usage ...x509.ExtKeyUsage) (Leaf, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return Leaf{}, err
@@ -155,6 +218,7 @@ func (ca *CA) issue(cn string, dns []string, usage ...x509.ExtKeyUsage) (Leaf, e
 		SerialNumber: serial(),
 		Subject:      pkix.Name{CommonName: cn},
 		DNSNames:     dns,
+		URIs:         uris,
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.Add(leafLife),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -171,6 +235,7 @@ func (ca *CA) issue(cn string, dns []string, usage ...x509.ExtKeyUsage) (Leaf, e
 	return Leaf{
 		CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		KeyPEM:  pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+		Serial:  tmpl.SerialNumber.Text(16),
 	}, nil
 }
 
@@ -265,8 +330,8 @@ func (ca *CA) verifyComputer(chain []*x509.Certificate) error {
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: ca.pool, Intermediates: inter, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
 		return fmt.Errorf("client certificate: %w", err)
 	}
-	if len(leaf.DNSNames) != 1 {
-		return errors.New("client certificate does not name one Computer")
+	if _, err := ca.PrincipalOf(leaf); err != nil {
+		return fmt.Errorf("client certificate: %w", err)
 	}
 	return nil
 }
