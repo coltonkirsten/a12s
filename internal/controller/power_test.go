@@ -122,7 +122,7 @@ func TestWakeRateLimit(t *testing.T) {
 	if n := h.events("scout", "wake.suppressed"); n != 1 {
 		t.Fatalf("suppressed recorded %d times", n)
 	}
-	h.advance(3 * time.Second) // past the scaled hour: the window reopens by itself
+	h.advance(3 * time.Second)              // past the scaled hour: the window reopens by itself
 	deadline := time.Now().Add(time.Second) // well inside the real 3s window
 	for h.message("scout", b.ID).State != api.MsgDelivered {
 		if time.Now().After(deadline) {
