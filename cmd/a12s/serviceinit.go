@@ -20,6 +20,11 @@ func hidden(name string, args []string) (error, bool) {
 			return usageError("service-write <path> <uid:gid> <mode> <dirMode> < data"), true
 		}
 		return serviceinit.WriteFile(args[0], args[1], args[2], args[3], os.Stdin), true
+	case "service-forward":
+		if len(args) < 2 {
+			return usageError("service-forward <proxy> <target>..."), true
+		}
+		return serviceinit.ServeForwards(args[0], args[1:], os.Stderr), true
 	case "publish-forward":
 		return serviceinit.Forward(args, os.Stderr), true
 	}

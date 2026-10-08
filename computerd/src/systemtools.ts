@@ -15,7 +15,9 @@ const drivePath = {
   required: ['drive', 'path'],
 } as const;
 
-const tools = [
+const sendTo = (process.env.A12S_SEND ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
+const tools: { name: string; description: string; inputSchema: Record<string, unknown> }[] = [
   {
     name: 'restart_harness',
     description:
@@ -25,6 +27,27 @@ const tools = [
   { name: 'lock', description: 'Take an advisory lock on a path in a shared-write drive (a lease renewed while held).', inputSchema: drivePath },
   { name: 'release', description: 'Release an advisory lock taken with lock.', inputSchema: drivePath },
 ];
+if (sendTo.length) {
+  tools.push({
+    name: 'send',
+    description:
+      `Send a message to another Computer's inbox. You may send to: ${sendTo.join(', ')}. ` +
+      'It arrives as untrusted data from you (via computer:<your name>) in their next turn; nothing is returned but a receipt. ' +
+      'fresh starts a new session for it; expires (seconds, 0 = only if idle now) drops it if not delivered in time; ' +
+      'replaceKey replaces your earlier pending message with the same key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        computer: { type: 'string', description: `One of: ${sendTo.join(', ')}` },
+        body: { type: 'string', description: 'The message text' },
+        fresh: { type: 'boolean' },
+        expires: { type: 'integer', minimum: 0 },
+        replaceKey: { type: 'string' },
+      },
+      required: ['computer', 'body'],
+    },
+  });
+}
 
 function call(path: string, body: unknown): Promise<string> {
   const text = JSON.stringify(body);
@@ -46,7 +69,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (!tools.some((t) => t.name === name)) return { isError: true, content: [{ type: 'text', text: `unknown tool ${name}` }] };
   try {
     const args = req.params.arguments ?? {};
-    const out = await call(`/v1/system/${name}`, name === 'restart_harness' ? {} : { drive: args.drive, path: args.path });
+    const payload = name === 'restart_harness' ? {} : name === 'send' ? args : { drive: args.drive, path: args.path };
+    const out = await call(`/v1/system/${name}`, payload);
     const controllerStatus = (JSON.parse(out) as { status?: unknown }).status;
     const refused = typeof controllerStatus === 'number' && controllerStatus >= 300;
     return { isError: refused, content: [{ type: 'text', text: out }] };

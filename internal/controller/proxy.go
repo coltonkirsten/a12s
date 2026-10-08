@@ -111,6 +111,18 @@ type Proxy struct {
 	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
 	// Denied is told about every denied request (it journals a diagnostic).
 	Denied func(computer, host string, port int, reason string)
+	// Internal decides a <name>.a12s target (enhancements §5.4), before and
+	// independently of Policy: the pinned address to dial, or an HTTP status
+	// and the reason. plain is an absolute-URI (non-TLS) request. Nil:
+	// .a12s names are denied.
+	Internal func(ctx context.Context, caller, host string, port int, plain bool) (netip.AddrPort, int, string)
+}
+
+// IsInternal reports whether host is in the .a12s name space, which only
+// Internal decides and which never reaches Policy, DNS or a redirect.
+func IsInternal(host string) bool {
+	h := normalizeHost(host)
+	return h == "a12s" || strings.HasSuffix(h, ".a12s")
 }
 
 // NewProxy returns a proxy that resolves with the system resolver.
@@ -138,6 +150,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodConnect {
 		if host, port, ok := plainTarget(r); ok {
+			if IsInternal(host) {
+				p.serveInternalHTTP(w, r, computer, host, port)
+				return
+			}
 			p.deny(w, computer, host, port, "plain http is not proxied; use https")
 			return
 		}
@@ -153,6 +169,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := h
 	if strings.Contains(host, "%") {
 		p.deny(w, computer, host, port, "IPv6 zones are not allowed")
+		return
+	}
+	if IsInternal(host) {
+		target, ok := p.internal(w, r, computer, host, port, false)
+		if !ok {
+			return
+		}
+		upstream, err := p.Dial(r.Context(), "tcp", target.String())
+		if err != nil {
+			http.Error(w, "a12s egress: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		p.tunnel(w, upstream)
 		return
 	}
 	policy, _ := p.Policy(computer)
@@ -171,6 +200,76 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.tunnel(w, upstream)
+}
+
+// internal decides a .a12s target; on refusal it has answered and journaled.
+func (p *Proxy) internal(w http.ResponseWriter, r *http.Request, caller, host string, port int, plain bool) (netip.AddrPort, bool) {
+	host = normalizeHost(host)
+	if p.Internal == nil {
+		p.deny(w, caller, host, port, "no internal names on this proxy")
+		return netip.AddrPort{}, false
+	}
+	target, status, reason := p.Internal(r.Context(), caller, host, port, plain)
+	if reason == "" {
+		return target, true
+	}
+	if p.Denied != nil {
+		go p.Denied(caller, host, port, reason)
+	}
+	if status == 0 {
+		status = http.StatusForbidden
+	}
+	http.Error(w, fmt.Sprintf("a12s egress: %s: %s", net.JoinHostPort(host, strconv.Itoa(port)), reason), status)
+	return netip.AddrPort{}, false
+}
+
+// serveInternalHTTP forwards a plain-HTTP absolute-URI request to a .a12s
+// Service (the one plaintext the proxy carries; on the Docker driver both
+// legs stay on the host's bridges).
+func (p *Proxy) serveInternalHTTP(w http.ResponseWriter, r *http.Request, caller, host string, port int) {
+	target, ok := p.internal(w, r, caller, host, port, true)
+	if !ok {
+		return
+	}
+	out := r.Clone(r.Context())
+	out.RequestURI = ""
+	out.URL.Scheme = "http"
+	out.Host = r.URL.Host
+	for _, h := range []string{"Proxy-Connection", "Proxy-Authorization", "Connection", "Keep-Alive", "Te", "Trailer", "Upgrade"} {
+		out.Header.Del(h)
+	}
+	tr := &http.Transport{
+		DialContext:       func(ctx context.Context, _, _ string) (net.Conn, error) { return p.Dial(ctx, "tcp", target.String()) },
+		DisableKeepAlives: true,
+		Proxy:             nil,
+	}
+	defer tr.CloseIdleConnections()
+	res, err := tr.RoundTrip(out)
+	if err != nil {
+		http.Error(w, "a12s egress: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer res.Body.Close()
+	for k, vs := range res.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(res.StatusCode)
+	rc := http.NewResponseController(w)
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := res.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			_ = rc.Flush() // streams (MCP over SSE) pass through as they come
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // plainTarget is the host and port of an absolute-URI request.

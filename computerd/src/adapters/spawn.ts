@@ -8,6 +8,8 @@ export interface HarnessDeps {
   credentialEnv: () => Record<string, string>;
   /** MCP servers a long-lived harness (Codex) is spawned with before its first turn. */
   mcpServers: Record<string, McpServer>;
+  /** Service wiring: A12S_SERVICE_<SVC>_<PORT> addresses (enhancements §5.4). */
+  wiringEnv?: Record<string, string>;
 }
 
 /** The whole environment a harness process sees. Nothing from computerd's own env leaks except PATH and locale. */
@@ -28,7 +30,7 @@ export function harnessEnv(deps: HarnessDeps): Record<string, string> {
     for (const k of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) env[k] = cfg.proxy;
     env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1,::1';
   }
-  return { ...env, ...deps.credentialEnv() };
+  return { ...env, ...(deps.wiringEnv ?? {}), ...deps.credentialEnv() };
 }
 
 /** Spawns a harness process as the agent user (uid/gid 1000) when computerd is root. */

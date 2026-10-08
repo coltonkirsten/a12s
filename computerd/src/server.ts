@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { TLSSocket } from 'node:tls';
 import { HttpError, type Computer, type TurnRequest } from './computer.js';
 import type { EventEnvelope, Journal } from './journal.js';
+import type { SendReply, SendRequest } from './send.js';
 import type { Leases } from './leases.js';
 
 const MAX_BODY = 2 << 20; // a 1 MiB render plus 2,000 inbox entries (enhancements §4.3)
@@ -202,10 +203,19 @@ export function streamEvents(
 }
 
 /** System tools endpoints on the local unix socket (the agent's MCP server calls these). */
-export function localHandler(computer: Computer, leases: Leases | null): Handler {
+export function localHandler(computer: Computer, leases: Leases | null, sendTo: ((req: SendRequest) => Promise<SendReply>) | null = null): Handler {
   return wrap(async (req, res, url) => {
     if (req.method !== 'POST') throw new HttpError(405, 'POST only');
     if (url.pathname === '/v1/system/restart_harness') return send(res, 200, { message: computer.requestRestart() });
+    if (url.pathname === '/v1/system/send') {
+      if (!sendTo) throw new HttpError(403, 'this Computer has no send grant');
+      const body = await readJson(req);
+      const r: SendRequest = { computer: str(body, 'computer'), body: str(body, 'body') };
+      if (body.fresh === true) r.fresh = true;
+      if (typeof body.expires === 'number') r.expires = body.expires;
+      if (typeof body.replaceKey === 'string' && body.replaceKey) r.replaceKey = body.replaceKey;
+      return send(res, 200, await sendTo(r));
+    }
     const lease = /^\/v1\/system\/(lock|release)$/.exec(url.pathname);
     if (lease) {
       if (!leases) throw new HttpError(503, 'leases are unavailable (no controller TLS)');

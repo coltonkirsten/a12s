@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -45,10 +46,13 @@ if command -v flock > /dev/null 2>&1; then
   : >> "$l" && chown 0:0 "$l" && chmod 0600 "$l" && flock -w 10 "$l" sh -c 'mv -f "$1" "$2" && { touch "$2" || { rm -f "$2"; false; }; }' sh "$t" "$1"
 else mv -f "$t" "$1" && { touch "$1" || { rm -f "$1"; false; }; }; fi || { rm -f "$t"; exit 1; }`
 
-// inject writes the Computer's credentials and a fresh certificate into its
-// tmpfs through Exec with stdin, then .generation last: computerd waits for
-// the TLS files and reports .generation as credentialGeneration.
-func (c *Controller) inject(ctx context.Context, name string) error {
+// inject writes the Computer's credentials and, at a start (withCert), a
+// fresh certificate into its tmpfs through Exec with stdin, then
+// .generation last: computerd waits for the TLS files and reports
+// .generation as credentialGeneration. A fresh certificate becomes the live
+// one in the registry before it is written (enhancements §5.3); a rotation
+// of credentials keeps the certificate computerd already loaded.
+func (c *Controller) inject(ctx context.Context, name string, withCert bool) error {
 	c.mu.Lock()
 	comp, ok := c.state.Fleet.Computers[name]
 	rec := c.state.Computers[name]
@@ -62,9 +66,10 @@ func (c *Controller) inject(ctx context.Context, name string) error {
 		rec.CredentialGeneration++
 		err = c.saveLocked()
 	}
-	var gen int64
+	var gen, generation int64
+	var send []string
 	if rec != nil {
-		gen = rec.CredentialGeneration
+		gen, generation, send = rec.CredentialGeneration, rec.Generation, slices.Clone(rec.Active.Send)
 	}
 	c.mu.Unlock()
 	switch {
@@ -81,9 +86,16 @@ func (c *Controller) inject(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	leaf, err := c.ca.ComputerCert(name)
+	if !withCert {
+		return c.writeFile(ctx, name, generationFile, "0:0", "0644", secretsDirMode, []byte(strconv.FormatInt(gen, 10)+"\n"))
+	}
+	p := Principal{Kind: KindComputer, Name: name, Generation: generation}
+	leaf, err := c.ca.ComputerCert(name, generation)
 	if err != nil {
 		return fmt.Errorf("inject %s: %w", name, err)
+	}
+	if err := c.registerCert(ctx, p, leaf.Serial, send); err != nil {
+		return fmt.Errorf("inject %s: register certificate: %w", name, err)
 	}
 	for _, f := range []struct {
 		name string
