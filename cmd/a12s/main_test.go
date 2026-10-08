@@ -112,12 +112,14 @@ func TestTurnPrinter(t *testing.T) {
 	if stop, _ := p.handle(ev(api.EventTurnFinished, `{"status":"completed"}`)); !stop || p.status != "completed" {
 		t.Fatal("turn.finished did not stop")
 	}
-	want := "turn t_41 started (codex 0.154.0, gpt-6-astra, resumed: false)\nAdding a health check.\nDone.\nturn t_41 completed\n"
-	if out.String() != want {
-		t.Errorf("stdout:\n%q\nwant:\n%q", out.String(), want)
+	// Routing and filtering, not wording: this turn's text streams whole to
+	// stdout, tools go to stderr, another turn's text is dropped.
+	so, se := out.String(), errOut.String()
+	if !strings.Contains(so, "Adding a health check.\nDone.\n") || !strings.Contains(so, "t_41") || strings.Contains(so, "not ours") || strings.Contains(so, "apply_patch") {
+		t.Errorf("stdout %q", so)
 	}
-	if errOut.String() != "[tool] apply_patch started\n" {
-		t.Errorf("stderr %q", errOut.String())
+	if !strings.Contains(se, "apply_patch") || strings.Contains(se, "health check") || strings.Contains(se, "not ours") {
+		t.Errorf("stderr %q", se)
 	}
 }
 

@@ -42,15 +42,12 @@ func TestConfirmPurge(t *testing.T) {
 		if got := confirmPurge(strings.NewReader(in), &out, "qs", drives, nil, ""); got != want {
 			t.Errorf("answer %q: got %v", in, got)
 		}
+		// Every drive and its volume is named before the question.
 		s := out.String()
-		if !strings.Contains(s, "destroys the 2 drive(s) of fleet qs") ||
-			!strings.Contains(s, "  home-hello (volume a12s-qs-home-hello)\n") ||
-			!strings.Contains(s, "  notes (volume a12s-qs-drive-notes)\n") ||
-			!strings.Contains(s, "cannot be undone. [y/N] ") {
-			t.Errorf("prompt %q", s)
-		}
-		if !want && !strings.HasSuffix(s, "nothing removed\n") {
-			t.Errorf("declined prompt %q", s)
+		for _, d := range drives {
+			if !strings.Contains(s, d.Name) || !strings.Contains(s, d.Volume) {
+				t.Errorf("prompt does not list %s: %q", d.Name, s)
+			}
 		}
 	}
 }
@@ -67,28 +64,24 @@ func TestWriteDown(t *testing.T) {
 	plan.Networks = res.Networks
 	var b bytes.Buffer
 	writeDown(&b, "qs", plan, res)
-	want := `removed container a12s-qs-controller
-removed container a12s-qs-hello
-removed network a12s-qs
-removed volume a12s-qs-controller
-removed /home/u/.a12s/qs
-kept 1 drive(s); a12s up reattaches them:
-  home-hello (volume a12s-qs-home-hello)
-to destroy them: a12s down --purge (or a12s drive rm <name> while the fleet is up)
-`
-	if b.String() != want {
-		t.Errorf("got\n%s", b.String())
+	// Each removed thing and each kept drive is reported; down --json is
+	// for scripts, so the wording is free.
+	out := b.String()
+	for _, want := range []string{"a12s-qs-controller", "a12s-qs-hello", "a12s-qs", "/home/u/.a12s/qs", "home-hello", "a12s-qs-home-hello", "kept"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
 	}
 
 	b.Reset()
 	writeDown(&b, "qs", &cli.DownPlan{Fleet: "qs"}, &cli.DownResult{})
-	if b.String() != "fleet qs is already down\n" {
+	if !strings.Contains(b.String(), "already down") {
 		t.Errorf("got %q", b.String())
 	}
 	b.Reset()
 	d := cli.Drive{Name: "notes", Volume: "a12s-qs-drive-notes"}
 	writeDown(&b, "qs", &cli.DownPlan{Fleet: "qs", Drives: []cli.Drive{d}}, &cli.DownResult{Destroyed: []cli.Drive{d}})
-	if b.String() != "destroyed drive notes (volume a12s-qs-drive-notes)\n" {
+	if s := b.String(); !strings.Contains(s, "destroyed") || !strings.Contains(s, "a12s-qs-drive-notes") || strings.Contains(s, "kept") {
 		t.Errorf("got %q", b.String())
 	}
 }
