@@ -100,6 +100,7 @@ type computerdClient interface {
 	Status(ctx context.Context) (api.ComputerdStatus, error)
 	StartTurn(ctx context.Context, req api.TurnRequest) (api.TurnResponse, error)
 	TurnSummary(ctx context.Context, turnID string) (api.TurnSummary, error)
+	JournalInbox(ctx context.Context, records any) ([]string, error)
 	Stop(ctx context.Context, turnID string) error
 	Events(ctx context.Context, lastEventID, turn string) (*computerd.Stream, error)
 	Diagnostic(ctx context.Context, message string, data any) error

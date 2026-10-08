@@ -184,10 +184,17 @@ func (c *Controller) handlePower(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		fail(w, err)
+		inboxFail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c.computerStatus(r.Context(), name))
+	cs := c.computerStatus(r.Context(), name)
+	if req.ClearInbox {
+		c.mu.Lock()
+		n := c.rtLocked(name).lastClear
+		c.mu.Unlock()
+		cs.InboxCleared = &n
+	}
+	writeJSON(w, http.StatusOK, cs)
 }
 
 // awake returns the computerd client of a Computer accepting work, or an
@@ -210,7 +217,26 @@ func (c *Controller) awake(name string) (computerdClient, error) {
 }
 
 func (c *Controller) handleStop(w http.ResponseWriter, r *http.Request) {
-	cl, err := c.awake(r.PathValue("c"))
+	name := r.PathValue("c")
+	if r.URL.Query().Get("hold") == "true" {
+		// stop --hold: the hold first, under the admission gate, then the
+		// interrupt, so no Batch slips in between (§4.7).
+		if !callerOf(r).may(api.ActionInbox, name) {
+			writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: "stop --hold needs the inbox action", Fix: "use a token with inbox on " + name})
+			return
+		}
+		c.mu.Lock()
+		rt := c.rtLocked(name)
+		c.mu.Unlock()
+		rt.admit.Lock()
+		err := c.inbox.Hold(r.Context(), name, api.HoldOperator, "a12s stop --hold", callerOf(r).principal)
+		rt.admit.Unlock()
+		if err != nil {
+			inboxFail(w, err)
+			return
+		}
+	}
+	cl, err := c.awake(name)
 	if err == nil {
 		err = cl.Stop(r.Context(), r.PathValue("id"))
 	}

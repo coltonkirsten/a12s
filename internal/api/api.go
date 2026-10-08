@@ -119,6 +119,8 @@ type ComputerStatus struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// Inbox is the Computer's inbox state (enhancements §4).
 	Inbox *InboxSummary `json:"inbox,omitempty"`
+	// InboxCleared is set on a wake --clear-inbox answer: Messages discarded.
+	InboxCleared *int `json:"inboxCleared,omitempty"`
 }
 
 // ComputerStatus.EgressMode values.
@@ -169,6 +171,13 @@ const (
 type PowerRequest struct {
 	State       Power       `json:"state"`
 	Credentials Credentials `json:"credentials,omitempty"`
+	// ClearInbox discards the pending Messages up to the inbox head at
+	// acceptance before admission opens (§4.7). RequestID makes it
+	// idempotent: a retry never clears a Message that arrived later.
+	ClearInbox bool   `json:"clearInbox,omitempty"`
+	RequestID  string `json:"requestId,omitempty"`
+	// AllowWake, on a sleep, leaves the power policy in charge (§4.14).
+	AllowWake bool `json:"allowWake,omitempty"`
 }
 
 // ApplyRequest is POST /v1/apply: `a12s apply --interrupt --grace 30s`.

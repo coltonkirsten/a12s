@@ -42,6 +42,7 @@ export class Journal {
       CREATE INDEX IF NOT EXISTS events_turn ON events(turn, seq);
       CREATE TABLE IF NOT EXISTS turns (request_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL UNIQUE, body_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS refused (request_id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS inbox_journaled (message_id TEXT PRIMARY KEY, seq INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
     `);
   }
@@ -110,6 +111,33 @@ export class Journal {
       )
       .all() as { turnId: string }[];
     return rows.map((r) => ({ turnId: r.turnId, session: this.turnInfo(r.turnId)?.session ?? null }));
+  }
+
+  /**
+   * Seals inbox Messages that ended without delivery as inbox.discarded, bodies included (enhancements §4.10).
+   * Keyed by Message id: a retry never journals one twice. Returns the ids now sealed (new or already).
+   */
+  journalInbox(records: { id: string; [k: string]: unknown }[]): string[] {
+    const out: string[] = [];
+    const events: EventEnvelope[] = [];
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of records) {
+        const known = this.db.prepare('SELECT 1 FROM inbox_journaled WHERE message_id = ?').get(r.id);
+        if (!known) {
+          const e = this.insert('inbox.discarded', r, {});
+          this.db.prepare('INSERT INTO inbox_journaled (message_id, seq) VALUES (?, ?)').run(r.id, e.seq);
+          events.push(e);
+        }
+        out.push(r.id);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    for (const e of events) this.publish(e);
+    return out;
   }
 
   /** Tombstones a requestId a lookup-only replay did not find, journaling turn.refused (§4.11). */

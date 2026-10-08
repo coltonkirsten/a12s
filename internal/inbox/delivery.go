@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS batches (
 );
 CREATE INDEX IF NOT EXISTS batches_open ON batches (computer, state);
 CREATE INDEX IF NOT EXISTS batches_turn ON batches (turn);
+CREATE TABLE IF NOT EXISTS clear_ops (
+  request_id TEXT PRIMARY KEY,
+  computer TEXT NOT NULL,
+  through_seq INTEGER NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS messages_journal ON messages (computer, journaled) WHERE journaled = 0;
 `
 
 // Batch is a claimed Batch with its immutable Turn request.

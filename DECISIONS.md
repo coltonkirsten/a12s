@@ -69,3 +69,19 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
   reconnecting `Last-Event-ID` reader unchanged. It also carries inbox-level `held`/`resumed`.
 - **Fresh-session line.** `a12s prompt` prints `batch of 3: yours + <other senders>` from `turn.started`'s
   `inbox`, deduplicating sender labels.
+
+## S3: crash correctness and journaling
+
+- **Exit-gate test hooks are files, not flags.** computerd reads one-shot hook files from its root-only state dir
+  (`/home/.a12s/test-hooks/`: `exit-after-accept`, `exit-after-dispatch`, `fail-before-dispatch`,
+  `delay-before-dispatch` with seconds); the Controller reads `exit-after-claim` (optional delay in seconds)
+  from its state dir. Arming one takes `a12s shell --root` or `docker exec` into the Controller, i.e. powers
+  that can already kill those processes, so the hooks add no authority and need no build flag.
+- **Journal flush placement.** The drainer seals owed `inbox.discarded` records after settling and before any
+  claim, whenever the Computer is `Ready` or `Busy`; asleep, they wait in `fleet.db` (`journaled = 0`), and the
+  first drain after a wake flushes them. Records are sent in chunks of about 1 MiB of bodies.
+- **Prune.** Hourly, from the expiry loop: terminal rows ended more than 7 days ago and sealed in the journal,
+  their events, and settled Batches. A row not yet journaled is never pruned.
+- **`stop --hold` without an active Turn** just holds the inbox (the CLI calls `inbox/hold`).
+- **`wake --clear-inbox`** returns the number discarded in `inboxCleared` on the power answer; the CLI sends one
+  fresh requestId per Computer and reuses it on a retry.

@@ -105,6 +105,15 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
       return streamEvents(req, res, journal, url.searchParams.get('turn'), Array.isArray(lastId) ? lastId[0] : lastId);
     }
     if (path === '/v1/status' && method === 'GET') return send(res, 200, computer.status());
+    if (path === '/v1/journal/inbox' && method === 'POST') {
+      const body = await readJson(req);
+      if (!Array.isArray(body.records)) throw new HttpError(400, 'records must be an array');
+      const records = body.records.map((r: unknown) => {
+        if (typeof r !== 'object' || r === null || typeof (r as { id?: unknown }).id !== 'string') throw new HttpError(400, 'each record needs an id');
+        return r as { id: string };
+      });
+      return send(res, 200, { journaled: journal.journalInbox(records) });
+    }
     if (path === '/v1/diagnostics' && method === 'POST') {
       const body = await readJson(req);
       return send(res, 200, { seq: computer.diagnostic(str(body, 'message'), body.data ?? null) });

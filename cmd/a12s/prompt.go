@@ -333,6 +333,7 @@ func dim(w io.Writer, line string) {
 
 func runStop(g *globals, args []string) error {
 	fs := g.flags("stop")
+	hold := fs.Bool("hold", false, "hold the inbox first, so nothing is delivered after the stop")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -356,13 +357,27 @@ func runStop(g *globals, args []string) error {
 			continue
 		}
 		if cs.ActiveTurn == "" {
+			if *hold {
+				if err := c.Do(ctx, "POST", computerPath(name, "/inbox/hold"), api.HoldRequest{Reason: "a12s stop --hold"}, nil); err != nil {
+					return err
+				}
+				fmt.Printf("%s has no active turn; its inbox is held (a12s inbox resume %s)\n", name, name)
+				return nil
+			}
 			fmt.Printf("%s has no active turn\n", name)
 			return nil
 		}
-		if err := c.Do(ctx, "POST", computerPath(name, "/turns/"+url.PathEscape(cs.ActiveTurn)+"/stop"), struct{}{}, nil); err != nil {
+		q := ""
+		if *hold {
+			q = "?hold=true"
+		}
+		if err := c.Do(ctx, "POST", computerPath(name, "/turns/"+url.PathEscape(cs.ActiveTurn)+"/stop"+q), struct{}{}, nil); err != nil {
 			return err
 		}
 		fmt.Printf("stopping turn %s on %s\n", cs.ActiveTurn, name)
+		if *hold {
+			fmt.Printf("%s's inbox is held (a12s inbox resume %s)\n", name, name)
+		}
 		return nil
 	}
 	return fmt.Errorf("fleet %s has no Computer %q", st.Fleet, name)
