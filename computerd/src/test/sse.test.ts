@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createServer, get, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { after, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { Computer } from '../computer.js';
 import { Journal } from '../journal.js';
 import { apiHandler, streamEvents } from '../server.js';
@@ -63,7 +63,7 @@ function post(path: string, body: unknown): Promise<{ status: number; body: any 
   });
 }
 
-test('setup', async () => {
+before(async () => {
   await computer.start(); // journals lifecycle starting + ready (seq 1, 2)
   server = createServer(apiHandler(computer, journal));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));

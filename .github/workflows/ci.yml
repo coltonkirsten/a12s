@@ -66,6 +66,20 @@ jobs:
             a12s/browser:dev /test/render.mjs | tee render.out
           grep -q 'hello from chromium' render.out
           grep -q 'adequately sandboxed' render.out
+      # computerd hands the harness this NODE_PATH on the browser tier
+      # (adapters/spawn.ts); agent scripts must be able to require playwright.
+      - name: agent scripts can require playwright
+        run: |
+          docker run --rm --user 1000:1000 --network none --entrypoint node \
+            -e NODE_PATH=/opt/a12s/playwright-mcp/node_modules -w /tmp \
+            a12s/browser:dev -e "require('playwright'); console.log('playwright ok')" | grep -q 'playwright ok'
+      - name: Playwright MCP navigates (images/browser/test/mcp.mjs)
+        run: |
+          docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp \
+            --tmpfs /home/agent:uid=1000,gid=1000 -e HOME=/home/agent -w /home/agent \
+            --network none -v "$PWD/images/browser/test:/test:ro" --entrypoint node \
+            a12s/browser:dev /test/mcp.mjs
 
   controller:
     runs-on: ubuntu-latest
