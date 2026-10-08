@@ -26,6 +26,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
 	"github.com/coltonkirsten/a12s/internal/fleet"
+	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
 // APIPort is where the CLI API listens, on the Fleet bridge only.
@@ -33,8 +34,12 @@ const APIPort = 7000
 
 // Config is the Controller's environment.
 type Config struct {
-	Fleet      string       // A12S_FLEET
-	StateDir   string       // A12S_STATE_DIR, default /var/lib/a12s
+	Fleet    string // A12S_FLEET
+	StateDir string // A12S_STATE_DIR, default /var/lib/a12s
+	// DataDir holds fleet.db, the Fleet's data that outlives the
+	// Controller (inboxes, holds, tokens): the a12s-F-data volume. Empty
+	// means StateDir.
+	DataDir    string       // A12S_DATA_DIR
 	APIToken   string       // A12S_API_TOKEN
 	SubnetPool netip.Prefix // A12S_SUBNET_POOL, default 10.213.0.0/16
 	// APIAddr overrides the API listen address (host:port). By default the
@@ -49,6 +54,7 @@ func ConfigFromEnv() (Config, error) {
 		StateDir: os.Getenv("A12S_STATE_DIR"),
 		APIToken: os.Getenv("A12S_API_TOKEN"),
 		APIAddr:  os.Getenv("A12S_API_ADDR"),
+		DataDir:  os.Getenv("A12S_DATA_DIR"),
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = "/var/lib/a12s"
@@ -101,12 +107,16 @@ type computerdClient interface {
 
 // Controller reconciles one Fleet.
 type Controller struct {
-	cfg    Config
-	drv    driver.Driver
-	ca     *CA
-	timing Timing
-	logger *log.Logger
-	ctx    context.Context // set by Start; outlives requests
+	cfg Config
+	drv driver.Driver
+	// inbox is fleet.db (enhancements §4.1).
+	inbox     *inbox.Store
+	inboxKick chan struct{}
+	closeOnce sync.Once
+	ca        *CA
+	timing    Timing
+	logger    *log.Logger
+	ctx       context.Context // set by Start; outlives requests
 
 	// newClient makes the computerd client of a Computer.
 	newClient func(name string) computerdClient
@@ -153,22 +163,37 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Controller{
-		cfg:      cfg,
-		drv:      drv,
-		ca:       ca,
-		timing:   defaultTiming,
-		logger:   log.New(os.Stderr, "a12s controller: ", log.LstdFlags),
-		ctx:      context.Background(),
-		state:    st,
-		creds:    api.Credentials{},
-		rt:       map[string]*runtime{},
-		locks:    map[string]*sync.Mutex{},
-		clients:  map[string]computerdClient{},
-		proxyIPs: map[netip.Addr]string{},
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = cfg.StateDir
 	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, err
+	}
+	store, err := inbox.Open(filepath.Join(dataDir, "fleet.db"))
+	if err != nil {
+		return nil, err
+	}
+	c := &Controller{
+		inbox:     store,
+		inboxKick: make(chan struct{}, 1),
+		cfg:       cfg,
+		drv:       drv,
+		ca:        ca,
+		timing:    defaultTiming,
+		logger:    log.New(os.Stderr, "a12s controller: ", log.LstdFlags),
+		ctx:       context.Background(),
+		state:     st,
+		creds:     api.Credentials{},
+		rt:        map[string]*runtime{},
+		locks:     map[string]*sync.Mutex{},
+		clients:   map[string]computerdClient{},
+		proxyIPs:  map[netip.Addr]string{},
+	}
+	store.OnChange(c.inboxChanged)
 	clientTLS, err := ca.ClientTLS()
 	if err != nil {
+		store.Close()
 		return nil, err
 	}
 	c.newClient = func(name string) computerdClient {
@@ -222,6 +247,16 @@ func (c *Controller) Wait() {
 	c.stopping = true
 	c.bgMu.Unlock()
 	c.bg.Wait()
+	c.closeStore()
+}
+
+// closeStore closes fleet.db once nothing of the Controller runs anymore.
+func (c *Controller) closeStore() {
+	c.closeOnce.Do(func() {
+		if c.inbox != nil {
+			_ = c.inbox.Close()
+		}
+	})
 }
 
 func (c *Controller) logf(format string, args ...any) { c.logger.Printf(format, args...) }
@@ -250,6 +285,7 @@ func (c *Controller) containerName(name string) string { return "a12s-" + c.cfg.
 func (c *Controller) Start(ctx context.Context) {
 	c.ctx = ctx
 	c.spawn(func() { c.watch(ctx) })
+	c.spawn(func() { c.expiryLoop(ctx) })
 	// Taken here, before Start returns, and released by the resume pass: an
 	// apply or power request that arrives first waits for the resume
 	// instead of the resume re-converging after it.
@@ -261,6 +297,9 @@ func (c *Controller) Start(ctx context.Context) {
 		c.mu.Unlock()
 		if f == nil {
 			return
+		}
+		if err := c.syncInboxes(ctx, f, "controller"); err != nil {
+			c.logf("resume: inboxes: %v", err)
 		}
 		obs, err := c.drv.Observe(ctx)
 		if err != nil {

@@ -62,6 +62,8 @@ func (f *Fleet) Validate() error {
 		}
 	}
 
+	errs = append(errs, validateInbox("defaults.inbox", f.Defaults.Inbox)...)
+
 	if len(f.Computers) == 0 {
 		bad("computers", "at least one Computer is required")
 	}
@@ -76,6 +78,7 @@ func (f *Fleet) Validate() error {
 			bad(field, "\"controller\" is reserved for the Controller's certificate identity")
 		}
 		errs = append(errs, c.validate(field, f.Drives)...)
+		errs = append(errs, validateInbox(field+".inbox", c.Inbox)...)
 		for _, m := range c.Drives {
 			if _, ok := f.Drives[m.Name]; ok {
 				attached[m.Name] = append(attached[m.Name], name)

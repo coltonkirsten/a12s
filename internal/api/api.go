@@ -46,6 +46,8 @@ type PutFleetResponse struct {
 	// Errors maps a Computer to why it did not converge (it is in PhaseError).
 	// The rest of the Fleet was still applied.
 	Errors map[string]string `json:"errors,omitempty"`
+	// Warnings are accepted but noteworthy settings (a large inbox maxBytes).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Phase is a Computer's Controller state (§7).
@@ -87,6 +89,8 @@ type StatusResponse struct {
 	CredentialsLoaded bool `json:"credentialsLoaded"`
 	// Warnings are Fleet-wide: unenforced egress, orphaned drives, missing credentials.
 	Warnings []string `json:"warnings,omitempty"`
+	// OrphanedInboxes are inboxes of Computers no longer in the Fleet.
+	OrphanedInboxes []InboxSummary `json:"orphanedInboxes,omitempty"`
 }
 
 // ComputerStatus is one row of `a12s status`.
@@ -111,6 +115,8 @@ type ComputerStatus struct {
 	EgressMode string `json:"egressMode,omitempty"`
 	// Warnings are per Computer: egress allow "*", resume failed, and so on.
 	Warnings []string `json:"warnings,omitempty"`
+	// Inbox is the Computer's inbox state (enhancements §4).
+	Inbox *InboxSummary `json:"inbox,omitempty"`
 }
 
 // ComputerStatus.EgressMode values.
@@ -213,9 +219,19 @@ type DriveRow struct {
 type Error struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
+	// Fix, when known, says how to resolve the error (enhancements §6.3).
+	Fix string `json:"fix,omitempty"`
+	// Details carries structured fields of some errors (reason, id,
+	// replacedBy); never needed to read Message.
+	Details map[string]string `json:"details,omitempty"`
 }
 
-func (e *Error) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.Message) }
+func (e *Error) Error() string {
+	if e.Fix != "" {
+		return fmt.Sprintf("%s: %s\n  fix: %s", e.Code, e.Message, e.Fix)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
 
 // ErrorCode classifies an Error. Busy is HTTP 409 and Asleep 503, passed
 // through from computerd.
@@ -230,6 +246,25 @@ const (
 	ErrUnauthorized ErrorCode = "unauthorized"
 	ErrAttached     ErrorCode = "attached" // drive rm while attached
 	ErrInternal     ErrorCode = "internal"
+
+	// Inbox errors (enhancements §4).
+	ErrBodyTooLarge        ErrorCode = "body_too_large"       // 413
+	ErrExceedsInbox        ErrorCode = "exceeds_inbox"        // 413: one Message bigger than maxBytes
+	ErrBadMetadata         ErrorCode = "bad_metadata"         // 400
+	ErrBadExpires          ErrorCode = "bad_expires"          // 400
+	ErrInboxFull           ErrorCode = "inbox_full"           // 429
+	ErrIdempotencyConflict ErrorCode = "idempotency_conflict" // 409
+	ErrNotIdle             ErrorCode = "not_idle"             // 409: expires 0 and the Computer can't take it now
+	ErrForbidden           ErrorCode = "forbidden"            // 403
+	ErrGone                ErrorCode = "gone"                 // 410
+	ErrUnknownRequest      ErrorCode = "unknown_request"      // 404
+	// Withdraw of a Message that is no longer pending: 409 with its state.
+	ErrAlreadyClaimed   ErrorCode = "already_claimed"
+	ErrAlreadyDelivered ErrorCode = "already_delivered"
+	ErrExpired          ErrorCode = "expired"
+	ErrReplaced         ErrorCode = "replaced"
+	ErrWithdrawn        ErrorCode = "withdrawn"
+	ErrDiscarded        ErrorCode = "discarded"
 )
 
 // Duration is a time.Duration written as a Go duration string ("30s").
