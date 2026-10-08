@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -264,7 +265,16 @@ func TestReturnedKeyedMessageIsReplaced(t *testing.T) {
 }
 
 // Gate 7 (stub harness): ten clients, 2,000 Messages, Turns back to back.
+//
+// By default 10 clients send 30 each (300 > the 200-message cap, so clients
+// still meet 429 backpressure). A12S_SLOW_TEST=1 runs the full 2,000 (19s
+// under -race).
 func TestDeliveryRace(t *testing.T) {
+	clients, each := 10, 30
+	if os.Getenv("A12S_SLOW_TEST") == "1" {
+		each = 200
+	}
+	total := clients * each
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
 	builder := h.cds.get("builder")
@@ -274,9 +284,9 @@ func TestDeliveryRace(t *testing.T) {
 	var mu sync.Mutex
 	order := map[string]int64{}
 	var wg sync.WaitGroup
-	for i := range 10 {
+	for i := range clients {
 		wg.Go(func() {
-			for j := range 200 {
+			for j := range each {
 				body := fmt.Sprintf(`{"body":"m %d %d","sender":"client-%d"}`, i, j, i)
 				for {
 					req, _ := http.NewRequest("POST", srv.URL+"/v1/computers/builder/inbox", strings.NewReader(body))
@@ -323,7 +333,7 @@ func TestDeliveryRace(t *testing.T) {
 			last = m.Seq
 		}
 	}
-	if len(order) != 2000 || len(seen) != 2000 {
+	if len(order) != total || len(seen) != total {
 		t.Fatalf("enqueued %d, delivered %d", len(order), len(seen))
 	}
 	for id, n := range seen {
@@ -331,7 +341,7 @@ func TestDeliveryRace(t *testing.T) {
 			t.Fatalf("%s in %d turns", id, n)
 		}
 	}
-	t.Logf("2000 messages in %d turns", len(builder.requestsSnapshot()))
+	t.Logf("%d messages in %d turns", total, len(builder.requestsSnapshot()))
 }
 
 // Gate 5 (first half): the Controller dies after the claim, before the POST.

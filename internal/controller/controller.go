@@ -130,6 +130,8 @@ type computerdClient interface {
 type Controller struct {
 	cfg Config
 	drv driver.Driver
+	// now is the power policy's clock (time.Now; a test moves it).
+	now func() time.Time
 	// inbox is fleet.db (enhancements §4.1).
 	inbox     *inbox.Store
 	inboxKick chan struct{}
@@ -213,6 +215,7 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		drv:       drv,
 		ca:        ca,
 		timing:    defaultTiming,
+		now:       time.Now,
 		logger:    log.New(os.Stderr, "a12s controller: ", log.LstdFlags),
 		ctx:       context.Background(),
 		state:     st,

@@ -104,7 +104,7 @@ func TestIdleDefinition(t *testing.T) {
 
 // Gate 23: the rate limit, recorded once, and the wake when the window reopens.
 func TestWakeRateLimit(t *testing.T) {
-	h := startHarnessScaled(t, t.TempDir(), nil, 1200) // a minute is 50ms, the window 3s
+	h := startHarnessScaled(t, t.TempDir(), nil, 1200) // a minute is 50ms; the window (3s) is crossed with advance
 	h.up(powerFleet(t, 1), nil, false)
 	scout := h.cds.get("scout")
 	scout.set(func(f *fakeComputerd) { f.autoFinish = true })
@@ -118,16 +118,17 @@ func TestWakeRateLimit(t *testing.T) {
 	if ps := h.powerOf("scout"); ps.AutoWake != api.AutoWakeRateLimited || ps.NextWakeAt == nil || h.message("scout", b.ID).State != api.MsgPending {
 		t.Fatalf("rate limit: %+v", ps)
 	}
-	time.Sleep(200 * time.Millisecond) // many ticks: still recorded once
+	time.Sleep(50 * time.Millisecond) // many ticks: still recorded once
 	if n := h.events("scout", "wake.suppressed"); n != 1 {
 		t.Fatalf("suppressed recorded %d times", n)
 	}
-	deadline := time.Now().Add(6 * time.Second)
-	for h.message("scout", b.ID).State != api.MsgDelivered { // the window reopens by itself
+	h.advance(3 * time.Second) // past the scaled hour: the window reopens by itself
+	deadline := time.Now().Add(time.Second) // well inside the real 3s window
+	for h.message("scout", b.ID).State != api.MsgDelivered {
 		if time.Now().After(deadline) {
 			t.Fatalf("not woken after the window: %+v", h.powerOf("scout"))
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	if n := h.events("scout", "power.auto_wake"); n != 2 {
 		t.Fatalf("auto wakes %d", n)
