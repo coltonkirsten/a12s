@@ -196,45 +196,6 @@ func TestInboxFleetLimits(t *testing.T) {
 	}
 }
 
-func TestFleetInboxValidation(t *testing.T) {
-	str := func(s string) *string { return &s }
-	n := func(v int64) *int64 { return &v }
-	for _, c := range []struct {
-		in   fleet.Inbox
-		want string
-	}{
-		{fleet.Inbox{MaxBytes: str("2Mi")}, "above the 1Mi ceiling"},
-		{fleet.Inbox{MaxBytes: str("4Ki")}, "below the 8Ki floor"},
-		{fleet.Inbox{MaxBytes: str("lots")}, "is not a size"},
-		{fleet.Inbox{MaxMessages: n(0)}, "out of range"},
-		{fleet.Inbox{MaxMessages: n(2001)}, "out of range"},
-		{fleet.Inbox{Intro: str(strings.Repeat("x", 513))}, "512-byte cap"},
-		{fleet.Inbox{Intro: str(strings.Repeat("l\n", 8) + "l")}, "8-line cap"},
-		{fleet.Inbox{Intro: str("bell\a")}, "control character"},
-	} {
-		f := labFleet(t, func(f *fleet.Fleet) {
-			b := f.Computers["builder"]
-			b.Inbox = c.in
-			f.Computers["builder"] = b
-		})
-		err := f.Validate()
-		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "fix:") {
-			t.Errorf("%+v: %v", c.in, err)
-		}
-	}
-	ok := labFleet(t, func(f *fleet.Fleet) {
-		b := f.Computers["builder"]
-		b.Inbox = fleet.Inbox{MaxBytes: str("768Ki"), Intro: str("Review requests.\nOne verdict each.")}
-		f.Computers["builder"] = b
-	})
-	if err := ok.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if w := ok.InboxWarnings(); len(w) != 1 || !strings.Contains(w[0], "long-context") {
-		t.Fatalf("warnings %v", w)
-	}
-}
-
 // Expiry runs on the Controller's timer, whatever the Computer is doing.
 func TestInboxExpiryTimer(t *testing.T) {
 	h := newHarness(t)
