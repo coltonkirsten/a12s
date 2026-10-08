@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -52,7 +53,16 @@ func runPrompt(g *globals, args []string) error {
 		return fmt.Errorf("fleet %s has no Computer %q", st.Fleet, name)
 	}
 	if cs.Phase == api.PhaseAsleep || cs.Phase == api.PhaseStopping {
-		return &api.Error{Code: api.ErrAsleep, Message: name + " is asleep", Fix: fmt.Sprintf("a12s wake %s, or a12s send %s \"…\" to leave a message", name, name)}
+		// The power policy may wake it for local (§4.14); otherwise fail with the reason.
+		if p := cs.Power; cs.Phase == api.PhaseAsleep && p != nil && p.AutoWake == api.AutoWakeOn && slices.Contains(p.WakeOnMessage, api.PrincipalLocal) {
+			dim(os.Stderr, "waking "+name+" (power policy)")
+		} else {
+			msg := name + " is asleep"
+			if p != nil && p.AutoWake != api.AutoWakeOn && p.AutoWake != api.AutoWakeOff {
+				msg += " (auto-wake " + p.AutoWake + ": " + strings.ReplaceAll(p.Reason, "_", " ") + ")"
+			}
+			return &api.Error{Code: api.ErrAsleep, Message: msg, Fix: fmt.Sprintf("a12s wake %s, or a12s send %s \"…\" to leave a message", name, name)}
+		}
 	}
 
 	// (2) Enqueue; the idempotency key makes a retry after a lost response safe.

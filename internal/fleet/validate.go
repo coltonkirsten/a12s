@@ -63,6 +63,9 @@ func (f *Fleet) Validate() error {
 	}
 
 	errs = append(errs, validateInbox("defaults.inbox", f.Defaults.Inbox)...)
+	isComputer := func(n string) bool { _, ok := f.Computers[n]; return ok }
+	isService := f.hasService
+	errs = append(errs, validatePower("defaults.power", f.Defaults.Power, isComputer, isService)...)
 
 	if len(f.Computers) == 0 {
 		bad("computers", "at least one Computer is required")
@@ -79,6 +82,7 @@ func (f *Fleet) Validate() error {
 		}
 		errs = append(errs, c.validate(field, f.Drives)...)
 		errs = append(errs, validateInbox(field+".inbox", c.Inbox)...)
+		errs = append(errs, validatePower(field+".power", c.Power, isComputer, isService)...)
 		for _, m := range c.Drives {
 			if _, ok := f.Drives[m.Name]; ok {
 				attached[m.Name] = append(attached[m.Name], name)

@@ -420,7 +420,7 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 	return res
 }
 
-func (c *Controller) computerStatus(ctx context.Context, name string) api.ComputerStatus {
+func (c *Controller) computerStatus(ctx context.Context, name string) (out api.ComputerStatus) {
 	c.mu.Lock()
 	comp := c.state.Fleet.Computers[name]
 	cs := api.ComputerStatus{
@@ -445,6 +445,7 @@ func (c *Controller) computerStatus(ctx context.Context, name string) api.Comput
 	r := c.rtLocked(name)
 	cs.Phase, cs.Error, cs.ActiveTurn = r.phase, r.failure, r.activeTurn
 	c.mu.Unlock()
+	defer func() { out.Power = c.powerStatus(ctx, name, out.Phase) }()
 
 	if cs.EgressMode == api.EgressAllowAll {
 		cs.Warnings = append(cs.Warnings, `egress allows any public host ("*")`)

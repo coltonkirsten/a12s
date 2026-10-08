@@ -166,3 +166,22 @@ func onLocalNetwork(subnets []netip.Prefix) (bool, error) {
 	}
 	return false, nil
 }
+
+// Sessions counts the exec sessions running in a Computer now (`a12s shell`
+// or any docker exec): an attached session keeps it from auto-sleeping.
+func (d *Driver) Sessions(ctx context.Context, computer string) (int, error) {
+	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(computer), client.ContainerInspectOptions{})
+	if isNotFound(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range res.Container.ExecIDs {
+		if ex, err := d.cli.ExecInspect(ctx, id, client.ExecInspectOptions{}); err == nil && ex.Running {
+			n++
+		}
+	}
+	return n, nil
+}

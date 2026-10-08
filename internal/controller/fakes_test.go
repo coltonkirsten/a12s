@@ -52,6 +52,8 @@ type fakeDriver struct {
 	beforeRemove func(name string)
 	// observeGate, when set, holds the next Observe until it is closed.
 	observeGate chan struct{}
+	// sessions are attached shell sessions, by Computer.
+	sessions map[string]int
 }
 
 type fakeContainer struct {
@@ -305,6 +307,12 @@ func (d *fakeDriver) RemoveComputer(_ context.Context, name string) error {
 		d.record("remove %s", name)
 	}
 	return nil
+}
+
+func (d *fakeDriver) Sessions(_ context.Context, name string) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sessions[name], nil
 }
 
 func (d *fakeDriver) RemoveDrive(_ context.Context, id string) error {
@@ -674,6 +682,13 @@ func newHarness(t *testing.T) *harness {
 
 func startHarness(t *testing.T, dir string, d *fakeDriver) *harness {
 	t.Helper()
+	return startHarnessScaled(t, dir, d, 1)
+}
+
+// startHarnessScaled runs the power policy at a test speed: durations are
+// divided by scale.
+func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) *harness {
+	t.Helper()
 	cds := &fakeComputerds{}
 	if d == nil {
 		d = newFakeDriver(cds)
@@ -684,13 +699,13 @@ func startHarness(t *testing.T, dir string, d *fakeDriver) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789"}, d, ca)
+	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale}, d, ca)
 	if err != nil {
 		t.Fatal(err)
 	}
 	buf := &bytes.Buffer{}
 	c.logger = log.New(&lockedWriter{w: buf}, "", 0)
-	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second}
+	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second, PowerTick: 5 * time.Millisecond}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf}

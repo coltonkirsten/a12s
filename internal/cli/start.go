@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -225,7 +226,12 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 }
 
 func createController(ctx context.Context, dc *client.Client, n ControllerNames, o StartOptions, labels map[string]string, token string) error {
-	_, err := dc.ContainerCreate(ctx, ControllerCreateOptions(n, o.Fleet, o.Image, token, labels))
+	opts := ControllerCreateOptions(n, o.Fleet, o.Image, token, labels)
+	// The exit gate's power-policy test speed (enhancements §9 gate 23).
+	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
+		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
+	}
+	_, err := dc.ContainerCreate(ctx, opts)
 	if cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("controller image %s not found locally: build it or pass --controller-image", o.Image)
 	}
