@@ -200,3 +200,10 @@ func TestServicesExampleParses(t *testing.T) {
 		t.Fatalf("services %v", f.ServiceNames())
 	}
 }
+
+func TestManifestNumbers(t *testing.T) {
+	m, err := ParseManifest([]byte(`{"a12s":1,"user":1000,"resources":{"cpu":0.1,"memory":"64Mi"},"state":{"at":"/d","size":1048576}}`))
+	if err != nil || m.Resources.CPU.Millis() != 100 || m.Resources.Memory != 64<<20 || m.State.Size != 1<<20 {
+		t.Fatalf("%+v %v", m, err)
+	}
+}
