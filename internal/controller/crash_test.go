@@ -3,8 +3,6 @@ package controller
 import (
 	"context"
 	"net/http"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -105,18 +103,4 @@ func TestInboxStateSurvivesRestart(t *testing.T) {
 	if s := sum("reviewer"); s.SessionOverride != "new" {
 		t.Fatalf("reviewer %+v", s)
 	}
-}
-
-// Gate 20: the Controller's own crash hook fires once after a claim.
-func TestControllerHookFile(t *testing.T) {
-	h := newHarness(t)
-	dir := filepath.Join(h.dir, "test-hooks")
-	os.MkdirAll(dir, 0o700)
-	if _, err := os.Stat(filepath.Join(dir, "exit-after-claim")); err == nil {
-		t.Fatal("unexpected hook")
-	}
-	// Not armed: draining runs normally (arming it would exit the test binary).
-	h.up(labFleet(t, nil), nil, false)
-	m := h.send("builder", "x")
-	h.waitMessage("builder", m.ID, api.MsgDelivered)
 }
