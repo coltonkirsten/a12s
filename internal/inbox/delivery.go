@@ -115,7 +115,6 @@ func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
 	return b, err
 }
 
-
 // claimTx claims the next Batch of a Computer (§4.5 draining): expire due
 // Messages, take the pending snapshot up to the next fresh boundary, mark it
 // claimed, render it and store the immutable request. It returns nil when
