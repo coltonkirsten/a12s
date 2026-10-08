@@ -1,5 +1,82 @@
 # Exit gate (§8)
 
+## Layer 1 enhancements, run 2026-10-08 on mac-mini (docs/a12s-layer1-enhancements-design.md §9)
+
+Docker Desktop 29.2.0 (linux/arm64, 4 GB), images built from `main` after S1–S8 and the final-review fixes
+(PRs #7–#16) plus this PR, Claude Code 2.1.280 bundle on all three Computers (`claude-haiku-4-5`), the lab
+setup-token path (`~/.a12s/anthropic`, the Mac's OAuth access token, deleted after the run), reference Services
+from `make services`. Fleet: `examples/services/fleet.yaml` renamed `gate` (§3's Fleet with local image tags),
+started from nothing with `A12S_TEST_TIME_SCALE=60` (scout's 15-minute idle is 15 s). Script:
+`hack/exit-gate-enhancements.sh <workdir> <log> setup inbox services amendment cli teardown`, 04:12:41–04:21:45 UTC:
+**54 checks, 54 passed**, then `down --purge`. An earlier full run passed 52/54; the two misses were the gate's own
+busy Turn (Claude Code refuses a bare `sleep`), fixed by waiting in python. Raw log (281 lines, no secrets):
+`~/raven-v2/deliverables/a12s-build/gate/gate.log`.
+
+Covered here: §9 items 1, 2, 3, 4, 6, 8 (the 429), 9, 10, 11, 12 (the `a12s-db` tool answered through the stdio
+bridge), 14, 15, 16, 17, 18, 19 (scaffold, first-run fix line, `--json` on every listing), 20, 21, 22 (limit
+sources) and 23 (auto-sleep, manual-sleep refusal, `--allow-wake` wake by `prompt`). Covered by the Go/computerd
+test suites instead of this run: 5 (Controller crash, `down` with the Controller dead), 7 (the 2,000-message race),
+8's byte-ceiling boundaries, and the hook-driven races of 20–23. Item 13's mechanics (memory-only login container,
+0600 host write, Ready with the credential in tmpfs only) were run on this Docker during S6 with a stand-in login
+command; completing GitHub's device flow needs a person at a browser and was not run.
+
+```text
+PASS setup scout Ready
+PASS setup builder Ready
+PASS setup reviewer Ready
+PASS setup service clock Ready
+PASS setup service pg Ready
+PASS setup service db Ready
+PASS setup service hooks Ready
+PASS 1 one Turn carries the three sends in seq order, rendered per 4.8
+PASS 9 queued, then streamed to completion
+PASS 2 stays Asleep with one pending
+PASS 2 delivered after wake
+PASS 3 two inbox.discarded with bodies, no Turn
+PASS 4 returned and delivered next Turn with attempts 1
+PASS 4 after dispatch: delivered once, Turn interrupted
+PASS 6 [a] then [b,c] in a new session
+PASS 8 51st refused inbox_full with a fix
+PASS 10 inbox holds resume_failed, nothing runs
+PASS 10 resume --new delivers in a new session
+PASS 11 at least two distinct messages via service:clock
+PASS 11 send to reviewer refused 403 and audited
+PASS 12 the a12s-db tool ran through the bridge
+PASS 12 scout can't read the secret or resolve .a12s; CONNECT pg.a12s is denied
+PASS 12 reviewer (no uses) denied with a diagnostic
+PASS 14 asleep db answers 503 through the proxy, diagnostic journaled
+PASS 14 wake db -> Ready
+PASS 14 removed pg: stopped, pg-state an orphan, nothing destroyed
+PASS 15 new ref appended; old pin kept
+PASS 15 lock update keeps the key, moves explicitly
+PASS 15 doctor warns on npx
+PASS 16 reviewer got a message via computer:builder
+PASS 16 send to scout refused with the fix, journaled
+PASS 17 signed post enqueued, unsigned rejected
+PASS 17 status prints the publish warning
+PASS 18 owner API unreachable, no Docker socket
+PASS 18 PUT /v1/fleet and POST /v1/leases are 403 over mTLS; the granted send works
+PASS 18 after sleep the copied cert is refused
+PASS 20 expires 0 while busy: exit 1, not_idle busy
+PASS 20 a 5 s window expires while busy
+PASS 20 expires 0 to a sleeping scout: asleep, no wake
+PASS 21 one survivor, superseded 7, seven replaced, at the tail after a
+PASS 22 limits carry their source
+PASS 23 scout auto-sleeps after its idle time
+PASS 23 prompt to a manually slept scout fails with the reason
+PASS 23 with --allow-wake, local wakes it: prompt prints waking and streams
+PASS 19 init --with db scaffolds a valid Fleet
+PASS 19 the first up stops with the fix line
+PASS 19 --json parses: a12s status
+PASS 19 --json parses: a12s service ls
+PASS 19 --json parses: a12s service status db
+PASS 19 --json parses: a12s inbox builder
+PASS 19 --json parses: a12s drive ls
+PASS 19 --json parses: a12s token ls
+PASS 19 --json parses: a12s doctor
+PASS 19 logs --json is JSON lines
+```
+
 ## Re-run 2026-10-06 on mac-mini (Layer 1 closeout)
 
 Docker Desktop 29.2.0 (linux/arm64, 4 GB), images rebuilt from the closeout code at `7bb5dad` (PR #3: #58, #59, #35,
