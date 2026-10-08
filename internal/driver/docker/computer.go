@@ -380,10 +380,24 @@ func rebasePresetTar(r io.Reader, w io.Writer, dir string) error {
 // ensureNetwork creates the Computer's isolated internal network with a /29
 // from the pool, unless it already exists.
 func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, error) {
+	return d.ensureNetworkFor(ctx, computer, RoleComputer)
+}
+
+// ownerLabel is the label naming a network's or container's owner by role.
+func ownerLabel(role string) string {
+	if role == RoleService {
+		return LabelService
+	}
+	return LabelComputer
+}
+
+// ensureNetworkFor creates the isolated internal network of a Computer or
+// a Service (role), unless it already exists.
+func (d *Driver) ensureNetworkFor(ctx context.Context, computer, role string) (string, error) {
 	name := d.NetworkName(computer)
 	res, err := d.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
 	if err == nil {
-		if err := d.checkNetwork(res.Network.Network, computer); err != nil {
+		if err := d.checkNetwork(res.Network.Network, computer, role); err != nil {
 			return "", err
 		}
 		return name, nil
@@ -413,9 +427,9 @@ func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, er
 		IPAM:     &network.IPAM{Config: []network.IPAMConfig{{Subnet: subnet}}},
 		Options:  map[string]string{gatewayModeOption: "isolated"},
 		Labels: map[string]string{
-			LabelFleet:    d.fleet,
-			LabelComputer: computer,
-			LabelRole:     RoleComputer,
+			LabelFleet:       d.fleet,
+			ownerLabel(role): computer,
+			LabelRole:        role,
 		},
 	})
 	if err != nil {
@@ -426,14 +440,14 @@ func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, er
 
 // checkNetwork accepts an existing network for reuse only if it is exactly
 // what ensureNetwork would create: internal, isolated gateway, our labels.
-func (d *Driver) checkNetwork(n network.Network, computer string) error {
+func (d *Driver) checkNetwork(n network.Network, computer, role string) error {
 	switch {
 	case !n.Internal:
 		return fmt.Errorf("network %s exists but is not internal; remove it", n.Name)
 	case n.Options[gatewayModeOption] != "isolated":
 		return fmt.Errorf("network %s exists without %s=isolated; remove it", n.Name, gatewayModeOption)
-	case n.Labels[LabelFleet] != d.fleet || n.Labels[LabelComputer] != computer || n.Labels[LabelRole] != RoleComputer:
-		return fmt.Errorf("network %s exists but is not the network of Computer %s in fleet %s", n.Name, computer, d.fleet)
+	case n.Labels[LabelFleet] != d.fleet || n.Labels[ownerLabel(role)] != computer || n.Labels[LabelRole] != role:
+		return fmt.Errorf("network %s exists but is not the network of %s %s in fleet %s", n.Name, role, computer, d.fleet)
 	}
 	return nil
 }

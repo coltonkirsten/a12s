@@ -26,6 +26,10 @@ type State struct {
 	// BundleHosts are the sign-in hosts of each pinned bundle, by
 	// "kind@version", from its manifest.
 	BundleHosts map[string][]string `json:"bundleHosts,omitempty"`
+	// Services is each Service's persistent state, and Manifests the
+	// merged manifest each was admitted with (enhancements §5).
+	Services  map[string]*ServiceRecord         `json:"services,omitempty"`
+	Manifests map[string]*fleet.ServiceManifest `json:"manifests,omitempty"`
 }
 
 // Record is one Computer's persistent state.
@@ -72,7 +76,7 @@ type Active struct {
 func (r *Record) pending() bool { return r.StagedGeneration > r.Generation }
 
 func loadState(path string) (*State, error) {
-	st := &State{Computers: map[string]*Record{}, BundleHosts: map[string][]string{}}
+	st := &State{Computers: map[string]*Record{}, BundleHosts: map[string][]string{}, Services: map[string]*ServiceRecord{}, Manifests: map[string]*fleet.ServiceManifest{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return st, nil
@@ -88,6 +92,12 @@ func loadState(path string) (*State, error) {
 	}
 	if st.BundleHosts == nil {
 		st.BundleHosts = map[string][]string{}
+	}
+	if st.Services == nil {
+		st.Services = map[string]*ServiceRecord{}
+	}
+	if st.Manifests == nil {
+		st.Manifests = map[string]*fleet.ServiceManifest{}
 	}
 	return st, nil
 }

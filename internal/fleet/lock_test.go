@@ -69,9 +69,10 @@ presets: { "./presets/scout": "sha256:e" }   # content hash of the directory
 		t.Fatal(err)
 	}
 	want := &Lock{
-		Images:  map[string]string{"slim": "sha256:a", "browser": "sha256:b"},
-		Bundles: map[string]string{"claude-code@2.1.280": "sha256:c", "codex@0.154.0": "sha256:d"},
-		Presets: map[string]string{"./presets/scout": "sha256:e"},
+		Images:   map[string]string{"slim": "sha256:a", "browser": "sha256:b"},
+		Bundles:  map[string]string{"claude-code@2.1.280": "sha256:c", "codex@0.154.0": "sha256:d"},
+		Presets:  map[string]string{"./presets/scout": "sha256:e"},
+		Services: map[string]string{},
 	}
 	if !reflect.DeepEqual(l, want) {
 		t.Errorf("got %+v want %+v", l, want)

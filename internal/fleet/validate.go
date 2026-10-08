@@ -83,12 +83,15 @@ func (f *Fleet) Validate() error {
 		errs = append(errs, c.validate(field, f.Drives)...)
 		errs = append(errs, validateInbox(field+".inbox", c.Inbox)...)
 		errs = append(errs, validatePower(field+".power", c.Power, isComputer, isService)...)
+		errs = append(errs, f.validateUses(field, "", c.Uses)...)
+		errs = append(errs, f.validateGrants(field, c.Grants)...)
 		for _, m := range c.Drives {
 			if _, ok := f.Drives[m.Name]; ok {
 				attached[m.Name] = append(attached[m.Name], name)
 			}
 		}
 	}
+	errs = append(errs, f.validateServices()...)
 	for _, d := range f.DriveNames() {
 		if f.Drives[d].Access == AccessExclusive && len(attached[d]) > 1 {
 			bad("drives."+d, "exclusive drive is attached to more than one Computer: %s", strings.Join(attached[d], ", "))

@@ -1,0 +1,27 @@
+package main
+
+import (
+	"os"
+
+	"github.com/coltonkirsten/a12s/internal/serviceinit"
+)
+
+// hidden are in-container helpers, not listed in usage: a12s-init and its
+// injection write (§5.5), and a Service's publish forwarder.
+func hidden(name string, args []string) (error, bool) {
+	switch name {
+	case "service-init":
+		if len(args) > 0 && args[0] == "--" {
+			args = args[1:]
+		}
+		return serviceinit.Init(args, os.Stderr), true
+	case "service-write":
+		if len(args) != 4 {
+			return usageError("service-write <path> <uid:gid> <mode> <dirMode> < data"), true
+		}
+		return serviceinit.WriteFile(args[0], args[1], args[2], args[3], os.Stdin), true
+	case "publish-forward":
+		return serviceinit.Forward(args, os.Stderr), true
+	}
+	return nil, false
+}

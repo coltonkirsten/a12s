@@ -23,6 +23,7 @@ type rawFleet struct {
 	Defaults   yaml.Node            `yaml:"defaults"`
 	Drives     map[string]Drive     `yaml:"drives"`
 	Computers  map[string]yaml.Node `yaml:"computers"`
+	Services   map[string]yaml.Node `yaml:"services"`
 }
 
 // Load reads, parses and validates the Fleet file at path.
@@ -64,6 +65,31 @@ func Decode(data []byte) (*Fleet, error) {
 		Egress:     raw.Egress,
 		Drives:     raw.Drives,
 		Computers:  make(map[string]Computer, len(raw.Computers)),
+	}
+	var errs []error
+	if err := computerOnlyEgress("defaults", &raw.Defaults); err != nil {
+		errs = append(errs, err)
+	}
+	for _, name := range sortedKeys(raw.Computers) {
+		node := raw.Computers[name]
+		if err := computerOnlyEgress(name, &node); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(raw.Services) > 0 {
+		f.Services = make(map[string]Service, len(raw.Services))
+	}
+	for _, name := range sortedKeys(raw.Services) {
+		node := raw.Services[name]
+		var s Service
+		if err := decodeService(name, &node, &s); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		f.Services[name] = s
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("parse fleet: %w", errors.Join(errs...))
 	}
 	defaults := mapping(&raw.Defaults)
 	if err := decodeComputer(defaults, &f.Defaults); err != nil {

@@ -33,6 +33,13 @@ const (
 
 	RoleController = "controller"
 	RoleComputer   = "computer"
+	// RoleService marks a Service's container and network; RolePublish a
+	// Service's publish forwarder; RoleInit the a12s-init volume.
+	RoleService = "service"
+	RolePublish = "publish"
+	RoleInit    = "init"
+	// LabelService names the Service on its container, network and state drive.
+	LabelService = "a12s.service"
 )
 
 // DefaultSubnetPool is where per-Computer /29 networks are allocated.
@@ -54,6 +61,9 @@ type Config struct {
 	SubnetPool netip.Prefix
 	// Client defaults to a client configured from the environment.
 	Client *client.Client
+	// InitBinary is the a12s binary copied into Services as a12s-init;
+	// default: the running executable.
+	InitBinary string
 }
 
 // Driver is the Docker driver for one Fleet.
@@ -62,6 +72,12 @@ type Driver struct {
 	fleet string
 	pool  netip.Prefix
 	mu    sync.Mutex // serializes subnet allocation and staging
+
+	initPath string
+	initOnce sync.Once
+	initData []byte
+	initSum  string
+	initErr  error
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -85,7 +101,7 @@ func New(cfg Config) (*Driver, error) {
 			return nil, fmt.Errorf("docker driver: %w", err)
 		}
 	}
-	return &Driver{cli: cli, fleet: cfg.Fleet, pool: pool.Masked()}, nil
+	return &Driver{cli: cli, fleet: cfg.Fleet, pool: pool.Masked(), initPath: cfg.InitBinary}, nil
 }
 
 // Close releases the Docker client.
@@ -135,6 +151,7 @@ func (d *Driver) Capabilities(ctx context.Context) (driver.Capabilities, error) 
 		DriveQuota:        false,
 		Architectures:     []string{goArch(info.Info.Architecture)},
 		SandboxedRuntime:  sandboxed,
+		Services:          true,
 	}, nil
 }
 

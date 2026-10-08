@@ -260,7 +260,7 @@ func TestFinishUpPartialFailure(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	err := g.finishUp(onDisk, fleet.NewLock(), resp, false, &out, &errOut)
-	if err == nil || !strings.Contains(err.Error(), "1 Computer(s) did not converge") {
+	if err == nil || !strings.Contains(err.Error(), "1 Computer(s) or Service(s) did not converge") {
 		t.Fatalf("err = %v", err)
 	}
 	if out.String() != "created scout, tester (asleep: none)\n" {

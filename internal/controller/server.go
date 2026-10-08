@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,6 +110,13 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/computers/{c}/inbox/clear", allow(api.ActionInbox, "c", c.handleInboxClear))
 	mux.HandleFunc("POST /v1/computers/{c}/inbox/hold", allow(api.ActionInbox, "c", c.handleInboxHold))
 	mux.HandleFunc("POST /v1/computers/{c}/inbox/resume", allow(api.ActionInbox, "c", c.handleInboxResume))
+	mux.HandleFunc("GET /v1/services", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, api.ServicesResponse{Services: c.Services()})
+	}))
+	mux.HandleFunc("GET /v1/services/{s}", allow(api.ActionStatus, "", c.handleService))
+	mux.HandleFunc("GET /v1/services/{s}/logs", allow("", "", c.handleServiceLogs))
+	mux.HandleFunc("POST /v1/services/{s}/power", allow("", "", c.handleServicePower))
+	mux.HandleFunc("POST /v1/services/{s}/shell", allow("", "", c.handleServiceShell))
 	mux.HandleFunc("POST /v1/tokens", allow("", "", c.handleTokenCreate))
 	mux.HandleFunc("GET /v1/tokens", allow("", "", c.handleTokens))
 	mux.HandleFunc("DELETE /v1/tokens/{name}", allow("", "", c.handleTokenDelete))
@@ -405,6 +413,13 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 		}
 	}
 
+	res.Services = c.Services()
+	for _, s := range res.Services {
+		if s.EgressMode == api.EgressUnenforced {
+			res.EgressEnforcement = fleet.EnforcementUnenforced
+		}
+	}
+
 	if drives, err := c.drives(ctx); err == nil {
 		var orphans []string
 		for _, d := range drives {
@@ -497,7 +512,19 @@ func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 	rows := []api.DriveRow{}
 	for id, d := range obs.Drives {
 		row := api.DriveRow{Name: id, AttachedTo: d.AttachedTo}
-		if owner, ok := strings.CutPrefix(id, "home-"); ok {
+		if svc, ok := driver.ServiceOfStateDrive(id); ok {
+			row.Name, row.Kind, row.Service = driver.StateDriveName(svc), api.DriveState, svc
+			s, declared := f.Services[svc]
+			row.Orphaned = !declared
+			if declared {
+				c.mu.Lock()
+				if c.state.Fleet != nil && c.state.Manifests[svc] != nil {
+					row.Size = c.serviceStateSizeLocked(svc)
+				}
+				c.mu.Unlock()
+			}
+			_ = s
+		} else if owner, ok := strings.CutPrefix(id, "home-"); ok {
 			row.Kind, row.Computer = api.DriveHome, owner
 			comp, declared := f.Computers[owner]
 			row.Size, row.Orphaned = comp.Home.Size, !declared
@@ -527,6 +554,11 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 	if _, ok := obs.Drives[id]; !ok && strings.HasPrefix(name, "home-") {
 		id = name
 	}
+	if svc, ok := strings.CutSuffix(name, "-state"); ok {
+		if _, isWork := obs.Drives[id]; !isWork {
+			id = driver.StateDriveID(svc)
+		}
+	}
 	d, ok := obs.Drives[id]
 	if !ok {
 		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no drive %q", name))
@@ -545,4 +577,79 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 	}
 	c.logf("drive %s destroyed", name)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *Controller) handleService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("s")
+	if !c.isService(name) {
+		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no service %q in the Fleet", name))
+		return
+	}
+	writeJSON(w, http.StatusOK, c.serviceStatus(name))
+}
+
+func (c *Controller) handleServicePower(w http.ResponseWriter, r *http.Request) {
+	var req api.ServicePowerRequest
+	if !decode(w, r, 1<<20, &req) {
+		return
+	}
+	name := r.PathValue("s")
+	_, err, ok := detached(c, r, func(ctx context.Context) (struct{}, error) { return struct{}{}, c.SetServicePower(ctx, name, req) })
+	if !ok {
+		return
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c.serviceStatus(name))
+}
+
+// handleServiceLogs streams `a12s service logs`: the Controller's audit
+// lines for the Service, then its container output, following both.
+func (c *Controller) handleServiceLogs(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("s")
+	if !c.isService(name) {
+		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no service %q in the Fleet", name))
+		return
+	}
+	follow := r.URL.Query().Get("follow") == "true"
+	tail, _ := strconv.Atoi(r.URL.Query().Get("tail"))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	rc := http.NewResponseController(w)
+	_ = c.writeServiceLogs(r.Context(), name, follow, tail, func(s string) error {
+		if _, err := io.WriteString(w, s); err != nil {
+			return err
+		}
+		return rc.Flush()
+	})
+}
+
+// handleServiceShell audits `a12s shell <svc>` and names the container.
+func (c *Controller) handleServiceShell(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("s")
+	var req api.ShellRequest
+	if !decode(w, r, 1<<20, &req) {
+		return
+	}
+	c.mu.Lock()
+	m := c.state.Manifests[name]
+	ok := c.state.Fleet != nil && c.state.Fleet.HasService(name)
+	c.mu.Unlock()
+	if !ok {
+		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no service %q in the Fleet", name))
+		return
+	}
+	if p := c.servicePhase(name); p != api.PhaseReady && p != api.PhaseUnhealthy && p != api.PhaseStarting {
+		fail(w, errorf(http.StatusServiceUnavailable, api.ErrAsleep, "service %s is %s", name, p))
+		return
+	}
+	user := serviceUser(m)
+	if req.Root {
+		user = "0:0"
+	}
+	c.auditf(name, "shell opened as %s (%s)", user, strings.Join(req.Command, " "))
+	writeJSON(w, http.StatusOK, api.ShellResponse{Container: c.containerName(name), User: user})
 }

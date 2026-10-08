@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
+	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
 )
 
@@ -185,6 +186,9 @@ func DriveName(id string) string {
 	if strings.HasPrefix(id, "home-") {
 		return id
 	}
+	if svc, ok := driver.ServiceOfStateDrive(id); ok {
+		return driver.StateDriveName(svc)
+	}
 	return strings.TrimPrefix(id, "drive-")
 }
 
@@ -243,7 +247,8 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := removeContainer(ctx, dc, c, c.Labels[docker.LabelRole] == docker.RoleComputer)
+			role := c.Labels[docker.LabelRole]
+			err := removeContainer(ctx, dc, c, role == docker.RoleComputer || role == docker.RoleService)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {

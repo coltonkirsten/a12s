@@ -40,6 +40,8 @@ func commands() []command {
 		{"sleep", "<name>... | --all [--allow-wake]", "sleep Computers (storage kept, no CPU or RAM)", runSleep},
 		{"wake", "<name>... | --all [--clear-inbox]", "wake Computers; resume happens on the next prompt", runWake},
 		{"shell", "<name> [--root] [-- command...]", "audited terminal inside a Computer, outside the harness", runShell},
+		{"service", "ls | status <svc> | logs <svc> [-f] [--tail N]", "list Services, show one, or follow its logs and audit lines", runService},
+		{"lock", "update services/<svc>", "move a Service's pin in fleet.lock explicitly", runLock},
 		{"drive", "ls | rm <name> [--yes]", "list drives; rm and down --purge are the only commands that destroy data", runDrive},
 		{"down", "[--purge [--yes]]", "remove Computers, Controller and network; keep drives (--purge destroys them)", runDown},
 		{"controller", "", "run the Controller (inside its container)", runControllerCmd},
@@ -69,6 +71,15 @@ func run(args []string, stderr io.Writer) int {
 		return 2
 	}
 	rest := fs.Args()
+	if len(rest) > 0 {
+		if err, ok := hidden(rest[0], rest[1:]); ok {
+			if err != nil {
+				fmt.Fprintf(stderr, "a12s %s: %v\n", rest[0], err)
+				return 1
+			}
+			return 0
+		}
+	}
 	if len(rest) == 0 || rest[0] == "help" {
 		usage(stderr)
 		return 2

@@ -87,6 +87,51 @@ func Needed(f *fleet.Fleet, computers ...string) map[string][]string {
 	return need
 }
 
+// NeededByServices maps each credential name the Fleet's Services (or the
+// named ones) reference to those Services.
+func NeededByServices(f *fleet.Fleet, services ...string) map[string][]string {
+	if len(services) == 0 {
+		services = f.ServiceNames()
+	}
+	need := map[string][]string{}
+	for _, s := range services {
+		spec, ok := f.Services[s]
+		if !ok {
+			continue
+		}
+		for _, cred := range spec.Credentials {
+			need[cred] = append(need[cred], s)
+		}
+	}
+	return need
+}
+
+// ResolveBound reads the material of every needed credential that has a
+// binding and skips the rest: a Service credential without one is the
+// Controller's call (a login the Service's manifest produces leaves only
+// that Service waiting, enhancements §5.5). A binding that does not read
+// is still an error.
+func (b *Bindings) ResolveBound(need map[string][]string) (api.Credentials, error) {
+	creds := api.Credentials{}
+	var errs []error
+	for _, name := range sortedKeys(need) {
+		s, ok := b.Credentials[name]
+		if !ok || !b.Exists {
+			continue
+		}
+		v, err := b.read(s)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("credential %s (needed by %s): %w", name, strings.Join(need[name], ", "), err))
+			continue
+		}
+		creds[name] = v
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%s: %w", b.Path, errors.Join(errs...))
+	}
+	return creds, nil
+}
+
 // Resolve reads the material of every needed credential. Every name must
 // resolve; the error lists all that do not, with the Computers needing them.
 func (b *Bindings) Resolve(need map[string][]string) (api.Credentials, error) {

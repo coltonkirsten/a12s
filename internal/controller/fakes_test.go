@@ -54,6 +54,11 @@ type fakeDriver struct {
 	observeGate chan struct{}
 	// sessions are attached shell sessions, by Computer.
 	sessions map[string]int
+	// services are Service containers; svcImages what each image declares;
+	// svcUnhealthy fails a Service's exec health check.
+	services     map[string]*fakeService
+	svcImages    map[string]driver.ServiceImage
+	svcUnhealthy map[string]bool
 }
 
 type fakeContainer struct {
@@ -74,9 +79,12 @@ func newFakeDriver(cds *fakeComputerds) *fakeDriver {
 			"a12s/bundle-claude-code:2.1.280": bundle("claude-code", "2.1.280", "sha256:claude1", "platform.claude.com"),
 			"a12s/bundle-codex:0.154.0":       bundle("codex", "0.154.0", "sha256:codex1", "auth.openai.com"),
 		},
-		events:    make(chan driver.Event, 16),
-		cds:       cds,
-		exclusive: map[string]bool{"drive-a12s-repo": true, "drive-ux-scratch": true},
+		events:       make(chan driver.Event, 16),
+		cds:          cds,
+		exclusive:    map[string]bool{"drive-a12s-repo": true, "drive-ux-scratch": true},
+		services:     map[string]*fakeService{},
+		svcImages:    map[string]driver.ServiceImage{},
+		svcUnhealthy: map[string]bool{},
 	}
 }
 
@@ -94,7 +102,7 @@ func (d *fakeDriver) takeCalls() []string {
 }
 
 func (d *fakeDriver) Capabilities(context.Context) (driver.Capabilities, error) {
-	return driver.Capabilities{SharedWriteDrives: true, EgressEnforcement: true, Architectures: []string{"arm64"}}, nil
+	return driver.Capabilities{SharedWriteDrives: true, EgressEnforcement: true, Architectures: []string{"arm64"}, Services: true}, nil
 }
 
 func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
@@ -107,7 +115,14 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	obs := driver.Observation{Computers: map[string]driver.ComputerState{}, Drives: map[string]driver.DriveState{}}
+	obs := driver.Observation{Computers: map[string]driver.ComputerState{}, Drives: map[string]driver.DriveState{}, Services: map[string]driver.ComputerState{}}
+	for name, s := range d.services {
+		st := driver.ComputerState{Name: name, Generation: s.spec.Generation, Power: driver.PowerAsleep, Running: s.running}
+		if s.running {
+			st.Power = driver.PowerAwake
+		}
+		obs.Services[name] = st
+	}
 	attached := map[string][]string{}
 	for name, c := range d.computers {
 		running := c.running && !d.ghostStarts
@@ -119,6 +134,11 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 		attached[c.spec.HomeDrive] = append(attached[c.spec.HomeDrive], name)
 		for _, m := range c.spec.Drives {
 			attached[m.DriveID] = append(attached[m.DriveID], name)
+		}
+	}
+	for name, sv := range d.services {
+		if sv.spec.StateDrive != "" {
+			attached[sv.spec.StateDrive] = append(attached[sv.spec.StateDrive], name)
 		}
 	}
 	for id := range d.drives {
@@ -705,7 +725,7 @@ func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) 
 	}
 	buf := &bytes.Buffer{}
 	c.logger = log.New(&lockedWriter{w: buf}, "", 0)
-	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second, PowerTick: 5 * time.Millisecond}
+	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second, PowerTick: 5 * time.Millisecond, HealthPoll: 5 * time.Millisecond, HealthStartup: 300 * time.Millisecond, HealthInterval: 20 * time.Millisecond}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf}

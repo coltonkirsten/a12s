@@ -109,6 +109,3 @@ func validatePower(field string, p Power, computer func(string) bool, service fu
 	}
 	return errs
 }
-
-// hasService reports whether the Fleet declares a Service (none before S4).
-func (f *Fleet) hasService(string) bool { return false }

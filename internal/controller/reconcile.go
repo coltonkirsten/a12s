@@ -64,8 +64,11 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 				"computers.%s: no material for credentials %s (check the bindings file)", name, strings.Join(missing, ", "))
 		}
 	}
-	lock, hosts, err := c.resolve(ctx, f, req.Lock, req.Presets)
+	lock, hosts, manifests, err := c.resolve(ctx, f, req.Lock, req.Presets, req.Refresh)
 	if err != nil {
+		return api.PutFleetResponse{}, err
+	}
+	if err := serviceCredentialErrors(f, manifests, creds); err != nil {
 		return api.PutFleetResponse{}, err
 	}
 
@@ -75,8 +78,23 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 	if c.state.Fleet != nil {
 		previous = c.state.Fleet.Computers
 	}
+	var previousServices map[string]fleet.Service
+	if c.state.Fleet != nil {
+		previousServices = c.state.Fleet.Services
+	}
 	c.state.Fleet, c.state.Lock = f, lock
 	maps.Copy(c.state.BundleHosts, hosts)
+	newServices := []string{}
+	for _, name := range f.ServiceNames() {
+		c.state.Manifests[name] = manifests[name]
+		srec := c.state.Services[name]
+		if srec == nil {
+			srec = &ServiceRecord{}
+			c.state.Services[name] = srec
+			newServices = append(newServices, name)
+		}
+		srec.Restarts = 0
+	}
 	c.creds = maps.Clone(creds)
 	for _, name := range f.ComputerNames() {
 		rec := c.state.Computers[name]
@@ -95,6 +113,17 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		return api.PutFleetResponse{}, err
 	}
 	prunePresets(c.cfg.StateDir, lock.Presets)
+	if c.inbox != nil {
+		for _, name := range newServices {
+			if _, ok, err := c.inbox.ServiceDesired(ctx, name); err == nil && !ok {
+				desired := driver.PowerAwake
+				if req.Asleep {
+					desired = driver.PowerAsleep
+				}
+				_ = c.inbox.SetServiceDesired(ctx, name, string(desired))
+			}
+		}
+	}
 	if err := c.syncInboxes(ctx, f, api.PrincipalLocal); err != nil {
 		return api.PutFleetResponse{}, err
 	}
@@ -103,7 +132,8 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		_ = c.inbox.ClearPaused(ctx) // a12s up resumes an auto-wake paused by a failed wake
 	}
 
-	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: f.InboxWarnings()}
+	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: f.InboxWarnings(),
+		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
 		return res, err
@@ -112,6 +142,49 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		spec := driver.DriveSpec{ID: driver.WorkDriveID(d), Kind: driver.DriveWork, Size: int64(f.Drives[d].Size)}
 		if _, err := c.drv.EnsureDrive(ctx, spec); err != nil {
 			return res, err
+		}
+	}
+
+	// Services first: nothing about a Computer waits on them, but a
+	// Computer that uses one should find it running.
+	goneSvc := map[string]bool{}
+	for name := range previousServices {
+		goneSvc[name] = true
+	}
+	for name := range obs.Services {
+		goneSvc[name] = true
+	}
+	for _, name := range slices.Sorted(maps.Keys(goneSvc)) {
+		if _, ok := f.Services[name]; ok {
+			continue
+		}
+		if err := c.removeService(ctx, name); err != nil {
+			return res, err
+		}
+		res.Services.Removed = append(res.Services.Removed, name)
+	}
+	souts := c.convergeServices(ctx, f.ServiceNames(), obs)
+	for _, name := range f.ServiceNames() {
+		o := souts[name]
+		_, existed := previousServices[name]
+		var waiting *serviceWaiting
+		if errors.As(o.err, &waiting) {
+			res.Warnings = append(res.Warnings, name+": "+waiting.Error())
+			o.err = nil
+		}
+		switch {
+		case o.err != nil:
+			if res.Errors == nil {
+				res.Errors = map[string]string{}
+			}
+			res.Errors[name] = o.err.Error()
+			if !existed {
+				res.Services.Created = append(res.Services.Created, name)
+			}
+		case !existed:
+			res.Services.Created = append(res.Services.Created, name)
+		case o.result == restaged:
+			res.Services.Updated = append(res.Services.Updated, name)
 		}
 	}
 
@@ -711,20 +784,32 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 // resolve checks the Fleet against the substrate and the lock, makes the
 // images and bundles available, and returns the lock with missing pins
 // added (an existing pin never changes) and each bundle's sign-in hosts.
-func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte) (*fleet.Lock, map[string][]string, error) {
+func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte, refresh []string) (*fleet.Lock, map[string][]string, map[string]*fleet.ServiceManifest, error) {
+	lock, hosts, caps, err := c.resolveComputers(ctx, f, in, presets)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	manifests, err := c.resolveServices(ctx, f, lock, caps, refresh)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return lock, hosts, manifests, nil
+}
+
+func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte) (*fleet.Lock, map[string][]string, driver.Capabilities, error) {
 	invalid := func(format string, args ...any) error {
 		return errorf(http.StatusBadRequest, api.ErrInvalid, format, args...)
 	}
 	caps, err := c.drv.Capabilities(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, caps, err
 	}
 	if !caps.EgressEnforcement && !f.Egress.Unenforced() {
-		return nil, nil, invalid("this substrate cannot enforce egress; set egress.enforcement: unenforced to run anyway")
+		return nil, nil, caps, invalid("this substrate cannot enforce egress; set egress.enforcement: unenforced to run anyway")
 	}
 	for _, d := range f.DriveNames() {
 		if f.Drives[d].Access == fleet.AccessSharedWrite && !caps.SharedWriteDrives {
-			return nil, nil, invalid("drives.%s: this substrate has no shared-write storage", d)
+			return nil, nil, caps, invalid("drives.%s: this substrate has no shared-write storage", d)
 		}
 	}
 
@@ -733,6 +818,7 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 		maps.Copy(lock.Images, in.Images)
 		maps.Copy(lock.Bundles, in.Bundles)
 		maps.Copy(lock.Presets, in.Presets)
+		maps.Copy(lock.Services, in.Services)
 	}
 	hosts := map[string][]string{}
 	seen := map[string]bool{}
@@ -742,7 +828,7 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 			seen["image "+comp.Image] = true
 			id, err := ensurePinned(ctx, imageRef(comp.Image), lock.Images[comp.Image], c.drv.EnsureImage)
 			if err != nil {
-				return nil, nil, fmt.Errorf("computers.%s.image: %w", name, err)
+				return nil, nil, caps, fmt.Errorf("computers.%s.image: %w", name, err)
 			}
 			lock.PinImage(comp.Image, id)
 		}
@@ -754,14 +840,14 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 				return b.ImageID, err
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("computers.%s.harness: %w", name, err)
+				return nil, nil, caps, fmt.Errorf("computers.%s.harness: %w", name, err)
 			}
 			m := b.Manifest
 			if m.Kind != comp.Harness.Kind || m.Version != comp.Harness.Version {
-				return nil, nil, invalid("computers.%s.harness: bundle %s is %s@%s", name, id, m.Kind, m.Version)
+				return nil, nil, caps, invalid("computers.%s.harness: bundle %s is %s@%s", name, id, m.Kind, m.Version)
 			}
 			if m.Arch != "" && !slices.Contains(caps.Architectures, m.Arch) {
-				return nil, nil, invalid("computers.%s.harness: bundle is for %s, the substrate runs %s", name, m.Arch, strings.Join(caps.Architectures, ", "))
+				return nil, nil, caps, invalid("computers.%s.harness: bundle is for %s, the substrate runs %s", name, m.Arch, strings.Join(caps.Architectures, ", "))
 			}
 			lock.PinBundle(m.Kind, m.Version, id)
 			hosts[key] = append([]string{}, m.SignInHosts...)
@@ -770,22 +856,22 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 			seen["preset "+p] = true
 			data, ok := presets[p]
 			if !ok {
-				return nil, nil, invalid("computers.%s.home.preset: %q was not sent with the Fleet", name, p)
+				return nil, nil, caps, invalid("computers.%s.home.preset: %q was not sent with the Fleet", name, p)
 			}
 			sum, err := hashPresetTar(data)
 			if err != nil {
-				return nil, nil, invalid("computers.%s.home.preset: %v", name, err)
+				return nil, nil, caps, invalid("computers.%s.home.preset: %v", name, err)
 			}
 			if pin := lock.Presets[p]; pin != "" && pin != sum {
-				return nil, nil, invalid("preset %s changed since fleet.lock pinned it (%s, now %s); remove the pin to accept it", p, pin, sum)
+				return nil, nil, caps, invalid("preset %s changed since fleet.lock pinned it (%s, now %s); remove the pin to accept it", p, pin, sum)
 			}
 			if err := savePreset(c.cfg.StateDir, sum, data); err != nil {
-				return nil, nil, err
+				return nil, nil, caps, err
 			}
 			lock.PinPreset(p, sum)
 		}
 	}
-	return lock, hosts, nil
+	return lock, hosts, caps, nil
 }
 
 // ensurePinned makes ref available and returns its image ID. When the lock

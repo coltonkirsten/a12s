@@ -67,6 +67,8 @@ type Driver interface {
 	// Sessions counts the interactive or exec sessions attached to a
 	// Computer now (enhancements §4.14: they keep it from auto-sleeping).
 	Sessions(ctx context.Context, computer string) (int, error)
+
+	ServiceDriver
 }
 
 // Errors returned by Drivers; test with errors.Is.
@@ -100,12 +102,17 @@ type Capabilities struct {
 	DriveQuota        bool     `json:"driveQuota"`
 	Architectures     []string `json:"architectures"` // GOARCH names: "arm64", "amd64"
 	SandboxedRuntime  bool     `json:"sandboxedRuntime"`
+	// Services is whether the substrate runs Services (enhancements §5.4:
+	// a multi-node Driver reports false until it encrypts both hops).
+	Services bool `json:"services"`
 }
 
 // Observation is the substrate's view of one Fleet.
 type Observation struct {
 	Computers map[string]ComputerState `json:"computers"`
 	Drives    map[string]DriveState    `json:"drives"`
+	// Services are the Fleet's Services, in the same shape (no computerd).
+	Services map[string]ComputerState `json:"services,omitempty"`
 }
 
 // ComputerState is one Computer as observed.
@@ -145,4 +152,7 @@ type Event struct {
 	Computer   string    `json:"computer"`
 	Generation int64     `json:"generation"`
 	ExitCode   int       `json:"exitCode,omitempty"`
+	// Service is set when the event concerns a Service (Computer is then
+	// the Service's name).
+	Service bool `json:"service,omitempty"`
 }

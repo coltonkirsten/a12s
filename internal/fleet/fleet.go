@@ -54,6 +54,8 @@ type Fleet struct {
 	Defaults   Computer            `yaml:"defaults,omitempty" json:"defaults,omitzero"`
 	Drives     map[string]Drive    `yaml:"drives,omitempty" json:"drives,omitempty"`
 	Computers  map[string]Computer `yaml:"computers" json:"computers"`
+	// Services are non-agent containers (enhancements §5).
+	Services map[string]Service `yaml:"services,omitempty" json:"services,omitempty"`
 }
 
 // Metadata names the Fleet.
@@ -92,6 +94,10 @@ type Computer struct {
 	// Power is the declared power policy (enhancements §4.14): Controller
 	// state, never hashed into a generation. Off unless set.
 	Power Power `yaml:"power,omitempty" json:"power,omitzero"`
+	// Uses lists the Services this Computer may reach (enhancements §5.4).
+	Uses []Use `yaml:"uses,omitempty" json:"uses,omitempty"`
+	// Grants are this Computer's capabilities: send to other inboxes (§5.3).
+	Grants Grants `yaml:"grants,omitempty" json:"grants,omitzero"`
 }
 
 // Power is a Computer's power policy.

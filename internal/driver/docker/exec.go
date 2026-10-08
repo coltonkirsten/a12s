@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -29,7 +30,14 @@ func (d *Driver) Exec(ctx context.Context, computer string, cmd []string, stdin 
 	if asRoot {
 		user = "0:0"
 	}
-	created, err := d.cli.ExecCreate(ctx, d.ContainerName(computer), client.ExecCreateOptions{
+	return d.exec(ctx, d.ContainerName(computer), user, cmd, stdin)
+}
+
+// exec runs cmd in a container as user and returns its exit code and
+// combined output.
+func (d *Driver) exec(ctx context.Context, containerName, user string, cmd []string, stdin io.Reader) (int, string, error) {
+	computer := strings.TrimPrefix(containerName, "a12s-"+d.fleet+"-")
+	created, err := d.cli.ExecCreate(ctx, containerName, client.ExecCreateOptions{
 		User:         user,
 		Cmd:          cmd,
 		AttachStdin:  stdin != nil,
