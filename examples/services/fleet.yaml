@@ -1,0 +1,82 @@
+# The enhancements exit-gate Fleet (docs/a12s-layer1-enhancements-design.md §3, §9): the lab
+# Computers plus Services. Reference images are built locally (make services); the gh Service
+# demonstrates a one-time login. Image names are local tags, so fleet.lock pins what you built.
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: lab }
+
+defaults:
+  resources: { cpu: 1, memory: 1Gi }
+  home: { size: 10Gi }
+  autonomy: full
+  egress: { allow: [] }
+  inbox: { maxMessages: 200, maxBytes: 320Ki }
+
+drives:
+  reference: { size: 5Gi, access: shared }
+
+computers:
+  scout:
+    harness: { kind: claude-code, version: 2.1.280, model: claude-haiku-4-5 }
+    image: slim
+    credentials: [anthropic]
+    egress: { allow: [api.anthropic.com] }
+    uses: [db]
+    power:
+      sleepAfterIdle: 15m
+      wakeOnMessage: { from: [service:clock, local], maxWakesPerHour: 6 }
+
+  builder:
+    harness: { kind: claude-code, version: 2.1.280, model: claude-haiku-4-5 }
+    image: slim
+    credentials: [anthropic]
+    egress: { allow: [api.anthropic.com] }
+    grants: { send: [reviewer] }
+    inbox: { maxMessages: 50 }
+
+  reviewer:
+    harness: { kind: claude-code, version: 2.1.280, model: claude-haiku-4-5 }
+    image: slim
+    credentials: [anthropic]
+    drives: [{ name: reference, at: /work/ref, readOnly: true }]
+    egress: { allow: [api.anthropic.com] }
+    inbox: { intro: "Review requests from builder, oldest first. Reply with a verdict per request." }
+
+services:
+  clock:
+    image: a12s/svc-cron:0.1
+    grants: { send: [scout, builder] }
+    config:
+      jobs:
+        - { name: tick, cron: "* * * * *", to: scout, body: "Clock tick: reply with the single word tock." }
+        - { name: deploy-check, cron: "*/15 * * * *", to: builder, replace: deploy-check, expires: 1h,
+            body: "Check the staging deploy and report anything red." }
+        - { name: not-granted, cron: "* * * * *", to: reviewer, body: "This job has no grant and is refused." }
+
+  pg:
+    image: postgres:17
+    manifest:
+      ports: { db: { port: 5432, protocol: tcp } }
+      health: { exec: ["pg_isready", "-U", "postgres"] }
+      state: { at: /var/lib/postgresql/data, size: 1Gi }
+      tmpfs: [/var/run/postgresql]
+      user: 999
+    credentials: [postgres]
+    config: { env: { POSTGRES_PASSWORD_FILE: /run/a12s/secrets/postgres } }
+
+  db:
+    image: a12s/svc-mcp-postgres:0.1
+    credentials: [postgres]
+    uses: [pg]
+    config:
+      command: ["/opt/mcp/bin/mcp-server-postgres"]
+      args: ["postgresql://postgres@${PGHOST}:${PGPORT}/postgres"]
+      envFrom: { PGPASSWORD: postgres }
+      hostPortFrom: { A12S_SERVICE_PG_DB: [PGHOST, PGPORT] }
+
+  hooks:
+    image: a12s/svc-webhook:0.1
+    grants: { send: [builder] }
+    publish: ["127.0.0.1:8787:8080"]
+    config: { routes: [{ path: /github, to: builder, secretFrom: gh-webhook }] }
+    credentials: [gh-webhook]

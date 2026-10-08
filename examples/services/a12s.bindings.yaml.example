@@ -1,0 +1,5 @@
+# Copy to a12s.bindings.yaml (git-ignored), or run a12s creds set <name> for each.
+credentials:
+  anthropic:  { file: ~/.a12s/anthropic }       # a `claude setup-token` token
+  postgres:   { file: ~/.a12s/lab/postgres }    # any password; pg and db share it
+  gh-webhook: { file: ~/.a12s/lab/gh-webhook }  # the GitHub webhook secret

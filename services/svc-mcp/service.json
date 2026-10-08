@@ -1,0 +1,11 @@
+{
+  "a12s": 1,
+  "name": "svc-mcp",
+  "version": "0.1.0",
+  "user": 1000,
+  "health": { "http": { "port": 8080, "path": "/healthz" }, "interval": "10s", "startup": "60s" },
+  "ports": { "mcp": { "port": 8080, "protocol": "http", "mcp": { "path": "/mcp" } } },
+  "credentials": [],
+  "login": null,
+  "resources": { "cpu": 0.5, "memory": "512Mi" }
+}

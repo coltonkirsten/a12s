@@ -1,0 +1,9 @@
+{
+  "a12s": 1,
+  "name": "svc-webhook",
+  "version": "0.1.0",
+  "user": 1000,
+  "health": { "http": { "port": 8080, "path": "/healthz" }, "interval": "10s", "startup": "30s" },
+  "ports": { "http": { "port": 8080, "protocol": "http" } },
+  "resources": { "cpu": 0.1, "memory": "64Mi" }
+}
