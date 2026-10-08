@@ -45,3 +45,13 @@ type ServicePowerRequest struct {
 	State       Power       `json:"state"`
 	Credentials Credentials `json:"credentials,omitempty"`
 }
+
+// LoginResponse is POST /v1/services/{s}/login: the memory-only login
+// container the CLI attaches to (enhancements §5.5).
+type LoginResponse struct {
+	Container string   `json:"container"`
+	User      string   `json:"user"`
+	Command   []string `json:"command"`
+	Read      []string `json:"read"`
+	Produces  string   `json:"produces"`
+}

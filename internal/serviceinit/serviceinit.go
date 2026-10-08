@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -314,4 +315,32 @@ func closeWrite(c net.Conn) {
 	if tc, ok := c.(*net.TCPConn); ok {
 		_ = tc.CloseWrite()
 	}
+}
+
+// LoginHold is a login container's process: it makes HOME, XDG_* and the
+// output directory on the tmpfs and waits to be removed.
+func LoginHold() error {
+	for _, d := range []string{"home", "config", "cache", "data", "state", "out"} {
+		if err := os.MkdirAll(filepath.Join(RunDir, "login", d), 0o700); err != nil {
+			return err
+		}
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
+	<-sig
+	return nil
+}
+
+// LoginRead prints what the login command wrote to $A12S_LOGIN_OUT.
+func LoginRead(w io.Writer) error {
+	p := filepath.Join(RunDir, "login", "out", "credential")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return fmt.Errorf("the login command wrote nothing to $A12S_LOGIN_OUT (%s): %w", p, err)
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return fmt.Errorf("$A12S_LOGIN_OUT (%s) is empty", p)
+	}
+	_, err = w.Write(data)
+	return err
 }

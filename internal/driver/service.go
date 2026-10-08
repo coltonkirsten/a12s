@@ -44,6 +44,8 @@ type ServiceDriver interface {
 	// RefreshImage resolves ref again, pulling it when a registry has it,
 	// and returns the image ID (`a12s lock update services/<svc>`).
 	RefreshImage(ctx context.Context, ref string) (string, error)
+
+	LoginDriver
 }
 
 // ServiceImage is what a Service image declares.
@@ -126,4 +128,35 @@ func EnvName(prefix string, parts ...string) string {
 		out += "_" + strings.ToUpper(strings.ReplaceAll(p, "-", "_"))
 	}
 	return out
+}
+
+// LoginSpec is a Service's memory-only login container (enhancements §5.5):
+// the pinned image, its manifest uid, the image's VOLUMEs (all on tmpfs),
+// no state drive, on the Service's own network.
+type LoginSpec struct {
+	Image   string   `json:"image"`
+	User    string   `json:"user"`
+	Volumes []string `json:"volumes,omitempty"`
+	Tmpfs   []string `json:"tmpfs,omitempty"`
+	Env     []string `json:"env,omitempty"`
+}
+
+// Paths in a login container, all on tmpfs.
+const (
+	LoginDir = "/run/a12s/login"
+	LoginOut = LoginDir + "/out/credential"
+)
+
+// Login is a running login container: exec the command as User in it, then
+// Read prints what the command wrote to $A12S_LOGIN_OUT.
+type Login struct {
+	Container string   `json:"container"`
+	User      string   `json:"user"`
+	Read      []string `json:"read"`
+}
+
+// LoginDriver runs login containers.
+type LoginDriver interface {
+	StartLogin(ctx context.Context, service string, spec LoginSpec) (Login, error)
+	RemoveLogin(ctx context.Context, service string) error
 }

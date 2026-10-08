@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"net/http"
@@ -673,7 +674,11 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 		if err != nil {
 			return fmt.Errorf("health: %v", unwrapNet(err))
 		}
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		res.Body.Close()
+		if reauth(body) {
+			return fmt.Errorf("credential: reauth  fix: a12s service login %s", name)
+		}
 		if res.StatusCode >= 400 {
 			return fmt.Errorf("health: HTTP %d", res.StatusCode)
 		}
@@ -691,6 +696,15 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 		return fmt.Errorf("health: exit %d: %s", code, out)
 	}
 	return nil
+}
+
+// reauth reports whether a health answer says the Service's session is gone
+// ({"credential": "reauth"}, §5.5): it needs `a12s service login`.
+func reauth(body []byte) bool {
+	var h struct {
+		Credential string `json:"credential"`
+	}
+	return json.Unmarshal(bytes.TrimSpace(body), &h) == nil && h.Credential == "reauth"
 }
 
 func unwrapNet(err error) error {
@@ -875,6 +889,10 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 			return err
 		}
 		_, err = c.convergeService(ctx, name, obs, ok)
+		var waiting *serviceWaiting
+		if errors.As(err, &waiting) {
+			return withFix(http.StatusConflict, api.ErrInvalid, waiting.Error())
+		}
 		return err
 	}
 	return errorf(http.StatusBadRequest, api.ErrInvalid, "state must be %q or %q", api.PowerAwake, api.PowerAsleep)
@@ -1115,4 +1133,10 @@ func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow b
 			done = nil // container output ended (it stopped); audit lines continue
 		}
 	}
+}
+
+// withFix makes an API error from a message carrying "  fix: …".
+func withFix(status int, code api.ErrorCode, msg string) error {
+	m, fix, _ := strings.Cut(msg, "  fix: ")
+	return &httpError{status: status, body: api.Error{Code: code, Message: m, Fix: fix}}
 }

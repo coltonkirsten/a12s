@@ -117,6 +117,8 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/services/{s}/logs", allow("", "", c.handleServiceLogs))
 	mux.HandleFunc("POST /v1/services/{s}/power", allow("", "", c.handleServicePower))
 	mux.HandleFunc("POST /v1/services/{s}/shell", allow("", "", c.handleServiceShell))
+	mux.HandleFunc("POST /v1/services/{s}/login", allow("", "", c.handleLogin))
+	mux.HandleFunc("DELETE /v1/services/{s}/login", allow("", "", c.handleLoginEnd))
 	mux.HandleFunc("POST /v1/tokens", allow("", "", c.handleTokenCreate))
 	mux.HandleFunc("GET /v1/tokens", allow("", "", c.handleTokens))
 	mux.HandleFunc("DELETE /v1/tokens/{name}", allow("", "", c.handleTokenDelete))

@@ -136,3 +136,21 @@ func (d *fakeDriver) RefreshImage(_ context.Context, ref string) (string, error)
 	}
 	return "", fmt.Errorf("no image %s", ref)
 }
+
+func (d *fakeDriver) StartLogin(_ context.Context, service string, spec driver.LoginSpec) (driver.Login, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.logins == nil {
+		d.logins = map[string]driver.LoginSpec{}
+	}
+	d.logins[service] = spec
+	d.record("login %s", service)
+	return driver.Login{Container: "a12s-lab-" + service + "-login", User: spec.User, Read: []string{"/a12s/init/x/a12s", "login-read"}}, nil
+}
+
+func (d *fakeDriver) RemoveLogin(_ context.Context, service string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.logins, service)
+	return nil
+}

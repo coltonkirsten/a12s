@@ -59,6 +59,7 @@ type fakeDriver struct {
 	services     map[string]*fakeService
 	svcImages    map[string]driver.ServiceImage
 	svcUnhealthy map[string]bool
+	logins       map[string]driver.LoginSpec
 }
 
 type fakeContainer struct {
