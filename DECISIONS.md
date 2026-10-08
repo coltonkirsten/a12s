@@ -210,3 +210,21 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
 - **`a12s init`** writes fleet.yaml, an empty bindings file and .gitignore; `--with db` adds `pg` + `db` and a
   commented `uses: [db]`, `--with cron` adds `clock`. Missing bindings fail `up` with
   `fix: a12s creds set <name>`.
+
+## S8: CLI polish
+
+- **One global `--json`** (and `--fleet`/`-F`) registered on every command, instead of per-command flags: up/lock,
+  apply, status, send, inbox (all subcommands), token, stop, sleep/wake, drive, down, service, creds, init and doctor
+  print JSON; `logs --json` and `prompt --json` print events as JSON lines. `service logs` stays text (container
+  output). The deprecated `-f <fleet>` still works for one release and warns once; on `logs` and `service logs`,
+  `-f` means follow.
+- **Fleet discovery:** `--fleet`/`-F`, else `$A12S_FLEET` when it looks like a path (containers set
+  `A12S_FLEET=<name>`, which is not), else the nearest `fleet.yaml` upward, else `fleet.yaml`.
+- **`a12s doctor`** checks the Fleet file, Docker, every image and bundle the Fleet needs (pinned ID or ref),
+  bindings (fail for Computers, warn for Services), the Controller, egress, each Computer's and Service's phase,
+  and warns on `npx` in a Service's `config.command`/`args`. Exit 1 on any fail.
+- **Error table:** `TestErrorTable` walks the known-fix errors (inbox limits, intro, Service-only and
+  Computer-only fields, power wildcards, unknown uses, grants to Services, egress.tcp on a Computer, missing
+  manifest, uncovered VOLUME, unbound credential, needs-a-login, no login, the removed turns endpoint, a bad
+  bearer token) and requires a `fix:` on each. The 401 now carries one.
+- **Completion:** `a12s completion bash|zsh` (commands and their subcommands).

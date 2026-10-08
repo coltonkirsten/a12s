@@ -68,6 +68,9 @@ func runInit(g *globals, args []string) error {
 		fmt.Fprintln(f, "# per-deployment credential bindings: never commit\na12s.bindings.yaml")
 		f.Close()
 	}
+	if g.json {
+		return printJSON(map[string]any{"dir": dir, "files": []string{fleetPath, bpath, gi}})
+	}
 	fmt.Printf("wrote %s, a12s.bindings.yaml and .gitignore in %s\n", "fleet.yaml", dir)
 	cred := "anthropic"
 	if *harness == "codex" {

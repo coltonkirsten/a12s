@@ -61,7 +61,7 @@ func runSend(g *globals, args []string) error {
 	key := fs.String("key", "", "idempotency key (default: a random one, so a retry never queues twice)")
 	replace := fs.String("replace", "", "replace key: supersede your pending message with this key")
 	expires := fs.String("expires", "", "0 (now or never), or a window: 90s, 15m, 1h, 7d")
-	asJSON := fs.Bool("json", false, "print the result as JSON")
+	asJSON := &g.json
 	meta := metaFlag{}
 	fs.Var(meta, "meta", "metadata key=value (repeatable)")
 	pos, err := parse(fs, args)
@@ -155,7 +155,7 @@ func runInbox(g *globals, args []string) error {
 	fs := g.flags("inbox")
 	all := fs.Bool("all", false, "include delivered and ended messages")
 	bodies := fs.Bool("bodies", false, "print message bodies")
-	asJSON := fs.Bool("json", false, "print the list as JSON")
+	asJSON := &g.json
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -206,6 +206,9 @@ func runInboxRm(g *globals, args []string) error {
 	if err := c.Do(ctx, "DELETE", computerPath(pos[0], "/inbox/"+url.PathEscape(pos[1])), nil, &m); err != nil {
 		return err
 	}
+	if g.json {
+		return printJSON(m)
+	}
 	fmt.Printf("withdrew %s from %s\n", m.ID, pos[0])
 	return nil
 }
@@ -233,6 +236,9 @@ func runInboxClear(g *globals, args []string) error {
 		return err
 	}
 	if l.Pending == 0 {
+		if g.json {
+			return printJSON(api.ClearResponse{})
+		}
 		fmt.Printf("%s has no pending messages\n", name)
 		return nil
 	}
@@ -250,6 +256,9 @@ func runInboxClear(g *globals, args []string) error {
 	var res api.ClearResponse
 	if err := c.Do(ctx, "POST", computerPath(name, "/inbox/clear"), api.ClearRequest{ThroughSeq: &head, Orphan: *orphan}, &res); err != nil {
 		return err
+	}
+	if g.json {
+		return printJSON(res)
 	}
 	fmt.Printf("discarded %d message(s) for %s\n", res.Discarded, name)
 	return nil
@@ -273,6 +282,9 @@ func runInboxHold(g *globals, args []string) error {
 	var s api.InboxSummary
 	if err := c.Do(ctx, "POST", computerPath(pos[0], "/inbox/hold"), api.HoldRequest{}, &s); err != nil {
 		return err
+	}
+	if g.json {
+		return printJSON(s)
 	}
 	fmt.Printf("%s's inbox is held: messages are kept, not delivered (a12s inbox resume %s)\n", pos[0], pos[0])
 	return nil
@@ -302,6 +314,9 @@ func runInboxResume(g *globals, args []string) error {
 	if err := c.Do(ctx, "POST", computerPath(pos[0], "/inbox/resume"), req, &s); err != nil {
 		return err
 	}
+	if g.json {
+		return printJSON(s)
+	}
 	msg := fmt.Sprintf("%s's inbox resumed", pos[0])
 	if *fresh {
 		msg += "; the next Batch starts a new session"
@@ -318,7 +333,7 @@ func runToken(g *globals, args []string) error {
 	fs := g.flags("token " + sub)
 	actions := fs.String("actions", "", "with create: comma-separated actions ("+strings.Join(api.TokenActions, ",")+")")
 	computers := fs.String("computers", "", "with create: comma-separated Computers, or *")
-	asJSON := fs.Bool("json", false, "print as JSON")
+	asJSON := &g.json
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -371,6 +386,9 @@ func runToken(g *globals, args []string) error {
 		}
 		if err := c.Do(ctx, "DELETE", "/v1/tokens/"+url.PathEscape(pos[0]), nil, nil); err != nil {
 			return err
+		}
+		if g.json {
+			return printJSON(map[string]string{"revoked": pos[0]})
 		}
 		fmt.Printf("revoked token %s\n", pos[0])
 	default:

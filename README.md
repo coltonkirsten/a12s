@@ -50,3 +50,21 @@ copy of your interactive login. For Codex, bind `openai` to an OpenAI API key, o
 
 Build everything with `make`; see `PLAN.md` for layout and `EXIT-GATE.md` for
 the acceptance run. MIT licensed.
+
+## Inbox and Services (Layer 1 enhancements)
+
+Every Computer has a durable inbox: `a12s send <name> "…"` queues work while it is busy or asleep, and the next
+idle moment delivers everything pending as one turn (`a12s prompt` is enqueue-and-stream). A declared power policy
+can put a Computer to sleep when idle and let named senders wake it. **Services** are non-agent containers from the
+same Fleet file (a clock, a database, an MCP server that holds a login, a webhook bridge) with least-privilege grants:
+see [docs/services.md](docs/services.md). Try it:
+
+```sh
+a12s init demo --with cron && cd demo     # scaffold a Fleet with a clock
+a12s creds set anthropic                  # paste a `claude setup-token` token
+make -C .. services && a12s up            # build the reference Services, then start everything
+a12s doctor                               # one line per check, with the fix
+```
+
+Design: `docs/a12s-layer1-enhancements-design.md`. Every listing takes `--json`; the Fleet file is found from
+`--fleet`/`-F`, `$A12S_FLEET`, then the nearest `fleet.yaml` upward.

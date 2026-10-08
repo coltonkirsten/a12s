@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -123,10 +124,21 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 		}
 		fmt.Fprintf(stderr, "pinned in %s: %s\n", fleet.LockFile, strings.Join(added, ", "))
 	}
+	failed := cli.UpErrors(resp)
+	if g.json {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(resp); err != nil {
+			return err
+		}
+		if len(failed) > 0 {
+			return exitCode(1)
+		}
+		return nil
+	}
 	for _, line := range cli.UpSummary(resp, asleep) {
 		fmt.Fprintln(stdout, line)
 	}
-	failed := cli.UpErrors(resp)
 	for _, line := range failed {
 		fmt.Fprintln(stderr, line)
 	}

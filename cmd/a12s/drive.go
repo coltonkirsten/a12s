@@ -40,6 +40,9 @@ func driveLs(g *globals, args []string) error {
 	if err := c.Do(ctx, "GET", "/v1/drives", nil, &resp); err != nil {
 		return err
 	}
+	if g.json {
+		return printJSON(resp)
+	}
 	cli.WriteDrives(os.Stdout, resp.Drives)
 	return nil
 }
@@ -74,6 +77,9 @@ func driveRm(g *globals, args []string) error {
 			return fmt.Errorf("drive %s is attached; remove it from the Fleet (and run a12s up) first: %w", name, err)
 		}
 		return err
+	}
+	if g.json {
+		return printJSON(map[string]string{"removed": name})
 	}
 	fmt.Println("removed drive " + name)
 	return nil

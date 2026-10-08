@@ -108,7 +108,11 @@ func runPrompt(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout)}
+	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout), json: g.json}
+	if g.json {
+		b, _ := json.Marshal(map[string]any{"message": res, "turn": turn})
+		fmt.Println(string(b))
+	}
 	s := &cli.Stream{
 		Client: c,
 		Path:   computerPath(name, "/events?turn="+url.QueryEscape(turn)),
@@ -288,12 +292,27 @@ type turnPrinter struct {
 	mine        string // the caller's Message id, for the batch line
 	out, errOut io.Writer
 	tty         bool // stdout is a terminal (shared with stderr)
+	json        bool // print each event as a JSON line instead
 	midLine     bool // stdout's last text did not end a line
 	status      string
 }
 
 func (p *turnPrinter) handle(e api.Event) (bool, error) {
 	if e.Turn != "" && e.Turn != p.turn {
+		return false, nil
+	}
+	if p.json {
+		b, err := json.Marshal(e)
+		if err != nil {
+			return true, err
+		}
+		fmt.Fprintln(p.out, string(b))
+		if e.Type == api.EventTurnFinished {
+			var d api.TurnFinishedData
+			_ = json.Unmarshal(e.Data, &d)
+			p.status = d.Status
+			return true, nil
+		}
 		return false, nil
 	}
 	switch e.Type {
@@ -371,8 +390,14 @@ func runStop(g *globals, args []string) error {
 				if err := c.Do(ctx, "POST", computerPath(name, "/inbox/hold"), api.HoldRequest{Reason: "a12s stop --hold"}, nil); err != nil {
 					return err
 				}
+				if g.json {
+					return printJSON(map[string]any{"computer": name, "turn": nil, "held": true})
+				}
 				fmt.Printf("%s has no active turn; its inbox is held (a12s inbox resume %s)\n", name, name)
 				return nil
+			}
+			if g.json {
+				return printJSON(map[string]any{"computer": name, "turn": nil, "held": false})
 			}
 			fmt.Printf("%s has no active turn\n", name)
 			return nil
@@ -384,6 +409,9 @@ func runStop(g *globals, args []string) error {
 		if err := c.Do(ctx, "POST", computerPath(name, "/turns/"+url.PathEscape(cs.ActiveTurn)+"/stop"+q), struct{}{}, nil); err != nil {
 			return err
 		}
+		if g.json {
+			return printJSON(map[string]any{"computer": name, "turn": cs.ActiveTurn, "status": "stopping", "held": *hold})
+		}
 		fmt.Printf("stopping turn %s on %s\n", cs.ActiveTurn, name)
 		if *hold {
 			fmt.Printf("%s's inbox is held (a12s inbox resume %s)\n", name, name)
@@ -394,8 +422,8 @@ func runStop(g *globals, args []string) error {
 }
 
 func runLogs(g *globals, args []string) error {
-	fs := g.flags("logs")
-	follow := fs.Bool("follow", false, "keep streaming new events")
+	follow := new(bool)
+	fs := g.flagsFollow("logs", follow)
 	since := fs.Int64("since", 0, "start after this seq")
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -422,6 +450,14 @@ func runLogs(g *globals, args []string) error {
 		UntilHead: !*follow,
 	}
 	err = s.Run(ctx, func(e api.Event) (bool, error) {
+		if g.json {
+			b, err := json.Marshal(e)
+			if err != nil {
+				return true, err
+			}
+			fmt.Println(string(b))
+			return false, nil
+		}
 		fmt.Println(cli.LogLine(e))
 		return false, nil
 	})
