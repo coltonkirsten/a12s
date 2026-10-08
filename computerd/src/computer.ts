@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { chownSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { chownSync, existsSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
@@ -189,6 +189,7 @@ export class Computer {
     this.journal.acceptTurn(req.requestId, turnId, hash, started, wanted);
     let run;
     try {
+      await this.testHooks('accept');
       if (req.session === 'current' && this.sessionDamaged) throw new ResumeError(this.sessionDamaged);
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
@@ -241,6 +242,29 @@ export class Computer {
     return { turnId, sessionId };
   }
 
+  /**
+   * Exit-gate test hooks (enhancements §9 gates 4 and 20): files in the root-only state dir, so only an operator
+   * with `a12s shell --root` can arm them, and each fires once. At 'accept': `delay-before-dispatch` (seconds) waits,
+   * `fail-before-dispatch` fails the turn before the harness sees it, `exit-after-accept` kills computerd. At
+   * 'dispatch': `exit-after-dispatch` kills computerd right after turn.dispatched is on disk.
+   */
+  private async testHooks(at: 'accept' | 'dispatch'): Promise<void> {
+    const dir = join(this.cfg.stateDir, 'test-hooks');
+    const take = (name: string): string | null => {
+      const p = join(dir, name);
+      if (!existsSync(p)) return null;
+      const v = readFileSync(p, 'utf8').trim();
+      rmSync(p, { force: true });
+      return v;
+    };
+    if (at === 'accept') {
+      const delay = take('delay-before-dispatch');
+      if (delay !== null) await new Promise((r) => setTimeout(r, Math.min(Number(delay) || 0, 600) * 1000));
+      if (take('fail-before-dispatch') !== null) throw new Error('test hook: failed before dispatch');
+      if (take('exit-after-accept') !== null) process.exit(70);
+    } else if (take('exit-after-dispatch') !== null) process.exit(71);
+  }
+
   /** A continuation that failed before dispatch is dropped, never retried (§4.5). */
   private abandonContinuation(req: TurnRequest, reason: string, scope: { turn: string | null; session: string | null }): void {
     if (!req.continuation || this.owedContinuation?.id !== req.requestId) return;
@@ -262,6 +286,7 @@ export class Computer {
           const cont = req.continuation && this.owedContinuation?.id === req.requestId ? req.requestId : null;
           if (cont) this.owedContinuation = null;
           this.journal.append('turn.dispatched', cont ? { continuation: cont } : {}, { turn: active.turnId, session });
+          await this.testHooks('dispatch');
           continue;
         }
         if (ev.type === 'session.changed') {

@@ -371,6 +371,42 @@ type fakeComputerd struct {
 	// conflictNext answers the next StartTurn 409 busy (a turn that raced
 	// the drainer); autoFinish completes every turn right after it starts.
 	conflictNext, autoFinish bool
+	// sealed are the inbox.discarded records journaled, by Message id.
+	sealed map[string]map[string]any
+}
+
+func (f *fakeComputerd) JournalInbox(_ context.Context, records any) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.up {
+		return nil, errDown
+	}
+	b, _ := json.Marshal(records)
+	var recs []map[string]any
+	json.Unmarshal(b, &recs)
+	if f.sealed == nil {
+		f.sealed = map[string]map[string]any{}
+	}
+	var ids []string
+	for _, r := range recs {
+		id, _ := r["id"].(string)
+		if _, ok := f.sealed[id]; !ok {
+			f.sealed[id] = r
+			f.emitLocked(api.EventInboxDiscarded, "", r)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (f *fakeComputerd) sealedSnapshot() map[string]map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]map[string]any{}
+	for k, v := range f.sealed {
+		out[k] = v
+	}
+	return out
 }
 
 func (f *fakeComputerd) sessionLocked() string {

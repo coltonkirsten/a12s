@@ -330,9 +330,19 @@ func (c *Controller) handleTokenDelete(w http.ResponseWriter, r *http.Request) {
 
 // expiryLoop expires pending Messages at their deadlines (§4.11): a timer
 // on the earliest expiresAt, re-armed on every inbox change; on start it
-// expires everything overdue first.
+// expires everything overdue first. It also prunes, hourly, what is past
+// retention and sealed in the journal.
 func (c *Controller) expiryLoop(ctx context.Context) {
+	var pruned time.Time
 	for ctx.Err() == nil {
+		if time.Since(pruned) > time.Hour {
+			pruned = time.Now()
+			if n, err := c.inbox.Prune(ctx); err != nil {
+				c.logf("inbox prune: %v", err)
+			} else if n > 0 {
+				c.logf("inbox: pruned %d messages past retention", n)
+			}
+		}
 		if _, err := c.inbox.ExpireDue(ctx); err != nil && ctx.Err() == nil {
 			c.logf("inbox expiry: %v", err)
 		}

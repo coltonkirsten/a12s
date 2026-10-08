@@ -20,6 +20,10 @@ func runWake(g *globals, args []string) error { return power(g, "wake", api.Powe
 func power(g *globals, verb string, state api.Power, args []string) error {
 	fs := g.flags(verb)
 	all := fs.Bool("all", false, "every Computer in the Fleet")
+	var clearInbox *bool
+	if state == api.PowerAwake {
+		clearInbox = fs.Bool("clear-inbox", false, "discard the pending messages (journaled, not erased) before the Computer takes work")
+	}
 	names, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -63,9 +67,18 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	var wg sync.WaitGroup
 	for i, n := range names {
 		reqs[i].State = state
+		if clearInbox != nil && *clearInbox {
+			// One requestId per Computer: a retry is the same clear.
+			reqs[i].ClearInbox, reqs[i].RequestID = true, cli.NewRequestID()
+		}
 		wg.Go(func() {
-			if err := c.Do(ctx, "POST", computerPath(n, "/power"), reqs[i], nil); err != nil {
+			var cs api.ComputerStatus
+			if err := c.Do(ctx, "POST", computerPath(n, "/power"), reqs[i], &cs); err != nil {
 				errs[i] = fmt.Errorf("%s %s: %w", verb, n, err)
+				return
+			}
+			if cs.InboxCleared != nil {
+				fmt.Printf("%s: discarded %d pending message(s) (journaled with their bodies)\n", n, *cs.InboxCleared)
 			}
 		})
 	}

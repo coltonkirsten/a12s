@@ -22,6 +22,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/fleet"
+	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
 // Default image references (PLAN "HarnessBundle image").
@@ -633,6 +634,21 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 	case api.PowerAsleep:
 		return c.sleep(ctx, name)
 	case api.PowerAwake:
+		if req.ClearInbox && c.inbox != nil {
+			// Recorded and applied before admission opens (§4.7).
+			id := req.RequestID
+			if id == "" {
+				id = "wake-" + inbox.NewULID(time.Now())
+			}
+			through, n, err := c.inbox.WakeClear(ctx, name, id, api.PrincipalLocal)
+			if err != nil {
+				return err
+			}
+			c.logf("%s: wake --clear-inbox discarded %d pending messages (through seq %d)", name, n, through)
+			c.mu.Lock()
+			c.rtLocked(name).lastClear = n
+			c.mu.Unlock()
+		}
 		obs, ok, err := c.observeOne(ctx, name)
 		if err != nil {
 			return err

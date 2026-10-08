@@ -94,6 +94,16 @@ func (c *Client) TurnSummary(ctx context.Context, turnID string) (api.TurnSummar
 	return s, err
 }
 
+// JournalInbox is POST /v1/journal/inbox: it seals inbox.discarded records
+// in the journal, keyed by Message id, and returns the ids sealed.
+func (c *Client) JournalInbox(ctx context.Context, records any) ([]string, error) {
+	var res struct {
+		Journaled []string `json:"journaled"`
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/journal/inbox", map[string]any{"records": records}, &res)
+	return res.Journaled, err
+}
+
 // Stop is POST /v1/turns/{id}/stop; it is idempotent.
 func (c *Client) Stop(ctx context.Context, turnID string) error {
 	return c.do(ctx, http.MethodPost, "/v1/turns/"+url.PathEscape(turnID)+"/stop", struct{}{}, nil)

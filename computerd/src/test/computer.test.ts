@@ -204,7 +204,7 @@ test('acceptance is journaled before dispatch; a crash mid-turn ends it interrup
   const after = new Computer(cfg, journal, fresh, {});
   await after.start();
   assert.equal(journal.turnInfo(t.turnId)?.finished, 'interrupted');
-  assert.equal(journal.after(0, t.turnId, 100).at(-1)?.data.error, 'computerd restarted');
+  assert.equal(journal.after(0, t.turnId, 100).find((e) => e.type === 'turn.finished')?.data.error, 'computerd restarted');
   assert.deepEqual(await after.submitTurn({ requestId: 'r1', session: 'new', prompt: 'publish the release' }), t);
   assert.equal(fresh.inputs.length, 0, 'the retry did not reach the harness');
 });
@@ -327,4 +327,20 @@ test('failed credential wiring never advances the acknowledged generation', asyn
   writeFileSync(join(cfg.secretsDir, '.generation'), '3\n');
   await until(() => again.status().credentialGeneration === 3);
   await again.shutdown(100);
+});
+
+test('test hooks: fail-before-dispatch fails the turn before the harness sees it, once', async () => {
+  const { cfg, journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const { mkdirSync, writeFileSync, existsSync } = await import('node:fs');
+  mkdirSync(join(cfg.stateDir, 'test-hooks'), { recursive: true });
+  writeFileSync(join(cfg.stateDir, 'test-hooks', 'fail-before-dispatch'), '');
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  await until(() => finished(t.turnId) === 'failed');
+  assert.equal(adapter.inputs.length, 0);
+  assert.equal(journal.turnSummary(t.turnId)?.dispatched, false);
+  assert.equal(existsSync(join(cfg.stateDir, 'test-hooks', 'fail-before-dispatch')), false);
+  const t2 = await computer.submitTurn({ requestId: 'r2', session: 'new', prompt: 'x' });
+  adapter.finish();
+  await until(() => finished(t2.turnId) === 'completed');
 });
