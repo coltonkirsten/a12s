@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 
@@ -161,7 +162,7 @@ func TestCheckNetwork(t *testing.T) {
 		Options: map[string]string{gatewayModeOption: "isolated"},
 		Labels:  map[string]string{LabelFleet: "lab", LabelComputer: "c", LabelRole: RoleComputer},
 	}
-	if err := d.checkNetwork(good, "c"); err != nil {
+	if err := d.checkNetwork(good, "c", RoleComputer); err != nil {
 		t.Fatal(err)
 	}
 	mutate := map[string]func(n *network.Network){
@@ -179,7 +180,7 @@ func TestCheckNetwork(t *testing.T) {
 	for name, m := range mutate {
 		n := good
 		m(&n)
-		if err := d.checkNetwork(n, "c"); err == nil {
+		if err := d.checkNetwork(n, "c", RoleComputer); err == nil {
 			t.Errorf("%s: want rejection", name)
 		}
 	}
@@ -286,5 +287,26 @@ func TestCreateOptions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(mounts, wantMounts) {
 		t.Errorf("mounts = %+v", mounts)
+	}
+}
+
+func TestToEventRoles(t *testing.T) {
+	msg := func(role, name string) events.Message {
+		attrs := map[string]string{LabelRole: role, LabelGeneration: "3", "exitCode": "1"}
+		if role == RoleService {
+			attrs[LabelService] = name
+		} else {
+			attrs[LabelComputer] = name
+		}
+		return events.Message{Action: events.ActionDie, Actor: events.Actor{Attributes: attrs}}
+	}
+	if ev, ok := toEvent(msg(RoleComputer, "scout")); !ok || ev.Service || ev.Computer != "scout" || ev.Generation != 3 || ev.ExitCode != 1 {
+		t.Fatalf("computer: %+v %v", ev, ok)
+	}
+	if ev, ok := toEvent(msg(RoleService, "clock")); !ok || !ev.Service || ev.Computer != "clock" {
+		t.Fatalf("service: %+v %v", ev, ok)
+	}
+	if _, ok := toEvent(msg(RolePublish, "clock")); ok {
+		t.Fatal("a publish forwarder is not a Service")
 	}
 }

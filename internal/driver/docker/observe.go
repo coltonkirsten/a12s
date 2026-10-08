@@ -18,6 +18,7 @@ func (d *Driver) Observe(ctx context.Context) (driver.Observation, error) {
 	obs := driver.Observation{
 		Computers: map[string]driver.ComputerState{},
 		Drives:    map[string]driver.DriveState{},
+		Services:  map[string]driver.ComputerState{},
 	}
 	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: d.computerFilter()})
 	if err != nil {
@@ -39,6 +40,26 @@ func (d *Driver) Observe(ctx context.Context) (driver.Observation, error) {
 			return obs, fmt.Errorf("observe: inspect %s: %w", name, err)
 		}
 		obs.Computers[name] = d.computerState(name, res.Container)
+	}
+	slist, err := d.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: d.serviceFilter()})
+	if err != nil {
+		return obs, fmt.Errorf("observe: list services: %w", err)
+	}
+	for _, s := range slist.Items {
+		name := s.Labels[LabelService]
+		for _, m := range s.Mounts {
+			if m.Type == mount.TypeVolume {
+				attached[m.Name] = append(attached[m.Name], name)
+			}
+		}
+		res, err := d.cli.ContainerInspect(ctx, s.ID, client.ContainerInspectOptions{})
+		if isNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return obs, fmt.Errorf("observe: inspect service %s: %w", name, err)
+		}
+		obs.Services[name] = d.computerState(name, res.Container)
 	}
 
 	vols, err := d.cli.VolumeList(ctx, client.VolumeListOptions{Filters: d.fleetFilter().Add("label", LabelDrive)})
@@ -95,7 +116,8 @@ func isStopExit(code int) bool { return code == 0 || code == 143 || code == 137 
 
 // Watch streams died, OOM-killed and removed Computers of this Fleet.
 func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
-	filters := d.computerFilter().
+	// Label filters AND together, so the role is checked per event instead.
+	filters := d.fleetFilter().
 		Add("type", string(events.ContainerEventType)).
 		Add("event", string(events.ActionDie), string(events.ActionOOM), string(events.ActionDestroy))
 	res := d.cli.Events(ctx, client.EventsListOptions{Filters: filters})
@@ -127,6 +149,13 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 func toEvent(m events.Message) (driver.Event, bool) {
 	attrs := m.Actor.Attributes
 	ev := driver.Event{Computer: attrs[LabelComputer], Generation: parseGeneration(attrs)}
+	switch attrs[LabelRole] {
+	case RoleComputer:
+	case RoleService:
+		ev.Computer, ev.Service = attrs[LabelService], true
+	default:
+		return ev, false
+	}
 	switch m.Action {
 	case events.ActionDie:
 		ev.Type = driver.EventDied

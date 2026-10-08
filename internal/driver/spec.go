@@ -23,7 +23,8 @@ func WorkDriveID(drive string) string { return "drive-" + drive }
 type DriveSpec struct {
 	ID   string    `json:"id"` // HomeDriveID or WorkDriveID
 	Kind DriveKind `json:"kind"`
-	// Computer owns a home drive; empty for work drives.
+	// Computer owns a home drive (or, for a state drive, the Service);
+	// empty for work drives.
 	Computer string `json:"computer,omitempty"`
 	// Size in bytes; recorded, and enforced only where Capabilities.DriveQuota.
 	Size int64 `json:"size,omitempty"`

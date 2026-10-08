@@ -95,6 +95,11 @@ type Timing struct {
 	MaxRestarts    int           // then Error{retryable}
 	ReadBack       time.Duration // a Driver change showing in Observe
 	PowerTick      time.Duration // power-policy evaluation
+	// Service health: polling during startup, and caps on the manifest's
+	// startup grace and interval (zero: the manifest's).
+	HealthPoll     time.Duration
+	HealthStartup  time.Duration
+	HealthInterval time.Duration
 }
 
 var defaultTiming = Timing{
@@ -105,6 +110,7 @@ var defaultTiming = Timing{
 	MaxRestarts:    3,
 	ReadBack:       10 * time.Second,
 	PowerTick:      time.Second,
+	HealthPoll:     time.Second,
 }
 
 // computerdClient is what the Controller needs from computerd.
@@ -169,6 +175,9 @@ type Controller struct {
 	clients  map[string]computerdClient
 	proxyIPs map[netip.Addr]string // Controller IP on a Computer network -> Computer
 	drains   map[string]*drainState
+	srt      map[string]*serviceRuntime
+	// auditSubs are followers of a Service's audit lines (service logs -f).
+	auditSubs map[string][]chan string
 	// inboxBcast is closed and replaced on every inbox change (Message streams).
 	inboxBcast chan struct{}
 	addrsAt    time.Time
@@ -206,6 +215,8 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		locks:     map[string]*sync.Mutex{},
 		clients:   map[string]computerdClient{},
 		proxyIPs:  map[netip.Addr]string{},
+		srt:       map[string]*serviceRuntime{},
+		auditSubs: map[string][]chan string{},
 	}
 	store.OnChange(c.inboxChanged)
 	clientTLS, err := ca.ClientTLS()
@@ -333,6 +344,14 @@ func (c *Controller) Start(ctx context.Context) {
 				}
 			}
 		}
+		for _, name := range slices.Sorted(maps.Keys(obs.Services)) {
+			if _, ok := f.Services[name]; !ok {
+				if err := c.removeService(ctx, name); err != nil {
+					c.logf("resume: remove service %s: %v", name, err)
+				}
+			}
+		}
+		c.convergeServices(ctx, f.ServiceNames(), obs)
 		c.convergeAll(ctx, f.ComputerNames(), obs)
 		c.refreshAddrs(ctx)
 		c.kickAll()
@@ -455,6 +474,11 @@ func (c *Controller) refreshAddrs(ctx context.Context) error {
 				c.proxyIPs[ip] = name
 			}
 		}
+		for name := range c.state.Fleet.Services {
+			if ip, ok := addrs[c.containerName(name)]; ok {
+				c.proxyIPs[ip] = name
+			}
+		}
 	}
 	return nil
 }
@@ -529,10 +553,14 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	return name, ok
 }
 
-// policy is a Computer's egress policy: that of its active generation.
+// policy is a Computer's or Service's egress policy: that of its active
+// generation.
 func (c *Controller) policy(name string) (Policy, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if srec := c.state.Services[name]; c.state.Fleet != nil && srec != nil {
+		return NewPolicy(srec.Active.Allow, nil, srec.Active.Unenforced), true
+	}
 	rec := c.state.Computers[name]
 	if c.state.Fleet == nil || rec == nil {
 		return Policy{}, false
@@ -573,6 +601,10 @@ func (c *Controller) authorizeLease(computer, drive string) error {
 
 // denied journals a denied egress request in the Computer (§8 gate 7).
 func (c *Controller) denied(name, host string, port int, reason string) {
+	if c.isService(name) {
+		c.auditf(name, "egress denied %s (%s)", net.JoinHostPort(host, strconv.Itoa(port)), reason)
+		return
+	}
 	c.logf("%s: egress denied %s (%s)", name, net.JoinHostPort(host, strconv.Itoa(port)), reason)
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()

@@ -572,6 +572,12 @@ func (c *Controller) watch(ctx context.Context) {
 			c.logf("watch: %v", err)
 		} else {
 			for ev := range events {
+				if ev.Service {
+					if ev.Type == driver.EventDied {
+						c.spawn(func() { c.serviceDied(ev) })
+					}
+					continue
+				}
 				switch ev.Type {
 				case driver.EventDied:
 					c.spawn(func() { c.died(ev) })

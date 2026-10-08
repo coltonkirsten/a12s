@@ -25,7 +25,43 @@ func runUp(g *globals, args []string) error {
 	if len(pos) > 0 {
 		return usageError("up takes no arguments")
 	}
+	return g.up(*asleep, *image, nil)
+}
 
+// runLock is `a12s lock update services/<svc>`: the explicit way to move a
+// Service's pin on an unchanged ref (enhancements §5.6). It resolves the
+// ref again and applies the Fleet, as `a12s up` does.
+func runLock(g *globals, args []string) error {
+	fs := g.flags("lock")
+	image := fs.String("controller-image", cli.DefaultControllerImage, "Controller image")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) < 2 || pos[0] != "update" {
+		return usageError("lock update services/<svc>...")
+	}
+	f, err := fleet.Load(g.fleetPath)
+	if err != nil {
+		return err
+	}
+	var refresh []string
+	for _, target := range pos[1:] {
+		name, ok := strings.CutPrefix(target, "services/")
+		if !ok {
+			return usageError(fmt.Sprintf("%s: only services/<svc> pins move with lock update; image and bundle pins move by editing fleet.lock", target))
+		}
+		if !f.HasService(name) {
+			return fmt.Errorf("no Service %s in %s", name, g.fleetPath)
+		}
+		refresh = append(refresh, name)
+	}
+	return g.up(false, *image, refresh)
+}
+
+// up applies the Fleet file: `a12s up`, and `a12s lock update` with the
+// Services whose pins move in refresh.
+func (g *globals) up(asleep bool, image string, refresh []string) error {
 	f, err := fleet.Load(g.fleetPath)
 	if err != nil {
 		return err
@@ -43,6 +79,11 @@ func runUp(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
+	svcCreds, err := b.ResolveBound(cli.NeededByServices(f))
+	if err != nil {
+		return err
+	}
+	maps.Copy(creds, svcCreds)
 	presets, err := g.presets(f, lock)
 	if err != nil {
 		return err
@@ -52,18 +93,21 @@ func runUp(g *globals, args []string) error {
 	defer cancel()
 	c, err := cli.EnsureController(ctx, cli.StartOptions{
 		Fleet: f.Metadata.Name,
-		Image: *image,
+		Image: image,
 		Log:   func(s string) { fmt.Fprintln(os.Stderr, s) },
 	})
 	if err != nil {
 		return err
 	}
-	req := api.PutFleetRequest{Fleet: f, Lock: lock, Credentials: creds, Asleep: *asleep, Presets: presets}
+	for _, name := range refresh {
+		delete(lock.Services, fleet.ServiceKey(name, f.Services[name].Image))
+	}
+	req := api.PutFleetRequest{Fleet: f, Lock: lock, Credentials: creds, Asleep: asleep, Presets: presets, Refresh: refresh}
 	var resp api.PutFleetResponse
 	if err := c.Do(ctx, "PUT", "/v1/fleet", req, &resp); err != nil {
 		return err
 	}
-	return g.finishUp(onDisk, lock, &resp, *asleep, os.Stdout, os.Stderr)
+	return g.finishUp(onDisk, lock, &resp, asleep, os.Stdout, os.Stderr)
 }
 
 // finishUp writes new pins to fleet.lock and prints the summary, then each
@@ -87,7 +131,7 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 		fmt.Fprintln(stderr, line)
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("%d Computer(s) did not converge (a12s status shows their state)", len(failed))
+		return fmt.Errorf("%d Computer(s) or Service(s) did not converge (a12s status shows their state)", len(failed))
 	}
 	return nil
 }
@@ -125,7 +169,7 @@ func (g *globals) presets(f *fleet.Fleet, lock *fleet.Lock) (map[string][]byte, 
 }
 
 func cloneLock(l *fleet.Lock) *fleet.Lock {
-	return &fleet.Lock{Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Presets: maps.Clone(l.Presets)}
+	return &fleet.Lock{Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Presets: maps.Clone(l.Presets), Services: maps.Clone(l.Services)}
 }
 
 // addedPins lists lock keys in next that are not in prev ("slim",
@@ -133,7 +177,7 @@ func cloneLock(l *fleet.Lock) *fleet.Lock {
 func addedPins(prev, next *fleet.Lock) []string {
 	var out []string
 	for _, pair := range [][2]map[string]string{
-		{prev.Images, next.Images}, {prev.Bundles, next.Bundles}, {prev.Presets, next.Presets},
+		{prev.Images, next.Images}, {prev.Bundles, next.Bundles}, {prev.Presets, next.Presets}, {prev.Services, next.Services},
 	} {
 		var keys []string
 		for k, v := range pair[1] {

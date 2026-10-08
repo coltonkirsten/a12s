@@ -104,3 +104,39 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
   listed principal without a `send` grant arrives with grants (S5).
 - **Manual wake clears both the manual mark and a `wake_failed` pause; `a12s up` clears the pause.** An auto-wake
   clears the "slept by" mark (the Computer is awake) but not a pause.
+
+## S4: the Service primitive
+
+- **a12s-init is the `a12s` binary.** The Docker driver copies the running executable into a read-only
+  `a12s-F-init` volume under `<sha256 prefix>/a12s` (so a new Controller never swaps the binary under a running
+  Service) and mounts it at `/a12s/init`. The Service's entrypoint is `a12s service-init -- <image entrypoint+cmd>`.
+  It hands an empty state mount and the manifest's tmpfs paths to the manifest uid, waits for `.generation`,
+  exports `config.env`, then `setgroups/setgid/setuid` to the manifest uid (uid 0 refused) and execs. Leaving
+  uid 0 clears every capability and `no-new-privileges` keeps them away; Docker's `--init` (tini) stays PID 1, as
+  for Computers. Verified on real Docker: the image's processes run as 1000 with `CapEff 0`.
+- **Injection needs no shell in the image.** The Controller writes secrets (manifest uid, 0400), `config.json`
+  and `.generation` through `a12s service-write` (atomic temp + rename, only under `/run/a12s`) run by exec as
+  root, instead of the Computers' `sh` script; stock and distroless images work the same.
+- **Covered VOLUMEs.** A VOLUME is covered when it *is* the state mount, or is a tmpfs path or under one. A
+  VOLUME below the state mount would get an anonymous Docker volume nobody tracks, so admission refuses it with
+  `set manifest.state.at to <v>, or list it in manifest.tmpfs`.
+- **`publish:` without opening the Service.** A Service's network is internal, so it cannot publish a port.
+  Each published Service gets a forwarder container (`a12s-F-<svc>-publish`) that runs only `a12s
+  publish-forward` (uid 65534, no capabilities, read-only) on the Fleet bridge with the host port bound, and
+  joins the Service's network to forward to it. The Service gains no route out. It starts and stops with the
+  Service; it is not restarted on its own if it dies (logged as open work).
+- **Restarts never give up.** A Service that exits is restarted through the full start path with doubling
+  backoff capped at 5 minutes; `restarts` counts them since the last operator action (`up`, `wake`). Unhealthy is
+  reported, never restarted.
+- **Missing credentials.** A static Service credential with no binding is an admission error (`credential X has
+  no binding  fix: a12s creds set X`); one the Service's own manifest login produces leaves only that Service in
+  `Error: <svc> needs a login  fix: a12s service login <svc>`, reported by `up` as a warning, not a failure. The
+  CLI sends whatever Service credentials are bound and lets the Controller decide.
+- **Pins.** `fleet.lock` `services:` is keyed `<svc>@<ref>`, append-only. `a12s lock update services/<svc>`
+  drops that key client-side and sends `refresh: [svc]`; the Controller pulls the ref if a registry has it
+  (a locally built image keeps its local ID) and pins the result.
+- **Docker event filters AND their label values**, so the watch no longer filters by role; `toEvent` keeps
+  Computer and Service events and drops the rest (forwarders, extractors).
+- **Not yet (S5):** typed certificate SANs and the active-certificate registry, grants, `.a12s` routing, MCP
+  wiring. A Service already reaches the internet only through the egress proxy with its own `egress.allow`;
+  the proxy identifies it by network exactly as it does a Computer.

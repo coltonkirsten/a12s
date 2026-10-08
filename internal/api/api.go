@@ -30,6 +30,9 @@ type PutFleetRequest struct {
 	Credentials Credentials  `json:"credentials,omitempty"`
 	// Asleep creates new Computers asleep (`a12s up --asleep`).
 	Asleep bool `json:"asleep,omitempty"`
+	// Refresh names Services whose pin `a12s lock update services/<svc>`
+	// moves: the ref is resolved again (pulled if it can be) and pinned.
+	Refresh []string `json:"refresh,omitempty"`
 	// Presets holds each home preset as a tar stream (fleet.WritePresetTar),
 	// keyed by the preset path exactly as written in the Fleet. The
 	// Controller cannot read the host, so the CLI sends every preset the
@@ -50,6 +53,8 @@ type PutFleetResponse struct {
 	Errors map[string]string `json:"errors,omitempty"`
 	// Warnings are accepted but noteworthy settings (a large inbox maxBytes).
 	Warnings []string `json:"warnings,omitempty"`
+	// Services is what happened to Services; their failures are in Errors.
+	Services ServiceChanges `json:"services"`
 }
 
 // Phase is a Computer's Controller state (§7).
@@ -93,6 +98,8 @@ type StatusResponse struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// OrphanedInboxes are inboxes of Computers no longer in the Fleet.
 	OrphanedInboxes []InboxSummary `json:"orphanedInboxes,omitempty"`
+	// Services are the Fleet's Services (enhancements §5).
+	Services []ServiceStatus `json:"services,omitempty"`
 }
 
 // ComputerStatus is one row of `a12s status`.
@@ -217,8 +224,9 @@ type DrivesResponse struct {
 type DriveKind string
 
 const (
-	DriveHome DriveKind = "home"
-	DriveWork DriveKind = "work"
+	DriveHome  DriveKind = "home"
+	DriveWork  DriveKind = "work"
+	DriveState DriveKind = "state" // a Service's state drive: "<svc>-state"
 )
 
 // DriveRow is one row of `a12s drive ls`. Name is what `a12s drive rm` takes:
@@ -227,6 +235,7 @@ type DriveRow struct {
 	Name       string      `json:"name"`
 	Kind       DriveKind   `json:"kind"`
 	Computer   string      `json:"computer,omitempty"` // owner of a home drive
+	Service    string      `json:"service,omitempty"`  // owner of a state drive
 	Size       fleet.Bytes `json:"size,omitzero"`
 	Access     string      `json:"access,omitempty"` // work drives
 	AttachedTo []string    `json:"attachedTo,omitempty"`

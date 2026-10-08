@@ -23,14 +23,20 @@ type Lock struct {
 	Bundles map[string]string `yaml:"bundles" json:"bundles"`
 	// Presets maps a preset path, as written in the Fleet, to its content hash.
 	Presets map[string]string `yaml:"presets" json:"presets"`
+	// Services maps "<service>@<image ref>" to the Service's image ID
+	// (enhancements §5.6). Append-only like the rest.
+	Services map[string]string `yaml:"services,omitempty" json:"services,omitempty"`
 }
+
+// ServiceKey returns the Lock.Services key of a Service: "name@ref".
+func ServiceKey(name, ref string) string { return name + "@" + ref }
 
 // BundleKey returns the Lock.Bundles key for a harness kind and version.
 func BundleKey(kind, version string) string { return kind + "@" + version }
 
 // NewLock returns an empty lock.
 func NewLock() *Lock {
-	return &Lock{Images: map[string]string{}, Bundles: map[string]string{}, Presets: map[string]string{}}
+	return &Lock{Images: map[string]string{}, Bundles: map[string]string{}, Presets: map[string]string{}, Services: map[string]string{}}
 }
 
 // LoadLock reads a lock file. A missing file is an empty lock.
@@ -91,6 +97,9 @@ func (l *Lock) fillMaps() {
 	if l.Presets == nil {
 		l.Presets = map[string]string{}
 	}
+	if l.Services == nil {
+		l.Services = map[string]string{}
+	}
 }
 
 // PinImage records digest for an image key unless it is already pinned.
@@ -104,6 +113,11 @@ func (l *Lock) PinBundle(kind, version, digest string) bool {
 
 // PinPreset records the content hash of a preset path unless it is already pinned.
 func (l *Lock) PinPreset(path, digest string) bool { return pin(&l.Presets, path, digest) }
+
+// PinService records the image ID of a Service's ref unless already pinned.
+func (l *Lock) PinService(name, ref, digest string) bool {
+	return pin(&l.Services, ServiceKey(name, ref), digest)
+}
 
 func pin(m *map[string]string, key, digest string) bool {
 	if *m == nil {

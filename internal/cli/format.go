@@ -37,6 +37,15 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	if len(r.Removed) > 0 {
 		lines = append(lines, "removed "+strings.Join(r.Removed, ", ")+" (drives kept)")
 	}
+	if len(r.Services.Created) > 0 {
+		lines = append(lines, "created service "+strings.Join(r.Services.Created, ", "))
+	}
+	if len(r.Services.Updated) > 0 {
+		lines = append(lines, "restarted service "+strings.Join(r.Services.Updated, ", ")+" (new generation)")
+	}
+	if len(r.Services.Removed) > 0 {
+		lines = append(lines, "removed service "+strings.Join(r.Services.Removed, ", ")+" (state drives kept)")
+	}
 	for _, w := range r.Warnings {
 		lines = append(lines, "warning: "+w)
 	}
@@ -112,9 +121,50 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		rows = append(rows, cells)
 	}
 	writeTable(w, rows)
+	if len(st.Services) > 0 {
+		fmt.Fprintln(w)
+		WriteServices(w, st.Services)
+	}
 	for _, line := range StatusWarnings(st) {
 		fmt.Fprintln(w, "warning: "+line)
 	}
+}
+
+// WriteServices prints one row per Service (`a12s service ls`, and the
+// Services part of `a12s status`). A published port is loud on its row.
+func WriteServices(w io.Writer, services []api.ServiceStatus) {
+	rows := [][]string{{"SERVICE", "PHASE", "IMAGE", "PIN", "RESTARTS", "SEND", "USED BY", "PUBLISH"}}
+	dash := func(xs []string) string {
+		if len(xs) == 0 {
+			return "-"
+		}
+		return strings.Join(xs, ",")
+	}
+	for _, s := range services {
+		pin := "-"
+		if p := ShortImage(s.Pin); p != "" {
+			pin = p
+		}
+		pub := "-"
+		if len(s.Publish) > 0 {
+			pub = "PUBLISHED " + strings.Join(s.Publish, ",") + " (reachable outside uses)"
+		}
+		ph := string(s.Phase)
+		if s.EgressMode == api.EgressAllowAll {
+			ph += `  EGRESS ALLOW "*"`
+		}
+		rows = append(rows, []string{s.Name, ph, s.Image, pin, fmt.Sprint(s.Restarts), dash(s.Send), dash(s.UsedBy), pub})
+	}
+	writeTable(w, rows)
+}
+
+// ShortImage is the first 12 hex digits of an image ID, or "".
+func ShortImage(id string) string {
+	h := strings.TrimPrefix(id, "sha256:")
+	if len(h) < 12 {
+		return ""
+	}
+	return h[:12]
 }
 
 func phase(c api.ComputerStatus) string {
@@ -190,6 +240,14 @@ func StatusWarnings(st *api.StatusResponse) []string {
 			add(c.Name + ": " + s)
 		}
 	}
+	for _, sv := range st.Services {
+		if sv.Error != nil {
+			add(fmt.Sprintf("%s: error: %s", sv.Name, sv.Error.Reason))
+		}
+		for _, s := range sv.Warnings {
+			add(sv.Name + ": " + s)
+		}
+	}
 	return out
 }
 
@@ -209,6 +267,9 @@ func WriteDrives(w io.Writer, drives []api.DriveRow) {
 		}
 		if d.Orphaned {
 			attached += "  ORPHANED"
+		}
+		if d.Kind == api.DriveState && access == "-" {
+			access = "exclusive"
 		}
 		rows = append(rows, []string{d.Name, string(d.Kind), size, access, attached})
 	}
@@ -451,4 +512,43 @@ func PowerCell(ps *api.PowerStatus, phase api.Phase) string {
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// WriteServiceDetail prints `a12s service status <svc>`.
+func WriteServiceDetail(w io.Writer, s api.ServiceStatus) {
+	dash := func(xs []string) string {
+		if len(xs) == 0 {
+			return "-"
+		}
+		return strings.Join(xs, ", ")
+	}
+	rows := [][]string{
+		{"service", s.Name},
+		{"phase", string(s.Phase)},
+		{"image", s.Image},
+		{"pin", s.Pin},
+		{"generation", fmt.Sprint(s.Generation)},
+		{"restarts", fmt.Sprint(s.Restarts)},
+		{"health", s.Health + sinceSuffix(s.HealthSince)},
+		{"ports", dash(s.Ports)},
+		{"send", dash(s.Send)},
+		{"uses", dash(s.Uses)},
+		{"used by", dash(s.UsedBy)},
+		{"publish", dash(s.Publish)},
+		{"state drive", s.StateDrive},
+	}
+	if s.Error != nil {
+		rows = append(rows, []string{"error", s.Error.Reason})
+	}
+	writeTable(w, rows)
+	for _, x := range s.Warnings {
+		fmt.Fprintln(w, "warning: "+x)
+	}
+}
+
+func sinceSuffix(t string) string {
+	if t == "" {
+		return ""
+	}
+	return " (since " + t + ")"
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
+	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
 func runSleep(g *globals, args []string) error { return power(g, "sleep", api.PowerAsleep, args) }
@@ -32,7 +34,7 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		return err
 	}
 	if *all == (len(names) > 0) {
-		return usageError(verb + " needs Computer names or --all")
+		return usageError(verb + " needs Computer or Service names, or --all")
 	}
 	c, f, err := g.connect()
 	if err != nil {
@@ -40,6 +42,7 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	}
 	ctx, cancel := interruptible()
 	defer cancel()
+	var services []string
 	if *all {
 		st, err := status(ctx, c)
 		if err != nil {
@@ -48,6 +51,24 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		for _, cs := range st.Computers {
 			names = append(names, cs.Name)
 		}
+		for _, ss := range st.Services {
+			services = append(services, ss.Name)
+		}
+	} else {
+		if names, services, err = splitTargets(names, f.HasService, func(n string) bool { _, ok := f.Computers[n]; return ok }); err != nil {
+			return err
+		}
+	}
+	if len(services) > 0 {
+		if (clearInbox != nil && *clearInbox) || (allowWake != nil && *allowWake) {
+			return usageError("--clear-inbox and --allow-wake are for Computers; a Service has no inbox or power policy")
+		}
+		if err := powerServices(ctx, g, c, f, verb, state, services); err != nil {
+			return err
+		}
+	}
+	if len(names) == 0 {
+		return nil
 	}
 
 	reqs := make([]api.PowerRequest, len(names))
@@ -128,4 +149,39 @@ func runApply(g *globals, args []string) error {
 		fmt.Println("pending " + strings.Join(resp.Pending, ", ") + hint)
 	}
 	return nil
+}
+
+// powerServices sleeps or wakes Services; a wake re-sends their credentials.
+func powerServices(ctx context.Context, g *globals, c *cli.Client, f *fleet.Fleet, verb string, state api.Power, names []string) error {
+	reqs := make([]api.ServicePowerRequest, len(names))
+	if state == api.PowerAwake {
+		b, err := cli.LoadBindings(g.bindings())
+		if err != nil {
+			return err
+		}
+		for i, n := range names {
+			creds, err := b.ResolveBound(cli.NeededByServices(f, n))
+			if err != nil {
+				return err
+			}
+			reqs[i].Credentials = creds
+		}
+	}
+	errs := make([]error, len(names))
+	var wg sync.WaitGroup
+	for i, n := range names {
+		reqs[i].State = state
+		wg.Go(func() {
+			var ss api.ServiceStatus
+			if err := c.Do(ctx, "POST", servicePath(n, "/power"), reqs[i], &ss); err != nil {
+				errs[i] = fmt.Errorf("%s %s: %w", verb, n, err)
+				return
+			}
+			if ss.Error != nil {
+				errs[i] = fmt.Errorf("%s %s: %s", verb, n, ss.Error.Reason)
+			}
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }

@@ -24,8 +24,11 @@ func (d *Driver) EnsureDrive(ctx context.Context, spec driver.DriveSpec) (bool, 
 		LabelDrive: spec.ID,
 		LabelSize:  strconv.FormatInt(spec.Size, 10),
 	}
-	if spec.Kind == driver.DriveHome {
+	switch spec.Kind {
+	case driver.DriveHome:
 		labels[LabelComputer] = spec.Computer
+	case driver.DriveStateKind:
+		labels[LabelService] = spec.Computer
 	}
 	return d.ensureVolume(ctx, name, labels, LabelDrive, spec.ID)
 }

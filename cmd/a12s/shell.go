@@ -27,14 +27,18 @@ func runShell(g *globals, args []string) error {
 	if err != nil {
 		return fmt.Errorf("a12s shell runs the docker CLI: %w", err)
 	}
-	c, _, err := g.connect()
+	c, f, err := g.connect()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := interruptible()
 	defer cancel()
 	var resp api.ShellResponse
-	if err := c.Do(ctx, "POST", computerPath(name, "/shell"), api.ShellRequest{Root: *root, Command: command}, &resp); err != nil {
+	path, workdir := computerPath(name, "/shell"), "/home/agent"
+	if f.HasService(name) {
+		path, workdir = servicePath(name, "/shell"), "/"
+	}
+	if err := c.Do(ctx, "POST", path, api.ShellRequest{Root: *root, Command: command}, &resp); err != nil {
 		return err
 	}
 	cancel()
@@ -49,7 +53,7 @@ func runShell(g *globals, args []string) error {
 	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
 		argv = append(argv, "-t")
 	}
-	argv = append(argv, "-u", user, "-w", "/home/agent", resp.Container)
+	argv = append(argv, "-u", user, "-w", workdir, resp.Container)
 	if len(command) == 0 {
 		command = []string{"sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi"}
 	}
