@@ -61,3 +61,21 @@ func (s *Store) LiveCert(ctx context.Context, principal string) (CertEntry, bool
 	_ = json.Unmarshal([]byte(g), &e.Send)
 	return e, true, nil
 }
+
+// LiveCerts lists every live certificate.
+func (s *Store) LiveCerts(ctx context.Context) ([]CertEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT principal, generation, serial FROM cert_registry`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CertEntry
+	for rows.Next() {
+		var e CertEntry
+		if err := rows.Scan(&e.Principal, &e.Generation, &e.Serial); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

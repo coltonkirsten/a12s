@@ -125,7 +125,20 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 	reason, st := c.deliverable(ctx, name)
 	switch {
 	case reason == "continuation":
-		// (2) Work already in progress runs before the inbox.
+		// (2) Work already in progress runs before the inbox, unless an
+		// operator asked for a new session (`inbox resume --new`), which
+		// has nothing to continue (§4.5).
+		if ov, err := c.inbox.SessionOverride(ctx, name); err == nil && ov == api.SessionNew {
+			cctx, cancel := context.WithTimeout(ctx, postTimeout)
+			id, err := c.client(name).CancelContinuation(cctx, "cancelled by a12s inbox resume --new")
+			cancel()
+			if err != nil {
+				c.logf("%s: cancel continuation: %v", name, err)
+				return true
+			}
+			c.logf("%s: continuation %s cancelled (inbox resume --new)", name, id)
+			return true
+		}
 		c.runContinuation(ctx, name, st.Continuation)
 		return false
 	case reason == "unreachable":
@@ -215,7 +228,46 @@ func (c *Controller) postBatch(ctx context.Context, name string, b *inbox.Batch)
 		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "not_ready"})
 		return postReturned
 	}
-	return c.sendBatch(ctx, name, b, b.Request)
+	// A hold set after the claim wins: holds take this same gate (§4.7).
+	if held, _, err := c.inbox.Held(ctx, name); err != nil || held {
+		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "held"})
+		return postReturned
+	}
+	// Even the first POST respects the deadline fence: a Controller paused
+	// between claim and POST past notAfter must not start expired work.
+	req := b.Request
+	if b.FencePassed(time.Now()) {
+		req.LookupOnly = true
+	}
+	return c.sendBatch(ctx, name, b, req)
+}
+
+// afterTurn applies the hold a delivered Batch owes once its Turn's end is
+// known (§4.3 oversized, §4.6 dispatched-then-resume.failed): delivery
+// settles at dispatch, before the failure exists.
+func (c *Controller) afterTurn(name, turn string) {
+	if c.inbox == nil || turn == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	defer cancel()
+	b, err := c.inbox.BatchByTurn(ctx, turn)
+	if err != nil || b == nil || b.Computer != name || b.State != inbox.BatchDelivered {
+		return
+	}
+	sum, err := c.client(name).TurnSummary(ctx, turn)
+	if err != nil || !sum.Dispatched {
+		return
+	}
+	switch {
+	case sum.ResumeFailed:
+		err = c.inbox.Hold(ctx, name, api.HoldResumeFailed, "the harness received the Batch, then its session failed to resume: a12s inbox resume "+name+" (--new for a fresh session)", "controller")
+	case sum.Finished == api.TurnFailed && oversizedRE.MatchString(sum.Error):
+		err = c.inbox.Hold(ctx, name, api.HoldOversized, "turn "+turn+" failed on the Batch's size ("+itoaBytes(b)+"): "+sum.Error, "controller")
+	}
+	if err != nil {
+		c.logf("%s: hold after turn %s: %v", name, turn, err)
+	}
 }
 
 // sendBatch POSTs a Batch's stored request (or its lookup-only replay) and

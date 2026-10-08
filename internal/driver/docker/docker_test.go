@@ -310,3 +310,20 @@ func TestToEventRoles(t *testing.T) {
 		t.Fatal("a publish forwarder is not a Service")
 	}
 }
+
+func TestServiceContainerHardening(t *testing.T) {
+	d := &Driver{fleet: "lab"}
+	o := d.serviceCreateOptions(driver.ServiceSpec{Name: "clock", Generation: 1, Image: "sha256:x", User: "1000:1000", Tmpfs: []string{"/cache"}}, "/a12s/init/abc/a12s", []string{"run"})
+	if o.Config.Healthcheck == nil || len(o.Config.Healthcheck.Test) != 1 || o.Config.Healthcheck.Test[0] != "NONE" {
+		t.Fatal("image HEALTHCHECK not disabled")
+	}
+	h := o.HostConfig
+	if !h.ReadonlyRootfs || h.RestartPolicy.Name != "no" || len(h.CapDrop) != 1 || h.CapDrop[0] != "ALL" || h.Tmpfs["/cache"] == "" || h.Privileged {
+		t.Fatalf("host config %+v", h)
+	}
+	for _, m := range h.Mounts {
+		if m.Target == driver.InitDir && !m.ReadOnly {
+			t.Fatal("init volume writable")
+		}
+	}
+}

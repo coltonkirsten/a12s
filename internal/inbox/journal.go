@@ -27,7 +27,7 @@ type Discarded struct {
 }
 
 // Unjournaled returns a Computer's ended Messages not yet sealed in its
-// journal, oldest first, up to about maxBytes of bodies.
+// journal, oldest first, up to about maxBytes of serialized records.
 func (s *Store) Unjournaled(ctx context.Context, computer string, maxBytes int) ([]Discarded, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, seq, sender, via, created_at, body, metadata, end_reason, ended_by, expires_at, replaced_by
 		FROM messages WHERE computer = ? AND journaled = 0 ORDER BY seq LIMIT 500`, computer)
@@ -53,10 +53,14 @@ func (s *Store) Unjournaled(ctx context.Context, computer string, maxBytes int) 
 			t := fromMS(exp.Int64)
 			d.ExpiresAt = &t
 		}
-		if len(out) > 0 && size+len(d.Body) > maxBytes {
+		// Budget the serialized record (JSON escaping can grow a body
+		// several times), so a chunk always fits computerd's request limit.
+		enc, _ := json.Marshal(d)
+		n := len(enc) + 64
+		if len(out) > 0 && size+n > maxBytes {
 			break
 		}
-		size += len(d.Body)
+		size += n
 		out = append(out, d)
 	}
 	return out, rows.Err()

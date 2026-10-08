@@ -913,3 +913,15 @@ func (d *fakeDriver) setAddrErr(err error) {
 	defer d.mu.Unlock()
 	d.addrErr = err
 }
+
+func (f *fakeComputerd) CancelContinuation(_ context.Context, reason string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := f.continuation
+	if id != "" && f.active == "" {
+		f.continuation = ""
+		f.emitLocked(api.EventContinuationAbandoned, "", map[string]any{"continuation": id, "reason": reason, "cancelled": true})
+		return id, nil
+	}
+	return "", nil
+}

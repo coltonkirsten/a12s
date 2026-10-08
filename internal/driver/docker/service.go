@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"os"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,10 @@ import (
 var serviceCapAdd = []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"}
 
 const initCacheMount = "/a12s-init-cache"
+
+// noHealthcheck disables an image's HEALTHCHECK in every container a12s
+// creates from a Service image.
+var noHealthcheck = &container.HealthConfig{Test: []string{"NONE"}}
 
 // InitVolume is the read-only volume holding the a12s-init binary.
 func (d *Driver) InitVolume() string { return "a12s-" + d.fleet + "-init" }
@@ -223,6 +228,19 @@ func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) erro
 	if err := d.ConnectController(ctx, netName); err != nil {
 		return fmt.Errorf("stage service %s: %w", spec.Name, err)
 	}
+	// Docker gives every image VOLUME without an exact mount its own
+	// anonymous volume, even under a tmpfs; mount each one as tmpfs too, so
+	// nothing an image writes there reaches the disk or outlives it.
+	if img.Config != nil {
+		for v := range img.Config.Volumes {
+			v = path.Clean(v)
+			if v == spec.StateAt || slices.Contains(spec.Tmpfs, v) {
+				continue
+			}
+			spec.Tmpfs = append(spec.Tmpfs, v)
+		}
+		sort.Strings(spec.Tmpfs)
+	}
 	opts := d.serviceCreateOptions(spec, initExec, program)
 	if _, err := d.cli.ContainerCreate(ctx, opts); err != nil {
 		return fmt.Errorf("stage service %s: create container: %w", spec.Name, err)
@@ -293,11 +311,14 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 	return client.ContainerCreateOptions{
 		Name: d.ContainerName(spec.Name),
 		Config: &container.Config{
-			Image:       spec.Image,
-			Hostname:    spec.Name,
-			User:        "0:0", // a12s-init's bootstrap; it drops to spec.User before exec
-			Entrypoint:  []string{initExec, "service-init", "--"},
-			Cmd:         program,
+			Image:      spec.Image,
+			Hostname:   spec.Name,
+			User:       "0:0", // a12s-init's bootstrap; it drops to spec.User before exec
+			Entrypoint: []string{initExec, "service-init", "--"},
+			Cmd:        program,
+			// An image HEALTHCHECK would run image code as the container's
+			// user (root, for a12s-init); a12s runs the manifest's check.
+			Healthcheck: noHealthcheck,
 			Env:         env,
 			StopTimeout: &stop,
 			Labels: map[string]string{
@@ -354,6 +375,7 @@ func (d *Driver) createPublish(ctx context.Context, spec driver.ServiceSpec, ini
 		Config: &container.Config{
 			Image:        spec.Image, // never runs the image's code: the entrypoint is a12s
 			Entrypoint:   cmd,
+			Healthcheck:  noHealthcheck,
 			User:         "65534:65534",
 			ExposedPorts: exposed,
 			Labels: map[string]string{
@@ -651,12 +673,13 @@ func (d *Driver) StartLogin(ctx context.Context, service string, spec driver.Log
 	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: d.LoginName(service),
 		Config: &container.Config{
-			Image:      spec.Image,
-			User:       spec.User,
-			Entrypoint: []string{initExec, "login-hold"},
-			Cmd:        []string{},
-			Env:        env,
-			Labels:     map[string]string{LabelFleet: d.fleet, LabelService: service, LabelRole: RoleLogin},
+			Image:       spec.Image,
+			User:        spec.User,
+			Entrypoint:  []string{initExec, "login-hold"},
+			Cmd:         []string{},
+			Healthcheck: noHealthcheck,
+			Env:         env,
+			Labels:      map[string]string{LabelFleet: d.fleet, LabelService: service, LabelRole: RoleLogin},
 		},
 		HostConfig: &container.HostConfig{
 			NetworkMode:    container.NetworkMode(netName),

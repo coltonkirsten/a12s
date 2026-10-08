@@ -122,6 +122,7 @@ type computerdClient interface {
 	Stop(ctx context.Context, turnID string) error
 	Events(ctx context.Context, lastEventID, turn string) (*computerd.Stream, error)
 	Diagnostic(ctx context.Context, message string, data any) error
+	CancelContinuation(ctx context.Context, reason string) (string, error)
 	CloseIdleConnections()
 }
 
@@ -178,6 +179,11 @@ type Controller struct {
 	srt      map[string]*serviceRuntime
 	// auditSubs are followers of a Service's audit lines (service logs -f).
 	auditSubs map[string][]chan string
+	// revoked are principals whose certificate was withdrawn (fail closed
+	// even if the registry write failed); a new registration clears it.
+	revoked map[string]bool
+	// bridgePool is the last verified /16 of the Controller's Fleet bridge.
+	bridgePool netip.Prefix
 	// inboxBcast is closed and replaced on every inbox change (Message streams).
 	inboxBcast chan struct{}
 	addrsAt    time.Time
@@ -217,6 +223,7 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		proxyIPs:  map[netip.Addr]string{},
 		srt:       map[string]*serviceRuntime{},
 		auditSubs: map[string][]chan string{},
+		revoked:   map[string]bool{},
 	}
 	store.OnChange(c.inboxChanged)
 	clientTLS, err := ca.ClientTLS()
@@ -335,6 +342,14 @@ func (c *Controller) Start(ctx context.Context) {
 			c.logf("resume: %v", err)
 			return
 		}
+		running := map[string]bool{}
+		for n, st := range obs.Computers {
+			running[KindComputer+":"+n] = st.Running
+		}
+		for n, st := range obs.Services {
+			running[KindService+":"+n] = st.Running
+		}
+		c.reconcileCerts(ctx, running)
 		// Finish removals an apply had not completed: owned Computers the
 		// Fleet no longer declares go (their drives stay).
 		for _, name := range slices.Sorted(maps.Keys(obs.Computers)) {

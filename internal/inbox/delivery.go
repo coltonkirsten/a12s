@@ -375,6 +375,20 @@ func (s *Store) Return(ctx context.Context, batch string, o ReturnOptions) (*Ret
 		if err != nil {
 			return err
 		}
+		// (1) Every overdue pending row expires first, so a returned row is
+		// never replaced by a newer one that is itself already past its
+		// deadline (and nothing is delivered).
+		if _, err := expireTx(tx, b.Computer, now); err != nil {
+			return err
+		}
+		// A wake --clear-inbox accepted while this Batch was claimed still
+		// covers its rows: they come back discarded, never redelivered (§4.7).
+		var clearThrough sql.NullInt64
+		var clearID sql.NullString
+		if err := tx.QueryRow(`SELECT through_seq, request_id FROM clear_ops WHERE computer = ? AND at >= ? ORDER BY through_seq DESC LIMIT 1`,
+			b.Computer, ms(b.Claimed)).Scan(&clearThrough, &clearID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		undeliverable := ""
 		for _, id := range ids {
 			m, err := getMessage(tx, b.Computer, id, false)
@@ -392,6 +406,11 @@ func (s *Store) Return(ctx context.Context, batch string, o ReturnOptions) (*Ret
 				return err
 			}
 			switch {
+			case clearThrough.Valid && m.Seq <= clearThrough.Int64:
+				if err := endTx(tx, id, api.MsgDiscarded, "wake-clear", "controller", now, map[string]any{"reason": "wake-clear", "requestId": clearID.String}); err != nil {
+					return err
+				}
+				continue
 			case m.ExpiresAt != nil && !now.Before(*m.ExpiresAt):
 				if err := endTx(tx, id, api.MsgExpired, "expired", "controller", now, map[string]any{"expiresAt": *m.ExpiresAt}); err != nil {
 					return err

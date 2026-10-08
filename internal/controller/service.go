@@ -459,7 +459,8 @@ func (c *Controller) ensureServicePower(ctx context.Context, name string, runnin
 	}
 	if phase != api.PhaseReady && phase != api.PhaseUnhealthy {
 		// Picked up after a Controller restart: it keeps running; health
-		// decides its phase.
+		// decides its phase (from Starting, which health may leave).
+		c.setServicePhase(name, api.PhaseStarting, nil)
 		c.watchHealth(name)
 	}
 	return nil
@@ -946,16 +947,16 @@ func (c *Controller) serviceDied(ev driver.Event) {
 		return
 	}
 	name := ev.Computer
-	c.stopHealth(name)
-	c.unregisterCert(KindService, name)
 	defer c.lockComputer(name)()
 	if !c.unexpectedService(ev) {
 		return
 	}
 	ctx := c.ctx
 	if obs, ok, err := c.observeService(ctx, name); err != nil || !ok || obs.Running || obs.Generation != ev.Generation {
-		return
+		return // alive again (a delayed event), gone, or replaced: leave it be
 	}
+	c.stopHealth(name)
+	c.unregisterCert(KindService, name)
 	c.setServicePhase(name, api.PhaseStarting, nil)
 	c.mu.Lock()
 	rec := c.state.Services[name]

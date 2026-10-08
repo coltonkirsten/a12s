@@ -344,3 +344,37 @@ test('test hooks: fail-before-dispatch fails the turn before the harness sees it
   adapter.finish();
   await until(() => finished(t2.turnId) === 'completed');
 });
+
+test('a continuation accepted but not dispatched before a crash is abandoned at startup, never owed forever', async () => {
+  const { cfg, journal, adapter, computer } = setup();
+  await computer.start();
+  await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  computer.requestRestart();
+  adapter.finish();
+  await until(() => computer.status().continuation !== null);
+  const owed = computer.status().continuation as string;
+  // The Controller starts it; the harness never receives it; computerd dies.
+  const slow = new StubAdapter();
+  slow.autoDispatch = false;
+  for (const id of adapter.sessions) slow.sessions.add(id);
+  const crashing = new Computer(cfg, journal, slow, {});
+  await crashing.start();
+  await crashing.submitTurn({ requestId: owed, session: 'current', prompt: '', continuation: true });
+  assert.equal(crashing.status().continuation, owed, 'accepted, not dispatched: still owed');
+  const after = new Computer(cfg, journal, new StubAdapter(), {});
+  await after.start();
+  assert.equal(after.status().continuation, null);
+  const ab = journal.after(0, null, 200).filter((e) => e.type === 'continuation.abandoned');
+  assert.equal(ab.at(-1)?.data.continuation, owed);
+  // And `inbox resume --new` can cancel an owed one outright.
+  const { computer: c2, adapter: a2 } = setup();
+  await c2.start();
+  await c2.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  c2.requestRestart();
+  a2.finish();
+  await until(() => c2.status().continuation !== null);
+  const id = c2.status().continuation;
+  assert.equal(c2.cancelContinuation('cancelled by a12s inbox resume --new'), id);
+  assert.equal(c2.status().continuation, null);
+  assert.equal(c2.cancelContinuation('again'), null);
+});

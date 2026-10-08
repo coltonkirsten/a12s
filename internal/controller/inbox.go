@@ -234,7 +234,15 @@ func (c *Controller) handleInboxHold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("c")
-	if err := c.inbox.Hold(r.Context(), name, api.HoldOperator, req.Reason, callerOf(r).principal); err != nil {
+	// Under the admission gate, so a Batch claimed before the hold can't
+	// POST after it (postBatch re-checks the hold inside the same gate).
+	c.mu.Lock()
+	rt := c.rtLocked(name)
+	c.mu.Unlock()
+	rt.admit.Lock()
+	err := c.inbox.Hold(r.Context(), name, api.HoldOperator, req.Reason, callerOf(r).principal)
+	rt.admit.Unlock()
+	if err != nil {
 		inboxFail(w, err)
 		return
 	}

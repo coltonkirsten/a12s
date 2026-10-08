@@ -115,6 +115,10 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
       });
       return send(res, 200, { journaled: journal.journalInbox(records) });
     }
+    if (path === '/v1/continuation/cancel' && method === 'POST') {
+      const body = await readJson(req);
+      return send(res, 200, { cancelled: computer.cancelContinuation(typeof body.reason === 'string' ? body.reason : 'cancelled by the Controller') });
+    }
     if (path === '/v1/diagnostics' && method === 'POST') {
       const body = await readJson(req);
       return send(res, 200, { seq: computer.diagnostic(str(body, 'message'), body.data ?? null) });

@@ -1062,3 +1062,14 @@ func (s *Store) Events(ctx context.Context, computer, message string, after int6
 	}
 	return out, rows.Err()
 }
+
+// SessionOverride returns the inbox's pending one-shot session override
+// ("" or "new").
+func (s *Store) SessionOverride(ctx context.Context, computer string) (string, error) {
+	var o string
+	err := s.db.QueryRowContext(ctx, `SELECT session_override FROM inboxes WHERE computer = ?`, computer).Scan(&o)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return o, err
+}

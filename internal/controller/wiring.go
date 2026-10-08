@@ -181,17 +181,28 @@ var alwaysDenied = func() []netip.Prefix {
 
 // fleetPools are the Fleet's own networks: the internal-network pool and
 // the Controller bridge. No Fleet field opens them.
-func (c *Controller) fleetPools(ctx context.Context) []netip.Prefix {
+// It fails closed: without the bridge's identity (an engine error), no named
+// egress is dialed. The last verified bridge is remembered.
+func (c *Controller) fleetPools(ctx context.Context) ([]netip.Prefix, bool) {
 	pools := []netip.Prefix{c.cfg.SubnetPool}
-	if c.selfAddrs != nil {
-		if addrs, err := c.selfAddrs(ctx); err == nil {
-			if ip, ok := addrs["a12s-"+c.cfg.Fleet]; ok && ip.Is4() {
-				p, _ := ip.Prefix(16)
-				pools = append(pools, p)
-			}
+	if c.selfAddrs == nil {
+		return pools, true // not on Docker (tests): no bridge to protect
+	}
+	if addrs, err := c.selfAddrs(ctx); err == nil {
+		if ip, ok := addrs["a12s-"+c.cfg.Fleet]; ok && ip.Is4() {
+			p, _ := ip.Prefix(16)
+			c.mu.Lock()
+			c.bridgePool = p
+			c.mu.Unlock()
 		}
 	}
-	return pools
+	c.mu.Lock()
+	bridge := c.bridgePool
+	c.mu.Unlock()
+	if !bridge.IsValid() {
+		return nil, false
+	}
+	return append(pools, bridge), true
 }
 
 // egressTarget resolves a Service's named TCP egress and validates the
@@ -223,7 +234,10 @@ func (c *Controller) egressTarget(ctx context.Context, caller string, rc reach, 
 		}
 		addrs = found
 	}
-	pools := c.fleetPools(ctx)
+	pools, ok := c.fleetPools(ctx)
+	if !ok {
+		return netip.AddrPort{}, http.StatusServiceUnavailable, "the Controller cannot verify the Fleet's own networks right now; named egress is refused until it can"
+	}
 	for _, a := range addrs {
 		a = a.Unmap()
 		if why := egressAddrDenied(a, pools, rc.private); why != "" {

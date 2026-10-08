@@ -109,6 +109,21 @@ func (c *Client) Stop(ctx context.Context, turnID string) error {
 	return c.do(ctx, http.MethodPost, "/v1/turns/"+url.PathEscape(turnID)+"/stop", struct{}{}, nil)
 }
 
+// CancelContinuation cancels computerd's owed restart_harness continuation
+// (`inbox resume --new`); it returns the cancelled id, or "".
+func (c *Client) CancelContinuation(ctx context.Context, reason string) (string, error) {
+	var out struct {
+		Cancelled *string `json:"cancelled"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/continuation/cancel", map[string]string{"reason": reason}, &out); err != nil {
+		return "", err
+	}
+	if out.Cancelled == nil {
+		return "", nil
+	}
+	return *out.Cancelled, nil
+}
+
 // Diagnostic journals a diagnostic event from the Controller (a denied
 // egress request, an opened shell) under the active turn.
 func (c *Client) Diagnostic(ctx context.Context, message string, data any) error {

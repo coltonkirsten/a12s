@@ -409,10 +409,17 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			c.mu.Unlock()
 			c.maybeApplyStaged(name)
 			c.kick(name)
+			if ev.Turn != "" {
+				c.spawn(func() { c.afterTurn(name, ev.Turn) })
+			}
 		case api.EventTurnDispatched, api.EventHarnessRestarted:
 			c.kick(name)
 		case api.EventContinuationAbandoned:
-			if c.inbox != nil {
+			var ab struct {
+				Cancelled bool `json:"cancelled"`
+			}
+			_ = json.Unmarshal(ev.Data, &ab)
+			if c.inbox != nil && !ab.Cancelled {
 				if err := c.inbox.Hold(c.ctx, name, api.HoldResumeFailed, "the restart_harness continuation failed before the harness received it: a12s inbox resume "+name+" (--new for a fresh session)", "controller"); err != nil {
 					c.logf("%s: hold: %v", name, err)
 				}
@@ -621,8 +628,6 @@ func (c *Controller) died(ev driver.Event) {
 		return
 	}
 	name := ev.Computer
-	c.stopEvents(name)
-	c.unregisterCert(KindComputer, name)
 	defer c.lockComputer(name)()
 	if !c.unexpected(ev) {
 		return
@@ -631,6 +636,8 @@ func (c *Controller) died(ev driver.Event) {
 	if obs, ok, err := c.observeOne(ctx, name); err != nil || !ok || obs.Running || obs.Generation != ev.Generation {
 		return // alive again, gone, or replaced
 	}
+	c.stopEvents(name)
+	c.unregisterCert(KindComputer, name) // dead: its certificate goes before the restart
 	c.mu.Lock()
 	rec := c.state.Computers[name]
 	if rec.Restarts >= c.timing.MaxRestarts {
