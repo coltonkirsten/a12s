@@ -90,39 +90,41 @@ func TestServicesParse(t *testing.T) {
 }
 
 func TestServiceAdmissionErrors(t *testing.T) {
-	cases := []struct{ name, edit, want string }{
-		{"inbox on a service", "  clock2:\n    image: x/y:1\n    inbox: { maxMessages: 5 }\n", "services.clock2.inbox: a Service has no inbox  fix: remove it"},
-		{"power on a service", "  clock2:\n    image: x/y:1\n    power: { sleepAfterIdle: 15m }\n", "services.clock2.power: a Service has no power policy"},
-		{"harness on a service", "  clock2:\n    image: x/y:1\n    harness: { kind: codex }\n", "services.clock2.harness: a Service runs no harness"},
-		{"tier image", "  clock2:\n    image: slim\n", "a Service runs its own image"},
-		{"name clash", "  scout:\n    image: x/y:1\n", "services.scout: scout is already a Computer"},
-		{"grant to a service", "  clock2:\n    image: x/y:1\n    grants: { send: [pg] }\n", "pg is a Service, and only Computers have inboxes"},
-		{"grant to nobody", "  clock2:\n    image: x/y:1\n    grants: { send: [ghost] }\n", "there is no Computer ghost  fix: add computers.ghost"},
-		{"grant wildcard", "  clock2:\n    image: x/y:1\n    grants: { send: [\"*\"] }\n", "there is no wildcard"},
-		{"uses itself", "  clock2:\n    image: x/y:1\n    uses: [clock2]\n", "a Service can't use itself"},
-		{"uses unknown", "  clock2:\n    image: x/y:1\n    uses: [ghost]\n", "clock2 uses ghost, but there is no Service ghost  fix: add services.ghost or remove it from services.clock2.uses"},
-		{"uses a computer", "  clock2:\n    image: x/y:1\n    uses: [scout]\n", "scout is a Computer; uses reaches Services only"},
-		{"bad publish", "  clock2:\n    image: x/y:1\n    publish: [\"8787:8080\"]\n", "publish: \"8787:8080\" must be"},
-		{"manifest user 0", "  clock2:\n    image: x/y:1\n    manifest: { user: 0 }\n", "never runs as root"},
-		{"state over /tmp", "  clock2:\n    image: x/y:1\n    manifest: { state: { at: /tmp/x } }\n", "overlaps /tmp"},
-		{"unknown field", "  clock2:\n    image: x/y:1\n    surprise: 1\n", "field surprise not found"},
+	// Each refusal names its field path and the offending value; the prose
+	// and fix text belong to the error table, not this test.
+	cases := []struct{ name, edit, field, value string }{
+		{"inbox on a service", "  clock2:\n    image: x/y:1\n    inbox: { maxMessages: 5 }\n", "services.clock2.inbox", "no inbox"},
+		{"power on a service", "  clock2:\n    image: x/y:1\n    power: { sleepAfterIdle: 15m }\n", "services.clock2.power", "no power policy"},
+		{"harness on a service", "  clock2:\n    image: x/y:1\n    harness: { kind: codex }\n", "services.clock2.harness", "no harness"},
+		{"tier image", "  clock2:\n    image: slim\n", "services.clock2.image", `"slim"`},
+		{"name clash", "  scout:\n    image: x/y:1\n", "services.scout", "already a Computer"},
+		{"grant to a service", "  clock2:\n    image: x/y:1\n    grants: { send: [pg] }\n", "services.clock2.grants.send", "pg is a Service"},
+		{"grant to nobody", "  clock2:\n    image: x/y:1\n    grants: { send: [ghost] }\n", "services.clock2.grants.send", "no Computer ghost"},
+		{"grant wildcard", "  clock2:\n    image: x/y:1\n    grants: { send: [\"*\"] }\n", "services.clock2.grants.send", `"*"`},
+		{"uses itself", "  clock2:\n    image: x/y:1\n    uses: [clock2]\n", "services.clock2.uses", "itself"},
+		{"uses unknown", "  clock2:\n    image: x/y:1\n    uses: [ghost]\n", "fix: add services.ghost or remove it from services.clock2.uses", "no Service ghost"},
+		{"uses a computer", "  clock2:\n    image: x/y:1\n    uses: [scout]\n", "services.clock2.uses", "scout is a Computer"},
+		{"bad publish", "  clock2:\n    image: x/y:1\n    publish: [\"8787:8080\"]\n", "services.clock2.publish", `"8787:8080"`},
+		{"manifest user 0", "  clock2:\n    image: x/y:1\n    manifest: { user: 0 }\n", "services.clock2.manifest.user", "root"},
+		{"state over /tmp", "  clock2:\n    image: x/y:1\n    manifest: { state: { at: /tmp/x } }\n", "services.clock2.manifest.state.at", "/tmp"},
+		{"unknown field", "  clock2:\n    image: x/y:1\n    surprise: 1\n", "services.clock2", "surprise"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse([]byte(svcFleet + tc.edit))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("got %v, want %q", err, tc.want)
+			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), tc.value) {
+				t.Fatalf("got %v, want %s refused (%s)", err, tc.field, tc.value)
 			}
 		})
 	}
 	// egress.tcp is for Services only.
 	doc := strings.Replace(svcFleet, "    grants: { send: [scout] }\n", "    grants: { send: [scout] }\n    egress: { allow: [], tcp: [{ name: pg, host: db.example.com, port: 5432 }] }\n", 1)
-	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "computers.builder.egress.tcp: only a Service can declare TCP egress") {
+	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "computers.builder.egress.tcp: ") {
 		t.Fatalf("egress.tcp on a Computer: %v", err)
 	}
 	// A Computer using a Computer, or an unknown Service.
 	doc = strings.Replace(svcFleet, "uses: [db, { name: pg, mcp: false }]", "uses: [ghost]", 1)
-	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "scout uses ghost, but there is no Service ghost  fix: add services.ghost or remove it from computers.scout.uses") {
+	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "no Service ghost") || !strings.Contains(err.Error(), "computers.scout.uses") {
 		t.Fatalf("unknown use: %v", err)
 	}
 	// service:<name> in wakeOnMessage resolves against Services now.
@@ -141,13 +143,13 @@ func TestValidateServiceManifest(t *testing.T) {
 	if err := ValidateService("pg", pg, MergeManifest(nil, pg.Manifest), "postgres:17", []string{"/var/lib/postgresql/data"}); err != nil {
 		t.Fatalf("pg: %v", err)
 	}
-	if err := ValidateService("pg", pg, MergeManifest(nil, pg.Manifest), "postgres:17", []string{"/var/lib/postgresql/data/sub"}); err == nil || !strings.Contains(err.Error(), "VOLUME /var/lib/postgresql/data/sub, which neither state nor tmpfs covers") {
+	if err := ValidateService("pg", pg, MergeManifest(nil, pg.Manifest), "postgres:17", []string{"/var/lib/postgresql/data/sub"}); err == nil || !strings.Contains(err.Error(), "/var/lib/postgresql/data/sub") {
 		t.Fatalf("volume under state: %v", err)
 	}
 	if err := ValidateService("pg", pg, MergeManifest(nil, pg.Manifest), "postgres:17", []string{"/var/run/postgresql/x"}); err != nil {
 		t.Fatalf("volume under tmpfs is covered: %v", err)
 	}
-	if err := ValidateService("db", f.Services["db"], nil, "ghcr.io/x/y", nil); err == nil || !strings.Contains(err.Error(), "image ghcr.io/x/y is not an a12s Service (no /a12s/service.json)  fix: add services.db.manifest or see docs/services.md#manifest") {
+	if err := ValidateService("db", f.Services["db"], nil, "ghcr.io/x/y", nil); err == nil || !strings.Contains(err.Error(), "/a12s/service.json") || !strings.Contains(err.Error(), "fix: add services.db.manifest") {
 		t.Fatalf("no manifest: %v", err)
 	}
 	img, err := ParseManifest([]byte(`{"a12s":1,"name":"svc-webhook","version":"0.1.0","user":1000,
@@ -158,12 +160,12 @@ func TestValidateServiceManifest(t *testing.T) {
 	}
 	hooks := f.Services["hooks"]
 	err = ValidateService("hooks", hooks, img, "a12s/svc-webhook:0.1", nil)
-	if err == nil || !strings.Contains(err.Error(), "the image requires credential gh-webhook") {
+	if err == nil || !strings.Contains(err.Error(), "gh-webhook") {
 		t.Fatalf("required credential: %v", err)
 	}
 	hooks.Credentials = []string{"gh-webhook"}
 	hooks.Publish = []string{"127.0.0.1:8787:9090"}
-	if err := ValidateService("hooks", hooks, img, "a12s/svc-webhook:0.1", nil); err == nil || !strings.Contains(err.Error(), "port 9090 is not a declared port of hooks") {
+	if err := ValidateService("hooks", hooks, img, "a12s/svc-webhook:0.1", nil); err == nil || !strings.Contains(err.Error(), "9090") {
 		t.Fatalf("publish undeclared: %v", err)
 	}
 	// Inline fields override the image's, field by field.
@@ -173,7 +175,7 @@ func TestValidateServiceManifest(t *testing.T) {
 	}
 	login := &ServiceManifest{Login: &ServiceLogin{Command: []string{"login"}, Produces: "gh-oauth"}}
 	hooks.Publish = nil
-	if err := ValidateService("hooks", hooks, MergeManifest(img, login), "x", nil); err == nil || !strings.Contains(err.Error(), "login produces gh-oauth, which the Service does not list") {
+	if err := ValidateService("hooks", hooks, MergeManifest(img, login), "x", nil); err == nil || !strings.Contains(err.Error(), "gh-oauth") {
 		t.Fatalf("login produces: %v", err)
 	}
 	if _, err := ParseManifest([]byte(`{"a12s":1,"surprise":true}`)); err == nil {

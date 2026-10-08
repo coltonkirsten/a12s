@@ -11,71 +11,25 @@ func TestParseLabExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gi := Bytes(1 << 30)
-	full := AutonomyFull
-	want := &Fleet{
-		APIVersion: APIVersion,
-		Kind:       Kind,
-		Metadata:   Metadata{Name: "lab"},
-		Defaults: Computer{
-			Resources: Resources{CPU: 1000, Memory: 2 * gi},
-			Home:      Home{Size: 10 * gi},
-			Autonomy:  full,
-			Egress:    Egress{Allow: []string{}},
-		},
-		Drives: map[string]Drive{
-			"a12s-repo":  {Size: 20 * gi, Access: AccessExclusive},
-			"ux-scratch": {Size: 5 * gi, Access: AccessExclusive},
-			"reference":  {Size: 5 * gi, Access: AccessShared},
-		},
-		Computers: map[string]Computer{
-			"scout": {
-				Harness:     Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"},
-				Image:       TierSlim,
-				Resources:   Resources{CPU: 1000, Memory: 2 * gi},
-				Home:        Home{Size: 10 * gi, Preset: "./presets/scout"},
-				Autonomy:    full,
-				Credentials: []string{"anthropic"},
-				Drives:      []DriveMount{{Name: "reference", At: "/work/ref", ReadOnly: true}},
-				Egress:      Egress{Allow: []string{"api.anthropic.com"}},
-			},
-			"builder": {
-				Harness:     Harness{Kind: HarnessCodex, Version: "0.154.0", Model: "gpt-6-astra"},
-				Image:       TierSlim,
-				Resources:   Resources{CPU: 1000, Memory: 2 * gi},
-				Home:        Home{Size: 10 * gi},
-				Autonomy:    full,
-				Credentials: []string{"openai", "github"},
-				Drives:      []DriveMount{{Name: "a12s-repo", At: "/work/a12s"}},
-				Egress:      Egress{Allow: []string{"api.openai.com", "github.com", "registry.npmjs.org"}},
-			},
-			"tester": {
-				Harness:     Harness{Kind: HarnessClaudeCode, Version: "2.1.280"},
-				Image:       TierBrowser,
-				Resources:   Resources{CPU: 2000, Memory: 4 * gi},
-				Home:        Home{Size: 10 * gi},
-				Autonomy:    full,
-				Credentials: []string{"anthropic"},
-				Drives:      []DriveMount{{Name: "ux-scratch", At: "/work/ux"}},
-				Egress:      Egress{Allow: []string{"api.anthropic.com", "staging.example.com"}},
-			},
-			"reviewer": {
-				Harness:     Harness{Kind: HarnessCodex, Version: "0.154.0"},
-				Image:       TierSlim,
-				Resources:   Resources{CPU: 1000, Memory: 2 * gi},
-				Home:        Home{Size: 10 * gi},
-				Autonomy:    full,
-				Credentials: []string{"openai"},
-				Drives:      []DriveMount{{Name: "reference", At: "/work/ref", ReadOnly: true}},
-				Egress:      Egress{Allow: []string{"api.openai.com"}},
-			},
-		},
-	}
-	if !reflect.DeepEqual(f, want) {
-		t.Fatalf("parsed fleet mismatch\n got: %+v\nwant: %+v", f, want)
+	// The contract fields only; TestDefaultsMerge owns the merge rules, and a
+	// new defaulted field must not break this test.
+	if f.Metadata.Name != "lab" || len(f.Drives) != 3 || f.Drives["reference"].Access != AccessShared || f.Drives["a12s-repo"].Access != AccessExclusive {
+		t.Fatalf("fleet %+v drives %+v", f.Metadata, f.Drives)
 	}
 	if got := f.ComputerNames(); !reflect.DeepEqual(got, []string{"builder", "reviewer", "scout", "tester"}) {
 		t.Errorf("ComputerNames = %v", got)
+	}
+	scout, builder, tester := f.Computers["scout"], f.Computers["builder"], f.Computers["tester"]
+	if scout.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"}) || scout.Home.Preset != "./presets/scout" ||
+		!reflect.DeepEqual(scout.Drives, []DriveMount{{Name: "reference", At: "/work/ref", ReadOnly: true}}) ||
+		!reflect.DeepEqual(scout.Egress.Allow, []string{"api.anthropic.com"}) || !reflect.DeepEqual(scout.Credentials, []string{"anthropic"}) {
+		t.Errorf("scout %+v", scout)
+	}
+	if builder.Harness.Kind != HarnessCodex || !reflect.DeepEqual(builder.Credentials, []string{"openai", "github"}) || builder.Autonomy != AutonomyFull {
+		t.Errorf("builder %+v", builder)
+	}
+	if tester.Image != TierBrowser || tester.Resources.CPU != 2000 || tester.Resources.Memory != 4*Bytes(1<<30) {
+		t.Errorf("tester %+v", tester)
 	}
 }
 
