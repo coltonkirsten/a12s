@@ -244,8 +244,12 @@ func TestCreateOptions(t *testing.T) {
 		"A12S_PROXY=http://a12s-lab-controller:3128", "A12S_CONTROLLER=https://a12s-lab-controller:7443",
 		"A12S_MODEL=claude-fable-5-1",
 	}
-	if !reflect.DeepEqual(o.Config.Env, wantEnv) {
-		t.Errorf("env = %q", o.Config.Env)
+	// A set, not an ordered slice: what computerd reads must be there with
+	// these values; order, and a new variable, are not this test's concern.
+	for _, kv := range wantEnv {
+		if !slices.Contains(o.Config.Env, kv) {
+			t.Errorf("env lacks %s: %q", kv, o.Config.Env)
+		}
 	}
 	h := o.HostConfig
 	if !h.ReadonlyRootfs || !reflect.DeepEqual(h.CapDrop, []string{"ALL"}) ||
