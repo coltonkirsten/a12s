@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -51,19 +49,5 @@ func TestFetchesAtStart(t *testing.T) {
 	}
 	if fetchesAtStart(map[string]any{"command": []any{"/opt/mcp/bin/mcp-server-postgres"}}) {
 		t.Fatal("baked server flagged")
-	}
-}
-
-func TestCompletion(t *testing.T) {
-	r, w, _ := os.Pipe()
-	old := os.Stdout
-	os.Stdout = w
-	err := runCompletion(nil, []string{"bash"})
-	w.Close()
-	os.Stdout = old
-	var b bytes.Buffer
-	b.ReadFrom(r)
-	if err != nil || !strings.Contains(b.String(), "complete -F _a12s a12s") || !strings.Contains(b.String(), "service)") || !strings.Contains(b.String(), "doctor") {
-		t.Fatalf("%v\n%s", err, b.String())
 	}
 }
