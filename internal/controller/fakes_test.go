@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -694,7 +695,13 @@ type harness struct {
 	dir  string
 	log  *bytes.Buffer
 	stop func()
+	// skew moves the power clock and fleet.db's clock forward (advance).
+	skew *atomic.Int64
 }
+
+// advance moves the Controller's power clock and fleet.db's clock forward,
+// so a test need not wait out a real window.
+func (h *harness) advance(d time.Duration) { h.skew.Add(int64(d)) }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
@@ -729,8 +736,11 @@ func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) 
 	c.logger = log.New(&lockedWriter{w: buf}, "", 0)
 	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second, PowerTick: 5 * time.Millisecond, HealthPoll: 5 * time.Millisecond, HealthStartup: 300 * time.Millisecond, HealthInterval: 20 * time.Millisecond}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
+	skew := &atomic.Int64{}
+	c.now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	c.inbox.SetClock(c.now)
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf}
+	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf, skew: skew}
 	h.stop = sync.OnceFunc(func() {
 		cancel()
 		c.Wait() // nothing of this Controller runs on after it stops
