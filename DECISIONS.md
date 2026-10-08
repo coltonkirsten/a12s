@@ -85,3 +85,22 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
 - **`stop --hold` without an active Turn** just holds the inbox (the CLI calls `inbox/hold`).
 - **`wake --clear-inbox`** returns the number discarded in `inboxCleared` on the power answer; the CLI sends one
   fresh requestId per Computer and reuses it on a retry.
+
+## S3b: power policy
+
+- **The idle clock is a 1-second tick, not per-Computer timers.** The power loop checks every Computer's policy
+  each tick (idle → auto-sleep; asleep → wake-on-message). The tick also covers every "later moment that makes
+  a Message eligible" (rate window reopening, credentials loaded, hold lifted) without wiring each one; enqueues
+  and drains additionally evaluate wake at once. Auto-sleep re-checks idleness under the Computer's lock,
+  including computerd's status (turn, continuation) and attached exec sessions.
+- **Attached sessions** are counted from Docker (`ContainerInspect.ExecIDs`, running ones): any `a12s shell`
+  or other exec keeps the Computer awake. The Controller's own credential-injection execs are momentary.
+- **Test speed.** `A12S_TEST_TIME_SCALE` (≥ 1, passed from the CLI's environment to a newly created Controller)
+  divides `sleepAfterIdle` and the rate window, for the exit gate. Absent in production.
+- **Suppression is recorded per sleep and reason** (`suppressed` in fleet.db, reset by every sleep): `manual_sleep`,
+  `credentials_not_loaded`, `wake_failed`, `rate_limit` (with `until`). No suppression is recorded while a wake
+  is in flight.
+- **`service:<name>` in `wakeOnMessage.from`** is refused until Services exist (S4 adds them); the warning for a
+  listed principal without a `send` grant arrives with grants (S5).
+- **Manual wake clears both the manual mark and a `wake_failed` pause; `a12s up` clears the pause.** An auto-wake
+  clears the "slept by" mark (the Computer is awake) but not a pause.

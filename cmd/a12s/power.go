@@ -20,7 +20,10 @@ func runWake(g *globals, args []string) error { return power(g, "wake", api.Powe
 func power(g *globals, verb string, state api.Power, args []string) error {
 	fs := g.flags(verb)
 	all := fs.Bool("all", false, "every Computer in the Fleet")
-	var clearInbox *bool
+	var clearInbox, allowWake *bool
+	if state == api.PowerAsleep {
+		allowWake = fs.Bool("allow-wake", false, "leave the power policy in charge: a listed sender's message may wake it")
+	}
 	if state == api.PowerAwake {
 		clearInbox = fs.Bool("clear-inbox", false, "discard the pending messages (journaled, not erased) before the Computer takes work")
 	}
@@ -67,6 +70,9 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	var wg sync.WaitGroup
 	for i, n := range names {
 		reqs[i].State = state
+		if allowWake != nil && *allowWake {
+			reqs[i].AllowWake = true
+		}
 		if clearInbox != nil && *clearInbox {
 			// One requestId per Computer: a retry is the same clear.
 			reqs[i].ClearInbox, reqs[i].RequestID = true, cli.NewRequestID()

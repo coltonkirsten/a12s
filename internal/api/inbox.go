@@ -198,3 +198,34 @@ type Token struct {
 type TokensResponse struct {
 	Tokens []Token `json:"tokens"`
 }
+
+// Power policy autoWake values (enhancements §4.14).
+const (
+	AutoWakeOn          = "on"
+	AutoWakeOff         = "off"
+	AutoWakeSuppressed  = "suppressed"   // manually slept: until a manual wake
+	AutoWakePaused      = "paused"       // credentials not loaded, or the last wake failed
+	AutoWakeRateLimited = "rate_limited" // maxWakesPerHour reached
+)
+
+// Slept-by values.
+const (
+	SleptAuto      = "auto"
+	SleptManual    = "manual"
+	SleptAllowWake = "allow_wake"
+)
+
+// PowerStatus is a Computer's power policy and its live state, in status.
+type PowerStatus struct {
+	SleepAfterIdle  string     `json:"sleepAfterIdle,omitempty"` // "off" or a duration
+	WakeOnMessage   []string   `json:"wakeOnMessage,omitempty"`
+	MaxWakesPerHour int        `json:"maxWakesPerHour,omitempty"`
+	AutoWake        string     `json:"autoWake"`
+	Reason          string     `json:"reason,omitempty"`
+	Fix             string     `json:"fix,omitempty"`
+	WakesLastHour   int        `json:"wakesLastHour"`
+	NextWakeAt      *time.Time `json:"nextWakeAt,omitempty"`
+	IdleSince       *time.Time `json:"idleSince,omitempty"`
+	SleptBy         string     `json:"sleptBy,omitempty"`
+	SleptAt         *time.Time `json:"sleptAt,omitempty"`
+}

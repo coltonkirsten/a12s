@@ -45,6 +45,9 @@ type Config struct {
 	// APIAddr overrides the API listen address (host:port). By default the
 	// API listens on the Controller's IP on the bridge network a12s-F.
 	APIAddr string // A12S_API_ADDR
+	// TimeScale divides power-policy durations (idle time, the wake rate
+	// window); 1 in production, larger for the exit gate's test speed.
+	TimeScale float64 // A12S_TEST_TIME_SCALE
 }
 
 // ConfigFromEnv reads the Config from the environment.
@@ -60,6 +63,13 @@ func ConfigFromEnv() (Config, error) {
 		cfg.StateDir = "/var/lib/a12s"
 	}
 	cfg.SubnetPool = docker.DefaultSubnetPool
+	if s := os.Getenv("A12S_TEST_TIME_SCALE"); s != "" {
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil || v < 1 {
+			return cfg, fmt.Errorf("A12S_TEST_TIME_SCALE: want a number >= 1, got %q", s)
+		}
+		cfg.TimeScale = v
+	}
 	if s := os.Getenv("A12S_SUBNET_POOL"); s != "" {
 		p, err := netip.ParsePrefix(s)
 		if err != nil {
@@ -84,6 +94,7 @@ type Timing struct {
 	RestartBackoff time.Duration // first restart delay after an unexpected death; doubles
 	MaxRestarts    int           // then Error{retryable}
 	ReadBack       time.Duration // a Driver change showing in Observe
+	PowerTick      time.Duration // power-policy evaluation
 }
 
 var defaultTiming = Timing{
@@ -93,6 +104,7 @@ var defaultTiming = Timing{
 	RestartBackoff: time.Second,
 	MaxRestarts:    3,
 	ReadBack:       10 * time.Second,
+	PowerTick:      time.Second,
 }
 
 // computerdClient is what the Controller needs from computerd.
@@ -291,6 +303,7 @@ func (c *Controller) Start(ctx context.Context) {
 	c.ctx = ctx
 	c.spawn(func() { c.watch(ctx) })
 	c.spawn(func() { c.expiryLoop(ctx) })
+	c.spawn(func() { c.powerLoop(ctx) })
 	// Taken here, before Start returns, and released by the resume pass: an
 	// apply or power request that arrives first waits for the resume
 	// instead of the resume re-converging after it.

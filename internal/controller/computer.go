@@ -40,6 +40,10 @@ type runtime struct {
 	released bool
 	// lastClear is what the last wake --clear-inbox discarded (its answer).
 	lastClear int
+	// idleSince is when the current idle run began (zero: not idle), and
+	// powerBusy marks a power-policy action in flight (§4.14).
+	idleSince time.Time
+	powerBusy bool
 }
 
 // closeAdmission stops new prompts and waits for one being admitted:

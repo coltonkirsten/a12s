@@ -37,7 +37,7 @@ func commands() []command {
 		{"token", "create <name> --actions a,b --computers c | ls | rm <name>", "scoped API tokens", runToken},
 		{"stop", "<name> [--hold]", "interrupt the active turn (--hold: hold the inbox first)", runStop},
 		{"logs", "<name> [--follow] [--since <seq>]", "replay and follow the journal", runLogs},
-		{"sleep", "<name>... | --all", "sleep Computers (storage kept, no CPU or RAM)", runSleep},
+		{"sleep", "<name>... | --all [--allow-wake]", "sleep Computers (storage kept, no CPU or RAM)", runSleep},
 		{"wake", "<name>... | --all [--clear-inbox]", "wake Computers; resume happens on the next prompt", runWake},
 		{"shell", "<name> [--root] [-- command...]", "audited terminal inside a Computer, outside the harness", runShell},
 		{"drive", "ls | rm <name> [--yes]", "list drives; rm and down --purge are the only commands that destroy data", runDrive},

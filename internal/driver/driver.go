@@ -63,6 +63,10 @@ type Driver interface {
 	// RemoveDrive destroys a drive. It returns ErrDriveAttached if anything
 	// has it attached.
 	RemoveDrive(ctx context.Context, id string) error
+
+	// Sessions counts the interactive or exec sessions attached to a
+	// Computer now (enhancements §4.14: they keep it from auto-sleeping).
+	Sessions(ctx context.Context, computer string) (int, error)
 }
 
 // Errors returned by Drivers; test with errors.Is.

@@ -121,6 +121,8 @@ type ComputerStatus struct {
 	Inbox *InboxSummary `json:"inbox,omitempty"`
 	// InboxCleared is set on a wake --clear-inbox answer: Messages discarded.
 	InboxCleared *int `json:"inboxCleared,omitempty"`
+	// Power is the declared power policy and its state (enhancements §4.14).
+	Power *PowerStatus `json:"power,omitempty"`
 }
 
 // ComputerStatus.EgressMode values.

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -104,6 +105,9 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		if in := InboxCell(c.Inbox); in != "" {
 			extra = append(extra, in)
 		}
+		if pw := PowerCell(c.Power, c.Phase); pw != "" {
+			extra = append(extra, "power: "+pw)
+		}
 		cells = append(cells, strings.Join(extra, "  "))
 		rows = append(rows, cells)
 	}
@@ -115,6 +119,18 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 
 func phase(c api.ComputerStatus) string {
 	p := string(c.Phase)
+	if c.Phase == api.PhaseAsleep && c.Power != nil && c.Power.SleptBy != "" {
+		switch c.Power.SleptBy {
+		case api.SleptAuto:
+			at := ""
+			if c.Power.SleptAt != nil {
+				at = " " + c.Power.SleptAt.Local().Format("15:04")
+			}
+			p += " (auto" + at + ")"
+		case api.SleptManual:
+			p += " (manual)"
+		}
+	}
 	if c.ResumePending {
 		p += " (resumePending)"
 	}
@@ -401,4 +417,38 @@ func WriteInbox(w io.Writer, l *api.InboxListResponse, bodies bool) {
 			}
 		}
 	}
+}
+
+// PowerCell renders the POWER column (§4.14 "What you see").
+func PowerCell(ps *api.PowerStatus, phase api.Phase) string {
+	if ps == nil {
+		return ""
+	}
+	var parts []string
+	switch ps.AutoWake {
+	case api.AutoWakeSuppressed:
+		return "auto-wake suppressed until a12s wake"
+	case api.AutoWakePaused:
+		s := "auto-wake: paused (" + strings.ReplaceAll(ps.Reason, "_", " ") + ")"
+		if ps.Fix != "" {
+			s += "  fix: " + ps.Fix
+		}
+		return s
+	case api.AutoWakeRateLimited:
+		s := fmt.Sprintf("auto-wake: rate-limited (%d/%d)", ps.WakesLastHour, ps.MaxWakesPerHour)
+		if ps.NextWakeAt != nil {
+			s += ", next " + ps.NextWakeAt.Local().Format("15:04")
+		}
+		return s
+	case api.AutoWakeOn:
+		parts = append(parts, fmt.Sprintf("wakes on %s · %d/%d this hour", strings.Join(ps.WakeOnMessage, ", "), ps.WakesLastHour, ps.MaxWakesPerHour))
+	}
+	if ps.SleepAfterIdle != "off" && ps.SleepAfterIdle != "" && phase != api.PhaseAsleep {
+		if ps.IdleSince != nil {
+			parts = append(parts, fmt.Sprintf("idle %s of %s", time.Since(*ps.IdleSince).Round(time.Minute), ps.SleepAfterIdle))
+		} else {
+			parts = append(parts, "sleeps after "+ps.SleepAfterIdle+" idle")
+		}
+	}
+	return strings.Join(parts, " · ")
 }

@@ -89,6 +89,23 @@ type Computer struct {
 	// Inbox configures the Computer's inbox (enhancements §4.8, §4.13).
 	// Controller state, not container config: never hashed into a generation.
 	Inbox Inbox `yaml:"inbox,omitempty" json:"inbox,omitzero"`
+	// Power is the declared power policy (enhancements §4.14): Controller
+	// state, never hashed into a generation. Off unless set.
+	Power Power `yaml:"power,omitempty" json:"power,omitzero"`
+}
+
+// Power is a Computer's power policy.
+type Power struct {
+	// SleepAfterIdle is "off" or a duration from 1m to 7d ("15m", "2h", "1d").
+	SleepAfterIdle *string        `yaml:"sleepAfterIdle,omitempty" json:"sleepAfterIdle,omitempty"`
+	WakeOnMessage  *WakeOnMessage `yaml:"wakeOnMessage,omitempty" json:"wakeOnMessage,omitempty"`
+}
+
+// WakeOnMessage lists the principals whose pending Messages may wake the
+// Computer, rate-limited.
+type WakeOnMessage struct {
+	From            []string `yaml:"from" json:"from"`
+	MaxWakesPerHour *int     `yaml:"maxWakesPerHour,omitempty" json:"maxWakesPerHour,omitempty"`
 }
 
 // Inbox is a Computer's inbox configuration. Unset fields fall back to

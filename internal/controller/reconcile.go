@@ -98,6 +98,10 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 	if err := c.syncInboxes(ctx, f, api.PrincipalLocal); err != nil {
 		return api.PutFleetResponse{}, err
 	}
+	c.syncPower(ctx, f, api.PrincipalLocal)
+	if c.inbox != nil {
+		_ = c.inbox.ClearPaused(ctx) // a12s up resumes an auto-wake paused by a failed wake
+	}
 
 	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: f.InboxWarnings()}
 	obs, err := c.drv.Observe(ctx)
@@ -614,6 +618,27 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 // SetPower is `a12s sleep` and `a12s wake`.
 func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerRequest) error {
 	defer c.lockComputer(name)()
+	if err := c.setPowerLocked(ctx, name, req); err != nil {
+		return err
+	}
+	// A manual sleep suppresses auto-wake until a manual wake, which clears
+	// the mark and a paused auto-wake (§4.14).
+	if c.inbox != nil {
+		by := ""
+		if req.State == api.PowerAsleep {
+			by = api.SleptManual
+			if req.AllowWake {
+				by = api.SleptAllowWake
+			}
+		}
+		if err := c.inbox.SetSlept(ctx, name, by); err != nil {
+			c.logf("%s: power mark: %v", name, err)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.PowerRequest) error {
 	c.mu.Lock()
 	rec := c.state.Computers[name]
 	inFleet := c.state.Fleet != nil && rec != nil

@@ -130,6 +130,10 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 		return false
 	case reason == "unreachable":
 		return true
+	case reason == "asleep":
+		// An enqueue, a hold lifted or credentials loaded: wake on policy (§4.14).
+		c.maybeAutoWake(ctx, name)
+		return retry
 	case reason != "":
 		return retry
 	}
