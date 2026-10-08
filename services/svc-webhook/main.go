@@ -107,7 +107,11 @@ func handler(c *svckit.Client, r route) http.HandlerFunc {
 }
 
 // validSignature checks GitHub's X-Hub-Signature-256: sha256=<hex HMAC>.
+// An empty secret validates nothing (svckit.Secret already refuses one).
 func validSignature(secret, body []byte, header string) bool {
+	if len(secret) == 0 {
+		return false
+	}
 	hexsig, ok := strings.CutPrefix(header, "sha256=")
 	if !ok {
 		return false

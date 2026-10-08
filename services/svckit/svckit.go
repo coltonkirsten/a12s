@@ -36,7 +36,9 @@ func LoadConfig(v any) error {
 	return json.Unmarshal(data, v)
 }
 
-// Secret reads a credential a12s injected (whitespace trimmed).
+// Secret reads a credential a12s injected (whitespace trimmed). An empty or
+// whitespace-only credential is an error, never an empty key: an HMAC with an
+// empty key is one anybody can compute, so a caller must fail closed.
 func Secret(name string) ([]byte, error) {
 	if name == "" || strings.ContainsAny(name, "/\\") || name[0] == '.' {
 		return nil, fmt.Errorf("bad credential name %q", name)
@@ -45,7 +47,11 @@ func Secret(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bytes.TrimSpace(b), nil
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 {
+		return nil, fmt.Errorf("credential %q is empty", name)
+	}
+	return b, nil
 }
 
 // Client calls the Controller's mTLS listener as this Service.
