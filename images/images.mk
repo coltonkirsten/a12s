@@ -27,3 +27,17 @@ bundles:
 bundle-claude-code bundle-codex:
 	@test -n "$(VERSION)" || { echo "usage: make $@ VERSION=x.y.z" >&2; exit 1; }
 	$(DOCKER) build --build-arg VERSION=$(VERSION) -t a12s/$@:$(VERSION) images/bundles/$(@:bundle-%=%)
+
+# Reference Services (services/, enhancements §5.8): ordinary images, pinned like any other.
+SVC_TAG ?= 0.1
+.PHONY: services svc-cron svc-webhook svc-mcp svc-mcp-postgres
+services: svc-cron svc-webhook svc-mcp svc-mcp-postgres
+
+svc-cron svc-webhook:
+	$(DOCKER) build -f services/go.Dockerfile --build-arg SERVICE=$@ -t a12s/$@:$(SVC_TAG) .
+
+svc-mcp:
+	$(DOCKER) build -f services/svc-mcp/Dockerfile -t a12s/svc-mcp:$(SVC_TAG) .
+
+svc-mcp-postgres: svc-mcp
+	$(DOCKER) build -f services/svc-mcp/postgres.Dockerfile --build-arg SVC_MCP_IMAGE=a12s/svc-mcp:$(SVC_TAG) -t a12s/svc-mcp-postgres:$(SVC_TAG) services/svc-mcp

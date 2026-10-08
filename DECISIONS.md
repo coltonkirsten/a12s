@@ -192,3 +192,21 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
   uid, 0400); a Service's `config.env` maps them (`POSTGRES_PASSWORD_FILE: /run/a12s/secrets/postgres`).
 - The controller image now builds with a Go build-cache mount, so each rebuild adds only the binary to the
   build cache (the disk on mac-mini is tight).
+
+## S7: reference Services
+
+- **svc-cron and svc-webhook are Go, svc-mcp is plain Node.** The Go ones share `services/svckit` (config,
+  secrets, the mTLS client from `A12S_API` + `/run/a12s/tls`, the inbox calls) and build from
+  `services/go.Dockerfile` onto Alpine; svc-mcp has no npm dependencies. None needed a Controller change.
+- **svc-mcp sessions.** One child process per MCP session (`initialize` without `Mcp-Session-Id` starts one),
+  idle-killed after 30 minutes, so two Computers never share a stdio server's state. Answers are JSON (not SSE);
+  server-initiated requests are dropped.
+- **`${VAR}` in svc-mcp `args`.** `@modelcontextprotocol/server-postgres` takes its URL as an argument, so the
+  wrapper expands `${PGHOST}`/`${PGPORT}` (from `hostPortFrom`) there; the password stays in `PGPASSWORD` from
+  `envFrom`, never in argv or config.
+- **The postgres derivative is `a12s/svc-mcp-postgres:0.1`** (local tag) rather than the spec's ghcr.io name,
+  with the server at `/opt/mcp/bin/mcp-server-postgres`. `examples/services/fleet.yaml` is §3's Fleet with local
+  image names, Claude Code on all three Computers (the gate runs on the setup-token), and a `gh-webhook` secret.
+- **`a12s init`** writes fleet.yaml, an empty bindings file and .gitignore; `--with db` adds `pg` + `db` and a
+  commented `uses: [db]`, `--with cron` adds `clock`. Missing bindings fail `up` with
+  `fix: a12s creds set <name>`.

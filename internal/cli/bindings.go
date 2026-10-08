@@ -140,15 +140,15 @@ func (b *Bindings) Resolve(need map[string][]string) (api.Credentials, error) {
 		return creds, nil
 	}
 	if !b.Exists {
-		return nil, fmt.Errorf("the Fleet needs credentials %s but %s does not exist (copy %s.example and fill it in)",
-			strings.Join(sortedKeys(need), ", "), b.Path, BindingsFile)
+		return nil, fmt.Errorf("the Fleet needs credentials %s but %s does not exist  fix: a12s creds set %s (or copy %s.example and fill it in)",
+			strings.Join(sortedKeys(need), ", "), b.Path, sortedKeys(need)[0], BindingsFile)
 	}
 	var errs []error
 	for _, name := range sortedKeys(need) {
 		who := strings.Join(need[name], ", ")
 		s, ok := b.Credentials[name]
 		if !ok {
-			errs = append(errs, fmt.Errorf("credential %s (needed by %s) has no binding", name, who))
+			errs = append(errs, fmt.Errorf("credential %s (needed by %s) has no binding  fix: a12s creds set %s", name, who, name))
 			continue
 		}
 		v, err := b.read(s)

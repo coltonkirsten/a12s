@@ -190,3 +190,13 @@ func TestLockServices(t *testing.T) {
 		t.Fatalf("%v", l.Services)
 	}
 }
+
+func TestServicesExampleParses(t *testing.T) {
+	f, err := Load("../../examples/services/fleet.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Services) != 4 || f.Services["db"].Uses[0].Name != "pg" {
+		t.Fatalf("services %v", f.ServiceNames())
+	}
+}
