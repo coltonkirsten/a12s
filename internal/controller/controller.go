@@ -322,6 +322,9 @@ func (c *Controller) containerName(name string) string { return "a12s-" + c.cfg.
 // It returns at once; work continues until ctx ends.
 func (c *Controller) Start(ctx context.Context) {
 	c.ctx = ctx
+	if n := c.timeScaleNote(); n != "" {
+		c.logf("%s", n)
+	}
 	c.spawn(func() { c.watch(ctx) })
 	c.spawn(func() { c.expiryLoop(ctx) })
 	c.spawn(func() { c.powerLoop(ctx) })

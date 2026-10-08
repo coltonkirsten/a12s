@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
@@ -34,6 +35,16 @@ func (c *Controller) scaled(d time.Duration) time.Duration {
 		return time.Duration(float64(d) / c.cfg.TimeScale)
 	}
 	return d
+}
+
+// timeScaleNote says when A12S_TEST_TIME_SCALE is in force: a stray value in
+// the operator's shell is baked into the persistent Controller by a12s up and
+// silently shortens auto-sleep, so it is logged at start and shown in status.
+func (c *Controller) timeScaleNote() string {
+	if c.cfg.TimeScale <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("A12S_TEST_TIME_SCALE=%g: power-policy durations run %gx fast (a test setting; unset it and run a12s down, then a12s up)", c.cfg.TimeScale, c.cfg.TimeScale)
 }
 
 // credsLoaded reports whether the Controller holds every credential the
