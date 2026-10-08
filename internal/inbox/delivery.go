@@ -531,4 +531,3 @@ func (s *Store) MessageEvents(ctx context.Context, computer, id string, after in
 	}
 	return out, rows.Err()
 }
-

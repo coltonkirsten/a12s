@@ -311,11 +311,11 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 	return client.ContainerCreateOptions{
 		Name: d.ContainerName(spec.Name),
 		Config: &container.Config{
-			Image:       spec.Image,
-			Hostname:    spec.Name,
-			User:        "0:0", // a12s-init's bootstrap; it drops to spec.User before exec
-			Entrypoint:  []string{initExec, "service-init", "--"},
-			Cmd:         program,
+			Image:      spec.Image,
+			Hostname:   spec.Name,
+			User:       "0:0", // a12s-init's bootstrap; it drops to spec.User before exec
+			Entrypoint: []string{initExec, "service-init", "--"},
+			Cmd:        program,
 			// An image HEALTHCHECK would run image code as the container's
 			// user (root, for a12s-init); a12s runs the manifest's check.
 			Healthcheck: noHealthcheck,
@@ -673,13 +673,13 @@ func (d *Driver) StartLogin(ctx context.Context, service string, spec driver.Log
 	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: d.LoginName(service),
 		Config: &container.Config{
-			Image:      spec.Image,
-			User:       spec.User,
+			Image:       spec.Image,
+			User:        spec.User,
 			Entrypoint:  []string{initExec, "login-hold"},
 			Cmd:         []string{},
 			Healthcheck: noHealthcheck,
-			Env:        env,
-			Labels:     map[string]string{LabelFleet: d.fleet, LabelService: service, LabelRole: RoleLogin},
+			Env:         env,
+			Labels:      map[string]string{LabelFleet: d.fleet, LabelService: service, LabelRole: RoleLogin},
 		},
 		HostConfig: &container.HostConfig{
 			NetworkMode:    container.NetworkMode(netName),
