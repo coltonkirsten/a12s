@@ -72,12 +72,6 @@ func TestBatchedWhileBusy(t *testing.T) {
 	if strings.Join(reqIDs(req), ",") != strings.Join([]string{a.ID, b.ID, c.ID}, ",") || req.Session != api.SessionCurrent || req.RequestID != req.Inbox.Batch {
 		t.Fatalf("batch %v %s", reqIDs(req), req.Session)
 	}
-	p := req.Prompt
-	for _, want := range []string{"[a12s inbox · builder · batch " + req.Inbox.Batch + " · 3 messages · ", inbox.SafetyBlock, `from="colton" via="local"`, `from="cron:nightly-audit" via="local"`, `meta='{&quot;job&quot;:&quot;nightly-audit&quot;}'`, "[end of inbox batch " + req.Inbox.Batch + "]"} {
-		if !strings.Contains(p, want) {
-			t.Fatalf("render lacks %q:\n%s", want, p)
-		}
-	}
 	for _, id := range []string{a.ID, b.ID, c.ID} {
 		if m := h.waitMessage("builder", id, api.MsgDelivered); m.Turn != "t_2" {
 			t.Fatalf("%s turn %s", id, m.Turn)

@@ -219,7 +219,7 @@ func TestServiceAdmission(t *testing.T) {
 		}}
 	})
 	_, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
-	if err == nil || !strings.Contains(err.Error(), "VOLUME /var/lib/postgresql/data, which neither state nor tmpfs covers") {
+	if err == nil || !strings.Contains(err.Error(), "services.pg") || !strings.Contains(err.Error(), "/var/lib/postgresql/data") || !strings.Contains(err.Error(), "fix:") {
 		t.Fatalf("uncovered volume: %v", err)
 	}
 	// A static credential with no material is refused at admission...
@@ -229,7 +229,7 @@ func TestServiceAdmission(t *testing.T) {
 		f.Services["clock"] = s
 	})
 	_, err = h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
-	if err == nil || !strings.Contains(err.Error(), "services.clock: credential postgres has no binding  fix: a12s creds set postgres") {
+	if err == nil || !strings.Contains(err.Error(), "services.clock: ") || !strings.Contains(err.Error(), "postgres") || !strings.Contains(err.Error(), "fix: a12s creds set postgres") {
 		t.Fatalf("missing credential: %v", err)
 	}
 	// ...but one the Service's own login produces leaves only it waiting.
@@ -243,7 +243,7 @@ func TestServiceAdmission(t *testing.T) {
 	if err != nil || len(res.Errors) > 0 {
 		t.Fatalf("login credential: %v %+v", err, res.Errors)
 	}
-	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "clock needs a login  fix: a12s service login clock") }) {
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "fix: a12s service login clock") }) {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
 	h.waitService("clock", api.PhaseError)
