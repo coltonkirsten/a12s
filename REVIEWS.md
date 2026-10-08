@@ -155,3 +155,31 @@ Astra's one-round check of `7bb5dad` (the round the two-round cap skipped) retur
 Round 3: sign-off (Astra, `gpt-6-astra`, on the #65 fix and #66; #67 accepted as the documented no-flock limit). #65 is now re-reviewed.
 
 **Layer 1 DONE 2026-10-06.** Totals across Layer 1: 8 rounds, 65 findings; #58 and #59 closed here; #65 is fixed and re-reviewed (post-closeout round 3: sign-off; #66 and #67 raised there).
+
+## Enhancements final review — the whole Layer 1 enhancements diff at 9237e1b (S1–S8)
+
+One pass, as asked (Astra, `codex exec -m gpt-6-astra`, xhigh, read-only), over `git diff 089eb7c..9237e1b`
+against `docs/a12s-layer1-enhancements-design.md` and DECISIONS.md. Raw report:
+`~/raven-v2/deliverables/a12s-build/astra/final.log`. Verdict: NOT YET, 18 findings (6 blockers, 12 should-fix).
+All 18 accepted and fixed in the PR that follows this review.
+
+| # | Finding (Astra) | Decision | What changed |
+|---|---|---|---|
+| 1 | Image `HEALTHCHECK` inherited: image code runs as root (a12s-init's user) and in the publish forwarder | accept (blocker) | `Healthcheck: NONE` on Service, forwarder, login and Computer containers |
+| 2 | Bridge missing from the named-egress deny list when the engine read fails | accept (blocker) | last verified bridge remembered; without one, named egress fails closed |
+| 3 | A certificate outlives a Service that died while the Controller was down | accept (blocker) | registry reconciled against running containers at start; the listener also requires the principal's container to be up (fail closed) |
+| 4 | A failed registry delete leaves a stopped principal authorized | accept | revocation recorded in memory first; a failed write still refuses |
+| 5 | A VOLUME under a tmpfs path still gets an anonymous Docker volume | accept | every image VOLUME without an exact mount is mounted as tmpfs too |
+| 6 | `creds set` echo-off ran `stty` on /dev/null; the token was echoed | accept | `stty` on the terminal, errors checked, restored on return; refuses to read if echo can't be turned off |
+| 7 | Return could replace a row with an already-overdue one, delivering neither | accept (blocker) | the return routine expires all overdue pending rows first |
+| 8 | The first POST ignored the expiry fence | accept | every POST past `notAfter` is lookup-only |
+| 9 | Holds owed after dispatch (oversized, resume.failed) were missed when settlement ran at dispatch | accept | after `turn.finished`, the delivered Batch's Turn summary sets the hold |
+| 10 | A continuation accepted but not dispatched before a crash was owed forever, wedging the inbox | accept (blocker) | computerd abandons it at startup (`continuation.abandoned`), the Controller holds `resume_failed` |
+| 11 | `inbox resume --new` didn't cancel the owed continuation | accept | the drainer cancels it (`POST /v1/continuation/cancel`) when a new-session override is pending; a cancelled abandonment doesn't re-hold |
+| 12 | A Batch claimed just before a hold could POST after it | accept | holds take the admission gate; `postBatch` re-checks the hold inside it |
+| 13 | `wake --clear-inbox` missed rows of a claim that came back later | accept | the return routine discards rows a clear accepted during the claim covers |
+| 14 | Deferred journaling budgeted raw bodies; escaped chunks could exceed 2 MiB forever | accept | chunks budget the serialized records |
+| 15 | An enqueue could commit after auto-sleep's pending check and lose to the sleep | accept | auto-sleep closes admission, then re-checks pending |
+| 16 | `sleep; down; up` brought the Computer back awake | accept | new records take desired power from fleet.db's sleep mark; the mark is written before the sleep |
+| 17 | A Service reattached after a Controller restart stayed Provisioning | accept | reattach goes through Starting so health can make it Ready |
+| 18 | A delayed death event revoked the restarted instance's certificate and stopped its watchers | accept | revoke and stop only after confirming the instance is still dead |

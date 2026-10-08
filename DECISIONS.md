@@ -228,3 +228,10 @@ contradictory. Each is the smallest sound choice; the final Astra pass reviews t
   manifest, uncovered VOLUME, unbound credential, needs-a-login, no login, the removed turns endpoint, a bad
   bearer token) and requires a `fix:` on each. The 401 now carries one.
 - **Completion:** `a12s completion bash|zsh` (commands and their subcommands).
+
+## Final review fixes
+
+The 18 accepted findings of the one Astra pass are in REVIEWS.md ("Enhancements final review"). Two shapes worth
+knowing: the mTLS listener now fails closed on the Controller's own belief that a principal's container is up (as well
+as the registry), and `inbox resume --new` cancels an owed continuation through a new computerd endpoint,
+`POST /v1/continuation/cancel`, journaled as `continuation.abandoned {cancelled: true}`.

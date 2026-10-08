@@ -224,6 +224,7 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 			Hostname:    spec.Name,
 			Env:         spec.Env(d.fleet),
 			StopTimeout: &stop,
+			Healthcheck: noHealthcheck, // a custom image's HEALTHCHECK would run image code as root
 			Labels: map[string]string{
 				LabelFleet:      d.fleet,
 				LabelComputer:   spec.Name,

@@ -72,6 +72,21 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		return api.PutFleetResponse{}, err
 	}
 
+	// Durable sleep marks, read before taking the lock.
+	sleptMarks := map[string]bool{}
+	if c.inbox != nil {
+		for _, name := range f.ComputerNames() {
+			c.mu.Lock()
+			known := c.state.Computers[name] != nil
+			c.mu.Unlock()
+			if known {
+				continue
+			}
+			if row, err := c.inbox.Power(ctx, name); err == nil && row.SleptBy != "" {
+				sleptMarks[name] = true
+			}
+		}
+	}
 	// Admitted: this Fleet is now the desired state.
 	c.mu.Lock()
 	var previous map[string]fleet.Computer
@@ -100,7 +115,9 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		rec := c.state.Computers[name]
 		if rec == nil {
 			rec = &Record{DesiredPower: driver.PowerAwake}
-			if req.Asleep {
+			if req.Asleep || sleptMarks[name] {
+				// A Computer that went to sleep before `down` comes back
+				// asleep: the mark is Fleet data in fleet.db (§4.14).
 				rec.DesiredPower = driver.PowerAsleep
 			}
 			c.state.Computers[name] = rec
@@ -693,6 +710,17 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 // SetPower is `a12s sleep` and `a12s wake`.
 func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerRequest) error {
 	defer c.lockComputer(name)()
+	if req.State == api.PowerAsleep && c.inbox != nil {
+		// The intent is durable before the sleep starts: a crash in the
+		// middle can't leave a manual sleep unmarked.
+		by := api.SleptManual
+		if req.AllowWake {
+			by = api.SleptAllowWake
+		}
+		if err := c.inbox.SetSlept(ctx, name, by); err != nil {
+			return err
+		}
+	}
 	if err := c.setPowerLocked(ctx, name, req); err != nil {
 		return err
 	}

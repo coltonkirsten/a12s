@@ -98,6 +98,14 @@ export class Computer {
       this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'computerd restarted' }, { turn: t.turnId, session: t.session });
     }
     this.owedContinuation = this.journal.owedContinuation();
+    // A continuation accepted before the crash, and never dispatched (its owed flag clears with the dispatch), was
+    // just ended interrupted above. It failed before dispatch: abandon it instead of owing it forever (§4.5).
+    const owed = this.owedContinuation;
+    const accepted = owed ? this.journal.findRequest(owed.id) : undefined;
+    if (owed && accepted) {
+      this.owedContinuation = null;
+      this.journal.append('continuation.abandoned', { continuation: owed.id, reason: 'computerd restarted before the harness received the continuation' }, { turn: accepted.turnId });
+    }
     const loaded = loadSessionRecord(this.sessionPath);
     this.session = loaded.record;
     this.sessionDamaged = loaded.damaged;
@@ -263,6 +271,18 @@ export class Computer {
       if (take('fail-before-dispatch') !== null) throw new Error('test hook: failed before dispatch');
       if (take('exit-after-accept') !== null) process.exit(70);
     } else if (take('exit-after-dispatch') !== null) process.exit(71);
+  }
+
+  /**
+   * Cancels the owed continuation (`a12s inbox resume --new`, §4.5: a new session has nothing to continue). Returns its
+   * id, or null when none is owed.
+   */
+  cancelContinuation(reason: string): string | null {
+    const owed = this.owedContinuation;
+    if (!owed || this.active) return null;
+    this.owedContinuation = null;
+    this.journal.append('continuation.abandoned', { continuation: owed.id, reason, cancelled: true }, {});
+    return owed.id;
   }
 
   /** A continuation that failed before dispatch is dropped, never retried (§4.5). */

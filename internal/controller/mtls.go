@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
@@ -75,6 +76,13 @@ func (c *Controller) livePeer(r *http.Request) (Principal, inbox.CertEntry, erro
 	if c.inbox == nil {
 		return p, inbox.CertEntry{}, fmt.Errorf("no certificate registry")
 	}
+	c.mu.Lock()
+	revoked := c.revoked[p.String()]
+	live := c.principalRunningLocked(p)
+	c.mu.Unlock()
+	if revoked || !live {
+		return p, inbox.CertEntry{}, fmt.Errorf("the certificate of %s is not active (its container is not running)", p)
+	}
 	e, ok, err := c.inbox.LiveCert(r.Context(), p.String())
 	if err != nil {
 		return p, e, err
@@ -128,22 +136,66 @@ func (c *Controller) recordDenial(p Principal, audit, msg, fix string) {
 	})
 }
 
+// principalRunningLocked reports whether the Controller believes the
+// principal's container is up: a certificate never outlives its container,
+// even when the registry could not be updated (fail closed).
+func (c *Controller) principalRunningLocked(p Principal) bool {
+	switch p.Kind {
+	case KindService:
+		r := c.srt[p.Name]
+		return r != nil && (r.phase == api.PhaseStarting || r.phase == api.PhaseReady || r.phase == api.PhaseUnhealthy)
+	case KindComputer:
+		r := c.rt[p.Name]
+		return r != nil && (r.phase == api.PhaseStarting || r.phase == api.PhaseReady || r.phase == api.PhaseBusy)
+	}
+	return false
+}
+
 // registerCert makes a fresh certificate the live one for a Computer or
 // Service at start, with its active generation's send grants.
 func (c *Controller) registerCert(ctx context.Context, p Principal, serial string, send []string) error {
 	if c.inbox == nil {
 		return nil
 	}
-	return c.inbox.RegisterCert(ctx, inbox.CertEntry{Principal: p.String(), Generation: p.Generation, Serial: serial, Send: send})
+	if err := c.inbox.RegisterCert(ctx, inbox.CertEntry{Principal: p.String(), Generation: p.Generation, Serial: serial, Send: send}); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	delete(c.revoked, p.String())
+	c.mu.Unlock()
+	return nil
 }
 
 // unregisterCert deletes a principal's live certificate before its
-// container is stopped, removed or restarted.
+// container is stopped, removed or restarted. It is refused in memory
+// first, so a failed registry write still fails closed.
 func (c *Controller) unregisterCert(kind, name string) {
+	c.mu.Lock()
+	c.revoked[kind+":"+name] = true
+	c.mu.Unlock()
 	if c.inbox == nil {
 		return
 	}
 	if err := c.inbox.UnregisterCert(context.WithoutCancel(c.ctx), kind+":"+name); err != nil {
-		c.logf("%s:%s: unregister certificate: %v", kind, name, err)
+		c.logf("%s:%s: unregister certificate: %v (refused in memory until its next start)", kind, name, err)
+	}
+}
+
+// reconcileCerts drops registry entries whose container is not running
+// (it died, or was stopped, while the Controller was down).
+func (c *Controller) reconcileCerts(ctx context.Context, running map[string]bool) {
+	if c.inbox == nil {
+		return
+	}
+	entries, err := c.inbox.LiveCerts(ctx)
+	if err != nil {
+		c.logf("certificate registry: %v", err)
+		return
+	}
+	for _, e := range entries {
+		if !running[e.Principal] {
+			kind, name, _ := strings.Cut(e.Principal, ":")
+			c.unregisterCert(kind, name)
+		}
 	}
 }

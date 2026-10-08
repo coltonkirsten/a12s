@@ -193,6 +193,19 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 		c.setIdle(name, false)
 		return
 	}
+	// Close admission, then look at the inbox one last time: a Message that
+	// committed during the checks above wins over the sleep; one that
+	// commits after this finds the Computer asleep and is judged by
+	// wakeOnMessage (§4.14).
+	c.closeAdmission(name)
+	if held, _, _ := c.inbox.Held(ctx, name); !held {
+		if pending, err := c.inbox.HasPending(ctx, name); err != nil || pending {
+			c.openAdmission(name)
+			c.setIdle(name, false)
+			c.kick(name)
+			return
+		}
+	}
 	c.mu.Lock()
 	since := c.rtLocked(name).idleSince
 	c.mu.Unlock()
@@ -203,6 +216,7 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 	cancel()
 	if err := c.inbox.SetSlept(ctx, name, api.SleptAuto); err != nil {
 		c.logf("%s: auto-sleep: %v", name, err)
+		c.openAdmission(name)
 		return
 	}
 	c.logf("%s: auto-sleep after %s idle", name, p.SleepAfterIdle)

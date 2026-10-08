@@ -36,10 +36,18 @@ func runCreds(g *globals, args []string) error {
 	}
 	var value []byte
 	if isTerminal(os.Stdin) {
+		// stty acts on its stdin, which must be the terminal.
+		stty := func(arg string) error {
+			cmd := exec.Command("stty", arg)
+			cmd.Stdin = os.Stdin
+			return cmd.Run()
+		}
+		if err := stty("-echo"); err != nil {
+			return fmt.Errorf("cannot turn terminal echo off (%v); pipe the value instead: a12s creds set %s < file", err, name)
+		}
+		defer stty("echo")
 		fmt.Fprintf(os.Stderr, "paste %s and press Enter (not echoed): ", name)
-		_ = exec.Command("stty", "-echo").Run()
 		line, rerr := bufio.NewReader(os.Stdin).ReadBytes('\n')
-		_ = exec.Command("stty", "echo").Run()
 		fmt.Fprintln(os.Stderr)
 		if rerr != nil && rerr != io.EOF {
 			return rerr

@@ -261,3 +261,43 @@ func TestTwoThousandMessagesFit(t *testing.T) {
 	}
 	t.Logf("2000 messages: render %d B, request %d B", JSONLen(b.Request.Prompt), len(data))
 }
+
+// Astra final review #7: a returned row is not replaced by an overdue one.
+func TestReturnNeverReplacesWithOverdue(t *testing.T) {
+	s, c := newStore(t, nil)
+	a := enq(t, s, "builder", "service:clock", api.EnqueueRequest{Body: "a", ReplaceKey: "k"})
+	b := claim(t, s, "builder")
+	bb := enq(t, s, "builder", "service:clock", api.EnqueueRequest{Body: "b", ReplaceKey: "k", Expires: i64(2)})
+	c.add(5 * time.Second)
+	res, err := s.Return(context.Background(), b.ID, ReturnOptions{Reason: "busy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(res.Pending, ",") != a.Message.ID || len(res.Replaced) != 0 {
+		t.Fatalf("return %+v", res)
+	}
+	m, _ := s.Get(context.Background(), "builder", bb.Message.ID, "", false)
+	if m.State != api.MsgExpired {
+		t.Fatalf("b is %s", m.State)
+	}
+}
+
+// Astra final review #13: a wake-clear accepted while a Batch was claimed
+// discards its rows when they come back.
+func TestWakeClearCoversReturnedClaim(t *testing.T) {
+	s, _ := newStore(t, nil)
+	a := enq(t, s, "builder", "local", api.EnqueueRequest{Body: "a"})
+	b := claim(t, s, "builder")
+	if _, n, err := s.WakeClear(context.Background(), "builder", "wake-1", "local"); err != nil || n != 0 {
+		t.Fatalf("clear %d %v", n, err)
+	}
+	later := enq(t, s, "builder", "local", api.EnqueueRequest{Body: "later"})
+	if _, err := s.Return(context.Background(), b.ID, ReturnOptions{Reason: "interrupted"}); err != nil {
+		t.Fatal(err)
+	}
+	ma, _ := s.Get(context.Background(), "builder", a.Message.ID, "", false)
+	ml, _ := s.Get(context.Background(), "builder", later.Message.ID, "", false)
+	if ma.State != api.MsgDiscarded || ml.State != api.MsgPending {
+		t.Fatalf("a %s, later %s", ma.State, ml.State)
+	}
+}
