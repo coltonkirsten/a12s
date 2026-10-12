@@ -64,6 +64,9 @@ type globals struct {
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
 
 func run(args []string, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "--version" || args[0] == "-v") {
+		args = []string{"version"}
+	}
 	g := &globals{fleetPath: defaultFleetPath()}
 	fs := flag.NewFlagSet("a12s", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

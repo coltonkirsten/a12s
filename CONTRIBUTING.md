@@ -6,6 +6,22 @@
 - Node 24 and npm (for computerd)
 - Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images and end-to-end runs
 
+## Run from source (macOS)
+
+Needs Go 1.26+, Node 24, Docker Desktop running, and a `claude setup-token` token.
+
+```sh
+gh repo clone coltonkirsten/a12s && cd a12s
+make build                     # go build; also writes bin/a12s (version dev: uses the local images below)
+make images bundles            # slim, browser and controller images + Claude Code and Codex bundles
+
+cd examples/quickstart
+cp a12s.bindings.yaml.example a12s.bindings.yaml   # anthropic -> ~/.a12s/anthropic
+../../bin/a12s up
+../../bin/a12s prompt hello "Reply with the single word pong."
+../../bin/a12s down --purge
+```
+
 ## Build and test
 
 ```sh

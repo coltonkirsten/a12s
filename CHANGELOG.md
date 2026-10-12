@@ -5,6 +5,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 ## Unreleased
 
 ### Added
+- Docs built for skimming: a 5-minute quickstart, [Concepts](docs/concepts.md) led by the five ideas you need,
+  [Recipes](docs/recipes.md), and [`llms.txt`](llms.txt), the whole surface on one page for coding agents.
+- `a12s --version` (and `-v`).
 - **Python SDK (`pip install a12s`)**: the same client as TypeScript, sync (`a12s.connect()`) and async
   (`a12s.connect_async()`), typed dataclasses, `with client.turns([...]) as turns:` to watch before you send.
   Shares the Go-rendered API fixtures, so a change to the API's JSON fails its tests until the SDK follows.

@@ -58,7 +58,17 @@ computers:
 Every Computer inherits `defaults` and can override any field. **Maps merge** key by key; **lists replace**. So a
 Computer's `egress.allow` replaces the default list instead of adding to it, and
 `computers.x.inbox.maxMessages` overrides only that field of `defaults.inbox`. `defaults` apply to Computers only,
-never to Services.
+never to Services. Putting the harness, image and credentials in `defaults` keeps each Computer to its role:
+
+```yaml
+defaults:
+  harness: { kind: claude-code, version: 2.1.280, model: haiku }
+  image: slim
+  credentials: [anthropic]
+computers:
+  lead:    { home: { preset: ./presets/lead }, grants: { send: [worker1] } }
+  worker1: { home: { preset: ./presets/worker }, grants: { send: [lead] } }
+```
 
 ## Top level
 
@@ -95,7 +105,7 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 |---|---|
 | `harness.kind` | `claude-code` or `codex`. |
 | `harness.version` | The harness version; selects the bundle `<kind>@<version>`, pinned in `fleet.lock`. |
-| `harness.model` | Optional model id passed to the harness. |
+| `harness.model` | Optional, passed to the harness as is: an alias it knows (`haiku`, `sonnet`, `opus` for Claude Code) or a full model id. Default: the harness's own default. |
 | `image` | `slim`, `browser`, or a custom image reference. See [Images](images.md). |
 | `resources` | `{cpu, memory}`, e.g. `{ cpu: 2, memory: 4Gi }`. Zero means no limit. |
 | `home.size` | Home drive size. |

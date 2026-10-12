@@ -1,5 +1,8 @@
 # Agent guidelines
 
+Building an app ON a12s rather than changing a12s? Read [llms.txt](llms.txt) instead; this file is for changes to
+a12s itself.
+
 Most code here is written and reviewed by agents. These rules apply to every change.
 
 ## Comments
@@ -27,6 +30,9 @@ Most code here is written and reviewed by agents. These rules apply to every cha
 
 ## Where things are
 
-- `README.md`: overview and quickstart. `CONTRIBUTING.md`: build, test, layout, end-to-end scripts.
-- `docs/`: concepts, Fleet file, CLI, inbox and power policy, Services, credentials, security, architecture, images.
+- `README.md`: overview and quickstart. `llms.txt`: the whole user-facing surface on one page, for agents; update it
+  when a command, a Fleet field or an SDK method changes. `CONTRIBUTING.md`: build, test, layout, end-to-end scripts.
+  `CHANGELOG.md`: user-visible changes per release, breaking ones with what to do.
+- `docs/`: concepts, recipes, SDK, HTTP API, Fleet file, CLI, inbox and power policy, Services, credentials,
+  security, architecture, images.
 - Before finishing: `make build test vet`, and for computerd changes `cd computerd && npm run lint && npm test`.

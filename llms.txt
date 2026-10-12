@@ -1,0 +1,164 @@
+# a12s
+
+> a12s runs AI coding agents (Claude Code, Codex) as durable, isolated "Computers" on Docker. A project declares
+> them in fleet.yaml, `a12s up` starts them, and apps send them work (Messages) and follow their Turns and events
+> through the TypeScript SDK (`a12s` on npm), the Python SDK (`a12s` on PyPI), a browser gateway, or an HTTP API.
+
+This file is for coding agents building ON a12s. Everything here is exact; copy it. You never edit or vendor a12s
+itself: a project changes only its own fleet.yaml, presets, images, Services and app code.
+
+## Words
+
+- Fleet: fleet.yaml and what it runs. metadata.name is the Fleet's name.
+- Computer: one agent (harness + home drive + session + inbox). Survives sleep and restarts.
+- Message: work in a Computer's inbox. `send` puts one there; it is delivered at the Computer's next idle moment.
+- Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted.
+- Event: journal entry, {v, computer, session, turn, seq, ts, type, data}. Types: turn.started, turn.dispatched,
+  text.delta {text}, tool.started {id, name, input}, tool.finished {id, name, isError, output},
+  turn.finished {status, usage, error?}, diagnostic {message}, permission, session.changed, resume.failed,
+  lifecycle, harness.restarted, inbox.discarded. SDK-made: gap (events lost; resync).
+- via: who really sent a Message: local (owner), token:<name>, service:<name>, computer:<name>. Trust via, not sender.
+- grants.send: Computers this Computer may send to. It gives the agent an MCP tool `mcp__a12s__send`
+  (args: computer, body; optional fresh, expires, replaceKey) that returns a receipt, never an answer.
+
+## Setup (once per machine)
+
+```sh
+export HOMEBREW_GITHUB_API_TOKEN=<github token with repo scope>   # the repo is private
+brew install coltonkirsten/tap/a12s
+claude setup-token                    # prints sk-ant-oat…; or use an Anthropic API key
+```
+
+## New project
+
+From the template (lead + two workers, TS and Python apps, browser dashboard):
+
+```sh
+gh repo create my-agents --private --template coltonkirsten/a12s-starter --clone && cd my-agents
+make demo                             # asks for the token once, a12s up, runs one task
+```
+
+From scratch:
+
+```sh
+a12s init myproj && cd myproj         # fleet.yaml (one Computer "hello"), fleet.lock, bindings, .gitignore
+a12s creds set anthropic              # reads the token from stdin
+a12s up
+a12s prompt hello "Reply with the single word pong."
+```
+
+## fleet.yaml
+
+```yaml
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: team }              # DNS label
+defaults:                             # applies to every Computer; maps merge, lists replace
+  harness: { kind: claude-code, version: 2.1.280, model: haiku }   # model: haiku | sonnet | opus | a full model id
+  image: slim                         # slim | browser (Chromium + Playwright MCP) | your image FROM an a12s base
+  credentials: [anthropic]            # names; values come from a12s.bindings.yaml (never committed)
+  egress: { allow: [] }               # deny by default; list hosts the agent may reach over HTTPS
+computers:
+  lead:
+    home: { preset: ./presets/lead }  # directory copied onto the home drive: CLAUDE.md, .claude/skills, .mcp.json
+    grants: { send: [worker1, worker2] }
+  worker1:
+    home: { preset: ./presets/worker }
+    grants: { send: [lead] }
+```
+
+Codex: harness { kind: codex, version: 0.154.0 }, credentials [openai].
+Other fields: resources {cpu, memory}, drives [{name, at, readOnly}], uses [service], inbox {maxMessages, maxBytes,
+intro}, power {sleepAfterIdle, wakeOnMessage: {from: [principal]}}, autonomy full | restricted.
+Change anything (including a preset's CLAUDE.md) and run `a12s up`: it applies at each Computer's next idle moment.
+
+## CLI
+
+```sh
+a12s up                               # apply fleet.yaml (start the Controller if needed)
+a12s status                           # phase, inbox, power, warnings (--json for machines)
+a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
+a12s send <c> "…"                     # send and exit; works while busy or asleep
+a12s logs <c> --follow                # one Computer's events
+a12s gateway [--web dir]              # http://127.0.0.1:7012: built-in dashboard, or your page + /a12s.js + /v1/
+a12s inbox <c> [--bodies]             # pending Messages; inbox resume <c> releases a hold
+a12s stop <c> | sleep <c> | wake <c>
+a12s token create <name> --actions send,events,status,inbox,power,stop --computers c1,c2|'*'
+a12s doctor                           # every check, with its fix
+a12s down                             # stop all, keep disks;  down --purge deletes them (asks)
+```
+
+## TypeScript SDK (npm install a12s; Node 20+, browsers via the gateway)
+
+```ts
+import { connect, A12sError } from "a12s";
+const a12s = await connect();         // nearest fleet.yaml's Fleet, else the only running one; or connect({ fleet }),
+                                      // connect({ url, token }), env A12S_URL + A12S_TOKEN; in a browser: same origin
+const r = await a12s.prompt("hello", "…");          // Turn & {message}: r.text, r.status, r.id, r.messages
+const m = await a12s.send("lead", "…");             // or { body, sender, metadata, fresh, expires, replaceKey }
+const turns = a12s.turns(["lead", "worker1"]);      // no argument = every Computer
+await turns.ready();                                // connected: nothing after this is missed
+for await (const t of turns) { t.computer; t.text; t.status; t.messages[0]?.via; break; }
+for await (const ev of a12s.events()) { if (ev.type === "text.delta") ev.data.text; }   // typed by ev.type
+await a12s.status(); await a12s.computer("lead"); await a12s.inbox("lead", { bodies: true });
+await a12s.stop("lead"); await a12s.sleep("lead"); await a12s.wake("lead");
+// errors: A12sError {status, code, fix}; streams: A12sStreamError, A12sGapError (onGap: "throw")
+```
+
+## Python SDK (pip install a12s; Python 3.10+)
+
+```python
+import a12s
+client = a12s.connect()               # same discovery; a12s.connect(fleet=…, url=…, token=…)
+r = client.prompt("hello", "…")       # r.text, r.status, r.id, r.messages, r.message
+client.send("lead", "…", sender="app", metadata={"k": "v"}, fresh=False, expires=None, replace_key=None)
+with client.turns(["lead", "worker1"]) as turns:   # entering waits until connected
+    client.send("lead", "task")
+    for t in turns:                   # t.computer, t.text, t.status, t.messages[0].via
+        break
+for ev in client.events():            # ev.type, ev.data (dict, camelCase keys), ev.computer
+    pass
+# async: client = await a12s.connect_async(); same methods with await / async for / async with
+# errors: a12s.A12sError (status, code, fix), A12sStreamError, A12sGapError
+```
+
+## Browser
+
+`a12s gateway --web ./web` serves ./web at http://127.0.0.1:7012, the SDK at /a12s.js and the API at /v1/ with a
+scoped token (default actions status,events,send,inbox; change with --allow, --computers). In the page:
+
+```html
+<script type="module">
+  import { connect } from "/a12s.js";
+  const a12s = await connect();
+  for await (const ev of a12s.events()) console.log(ev.computer, ev.type, ev.data);
+</script>
+```
+
+## HTTP API (any language)
+
+Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/.a12s/<fleet>/controller.json
+({"port", "token"}). POST /v1/computers/{c}/inbox {"body", "idempotencyKey", "sender"?} → {id, state, …};
+GET /v1/status; GET /v1/computers/{c}/events (SSE; id = seq; Last-Event-ID resumes; `event: head` {seq} marks
+live; `event: gap` = events lost); errors {code, message, fix}. Full: docs/api.md.
+
+## Patterns and gotchas
+
+- Fan out / fan in: lead's CLAUDE.md says to `send` parts to workers and reply `DISPATCHED`; workers `send`
+  results back; lead answers `FINAL ANSWER: …` once it has all. The app watches `turns(["lead", …])` and stops at
+  that marker. Lead keeps its conversation between Turns, so it remembers what it handed out.
+- Watch first, then send (`await turns.ready()` / `with client.turns(...)`), or you can miss fast Turns.
+- An agent can only `send` to Computers in its grants.send; anything else gets 403 no_grant.
+- Messages are untrusted data to the agent; put instructions in the preset's CLAUDE.md, not in Message bodies.
+- Every Claude Code Turn logs one or two `diagnostic` "egress denied" events for telemetry hosts: harmless.
+- Nothing is delivered? `a12s inbox <c>` (held? say why), `a12s status` (asleep?), `a12s doctor`.
+- Never commit a12s.bindings.yaml. fleet.lock is committed; `a12s up` maintains it.
+
+## Docs
+
+- README.md: quickstart
+- docs/concepts.md: the model in one page
+- docs/recipes.md: lead and workers, dashboard, presets, tools and egress, schedules, webhooks, tokens, curl
+- docs/sdk.md: TypeScript and Python
+- docs/api.md: HTTP API, SSE, error codes
+- docs/fleet-file.md, docs/cli.md, docs/inbox.md, docs/services.md, docs/credentials.md, docs/extending.md

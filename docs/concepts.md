@@ -1,25 +1,45 @@
 # Concepts
 
-Every noun in a12s has one meaning, chosen so it doesn't collide with a Docker or Kubernetes word.
+Five ideas are enough to build with a12s:
+
+| | What it is |
+|---|---|
+| **Fleet** | Your `fleet.yaml`: the Computers (and Services) one project runs. `a12s up` makes the running Fleet match the file. |
+| **Computer** | One agent's durable machine: a harness (Claude Code or Codex), a home drive, a conversation (session) and an inbox. Containers come and go; the Computer stays. |
+| **Message** | Work you put in a Computer's inbox (`send`). Anyone allowed can send: you, your app, a Service, or another Computer with `grants.send`. |
+| **Turn** | One delivery of work: the Computer takes everything pending in its inbox, runs the agent once, and ends `completed`, `failed` or `interrupted`. |
+| **Event** | What a Computer journals while it works: `turn.started`, streamed `text.delta`, `tool.started`, `turn.finished`, … Your app follows them live. |
+
+The everyday loop: **edit `fleet.yaml` or a role's `CLAUDE.md` → `a12s up` → send a Message → follow its Turn.**
+
+```text
+            send                   delivered as a Turn            events
+ your app ─────────▶ inbox of lead ─────────────────▶ lead (agent) ─────────▶ your app
+                                                         │ send (system tool, needs grants.send)
+                                                         ▼
+                                                inbox of worker1 ─▶ worker1 ─▶ … ─▶ inbox of lead
+```
+
+Agents talk to each other the same way you talk to them: a Computer whose Fleet entry has `grants.send: [worker1]`
+gets a `send` tool (`mcp__a12s__send`, arguments `computer` and `body`). The Message lands in worker1's inbox, and
+worker1's next Turn delivers it, labeled `via="computer:lead"`. Replies go back the same way. Each Computer keeps
+its conversation between Turns, so a lead remembers what it handed out. [Recipes](recipes.md#lead-and-workers)
+puts this together.
+
+## Everything else, briefly
 
 | Name | What it is |
 |---|---|
-| **Fleet** | The spec file (`kind: Fleet`, usually `fleet.yaml`) and the set of Computers and Services it declares under one Controller. |
-| **Computer** | One agent's durable machine: its home drive, work drives, harness session, event journal and inbox. Containers come and go; the Computer stays. |
-| **Harness** | The program that runs the agent loop: Claude Code (`claude-code`) or Codex (`codex`). |
-| **HarnessBundle** | A pinned, read-only package of one harness version for one CPU architecture, shipped as an OCI image. |
-| **Adapter** | Code inside computerd that makes one harness speak the a12s contract. |
-| **Drive** | A persistent volume. Each Computer has one home drive and any number of work drives. |
-| **Controller** | The resident process that reconciles the Fleet, holds power state, owns the inboxes, authenticates callers and proxies event streams. |
-| **computerd** | The small daemon inside every Computer and the only thing the Controller talks to there. |
-| **Session** | The harness's own conversation, under its own id. a12s stores the id and resumes it; it never interprets it. |
-| **Turn** | One prompt in, one stream of events out, ending in one terminal event. |
-| **Inbox** | The Controller-owned, durable queue of Messages for one Computer. |
-| **Message** | One enqueue: a body, a sender label, the verified principal (`via`) and optional metadata, expiry and replace key. |
-| **Batch** | The pending Messages delivered together as one Turn. |
-| **Service** | A non-agent container run from the same Fleet: no harness, session or inbox. |
-| **Grant** | A capability written in the Fleet on the side that acts: `grants.send` (may enqueue to these Computers), `uses` (may reach these Services). |
-| **Principal** | The authenticated identity of an API caller: `local`, `token:<name>`, `service:<name>` or `computer:<name>`. |
+| **Session** | The harness's own conversation, under its own id. It survives sleep; a12s resumes it on the next Turn. `fresh` (or `prompt --new`) starts a new one. |
+| **Batch** | The pending Messages one Turn delivers together. |
+| **Principal** (`via`) | Who really sent a Message: `local` (you, with the owner token), `token:<name>`, `service:<name>` or `computer:<name>`. Agents should trust `via`, not the sender's own label. |
+| **Grant** | A permission written on the side that acts: `grants.send` (may send to these Computers), `uses` (may reach these Services). |
+| **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server, a webhook bridge. See [Services](services.md). |
+| **Drive** | A persistent volume: each Computer's home drive, plus shared work drives. |
+| **Preset** | A directory (`home.preset`) copied onto a Computer's home drive: its `CLAUDE.md`, skills, settings. Edit it and run `a12s up`. |
+| **Harness**, **HarnessBundle** | The agent program (Claude Code or Codex), shipped as a pinned read-only bundle per version. |
+| **Controller** | The process `a12s up` starts in a container: it reconciles the Fleet, owns the inboxes and serves the API. |
+| **computerd** | The small daemon inside every Computer that runs the harness and keeps the journal. |
 
 ## How the pieces fit
 
@@ -83,17 +103,20 @@ cannot open, so an agent can't read, edit or erase its own record. `a12s logs <n
 
 Every event has the envelope `{v:1, computer, session, turn, seq, ts, type, data}`. Types:
 
-| Type | Meaning |
+| Type | `data` |
 |---|---|
-| `turn.started` | Harness version, model, `resumed`, and the inbox Batch it carries |
-| `turn.dispatched` | The harness has received the prompt |
-| `text.delta` | Streamed text |
-| `tool.started` / `tool.finished` | A tool call |
-| `permission` | A permission decision, for audit |
-| `diagnostic` | Something an operator should see, such as a denied egress request |
-| `turn.finished` | `completed`, `failed` or `interrupted`, with usage |
+| `turn.started` | `{harness, model, resumed, prompt, cwd, inbox: {batch, messages: [{id, sender, via, …}]}}`: the Messages this Turn delivers |
+| `turn.dispatched` | `{}`: the harness has received the prompt |
+| `text.delta` | `{text}`: streamed text from the agent |
+| `tool.started` | `{id, name, input}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send` |
+| `tool.finished` | `{id, name, isError, output}` |
+| `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, error?}` |
+| `diagnostic` | `{message, …}`: something an operator should see. Every Claude Code Turn has one or two `egress denied` diagnostics for telemetry hosts the proxy blocks; they are harmless |
+| `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
+
+The SDKs type these ([SDK](sdk.md)); `turns()` folds them into one record per Turn.
 
 ## System tools
 
@@ -103,7 +126,9 @@ computerd gives the agent a small MCP server, `a12s`, for managing its own envir
   after writing new skills or MCP config to the home drive.
 - `lock` / `release`: an advisory lock on a path in a `shared-write` drive, held as a Controller lease that
   expires if the holder dies. Plain file writes ignore it.
-- `send`: enqueue a Message to another Computer, present only when the Computer has `grants.send`.
+- `send` (`computer`, `body`, and optionally `fresh`, `expires`, `replaceKey`): put a Message in another Computer's
+  inbox. Present only when the Computer has `grants.send`, and only for those Computers. It returns a receipt, not
+  an answer: the reply, if any, comes back as a new Message in a later Turn.
 
 Skills, MCP configs and harness settings live on the home drive, so the agent can change them; the harness program
 itself is read-only.
