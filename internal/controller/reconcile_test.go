@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -441,5 +444,41 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 	_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: withImage("me/old:1"), Credentials: labCreds, Presets: labPresets(t)})
 	if err == nil || !strings.Contains(err.Error(), "computers.scout.image: me/old:1: its computerd is from a12s v0.1.0, which this Controller (v0.2.0) cannot drive  fix: rebuild it FROM") {
 		t.Fatalf("an older-minor 0.x image is refused: err = %v", err)
+	}
+}
+
+// Editing a preset is the everyday way to change an agent's instructions: up re-pins it and restages the Computer.
+func TestChangedPresetIsRepinnedAndApplied(t *testing.T) {
+	h := newHarness(t)
+	res := h.up(labFleet(t, nil), nil, false)
+	before := res.Lock.Presets["./presets/scout"]
+	if got := h.d.get("scout").spec.PresetDigest; got != before {
+		t.Fatalf("spec preset digest = %q, want %q", got, before)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("You are scout, version 2.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := fleet.WritePresetTar(dir, &buf); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{
+		Fleet: labFleet(t, nil), Lock: res.Lock, Credentials: labCreds,
+		Presets: map[string][]byte{"./presets/scout": buf.Bytes()},
+	})
+	if err != nil {
+		t.Fatalf("up with a changed preset: %v", err)
+	}
+	after := changed.Lock.Presets["./presets/scout"]
+	if after == before || after == "" {
+		t.Fatalf("preset pin = %q, was %q", after, before)
+	}
+	if !slices.Equal(changed.Updated, []string{"scout"}) {
+		t.Fatalf("up = %+v, want scout updated", changed)
+	}
+	if spec := h.d.get("scout").spec; spec.PresetDigest != after || !bytes.Equal(spec.Preset, buf.Bytes()) {
+		t.Fatalf("scout spec preset = %q (%d bytes)", spec.PresetDigest, len(spec.Preset))
 	}
 }

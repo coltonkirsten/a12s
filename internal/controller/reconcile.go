@@ -887,13 +887,10 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 			if err != nil {
 				return nil, nil, caps, invalid("computers.%s.home.preset: %v", name, err)
 			}
-			if pin := lock.Presets[p]; pin != "" && pin != sum {
-				return nil, nil, caps, invalid("preset %s changed since fleet.lock pinned it (%s, now %s); remove the pin to accept it", p, pin, sum)
-			}
 			if err := savePreset(c.cfg.StateDir, sum, data); err != nil {
 				return nil, nil, caps, err
 			}
-			lock.PinPreset(p, sum)
+			lock.SetPreset(p, sum)
 		}
 	}
 	return lock, hosts, caps, nil
@@ -920,9 +917,9 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 }
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
-// Lock (generation and preset unset), and the hash of what makes a
-// generation: image, bundle, resources, drives, environment, egress and
-// the Fleet's egress enforcement.
+// Lock (generation and preset bytes unset), and the hash of what makes a
+// generation: image, bundle, resources, drives, environment, egress, the
+// Fleet's egress enforcement and the preset's digest.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -952,6 +949,9 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Uses:        c.endpointsLocked(comp.Uses),
 		Send:        slices.Clone(comp.Grants.Send),
 	}
+	if comp.Home.Preset != "" {
+		spec.PresetDigest = lock.Presets[comp.Home.Preset]
+	}
 	if spec.Tier == fleet.TierBrowser {
 		spec.Seccomp = browser.Seccomp
 	}
@@ -966,8 +966,9 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Env           []string
 		Egress        []string
 		// Omitted when enforced, so enforced generations keep their hash.
-		Unenforced bool `json:",omitempty"`
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced()})
+		Unenforced bool   `json:",omitempty"`
+		Preset     string `json:",omitempty"`
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced(), spec.PresetDigest})
 	if err != nil {
 		return spec, "", err
 	}

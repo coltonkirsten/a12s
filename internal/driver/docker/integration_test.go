@@ -153,7 +153,7 @@ func TestDockerIntegration(t *testing.T) {
 		t.Errorf("stage on a non-isolated network = %v", err)
 	}
 
-	spec.Preset = preset.Bytes()
+	spec.Preset, spec.PresetDigest = preset.Bytes(), "sha256:p1"
 	must(t, d.StageComputer(ctx, spec))
 	staged, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
 	must(t, err)
@@ -170,7 +170,7 @@ func TestDockerIntegration(t *testing.T) {
 	if again.Container.ID == staged.Container.ID {
 		t.Error("pending-marker container was reported as staged")
 	}
-	if state, err := d.readFile(ctx, again.Container.ID, presetMarker); err != nil || state != "applied" {
+	if state, err := d.readFile(ctx, again.Container.ID, presetMarker); err != nil || state != "applied sha256:p1" {
 		t.Errorf("marker after restage = %q, %v", state, err)
 	}
 
@@ -234,7 +234,7 @@ func TestDockerIntegration(t *testing.T) {
 		t.Errorf("asleep state = %+v", st)
 	}
 
-	// Stage generation 2 over the stopped Computer; home survives, preset is not reapplied.
+	// Stage generation 2 over the stopped Computer; home survives, the unchanged preset is not reapplied.
 	gen1ID := obs.Computers["c"].InstanceID
 	spec.Generation = 2
 	must(t, d.StageComputer(ctx, spec))
@@ -248,12 +248,24 @@ func TestDockerIntegration(t *testing.T) {
 		t.Errorf("home after restage = %q", out)
 	}
 
+	// A changed preset is copied over the home at the next stage: its files are replaced, the agent's stay.
+	must(t, d.SetPower(ctx, "c", driver.PowerAsleep, 2))
+	must(t, os.WriteFile(filepath.Join(presetDir, ".claude", "settings.json"), []byte(`{"preset":2}`), 0o644))
+	preset.Reset()
+	must(t, fleet.WritePresetTar(presetDir, &preset))
+	spec.Generation, spec.Preset, spec.PresetDigest = 3, preset.Bytes(), "sha256:p2"
+	must(t, d.StageComputer(ctx, spec))
+	must(t, d.SetPower(ctx, "c", driver.PowerAwake, 3))
+	if _, out, _ := d.Exec(ctx, "c", []string{"cat", "/home/agent/.claude/settings.json", "/home/agent/keep"}, nil, false); out != `{"preset":2}kept`+"\n" {
+		t.Errorf("home after a preset change = %q", out)
+	}
+
 	// Remove: container and network go, drives stay.
 	must(t, d.RemoveComputer(ctx, "c"))
 	must(t, d.RemoveComputer(ctx, "c")) // idempotent
 	for {
 		ev := nextEvent(t, events)
-		if ev.Type == driver.EventRemoved && ev.Computer == "c" && ev.Generation == 2 {
+		if ev.Type == driver.EventRemoved && ev.Computer == "c" && ev.Generation == 3 {
 			break
 		}
 	}
@@ -374,7 +386,7 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePa
 	if code, _ := run(true, "", "touch", "/work/ref/x"); code == 0 {
 		t.Error("readOnly drive is writable")
 	}
-	expect(true, "applied", "cat", presetMarker)
+	expect(true, "applied sha256:p1", "cat", presetMarker)
 	expect(true, "docker-init", "sh", "-c", "cat /proc/1/comm")
 	expect(true, "tmpfs 700", "sh", "-c", "echo $(stat -f -c %T /run/a12s) $(stat -c %a /run/a12s)")
 	// The secret-inject path: bytes on stdin into tmpfs.

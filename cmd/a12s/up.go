@@ -151,8 +151,7 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 	return nil
 }
 
-// presets refuses a pinned preset whose content changed: moving a pin is an
-// explicit lock edit.
+// presets re-pins a preset whose content changed: it is the project's own source, versioned with the Fleet file.
 func (g *globals) presets(f *fleet.Fleet, lock *fleet.Lock) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	for _, name := range f.ComputerNames() {
@@ -165,11 +164,7 @@ func (g *globals) presets(f *fleet.Fleet, lock *fleet.Lock) (map[string][]byte, 
 		if err != nil {
 			return nil, err
 		}
-		if pinned, ok := lock.Presets[p]; ok && pinned != hash {
-			return nil, fmt.Errorf("preset %s changed since %s pinned it (%s, now %s); delete its entry from %s to re-pin",
-				p, fleet.LockFile, pinned, hash, fleet.LockFile)
-		}
-		lock.PinPreset(p, hash)
+		lock.SetPreset(p, hash)
 		var buf bytes.Buffer
 		if err := fleet.WritePresetTar(dir, &buf); err != nil {
 			return nil, err
