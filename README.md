@@ -68,8 +68,8 @@ print(turn.text)
 ```
 
 Until the Python package is on PyPI, install the wheel from the release:
-`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*.whl'`, then `pip install ./a12s-0.2.0-py3-none-any.whl`
-(or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
+`gh release download v0.2.1 -R coltonkirsten/a12s -p 'a12s-*.whl'`, then `pip install ./a12s-0.2.1-py3-none-any.whl`
+(or, without installing: `uv run --with ./a12s-0.2.1-py3-none-any.whl app.py`).
 
 ## Learn it
 
