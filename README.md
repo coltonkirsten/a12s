@@ -25,6 +25,8 @@ TypeScript, Python or the command line.
 - **They are locked down.** No network except the hosts you list, no root, and credentials kept only in memory.
 - **They take work like a queue.** Send a task while an agent is busy or asleep; it runs when the agent is free.
 
+Using a coding agent? Give it this one file: https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt
+
 ## Install
 
 ```sh
@@ -112,7 +114,7 @@ flowchart LR
   [Inbox and power](docs/inbox.md) · [Services](docs/services.md) · [Credentials](docs/credentials.md) ·
   [Extending](docs/extending.md) · [Images](docs/images.md) · [Security](docs/security.md) ·
   [Architecture](docs/architecture.md)
-- Coding agents: [`llms.txt`](llms.txt) is all of a12s on one page, with exact commands.
+- Coding agents: [`llms.txt`](https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt) is everything an agent needs to build on a12s, on one page.
 
 a12s is early (`a12s.ai/v1alpha1`). It runs on Docker Desktop on macOS (arm64) and Docker Engine on Linux (amd64,
 arm64). The Fleet file and API may change before 1.0; [CHANGELOG](CHANGELOG.md) says what changed.
