@@ -199,7 +199,7 @@ Add the reference clock Service and let it send to a Computer:
 ```yaml
 services:
   clock:
-    image: ghcr.io/coltonkirsten/a12s/svc-cron:0.2.0     # match your a12s version
+    image: ghcr.io/coltonkirsten/a12s/svc-cron:0.2.1     # match your a12s version
     grants: { send: [lead] }
     config:
       jobs:
@@ -215,7 +215,7 @@ To let the clock wake a sleeping Computer, add `power: { wakeOnMessage: { from: 
 ```yaml
 services:
   hooks:
-    image: ghcr.io/coltonkirsten/a12s/svc-webhook:0.2.0
+    image: ghcr.io/coltonkirsten/a12s/svc-webhook:0.2.1
     credentials: [webhook-secret]                  # a12s creds set webhook-secret
     grants: { send: [lead] }
     publish: ["127.0.0.1:8787:8080"]
