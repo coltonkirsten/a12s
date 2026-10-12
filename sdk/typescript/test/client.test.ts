@@ -3,7 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 
-import { A12sClient, A12sError } from "../src/index.js";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { A12sClient, A12sError, A12sGapError, A12sStreamError } from "../src/index.js";
+import { fromFleet } from "../src/node.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
@@ -82,4 +87,108 @@ test("errors carry the code and fix line", async () => {
   } finally {
     close();
   }
+});
+
+const collect = async <T>(it: AsyncIterable<T>, n: number): Promise<T[]> => {
+  const out: T[] = [];
+  for await (const x of it) {
+    out.push(x);
+    if (out.length === n) break;
+  }
+  return out;
+};
+
+test("events: a gap is yielded as a typed event, then the stream goes on live", async () => {
+  const { client, close } = await fake((req, res) => {
+    assert.equal(req.headers["last-event-id"], "41");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('event: gap\ndata: {"lastEventId":"41","head":7}\n\n');
+    res.write(ev(8, "diagnostic", "", { message: "after gap" }));
+  });
+  try {
+    const [gap, next] = await collect(client.events("lead", { after: 41 }), 2);
+    assert.equal(gap!.type, "gap");
+    assert.equal(gap!.computer, "lead");
+    assert.deepEqual(gap!.data, { lastEventId: "41", head: 7, after: 41 });
+    assert.equal(next!.seq, 8);
+  } finally {
+    close();
+  }
+});
+
+test("events: onGap 'throw' throws A12sGapError", async () => {
+  const { client, close } = await fake((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('event: gap\ndata: {"lastEventId":"41","head":7}\n\n');
+  });
+  try {
+    await assert.rejects(collect(client.events("lead", { after: 41, onGap: "throw" }), 1), (e: unknown) => {
+      assert.ok(e instanceof A12sGapError);
+      assert.equal(e.after, 41);
+      return true;
+    });
+  } finally {
+    close();
+  }
+});
+
+test("events: a malformed event throws instead of reconnecting forever", async () => {
+  let calls = 0;
+  const { client, close } = await fake((_req, res) => {
+    calls++;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(ev(1, "diagnostic", "", {}));
+    res.write("id: 2\ndata: {not json\n\n");
+  });
+  try {
+    await assert.rejects(collect(client.events("lead", { reconnectMs: 10 }), 5), (e: unknown) => {
+      assert.ok(e instanceof A12sStreamError);
+      assert.match(e.message, /malformed event after seq 1/);
+      return true;
+    });
+    assert.equal(calls, 1);
+  } finally {
+    close();
+  }
+});
+
+test("events: an error thrown into the stream propagates; a dropped connection reconnects", async () => {
+  let calls = 0;
+  const { client, close } = await fake((_req, res) => {
+    calls++;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(ev(calls, "diagnostic", "", {}));
+    if (calls === 1) setTimeout(() => res.destroy(), 20); // a network drop mid-stream
+  });
+  try {
+    const it = client.events("lead", { reconnectMs: 10 });
+    assert.equal((await it.next()).value!.seq, 1);
+    assert.equal((await it.next()).value!.seq, 2, "reconnected after the drop");
+    assert.equal(calls, 2);
+    await assert.rejects(it.throw(new Error("consumer bug")), /consumer bug/);
+    assert.deepEqual(await it.next(), { done: true, value: undefined });
+    assert.equal(calls, 2, "no reconnect after a consumer error");
+  } finally {
+    close();
+  }
+});
+
+test("events: a non-network fetch failure is rethrown", async () => {
+  const client = new A12sClient({
+    url: "http://x",
+    token: "t",
+    fetch: (async () => {
+      throw new RangeError("bad fetch impl");
+    }) as unknown as typeof fetch,
+  });
+  await assert.rejects(collect(client.events("lead"), 1), RangeError);
+});
+
+test("node entry: fromFleet reads controller.json", async () => {
+  const home = await mkdtemp(join(tmpdir(), "a12s-"));
+  await mkdir(join(home, ".a12s", "proj"), { recursive: true });
+  await writeFile(join(home, ".a12s", "proj", "controller.json"), JSON.stringify({ port: 52011, token: "tk" }));
+  const c = await fromFleet("proj", { home });
+  assert.equal(c.url, "http://127.0.0.1:52011");
+  await assert.rejects(fromFleet("nope", { home }), /run a12s up first/);
 });
