@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+dist/
+uv.lock
+.mypy_cache/
+.pytest_cache/
