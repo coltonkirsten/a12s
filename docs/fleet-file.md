@@ -140,7 +140,9 @@ services: { "db@a12s/svc-mcp-postgres:0.1": "sha256:…" }
 
 `a12s: v0.1.0` pins the a12s release. A release binary of another version refuses to apply the Fleet and says how to
 upgrade: install that version, or change the line to the new version and run `a12s up`. `a12s init` and the first
-`a12s up` of a release binary write it; a source build only warns.
+`a12s up` of a release binary write it; a source build only warns. Existing pins are never moved, so when you
+upgrade, also delete the `slim`/`browser` entries under `images:` (they pin the old release's tiers) and rebuild any
+custom image FROM the new base under a new tag.
 
 `a12s up` resolves and appends missing entries and never changes an existing one. Moving a version forward is
 explicit: change the version or ref in `fleet.yaml` (a new key), or run `a12s lock update services/<svc>` to re-pin
