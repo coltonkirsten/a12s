@@ -1,0 +1,622 @@
+{
+  "diagnosticData": {
+    "message": "message",
+    "data": {},
+    "source": "source"
+  },
+  "diagnosticDataMinimal": {
+    "message": "message"
+  },
+  "enqueueRequest": {
+    "body": "body",
+    "sender": "sender",
+    "metadata": {
+      "k": "metadata"
+    },
+    "fresh": true,
+    "idempotencyKey": "idempotencyKey",
+    "expires": 1,
+    "replaceKey": "replaceKey"
+  },
+  "enqueueRequestMinimal": {
+    "body": "body"
+  },
+  "enqueueResponse": {
+    "id": "id",
+    "seq": 1,
+    "createdAt": "2026-10-12T12:00:00Z",
+    "expiresAt": "2026-10-12T12:00:00Z",
+    "state": "pending",
+    "position": 1,
+    "phase": "Ready",
+    "replaced": "replaced",
+    "batch": "batch",
+    "turn": "turn",
+    "outcome": "outcome"
+  },
+  "enqueueResponseMinimal": {
+    "id": "id",
+    "seq": 1,
+    "createdAt": "2026-10-12T12:00:00Z",
+    "expiresAt": null,
+    "state": "pending",
+    "position": 1
+  },
+  "error": {
+    "code": "code",
+    "message": "message",
+    "fix": "fix",
+    "details": {
+      "k": "details"
+    }
+  },
+  "errorMinimal": {
+    "code": "code",
+    "message": "message"
+  },
+  "event": {
+    "v": 1,
+    "computer": "computer",
+    "session": "session",
+    "turn": "turn",
+    "seq": 1,
+    "ts": "2026-10-12T12:00:00Z",
+    "type": "text.delta",
+    "data": {}
+  },
+  "eventMinimal": {
+    "v": 1,
+    "computer": "computer",
+    "session": "session",
+    "turn": "turn",
+    "seq": 1,
+    "ts": "2026-10-12T12:00:00Z",
+    "type": "text.delta"
+  },
+  "inboxListResponse": {
+    "computer": "computer",
+    "held": true,
+    "holdReason": "holdReason",
+    "diagnostic": "diagnostic",
+    "pending": 1,
+    "claimed": 1,
+    "limits": {
+      "maxMessages": {
+        "value": 1,
+        "source": "source"
+      },
+      "maxBytes": {
+        "value": 1,
+        "source": "source"
+      }
+    },
+    "usage": {
+      "messages": 1,
+      "bytes": 1
+    },
+    "overLimit": true,
+    "ended24h": {
+      "expired": 1,
+      "replaced": 1,
+      "withdrawn": 1,
+      "discarded": 1
+    },
+    "orphaned": true,
+    "sessionOverride": "sessionOverride",
+    "messages": [
+      {
+        "id": "id",
+        "computer": "computer",
+        "seq": 1,
+        "sender": "sender",
+        "via": "via",
+        "createdAt": "2026-10-12T12:00:00Z",
+        "body": "body",
+        "metadata": {
+          "k": "metadata"
+        },
+        "fresh": true,
+        "expiresAt": "2026-10-12T12:00:00Z",
+        "replaceKey": "replaceKey",
+        "superseded": 1,
+        "replacedBy": "replacedBy",
+        "state": "pending",
+        "batch": "batch",
+        "turn": "turn",
+        "attempts": 1,
+        "bytes": 1,
+        "endedAt": "2026-10-12T12:00:00Z"
+      }
+    ]
+  },
+  "inboxListResponseMinimal": {
+    "computer": "computer",
+    "held": true,
+    "pending": 1,
+    "claimed": 1,
+    "limits": {
+      "maxMessages": {
+        "value": 1,
+        "source": "source"
+      },
+      "maxBytes": {
+        "value": 1,
+        "source": "source"
+      }
+    },
+    "usage": {
+      "messages": 1,
+      "bytes": 1
+    },
+    "overLimit": true,
+    "ended24h": {
+      "expired": 1,
+      "replaced": 1,
+      "withdrawn": 1,
+      "discarded": 1
+    },
+    "messages": [
+      {
+        "id": "id",
+        "computer": "computer",
+        "seq": 1,
+        "sender": "sender",
+        "via": "via",
+        "createdAt": "2026-10-12T12:00:00Z",
+        "fresh": true,
+        "expiresAt": null,
+        "superseded": 1,
+        "state": "pending",
+        "attempts": 1,
+        "bytes": 1
+      }
+    ]
+  },
+  "message": {
+    "id": "id",
+    "computer": "computer",
+    "seq": 1,
+    "sender": "sender",
+    "via": "via",
+    "createdAt": "2026-10-12T12:00:00Z",
+    "body": "body",
+    "metadata": {
+      "k": "metadata"
+    },
+    "fresh": true,
+    "expiresAt": "2026-10-12T12:00:00Z",
+    "replaceKey": "replaceKey",
+    "superseded": 1,
+    "replacedBy": "replacedBy",
+    "state": "pending",
+    "batch": "batch",
+    "turn": "turn",
+    "attempts": 1,
+    "bytes": 1,
+    "endedAt": "2026-10-12T12:00:00Z"
+  },
+  "messageMinimal": {
+    "id": "id",
+    "computer": "computer",
+    "seq": 1,
+    "sender": "sender",
+    "via": "via",
+    "createdAt": "2026-10-12T12:00:00Z",
+    "fresh": true,
+    "expiresAt": null,
+    "superseded": 1,
+    "state": "pending",
+    "attempts": 1,
+    "bytes": 1
+  },
+  "putFleetResponse": {
+    "created": [
+      "created"
+    ],
+    "updated": [
+      "updated"
+    ],
+    "staged": [
+      "staged"
+    ],
+    "removed": [
+      "removed"
+    ],
+    "lock": {
+      "a12s": "a12s",
+      "images": {
+        "k": "images"
+      },
+      "bundles": {
+        "k": "bundles"
+      },
+      "presets": {
+        "k": "presets"
+      },
+      "services": {
+        "k": "services"
+      }
+    },
+    "errors": {
+      "k": "errors"
+    },
+    "warnings": [
+      "warnings"
+    ],
+    "services": {
+      "created": [
+        "created"
+      ],
+      "updated": [
+        "updated"
+      ],
+      "removed": [
+        "removed"
+      ]
+    }
+  },
+  "putFleetResponseMinimal": {
+    "created": [
+      "created"
+    ],
+    "updated": [
+      "updated"
+    ],
+    "staged": [
+      "staged"
+    ],
+    "removed": [
+      "removed"
+    ],
+    "lock": null,
+    "services": {
+      "created": [
+        "created"
+      ],
+      "updated": [
+        "updated"
+      ],
+      "removed": [
+        "removed"
+      ]
+    }
+  },
+  "resumeFailedData": {
+    "sessionId": "sessionId",
+    "reason": "reason",
+    "at": "at"
+  },
+  "resumeFailedDataMinimal": {
+    "sessionId": "sessionId",
+    "reason": "reason",
+    "at": "at"
+  },
+  "servicesResponse": {
+    "services": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "error": {
+          "reason": "reason",
+          "retryable": true
+        },
+        "image": "image",
+        "pin": "pin",
+        "generation": 1,
+        "restarts": 1,
+        "health": "health",
+        "healthSince": "healthSince",
+        "send": [
+          "send"
+        ],
+        "uses": [
+          "uses"
+        ],
+        "usedBy": [
+          "usedBy"
+        ],
+        "publish": [
+          "publish"
+        ],
+        "ports": [
+          "ports"
+        ],
+        "stateDrive": "stateDrive",
+        "egressMode": "egressMode",
+        "warnings": [
+          "warnings"
+        ]
+      }
+    ]
+  },
+  "servicesResponseMinimal": {
+    "services": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "image": "image",
+        "generation": 1,
+        "restarts": 1
+      }
+    ]
+  },
+  "statusResponse": {
+    "fleet": "fleet",
+    "egressEnforcement": "egressEnforcement",
+    "computers": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "error": {
+          "reason": "reason",
+          "retryable": true
+        },
+        "resumePending": true,
+        "session": "session",
+        "activeTurn": "activeTurn",
+        "harness": {
+          "kind": "kind",
+          "version": "version",
+          "model": "model"
+        },
+        "image": "image",
+        "autonomy": "autonomy",
+        "generation": 1,
+        "stagedGeneration": 1,
+        "credentialGeneration": 1,
+        "homeSize": "1",
+        "drives": [
+          "drives"
+        ],
+        "egressMode": "egressMode",
+        "warnings": [
+          "warnings"
+        ],
+        "inbox": {
+          "computer": "computer",
+          "held": true,
+          "holdReason": "holdReason",
+          "diagnostic": "diagnostic",
+          "pending": 1,
+          "claimed": 1,
+          "limits": {
+            "maxMessages": {
+              "value": 1,
+              "source": "source"
+            },
+            "maxBytes": {
+              "value": 1,
+              "source": "source"
+            }
+          },
+          "usage": {
+            "messages": 1,
+            "bytes": 1
+          },
+          "overLimit": true,
+          "ended24h": {
+            "expired": 1,
+            "replaced": 1,
+            "withdrawn": 1,
+            "discarded": 1
+          },
+          "orphaned": true,
+          "sessionOverride": "sessionOverride"
+        },
+        "inboxCleared": 1,
+        "power": {
+          "sleepAfterIdle": "sleepAfterIdle",
+          "wakeOnMessage": [
+            "wakeOnMessage"
+          ],
+          "maxWakesPerHour": 1,
+          "autoWake": "autoWake",
+          "reason": "reason",
+          "fix": "fix",
+          "wakesLastHour": 1,
+          "nextWakeAt": "2026-10-12T12:00:00Z",
+          "idleSince": "2026-10-12T12:00:00Z",
+          "sleptBy": "sleptBy",
+          "sleptAt": "2026-10-12T12:00:00Z"
+        }
+      }
+    ],
+    "orphanedDrives": [
+      {
+        "name": "name",
+        "kind": "work",
+        "computer": "computer",
+        "service": "service",
+        "size": "1",
+        "access": "access",
+        "attachedTo": [
+          "attachedTo"
+        ],
+        "orphaned": true
+      }
+    ],
+    "credentialsLoaded": true,
+    "warnings": [
+      "warnings"
+    ],
+    "orphanedInboxes": [
+      {
+        "computer": "computer",
+        "held": true,
+        "holdReason": "holdReason",
+        "diagnostic": "diagnostic",
+        "pending": 1,
+        "claimed": 1,
+        "limits": {
+          "maxMessages": {
+            "value": 1,
+            "source": "source"
+          },
+          "maxBytes": {
+            "value": 1,
+            "source": "source"
+          }
+        },
+        "usage": {
+          "messages": 1,
+          "bytes": 1
+        },
+        "overLimit": true,
+        "ended24h": {
+          "expired": 1,
+          "replaced": 1,
+          "withdrawn": 1,
+          "discarded": 1
+        },
+        "orphaned": true,
+        "sessionOverride": "sessionOverride"
+      }
+    ],
+    "services": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "error": {
+          "reason": "reason",
+          "retryable": true
+        },
+        "image": "image",
+        "pin": "pin",
+        "generation": 1,
+        "restarts": 1,
+        "health": "health",
+        "healthSince": "healthSince",
+        "send": [
+          "send"
+        ],
+        "uses": [
+          "uses"
+        ],
+        "usedBy": [
+          "usedBy"
+        ],
+        "publish": [
+          "publish"
+        ],
+        "ports": [
+          "ports"
+        ],
+        "stateDrive": "stateDrive",
+        "egressMode": "egressMode",
+        "warnings": [
+          "warnings"
+        ]
+      }
+    ]
+  },
+  "statusResponseMinimal": {
+    "fleet": "fleet",
+    "egressEnforcement": "egressEnforcement",
+    "computers": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "harness": {
+          "kind": "kind",
+          "version": "version"
+        },
+        "image": "image",
+        "autonomy": "autonomy",
+        "generation": 1
+      }
+    ],
+    "credentialsLoaded": true
+  },
+  "textDeltaData": {
+    "text": "text"
+  },
+  "textDeltaDataMinimal": {
+    "text": "text"
+  },
+  "token": {
+    "name": "name",
+    "actions": [
+      "send"
+    ],
+    "computers": [
+      "computers"
+    ],
+    "createdAt": "2026-10-12T12:00:00Z",
+    "secret": "secret"
+  },
+  "tokenMinimal": {
+    "name": "name",
+    "actions": [
+      "send"
+    ],
+    "computers": [
+      "computers"
+    ],
+    "createdAt": "2026-10-12T12:00:00Z"
+  },
+  "tokenRequest": {
+    "name": "name",
+    "actions": [
+      "send"
+    ],
+    "computers": [
+      "computers"
+    ]
+  },
+  "tokenRequestMinimal": {
+    "name": "name",
+    "actions": [
+      "send"
+    ],
+    "computers": [
+      "computers"
+    ]
+  },
+  "turnFinishedData": {
+    "status": "completed",
+    "usage": {},
+    "error": "error"
+  },
+  "turnFinishedDataMinimal": {
+    "status": "completed",
+    "usage": {}
+  },
+  "turnStartedData": {
+    "harness": {
+      "kind": "kind",
+      "version": "version",
+      "model": "model"
+    },
+    "model": "model",
+    "resumed": true,
+    "prompt": "prompt",
+    "cwd": "cwd",
+    "requestId": "requestId",
+    "inbox": {
+      "batch": "batch",
+      "pendingAfter": 1,
+      "messages": [
+        {
+          "id": "id",
+          "seq": 1,
+          "sender": "sender",
+          "via": "via",
+          "createdAt": "2026-10-12T12:00:00Z",
+          "bytes": 1,
+          "key": "key",
+          "superseded": 1
+        }
+      ]
+    },
+    "continuation": "continuation"
+  },
+  "turnStartedDataMinimal": {
+    "harness": {
+      "kind": "kind",
+      "version": "version"
+    },
+    "resumed": true,
+    "prompt": "prompt",
+    "cwd": "cwd"
+  }
+}
