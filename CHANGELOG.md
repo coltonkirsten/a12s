@@ -13,6 +13,8 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - `docs/sdk.md` and `docs/api.md` (the HTTP API: routes, JSON, SSE framing, error codes).
 
 ### Changed
+- Claude Code Computers load the `a12s` system tools (`send`, `lock`, `release`, `restart_harness`) up front instead
+  of behind tool search, so an agent no longer spends a ToolSearch step before every `send`.
 - **The npm package is `a12s`** (was `@coltonkirsten/a12s-client`). `import { connect } from "a12s"` works in Node
   and browsers; the `/node` subpath and `fromFleet` are gone (use `connect({ fleet })`). `enqueue`,
   `messageEvents` and `waitForTurn` are gone (use `send` and `prompt`). `prompt()` resolves with a `Turn` (`id`,

@@ -37,7 +37,7 @@ function mcpServers(cfg: Config): Record<string, McpServer> {
   const systemEnv: Record<string, string> = { A12S_SOCK: cfg.sockPath };
   if (cfg.send.length) systemEnv.A12S_SEND = cfg.send.join(',');
   const servers: Record<string, McpServer> = {
-    a12s: { command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'systemtools.js')], env: systemEnv },
+    a12s: { command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'systemtools.js')], env: systemEnv, alwaysLoad: true },
   };
   if (cfg.imageTier === 'browser') {
     const args = ['/opt/a12s/playwright-mcp/node_modules/@playwright/mcp/cli.js', '--config', '/opt/a12s/playwright-mcp/config.json'];

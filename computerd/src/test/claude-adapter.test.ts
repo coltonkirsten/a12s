@@ -18,7 +18,7 @@ function setup(mode: string, autonomy: 'full' | 'restricted' = 'full', timing = 
     cwd: cfg.agentHome,
     model: null,
     autonomy,
-    mcpServers: { a12s: { command: '/bin/true', args: ['x'] } },
+    mcpServers: { a12s: { command: '/bin/true', args: ['x'], alwaysLoad: true } },
   };
   const args = () => JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n').at(-1) ?? '[]') as string[];
   return { cfg, adapter, input, args };
@@ -45,6 +45,7 @@ test('claude: maps deltas, tools and the result; passes the pinned flags', async
   assert.ok(!a.includes('--strict-mcp-config'));
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'bypassPermissions');
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"a12s"'));
+  assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"alwaysLoad":true'), 'the system tools are never deferred');
 });
 
 test('claude: restricted maps to dontAsk + no prompts, and denials become permission events once each', async () => {

@@ -73,7 +73,7 @@ export class ClaudeAdapter implements Adapter {
       ...(input.sessionId ? { resume: input.sessionId } : { sessionId }),
       settingSources: ['user', 'project', 'local'],
       mcpServers: Object.fromEntries(
-        Object.entries(input.mcpServers).map(([name, s]) => [name, { type: 'stdio' as const, command: s.command, args: s.args, env: s.env ?? {} }]),
+        Object.entries(input.mcpServers).map(([name, s]) => [name, { type: 'stdio' as const, command: s.command, args: s.args, env: s.env ?? {}, ...(s.alwaysLoad ? { alwaysLoad: true } : {}) }]),
       ),
       strictMcpConfig: false, // agent-written MCP configs on the home drive must load after restart_harness
       // The CLI echoes each user message it took in: the evidence of receipt behind turn.dispatched.
