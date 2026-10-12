@@ -24,7 +24,6 @@ itself: a project changes only its own fleet.yaml, presets, images, Services and
 ## Setup (once per machine)
 
 ```sh
-export HOMEBREW_GITHUB_API_TOKEN=<github token with repo scope>   # the repo is private
 brew install coltonkirsten/tap/a12s
 claude setup-token                    # prints sk-ant-oat…; or use an Anthropic API key
 ```
