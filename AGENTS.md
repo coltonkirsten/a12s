@@ -19,8 +19,10 @@ Most code here is written and reviewed by agents. These rules apply to every cha
 
 ## Documentation
 
-1. Docs describe the **current state** of the code: no plans, roadmaps, decision logs, review notes, changelogs of
-   how a design evolved, dated run logs or "not built yet" sections. Git history is the record of the past.
+1. Docs describe the **current state** of the code: no plans, roadmaps, decision logs, review notes, write-ups of how
+   a design evolved, dated run logs or "not built yet" sections. Git history is the record of the past. The one
+   exception is the user-facing `CHANGELOG.md`: every user-visible change adds a line under `## Unreleased` in the
+   same change, and breaking ones say what to do.
 2. There is one README, at the repo root. Everything else lives in `docs/` (user and reference docs) or
    `CONTRIBUTING.md` (building, testing, layout). Don't add README files to subdirectories.
 3. When behavior changes, update the affected page in `docs/` in the same change. If a doc and the code disagree,
