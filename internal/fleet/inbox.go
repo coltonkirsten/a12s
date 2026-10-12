@@ -6,7 +6,6 @@ import (
 	"unicode/utf8"
 )
 
-// Inbox limits (enhancements §4.8, §4.13).
 const (
 	InboxDefaultMaxMessages = 200
 	InboxMinMaxMessages     = 1
@@ -18,17 +17,14 @@ const (
 	IntroMaxLines           = 8
 )
 
-// DefaultIntro is the Batch intro when the Fleet sets none.
 const DefaultIntro = "These messages arrived while you were busy or asleep, oldest first."
 
-// Limit sources, as reported by the inbox API.
 const (
 	SourceComputer = "computer"
 	SourceDefaults = "defaults"
 	SourceBuiltin  = "builtin"
 )
 
-// InboxSettings are a Computer's resolved inbox settings.
 type InboxSettings struct {
 	MaxMessages       int64
 	MaxMessagesSource string
@@ -37,10 +33,8 @@ type InboxSettings struct {
 	Intro             string
 }
 
-// ResolveInbox resolves a Computer's inbox settings against the Fleet's
-// defaults and the built-in values. Defaults are merged into each Computer
-// at decode, so a value equal to the default's is reported as from defaults.
-// The Fleet must have validated.
+// ResolveInbox reports a value equal to the default's as from defaults, since
+// defaults are merged into each Computer at decode. The Fleet must have validated.
 func (f *Fleet) ResolveInbox(name string) InboxSettings {
 	c := f.Computers[name].Inbox
 	d := f.Defaults.Inbox
@@ -65,7 +59,6 @@ func (f *Fleet) ResolveInbox(name string) InboxSettings {
 	return s
 }
 
-// validateInbox checks one inbox block; field is its path ("defaults.inbox").
 func validateInbox(field string, in Inbox) []error {
 	var errs []error
 	bad := func(sub, fix, format string, args ...any) {
@@ -101,7 +94,6 @@ func validateInbox(field string, in Inbox) []error {
 	return errs
 }
 
-// InboxWarnings are non-fatal remarks on inbox settings, shown by `a12s up`.
 func (f *Fleet) InboxWarnings() []string {
 	var out []string
 	for _, name := range f.ComputerNames() {

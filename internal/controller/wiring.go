@@ -17,11 +17,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// endpointsLocked resolves a uses list against the applied Fleet's
-// manifests: every declared port of every used Service, with its address
-// variable and, for an MCP port the user wants as a tool, the MCP server
-// name: a12s-<svc> when the Service has one MCP port, a12s-<svc>-<port>
-// when it has several (§5.4). The result is part of the user's generation.
+// endpointsLocked names an MCP server a12s-<svc> when the Service has one MCP port, and
+// a12s-<svc>-<port> when it has several. The result is part of the user's generation.
 func (c *Controller) endpointsLocked(uses []fleet.Use) []driver.Endpoint {
 	var out []driver.Endpoint
 	for _, u := range uses {
@@ -57,7 +54,6 @@ func sortedPortNames(m *fleet.ServiceManifest) []string {
 	return names
 }
 
-// tcpEgressOf is a Service's named TCP egress as wired into it.
 func tcpEgressOf(s fleet.Service) []driver.TCPEgress {
 	var out []driver.TCPEgress
 	for _, t := range s.Egress.TCP {
@@ -74,7 +70,6 @@ type reach struct {
 	private []string          // the Fleet's egress.allowPrivate when staged
 }
 
-// reachOf returns a caller's active reach.
 func (c *Controller) reachOf(name string) (reach, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -87,7 +82,6 @@ func (c *Controller) reachOf(name string) (reach, bool) {
 	return reach{}, false
 }
 
-// target is a Service's active declared port, for the proxy.
 func (c *Controller) servicePort(name string, port int) (fleet.ServicePort, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -103,11 +97,8 @@ func (c *Controller) servicePort(name string, port int) (fleet.ServicePort, bool
 	return fleet.ServicePort{}, false
 }
 
-// internalTarget decides a <name>.a12s connection for the proxy (§5.4): a
-// separate, mandatory check that never consults egress policy. A Service
-// is reachable only on a port the caller's active generation uses and the
-// Service's active generation declares, at its observed address on its own
-// network; <name>.egress.a12s is a Service's named TCP egress.
+// internalTarget is a separate, mandatory check that never consults egress policy: a Service is
+// reachable only on a port both active generations agree on, at its observed address on its own network.
 func (c *Controller) internalTarget(ctx context.Context, caller, host string, port int, plain bool) (netip.AddrPort, int, string) {
 	name := strings.TrimSuffix(host, ".a12s")
 	rc, ok := c.reachOf(caller)
@@ -247,7 +238,6 @@ func (c *Controller) egressTarget(ctx context.Context, caller string, rc reach, 
 	return netip.AddrPortFrom(addrs[0].Unmap(), uint16(port)), 0, ""
 }
 
-// egressAddrDenied returns why a named-egress address may not be dialed.
 func egressAddrDenied(a netip.Addr, pools []netip.Prefix, allowPrivate []string) string {
 	if !a.IsValid() || a.Zone() != "" {
 		return "invalid address"

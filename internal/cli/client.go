@@ -18,13 +18,11 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// controller.json and the prefix of its temp files while it is written.
 const (
 	controllerFileName   = "controller.json"
 	controllerTempPrefix = ".controller.json-"
 )
 
-// StateDir is ~/.a12s/<fleet>: where the CLI keeps controller.json.
 func StateDir(fleetName string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -33,7 +31,6 @@ func StateDir(fleetName string) (string, error) {
 	return filepath.Join(home, ".a12s", fleetName), nil
 }
 
-// ControllerFilePath is ~/.a12s/<fleet>/controller.json.
 func ControllerFilePath(fleetName string) (string, error) {
 	dir, err := StateDir(fleetName)
 	if err != nil {
@@ -42,8 +39,7 @@ func ControllerFilePath(fleetName string) (string, error) {
 	return filepath.Join(dir, controllerFileName), nil
 }
 
-// ReadControllerFile reads controller.json. A missing file returns
-// fs.ErrNotExist (wrapped).
+// ReadControllerFile wraps fs.ErrNotExist for a missing file.
 func ReadControllerFile(fleetName string) (*api.ControllerFile, error) {
 	p, err := ControllerFilePath(fleetName)
 	if err != nil {
@@ -60,7 +56,7 @@ func ReadControllerFile(fleetName string) (*api.ControllerFile, error) {
 	return &cf, nil
 }
 
-// WriteControllerFile writes controller.json, owner-only (dir 0700, file 0600).
+// WriteControllerFile keeps the bearer token owner-only (dir 0700, file 0600).
 func WriteControllerFile(fleetName string, cf *api.ControllerFile) error {
 	p, err := ControllerFilePath(fleetName)
 	if err != nil {
@@ -92,14 +88,12 @@ func WriteControllerFile(fleetName string, cf *api.ControllerFile) error {
 	return os.Rename(tmp.Name(), p)
 }
 
-// Client talks to one Fleet's Controller over loopback with its bearer token.
 type Client struct {
 	BaseURL string // http://127.0.0.1:<port>
 	Token   string
 	HTTP    *http.Client
 }
 
-// NewClient returns a client for the Controller described by cf.
 func NewClient(cf *api.ControllerFile) *Client {
 	return &Client{
 		BaseURL: "http://127.0.0.1:" + strconv.Itoa(cf.Port),
@@ -108,7 +102,6 @@ func NewClient(cf *api.ControllerFile) *Client {
 	}
 }
 
-// Dial finds the Controller of a Fleet through controller.json.
 func Dial(fleetName string) (*Client, error) {
 	cf, err := ReadControllerFile(fleetName)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -120,7 +113,6 @@ func Dial(fleetName string) (*Client, error) {
 	return NewClient(cf), nil
 }
 
-// NewRequest builds an authenticated request; body, when not nil, is sent as JSON.
 func (c *Client) NewRequest(ctx context.Context, method, path string, body any) (*http.Request, error) {
 	var r io.Reader
 	if body != nil {
@@ -141,8 +133,7 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body any) 
 	return req, nil
 }
 
-// Do sends a JSON request and decodes a JSON response into out (if not nil).
-// A non-2xx response is returned as *api.Error.
+// Do returns a non-2xx response as *api.Error.
 func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {
 	req, err := c.NewRequest(ctx, method, path, in)
 	if err != nil {
@@ -173,7 +164,6 @@ func (c *Client) transportError(err error) error {
 	return fmt.Errorf("the Controller at %s is not reachable (a12s up starts it): %w", c.BaseURL, err)
 }
 
-// ResponseError turns a non-2xx response into *api.Error.
 func ResponseError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	var e api.Error
@@ -203,13 +193,11 @@ func codeForStatus(status int) api.ErrorCode {
 	return api.ErrInternal
 }
 
-// HasCode reports whether err is an *api.Error with the given code.
 func HasCode(err error, code api.ErrorCode) bool {
 	var e *api.Error
 	return errors.As(err, &e) && e.Code == code
 }
 
-// NewRequestID returns a random UUID (version 4) for TurnRequest.RequestID.
 func NewRequestID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -219,7 +207,6 @@ func NewRequestID() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
-// NewToken returns a 32-byte random token, hex encoded.
 func NewToken() string {
 	var b [32]byte
 	_, _ = rand.Read(b[:])

@@ -1,4 +1,4 @@
-// Command svc-webhook is the reference webhook bridge (enhancements §5.8):
+// Command svc-webhook is the reference webhook bridge:
 // it receives HTTP posts on its routes, checks the vendor signature with a
 // credential, and enqueues a payload summary with metadata {source, event}.
 // It is the only reference Service with a host port (publish:), so it must

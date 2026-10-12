@@ -1,7 +1,5 @@
-// Package driver defines the substrate interface the Controller's reconciler
-// drives (§4). A Driver is scoped to one Fleet. It holds no opinions: every
-// call is idempotent, every mutation carries a generation, and success is
-// read back through Observe.
+// Package driver is the substrate interface, scoped to one Fleet. Every call is
+// idempotent, every mutation carries a generation, and success is read back through Observe.
 package driver
 
 import (
@@ -11,67 +9,50 @@ import (
 	"net"
 )
 
-// Driver is a substrate backend: Docker now, Kubernetes later.
 type Driver interface {
-	// Capabilities reports what the substrate can enforce. Gaps become
-	// admission errors in the reconciler.
+	// Gaps in Capabilities become admission errors in the reconciler.
 	Capabilities(ctx context.Context) (Capabilities, error)
 
-	// Observe returns every Computer and Drive of the Fleet as the substrate
-	// sees them now.
 	Observe(ctx context.Context) (Observation, error)
 
-	// Watch streams Computer failures (died, OOM-killed, removed) until ctx
-	// ends. The channel is closed when the watch stops.
+	// Watch streams Computer failures until ctx ends, then closes the channel.
 	Watch(ctx context.Context) (<-chan Event, error)
 
-	// EnsureDrive creates the drive if it does not exist. It never shrinks or
-	// erases a drive. It reports whether the drive was created.
+	// EnsureDrive never shrinks or erases an existing drive.
 	EnsureDrive(ctx context.Context, spec DriveSpec) (created bool, err error)
 
-	// EnsureImage makes an image available (pulling it if missing) and
-	// returns its image ID. ref may be a reference or an image ID.
+	// EnsureImage pulls only if missing; ref may be a reference or an image ID.
 	EnsureImage(ctx context.Context, ref string) (imageID string, err error)
 
-	// EnsureBundle makes the HarnessBundle image available read-only to
-	// Computers at BundlePath(kind, version, imageID). It is idempotent and returns the
-	// image ID and the bundle's manifest.
+	// EnsureBundle exposes the bundle read-only to Computers at BundlePath.
 	EnsureBundle(ctx context.Context, imageRef string) (Bundle, error)
 
-	// StageComputer prepares spec.Generation's definition so SetPower can start
-	// it. It returns ErrRunning rather than touch a running Computer, and
-	// ErrStaleGeneration if a newer generation is already staged.
+	// StageComputer never touches a running Computer (ErrRunning) and rejects
+	// a generation older than the staged one (ErrStaleGeneration).
 	StageComputer(ctx context.Context, spec ComputerSpec) error
 
-	// SetPower starts (PowerAwake) or stops (PowerAsleep) the staged
-	// generation. A generation other than the staged one is rejected with
-	// ErrStaleGeneration or ErrNotStaged.
+	// SetPower acts only on the staged generation; others get ErrStaleGeneration or ErrNotStaged.
 	SetPower(ctx context.Context, computer string, power Power, generation int64) error
 
-	// Connect opens a channel to a service inside the Computer (ServiceComputerd).
-	// Authentication (mTLS) is layered on top by the caller.
+	// Connect is unauthenticated; the caller layers mTLS on top.
 	Connect(ctx context.Context, computer string, service string) (net.Conn, error)
 
-	// Exec runs cmd in a running Computer, outside the harness: the audited
-	// debug path and the credential-inject path. stdin may be nil. Output is
-	// stdout and stderr combined.
+	// Exec runs outside the harness (audited debug and credential injection).
+	// Output is stdout and stderr combined.
 	Exec(ctx context.Context, computer string, cmd []string, stdin io.Reader, asRoot bool) (exitCode int, output string, err error)
 
-	// RemoveComputer stops and deletes the Computer. Its drives are kept.
+	// RemoveComputer keeps the Computer's drives.
 	RemoveComputer(ctx context.Context, computer string) error
 
-	// RemoveDrive destroys a drive. It returns ErrDriveAttached if anything
-	// has it attached.
+	// RemoveDrive refuses with ErrDriveAttached while anything has it attached.
 	RemoveDrive(ctx context.Context, id string) error
 
-	// Sessions counts the interactive or exec sessions attached to a
-	// Computer now (enhancements §4.14: they keep it from auto-sleeping).
+	// Sessions counts attached interactive/exec sessions; any keeps the Computer from auto-sleeping.
 	Sessions(ctx context.Context, computer string) (int, error)
 
 	ServiceDriver
 }
 
-// Errors returned by Drivers; test with errors.Is.
 var (
 	ErrNotFound        = errors.New("not found")
 	ErrRunning         = errors.New("computer is running")
@@ -81,13 +62,10 @@ var (
 	ErrNotOnNetwork    = errors.New("caller is not on the computer's network")
 )
 
-// ServiceComputerd is computerd's mTLS listener (§5).
 const ServiceComputerd = "computerd"
 
-// ComputerdPort is the port computerd listens on.
 const ComputerdPort = 7443
 
-// Power is a Computer's power state.
 type Power string
 
 const (
@@ -95,27 +73,22 @@ const (
 	PowerAsleep Power = "asleep"
 )
 
-// Capabilities is what a substrate can enforce.
 type Capabilities struct {
 	SharedWriteDrives bool     `json:"sharedWriteDrives"`
 	EgressEnforcement bool     `json:"egressEnforcement"`
 	DriveQuota        bool     `json:"driveQuota"`
 	Architectures     []string `json:"architectures"` // GOARCH names: "arm64", "amd64"
 	SandboxedRuntime  bool     `json:"sandboxedRuntime"`
-	// Services is whether the substrate runs Services (enhancements §5.4:
-	// a multi-node Driver reports false until it encrypts both hops).
+	// A multi-node Driver reports Services false until it encrypts both hops.
 	Services bool `json:"services"`
 }
 
-// Observation is the substrate's view of one Fleet.
 type Observation struct {
 	Computers map[string]ComputerState `json:"computers"`
 	Drives    map[string]DriveState    `json:"drives"`
-	// Services are the Fleet's Services, in the same shape (no computerd).
-	Services map[string]ComputerState `json:"services,omitempty"`
+	Services  map[string]ComputerState `json:"services,omitempty"`
 }
 
-// ComputerState is one Computer as observed.
 type ComputerState struct {
 	Name       string `json:"name"`
 	Generation int64  `json:"generation"` // the staged generation
@@ -130,14 +103,12 @@ type ComputerState struct {
 	Failure string `json:"failure,omitempty"`
 }
 
-// DriveState is one drive as observed.
 type DriveState struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"` // substrate object name
 	AttachedTo []string `json:"attachedTo,omitempty"`
 }
 
-// EventType is a Computer failure kind reported by Watch.
 type EventType string
 
 const (
@@ -146,13 +117,11 @@ const (
 	EventRemoved EventType = "removed"
 )
 
-// Event is one Computer failure.
 type Event struct {
 	Type       EventType `json:"type"`
 	Computer   string    `json:"computer"`
 	Generation int64     `json:"generation"`
 	ExitCode   int       `json:"exitCode,omitempty"`
-	// Service is set when the event concerns a Service (Computer is then
-	// the Service's name).
+	// When Service is set, Computer holds the Service's name.
 	Service bool `json:"service,omitempty"`
 }

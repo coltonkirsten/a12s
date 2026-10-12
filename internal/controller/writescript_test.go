@@ -68,7 +68,7 @@ func TestWriteScriptPublishes(t *testing.T) {
 }
 
 // A touch that fails after the rename must not leave the new secret in place
-// with a pre-publication mtime (#65): the write fails and the file is gone.
+// with a pre-publication mtime: the write fails and the file is gone.
 func TestWriteScriptTouchFailureRemovesPublishedFile(t *testing.T) {
 	for _, withFlock := range []bool{false, true} {
 		target, err := runWriteScript(t, true, withFlock)

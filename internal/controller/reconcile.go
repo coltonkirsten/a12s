@@ -25,7 +25,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// Default image references (PLAN "HarnessBundle image").
 func imageRef(image string) string {
 	switch image {
 	case fleet.TierSlim, fleet.TierBrowser:
@@ -36,8 +35,7 @@ func imageRef(image string) string {
 
 func bundleRef(h fleet.Harness) string { return "a12s/bundle-" + h.Kind + ":" + h.Version }
 
-// PutFleet is `a12s up`: admit the Fleet, resolve and pin what the lock
-// lacks, then converge every Computer. Admission errors change nothing.
+// PutFleet is `a12s up`; admission errors change nothing.
 func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api.PutFleetResponse, error) {
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
@@ -116,8 +114,8 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		if rec == nil {
 			rec = &Record{DesiredPower: driver.PowerAwake}
 			if req.Asleep || sleptMarks[name] {
-				// A Computer that went to sleep before `down` comes back
-				// asleep: the mark is Fleet data in fleet.db (§4.14).
+				// A Computer that went to sleep before `down` comes back asleep: the mark is Fleet data
+				// in fleet.db.
 				rec.DesiredPower = driver.PowerAsleep
 			}
 			c.state.Computers[name] = rec
@@ -339,8 +337,6 @@ func (c *Controller) retryIfFreed(ctx context.Context, name string) {
 	}
 }
 
-// stageLater records a generation to apply at the Computer's next idle
-// boundary, or once a drive it needs is released.
 func (c *Controller) stageLater(name, hash string, observed int64, why string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -353,8 +349,6 @@ func (c *Controller) stageLater(name, hash string, observed int64, why string) e
 	return c.saveLocked()
 }
 
-// activeLocked is the configuration the Computer's current Fleet entry
-// makes active when its generation is staged.
 func (c *Controller) activeLocked(name string) Active {
 	comp := c.state.Fleet.Computers[name]
 	return Active{
@@ -376,8 +370,6 @@ func (e *driveHeld) Error() string {
 	return "waits for " + e.holder + " to release exclusive drive " + e.drive
 }
 
-// exclusiveHolder returns the first exclusive drive of the Computer's
-// Fleet entry that another Computer has attached, as observed.
 func (c *Controller) exclusiveHolder(ctx context.Context, name string) (*driveHeld, error) {
 	c.mu.Lock()
 	f := c.state.Fleet
@@ -406,8 +398,6 @@ func (c *Controller) exclusiveHolder(ctx context.Context, name string) (*driveHe
 	return nil, nil
 }
 
-// holdsObsolete reports whether the active generation attaches an
-// exclusive drive the Computer's Fleet entry no longer attaches.
 func (c *Controller) holdsObsolete(name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -451,8 +441,6 @@ func (c *Controller) release(ctx context.Context, name string, obs driver.Comput
 	return nil
 }
 
-// kickPending retries staged generations, for example one that waited for
-// a drive the just-changed Computer released.
 func (c *Controller) kickPending(except string) {
 	c.mu.Lock()
 	var names []string
@@ -467,7 +455,6 @@ func (c *Controller) kickPending(except string) {
 	}
 }
 
-// ensurePower enforces the desired power of an up-to-date Computer.
 func (c *Controller) ensurePower(ctx context.Context, name string, running bool) error {
 	c.mu.Lock()
 	rec := c.state.Computers[name]
@@ -522,8 +509,6 @@ func (c *Controller) busy(ctx context.Context, name string) bool {
 	return st.ActiveTurn != "" || st.Phase == "busy"
 }
 
-// idle reports whether the Computer runs no turn: it is not running, or
-// its computerd says so.
 func (c *Controller) idle(ctx context.Context, name string) bool {
 	obs, exists, err := c.observeOne(ctx, name)
 	if err != nil {
@@ -622,7 +607,6 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	return nil
 }
 
-// applyStaged applies a staged generation at an idle boundary.
 func (c *Controller) applyStaged(name string) {
 	defer c.lockComputer(name)()
 	c.mu.Lock()
@@ -724,8 +708,8 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 	if err := c.setPowerLocked(ctx, name, req); err != nil {
 		return err
 	}
-	// A manual sleep suppresses auto-wake until a manual wake, which clears
-	// the mark and a paused auto-wake (§4.14).
+	// A manual sleep suppresses auto-wake until a manual wake, which clears the mark and a
+	// paused auto-wake.
 	if c.inbox != nil {
 		by := ""
 		if req.State == api.PowerAsleep {
@@ -763,7 +747,7 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 		return c.sleep(ctx, name)
 	case api.PowerAwake:
 		if req.ClearInbox && c.inbox != nil {
-			// Recorded and applied before admission opens (§4.7).
+			// Recorded and applied before admission opens.
 			id := req.RequestID
 			if id == "" {
 				id = "wake-" + inbox.NewULID(time.Now())

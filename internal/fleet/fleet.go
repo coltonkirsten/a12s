@@ -1,42 +1,37 @@
-// Package fleet parses, defaults, validates and diffs a12s Fleet files (§3),
-// and reads and writes fleet.lock.
+// Package fleet parses, defaults, validates and diffs a12s Fleet files, and
+// reads and writes fleet.lock.
 package fleet
 
 import "sort"
 
-// APIVersion and Kind identify a Fleet document.
 const (
 	APIVersion = "a12s.ai/v1alpha1"
 	Kind       = "Fleet"
 )
 
-// Harness kinds supported in Layer 1.
 const (
 	HarnessClaudeCode = "claude-code"
 	HarnessCodex      = "codex"
 )
 
-// Image tiers. Any other image value is a custom image reference.
+// Any other image value is a custom image reference.
 const (
 	TierSlim    = "slim"
 	TierBrowser = "browser"
 	TierCustom  = "custom"
 )
 
-// Autonomy levels (§5 "Permission prompts").
 const (
 	AutonomyFull       = "full"
 	AutonomyRestricted = "restricted"
 )
 
-// Drive access modes (§4 "Drive access").
 const (
 	AccessExclusive   = "exclusive"
 	AccessShared      = "shared"
 	AccessSharedWrite = "shared-write"
 )
 
-// Fleet-level egress enforcement values (§6).
 const (
 	EnforcementEnforced   = "enforced"
 	EnforcementUnenforced = "unenforced"
@@ -45,7 +40,7 @@ const (
 // AllowAll is the egress host that permits any public host on any port.
 const AllowAll = "*"
 
-// Fleet is a parsed Fleet with defaults applied to every Computer.
+// Fleet has defaults already applied to every Computer.
 type Fleet struct {
 	APIVersion string              `yaml:"apiVersion" json:"apiVersion"`
 	Kind       string              `yaml:"kind" json:"kind"`
@@ -54,35 +49,29 @@ type Fleet struct {
 	Defaults   Computer            `yaml:"defaults,omitempty" json:"defaults,omitzero"`
 	Drives     map[string]Drive    `yaml:"drives,omitempty" json:"drives,omitempty"`
 	Computers  map[string]Computer `yaml:"computers" json:"computers"`
-	// Services are non-agent containers (enhancements §5).
-	Services map[string]Service `yaml:"services,omitempty" json:"services,omitempty"`
+	Services   map[string]Service  `yaml:"services,omitempty" json:"services,omitempty"`
 }
 
-// Metadata names the Fleet.
 type Metadata struct {
 	Name string `yaml:"name" json:"name"`
 }
 
-// FleetEgress holds Fleet-wide egress settings.
 type FleetEgress struct {
 	// Enforcement is "" (enforced), "enforced" or "unenforced".
 	Enforcement string `yaml:"enforcement,omitempty" json:"enforcement,omitempty"`
-	// AllowPrivate lets Services' egress.tcp reach these private ranges
-	// (enhancements §5.4). Loud; never covers the Fleet's own pools,
-	// loopback, link-local or metadata addresses.
+	// AllowPrivate lets Services' egress.tcp reach these private ranges; it never
+	// covers the Fleet's own pools, loopback, link-local or metadata addresses.
 	AllowPrivate []string `yaml:"allowPrivate,omitempty" json:"allowPrivate,omitempty"`
 }
 
-// Unenforced reports whether the Fleet accepts unenforced egress.
 func (e FleetEgress) Unenforced() bool { return e.Enforcement == EnforcementUnenforced }
 
-// Drive declares a work drive shared by name across the Fleet.
 type Drive struct {
 	Size   Bytes  `yaml:"size,omitempty" json:"size,omitzero"`
 	Access string `yaml:"access" json:"access"`
 }
 
-// Computer is one Computer's resolved spec (defaults already merged in).
+// Computer has the Fleet defaults already merged in.
 type Computer struct {
 	Harness     Harness      `yaml:"harness,omitempty" json:"harness,omitzero"`
 	Image       string       `yaml:"image,omitempty" json:"image,omitempty"`
@@ -92,19 +81,14 @@ type Computer struct {
 	Credentials []string     `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 	Drives      []DriveMount `yaml:"drives,omitempty" json:"drives,omitempty"`
 	Egress      Egress       `yaml:"egress,omitempty" json:"egress,omitzero"`
-	// Inbox configures the Computer's inbox (enhancements §4.8, §4.13).
-	// Controller state, not container config: never hashed into a generation.
+	// Inbox is Controller state, not container config: never hashed into a generation.
 	Inbox Inbox `yaml:"inbox,omitempty" json:"inbox,omitzero"`
-	// Power is the declared power policy (enhancements §4.14): Controller
-	// state, never hashed into a generation. Off unless set.
-	Power Power `yaml:"power,omitempty" json:"power,omitzero"`
-	// Uses lists the Services this Computer may reach (enhancements §5.4).
-	Uses []Use `yaml:"uses,omitempty" json:"uses,omitempty"`
-	// Grants are this Computer's capabilities: send to other inboxes (§5.3).
+	// Power is Controller state, never hashed into a generation. Off unless set.
+	Power  Power  `yaml:"power,omitempty" json:"power,omitzero"`
+	Uses   []Use  `yaml:"uses,omitempty" json:"uses,omitempty"`
 	Grants Grants `yaml:"grants,omitempty" json:"grants,omitzero"`
 }
 
-// Power is a Computer's power policy.
 type Power struct {
 	// SleepAfterIdle is "off" or a duration from 1m to 7d ("15m", "2h", "1d").
 	SleepAfterIdle *string        `yaml:"sleepAfterIdle,omitempty" json:"sleepAfterIdle,omitempty"`
@@ -118,8 +102,7 @@ type WakeOnMessage struct {
 	MaxWakesPerHour *int     `yaml:"maxWakesPerHour,omitempty" json:"maxWakesPerHour,omitempty"`
 }
 
-// Inbox is a Computer's inbox configuration. Unset fields fall back to
-// defaults.inbox, then the built-in values.
+// Inbox's unset fields fall back to defaults.inbox, then the built-in values.
 type Inbox struct {
 	MaxMessages *int64 `yaml:"maxMessages,omitempty" json:"maxMessages,omitempty"`
 	// MaxBytes is a size as written ("320Ki"); validated at admission.
@@ -128,7 +111,6 @@ type Inbox struct {
 	Intro *string `yaml:"intro,omitempty" json:"intro,omitempty"`
 }
 
-// Tier returns the image tier: slim, browser or custom.
 func (c Computer) Tier() string {
 	switch c.Image {
 	case TierSlim, TierBrowser:
@@ -137,42 +119,36 @@ func (c Computer) Tier() string {
 	return TierCustom
 }
 
-// Harness selects the harness program and, optionally, the model.
 type Harness struct {
 	Kind    string `yaml:"kind,omitempty" json:"kind,omitempty"`
 	Version string `yaml:"version,omitempty" json:"version,omitempty"`
 	Model   string `yaml:"model,omitempty" json:"model,omitempty"`
 }
 
-// BundleKey returns the fleet.lock key for this harness: "kind@version".
 func (h Harness) BundleKey() string { return BundleKey(h.Kind, h.Version) }
 
-// Resources are per-Computer limits. A zero value means no limit.
+// A zero Resources value means no limit.
 type Resources struct {
 	CPU    CPU   `yaml:"cpu,omitempty" json:"cpu,omitzero"`
 	Memory Bytes `yaml:"memory,omitempty" json:"memory,omitzero"`
 }
 
-// Home describes the Computer's home drive.
 type Home struct {
 	Size Bytes `yaml:"size,omitempty" json:"size,omitzero"`
 	// Preset is a directory, relative to the Fleet file, copied once onto an empty home.
 	Preset string `yaml:"preset,omitempty" json:"preset,omitempty"`
 }
 
-// DriveMount attaches a Fleet drive to a Computer.
 type DriveMount struct {
 	Name     string `yaml:"name" json:"name"`
 	At       string `yaml:"at" json:"at"`
 	ReadOnly bool   `yaml:"readOnly,omitempty" json:"readOnly,omitempty"`
 }
 
-// Egress lists the hosts a Computer may reach through the egress proxy.
 type Egress struct {
 	Allow []string `yaml:"allow" json:"allow"`
 }
 
-// AllowsAll reports whether the allowlist contains "*".
 func (e Egress) AllowsAll() bool {
 	for _, h := range e.Allow {
 		if h == AllowAll {
@@ -182,10 +158,8 @@ func (e Egress) AllowsAll() bool {
 	return false
 }
 
-// ComputerNames returns the Computer names in sorted order.
 func (f *Fleet) ComputerNames() []string { return sortedKeys(f.Computers) }
 
-// DriveNames returns the drive names in sorted order.
 func (f *Fleet) DriveNames() []string { return sortedKeys(f.Drives) }
 
 func sortedKeys[V any](m map[string]V) []string {

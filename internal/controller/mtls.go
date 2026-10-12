@@ -12,7 +12,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// peerKey carries the verified Principal of an mTLS request.
 type peerKey struct{}
 
 func peerOf(r *http.Request) (Principal, bool) {
@@ -20,12 +19,8 @@ func peerOf(r *http.Request) (Principal, bool) {
 	return p, ok
 }
 
-// MTLSHandler is the Controller's mTLS listener (A12S_CONTROLLER, A12S_API;
-// enhancements §5.3): identity comes from the client certificate's typed
-// URI SAN and counts only while its serial is the live one in the
-// registry. The ACL is by principal type: Computers and Services may enqueue
-// to the Computers their active generation grants, and read or withdraw
-// their own Messages; leases stay Computer-only; nothing else exists here.
+// MTLSHandler: identity counts only while the certificate's serial is the live one in the
+// registry. Senders may enqueue only to granted Computers; leases stay Computer-only.
 func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	computerOnly := func(h http.Handler) http.HandlerFunc {
@@ -63,7 +58,6 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 	})
 }
 
-// livePeer verifies the request's certificate against the registry.
 func (c *Controller) livePeer(r *http.Request) (Principal, inbox.CertEntry, error) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return Principal{}, inbox.CertEntry{}, fmt.Errorf("no client certificate")
@@ -121,8 +115,6 @@ func (c *Controller) granted(h http.HandlerFunc) http.HandlerFunc {
 // caller's own Messages (via = principal).
 func (c *Controller) ownMessages(h http.HandlerFunc) http.HandlerFunc { return h }
 
-// recordDenial audits a refused call by a Service, or journals it as a
-// diagnostic in the Computer that made it.
 func (c *Controller) recordDenial(p Principal, audit, msg, fix string) {
 	if p.Kind == KindService {
 		c.auditf(p.Name, "%s", audit)
@@ -151,8 +143,6 @@ func (c *Controller) principalRunningLocked(p Principal) bool {
 	return false
 }
 
-// registerCert makes a fresh certificate the live one for a Computer or
-// Service at start, with its active generation's send grants.
 func (c *Controller) registerCert(ctx context.Context, p Principal, serial string, send []string) error {
 	if c.inbox == nil {
 		return nil

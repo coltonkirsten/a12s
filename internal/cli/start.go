@@ -22,7 +22,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
 )
 
-// Controller container settings (PLAN "Naming on Docker", "Controller API").
 const (
 	DefaultControllerImage = "a12s/controller:dev"
 	ControllerPort         = "7000/tcp"
@@ -31,34 +30,27 @@ const (
 	dockerSocket           = "/var/run/docker.sock"
 )
 
-// ControllerNames are the Docker objects of one Fleet's Controller.
 type ControllerNames struct {
 	Container string // a12s-F-controller
 	Volume    string // a12s-F-controller
 	Network   string // a12s-F
-	// Data is the Fleet's data volume (fleet.db), kept by down: a12s-F-data.
+	// Data holds fleet.db and is kept by down.
 	Data string
 }
 
-// NamesFor returns the Controller's object names for a Fleet.
 func NamesFor(fleetName string) ControllerNames {
 	name := "a12s-" + fleetName + "-controller"
 	return ControllerNames{Container: name, Volume: name, Network: "a12s-" + fleetName, Data: "a12s-" + fleetName + "-data"}
 }
 
-// StartOptions configures EnsureController.
 type StartOptions struct {
 	Fleet string
 	Image string // DefaultControllerImage when empty
-	// Wait bounds how long to wait for GET /v1/status. Zero means 60s.
+	// Wait of zero means 60s.
 	Wait time.Duration
-	// Log, if set, reports what was done ("started controller …").
-	Log func(string)
+	Log  func(string)
 }
 
-// EnsureController makes sure the Fleet's Controller container exists and
-// runs, writes ~/.a12s/<fleet>/controller.json, and waits until the API
-// answers. It returns a client for that API.
 func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 	if o.Image == "" {
 		o.Image = DefaultControllerImage
@@ -174,8 +166,7 @@ func ensureStateVolume(ctx context.Context, dc *client.Client, name, fleetName s
 	return nil
 }
 
-// ensureDataVolume creates the Fleet's data volume, labeled a12s.data so
-// that down keeps it like a drive.
+// ensureDataVolume labels the volume a12s.data so that down keeps it like a drive.
 func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName string) error {
 	res, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	if err == nil {
@@ -194,8 +185,7 @@ func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName st
 	return nil
 }
 
-// ControllerCreateOptions is the Controller container: Docker socket, state
-// volume, the Fleet's bridge network, API port published on loopback only.
+// ControllerCreateOptions publishes the API port on loopback only.
 func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, labels map[string]string) client.ContainerCreateOptions {
 	port := network.MustParsePort(ControllerPort)
 	return client.ContainerCreateOptions{
@@ -227,7 +217,7 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 
 func createController(ctx context.Context, dc *client.Client, n ControllerNames, o StartOptions, labels map[string]string, token string) error {
 	opts := ControllerCreateOptions(n, o.Fleet, o.Image, token, labels)
-	// The exit gate's power-policy test speed (enhancements §9 gate 23).
+	// Lets tests run power-policy timers faster than real time.
 	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
 		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
 	}
@@ -244,7 +234,6 @@ func createController(ctx context.Context, dc *client.Client, n ControllerNames,
 	return nil
 }
 
-// publishedPort reads the host port Docker picked for the API port.
 func publishedPort(ctx context.Context, dc *client.Client, name string) (int, error) {
 	port := network.MustParsePort(ControllerPort)
 	deadline := time.Now().Add(10 * time.Second)
@@ -274,7 +263,6 @@ func publishedPort(ctx context.Context, dc *client.Client, name string) (int, er
 	}
 }
 
-// waitReady polls GET /v1/status until it answers 200.
 func waitReady(ctx context.Context, c *Client, wait time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()

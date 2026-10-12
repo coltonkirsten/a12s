@@ -14,15 +14,12 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// check is one doctor line.
 type check struct {
 	Level string `json:"level"` // ok, warn, fail
 	What  string `json:"what"`
 	Fix   string `json:"fix,omitempty"`
 }
 
-// runDoctor is `a12s doctor`: Docker, images, bundles, bindings, the
-// Controller, egress and Service health, one fix per line (§6.3).
 func runDoctor(g *globals, args []string) error {
 	pos, err := parse(g.flags("doctor"), args)
 	if err != nil {
@@ -222,8 +219,7 @@ func doctor(ctx context.Context, g *globals) []check {
 	return out
 }
 
-// fetchesAtStart reports whether a Service's config runs npx (which fetches
-// at start instead of running what the image pinned).
+// fetchesAtStart flags npx, which fetches at start instead of running what the image pinned.
 func fetchesAtStart(cfg map[string]any) bool {
 	var words []string
 	collect := func(v any) {

@@ -17,11 +17,11 @@ export interface TurnRequest {
   session: string;
   prompt: string;
   cwd?: string;
-  /** The Controller's Batch description, copied into turn.started (enhancements §4.5). */
+  /** The Controller's Batch description, copied into turn.started. */
   inbox?: Record<string, unknown>;
   /** Runs the owed restart_harness continuation; requestId must be its id and prompt is computerd's own. */
   continuation?: boolean;
-  /** Recovery replay: return the turn if this requestId is known, else refuse it for good (§4.11). */
+  /** Recovery replay: return the turn if this requestId is known, else refuse it for good. */
   lookupOnly?: boolean;
 }
 
@@ -64,7 +64,7 @@ export class Computer {
   private restarting = false;
   private restartRequested = false;
   private readonly inflight = new Map<string, { hash: string; reply: Promise<TurnReply> }>();
-  /** The restart_harness continuation owed to the Controller (§4.5), by id. */
+  /** The restart_harness continuation owed to the Controller, by id. */
   private owedContinuation: { id: string; parentTurn: string | null } | null = null;
   /** The credential generation actually in effect: wired, and any long-lived harness restarted with it. */
   private ackedGeneration: number | null = null;
@@ -99,7 +99,7 @@ export class Computer {
     }
     this.owedContinuation = this.journal.owedContinuation();
     // A continuation accepted before the crash, and never dispatched (its owed flag clears with the dispatch), was
-    // just ended interrupted above. It failed before dispatch: abandon it instead of owing it forever (§4.5).
+    // just ended interrupted above. It failed before dispatch: abandon it instead of owing it forever.
     const owed = this.owedContinuation;
     const accepted = owed ? this.journal.findRequest(owed.id) : undefined;
     if (owed && accepted) {
@@ -251,7 +251,7 @@ export class Computer {
   }
 
   /**
-   * Exit-gate test hooks (enhancements §9 gate 4): files in the root-only state dir, so only an operator with
+   * End-to-end test hooks: files in the root-only state dir, so only an operator with
    * `a12s shell --root` can arm them, and each fires once. At 'accept': `exit-after-accept` kills computerd. At
    * 'dispatch': `exit-after-dispatch` kills computerd right after turn.dispatched is on disk.
    */
@@ -270,7 +270,7 @@ export class Computer {
   }
 
   /**
-   * Cancels the owed continuation (`a12s inbox resume --new`, §4.5: a new session has nothing to continue). Returns its
+   * Cancels the owed continuation (`a12s inbox resume --new`: a new session has nothing to continue). Returns its
    * id, or null when none is owed.
    */
   cancelContinuation(reason: string): string | null {
@@ -281,7 +281,7 @@ export class Computer {
     return owed.id;
   }
 
-  /** A continuation that failed before dispatch is dropped, never retried (§4.5). */
+  /** A continuation that failed before dispatch is dropped, never retried. */
   private abandonContinuation(req: TurnRequest, reason: string, scope: { turn: string | null; session: string | null }): void {
     if (!req.continuation || this.owedContinuation?.id !== req.requestId) return;
     this.owedContinuation = null;
@@ -381,7 +381,7 @@ export class Computer {
         } else resumed = true;
       }
       // A human stop (interrupted) or a failure does not get an automatic continuation. One that is owed is
-      // journaled with its id and run by the Controller at the next idle boundary (§4.5); computerd starts nothing.
+      // journaled with its id and run by the Controller at the next idle boundary; computerd starts nothing.
       const continuation = resumed && status === 'completed' && afterTurn ? `c_${ulid()}` : null;
       if (continuation) this.owedContinuation = { id: continuation, parentTurn: afterTurn };
       this.journal.append(

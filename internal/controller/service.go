@@ -23,7 +23,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// ServiceRecord is one Service's persistent state (state.json).
 type ServiceRecord struct {
 	// Generation is the generation staged on the substrate; SpecHash the
 	// hash of its spec.
@@ -52,7 +51,6 @@ type ServiceActive struct {
 	AllowPrivate []string                     `json:"allowPrivate,omitempty"`
 }
 
-// serviceRuntime is a Service's in-memory state.
 type serviceRuntime struct {
 	phase   api.Phase
 	failure *api.Failure
@@ -65,16 +63,13 @@ type serviceRuntime struct {
 	credsHash    string
 }
 
-// serviceWaiting is a Service left in Error for want of a credential (a
-// login, or credentials not loaded): the rest of the Fleet is fine, so
-// `a12s up` reports it as a warning, not a failure (§5.5).
+// serviceWaiting is a Service in Error for want of a credential: `a12s up` reports it as a
+// warning, not a failure, since the rest of the Fleet is fine.
 type serviceWaiting struct{ err error }
 
 func (e *serviceWaiting) Error() string { return e.err.Error() }
 func (e *serviceWaiting) Unwrap() error { return e.err }
 
-// MaxServiceBackoff caps the delay between restarts of a Service that keeps
-// exiting.
 const MaxServiceBackoff = 5 * time.Minute
 
 func (c *Controller) srtLocked(name string) *serviceRuntime {
@@ -107,7 +102,6 @@ func (c *Controller) servicePhase(name string) api.Phase {
 	return c.srtLocked(name).phase
 }
 
-// failService puts the Service in Error with a reason (and audits it).
 func (c *Controller) failService(name string, err error) error {
 	c.setServicePhase(name, api.PhaseError, &api.Failure{Reason: err.Error(), Retryable: true})
 	c.auditf(name, "error: %v", err)
@@ -157,12 +151,10 @@ func (c *Controller) serviceDesired(ctx context.Context, name string) driver.Pow
 	return driver.Power(d)
 }
 
-// controllerHost is the Controller's name on every network.
 func (c *Controller) controllerHost() string { return "a12s-" + c.cfg.Fleet + "-controller" }
 
-// resolveServices pins each Service's image, reads its manifest from the
-// pinned image, merges the inline manifest and checks the result
-// (§5.6). refresh names Services whose ref is resolved afresh.
+// resolveServices pins each Service's image and reads its manifest from the pinned image.
+// refresh names Services whose ref is resolved afresh.
 func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, lock *fleet.Lock, caps driver.Capabilities, refresh []string) (map[string]*fleet.ServiceManifest, error) {
 	out := map[string]*fleet.ServiceManifest{}
 	if len(f.Services) == 0 {
@@ -210,9 +202,8 @@ func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, lock *
 	return out, nil
 }
 
-// serviceCredentialErrors refuses a Service credential with no material
-// unless the Service's own login produces it (then only that Service waits
-// in Error, §5.5).
+// serviceCredentialErrors refuses a credential with no material unless the Service's own login
+// produces it; then only that Service waits in Error.
 func serviceCredentialErrors(f *fleet.Fleet, manifests map[string]*fleet.ServiceManifest, creds api.Credentials) error {
 	var errs []error
 	for _, name := range f.ServiceNames() {
@@ -230,7 +221,6 @@ func serviceCredentialErrors(f *fleet.Fleet, manifests map[string]*fleet.Service
 	return nil
 }
 
-// serviceUser is the manifest's uid:gid.
 func serviceUser(m *fleet.ServiceManifest) string {
 	if m == nil || m.User == nil {
 		return ""
@@ -238,9 +228,6 @@ func serviceUser(m *fleet.ServiceManifest) string {
 	return m.User.String()
 }
 
-// buildServiceSpec is the Driver spec of a Service under the applied Fleet,
-// Lock and manifest (generation unset), and the hash of what makes a
-// Service generation.
 func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -339,7 +326,6 @@ func (c *Controller) activeServiceLocked(name string) ServiceActive {
 	return a
 }
 
-// observeService returns the Service as the Driver sees it now.
 func (c *Controller) observeService(ctx context.Context, name string) (driver.ComputerState, bool, error) {
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -349,7 +335,6 @@ func (c *Controller) observeService(ctx context.Context, name string) (driver.Co
 	return st, ok, nil
 }
 
-// confirmService reads the Service back until want holds.
 func (c *Controller) confirmService(ctx context.Context, name, what string, want func(st driver.ComputerState, exists bool) bool) error {
 	deadline := time.Now().Add(c.timing.ReadBack)
 	for {
@@ -390,9 +375,7 @@ func (c *Controller) convergeServices(ctx context.Context, names []string, obs d
 	return out
 }
 
-// convergeService brings one Service to the applied Fleet: an unchanged one
-// only gets its power enforced; a changed one is restarted at once on a new
-// generation (a Service has no idle boundary, §5.2).
+// convergeService restarts a changed Service at once: a Service has no idle boundary.
 func (c *Controller) convergeService(ctx context.Context, name string, obs driver.ComputerState, exists bool) (result, error) {
 	spec, hash, err := c.buildServiceSpec(name)
 	if err != nil {
@@ -434,7 +417,6 @@ func (c *Controller) serviceStateSizeLocked(name string) fleet.Bytes {
 	return size
 }
 
-// ensureServicePower enforces the desired power of an up-to-date Service.
 func (c *Controller) ensureServicePower(ctx context.Context, name string, running bool, desired driver.Power) error {
 	c.mu.Lock()
 	r := c.srtLocked(name)
@@ -466,8 +448,6 @@ func (c *Controller) ensureServicePower(ctx context.Context, name string, runnin
 	return nil
 }
 
-// restageService stops the Service if it runs, stages a new generation and
-// starts it unless it should sleep.
 func (c *Controller) restageService(ctx context.Context, name string, spec driver.ServiceSpec, hash string, obs driver.ComputerState, exists bool, desired driver.Power) error {
 	c.setServiceTransition(name, true)
 	defer c.setServiceTransition(name, false)
@@ -510,7 +490,6 @@ func (c *Controller) restageService(ctx context.Context, name string, spec drive
 	return nil
 }
 
-// stopService powers a Service down and reads that back.
 func (c *Controller) stopService(ctx context.Context, name string, gen int64) error {
 	c.unregisterCert(KindService, name)
 	if err := c.drv.SetServicePower(ctx, name, driver.PowerAsleep, gen); err != nil {
@@ -521,8 +500,8 @@ func (c *Controller) stopService(ctx context.Context, name string, gen int64) er
 	})
 }
 
-// serviceNeedsLogin explains a missing credential: one the Service's own
-// login produces is "needs a login", anything else "not loaded".
+// serviceCredentialError: a credential the Service's own login produces "needs a login";
+// anything else is "not loaded".
 func (c *Controller) serviceCredentialError(name string, missing []string) error {
 	c.mu.Lock()
 	m := c.state.Manifests[name]
@@ -645,7 +624,6 @@ func (c *Controller) injectService(ctx context.Context, name string, withCert bo
 	return nil
 }
 
-// checkHealth runs the manifest's health check once.
 func (c *Controller) checkHealth(ctx context.Context, name string) error {
 	c.mu.Lock()
 	m := c.state.Manifests[name]
@@ -699,8 +677,8 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 	return nil
 }
 
-// reauth reports whether a health answer says the Service's session is gone
-// ({"credential": "reauth"}, §5.5): it needs `a12s service login`.
+// reauth reports a {"credential": "reauth"} health answer: the session is gone and needs
+// `a12s service login`.
 func reauth(body []byte) bool {
 	var h struct {
 		Credential string `json:"credential"`
@@ -786,7 +764,6 @@ func (c *Controller) waitHealthy(ctx context.Context, name string) {
 	}
 }
 
-// watchHealth runs the health check every interval while the Service runs.
 func (c *Controller) watchHealth(name string) {
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.mu.Lock()
@@ -832,7 +809,6 @@ func (c *Controller) stopHealth(name string) {
 	}
 }
 
-// sleepService stops a Service and keeps its state drive.
 func (c *Controller) sleepService(ctx context.Context, name string) error {
 	if c.inbox != nil {
 		if err := c.inbox.SetServiceDesired(ctx, name, string(driver.PowerAsleep)); err != nil {
@@ -929,8 +905,6 @@ func (c *Controller) removeService(ctx context.Context, name string) error {
 	return err
 }
 
-// unexpectedService reports whether a death concerns the Service's current
-// generation while it should be awake and nothing is changing it.
 func (c *Controller) unexpectedService(ev driver.Event) bool {
 	c.mu.Lock()
 	rec := c.state.Services[ev.Computer]
@@ -940,8 +914,7 @@ func (c *Controller) unexpectedService(ev driver.Event) bool {
 	return ok && c.serviceDesired(c.ctx, ev.Computer) == driver.PowerAwake
 }
 
-// serviceDied restarts a Service that exited, with backoff, through the
-// full start path (§5.5 "Restarts are the Controller's").
+// serviceDied restarts through the full start path, with backoff.
 func (c *Controller) serviceDied(ev driver.Event) {
 	if !c.unexpectedService(ev) {
 		return
@@ -974,7 +947,6 @@ func (c *Controller) serviceDied(ev driver.Event) {
 	_ = c.startService(ctx, name)
 }
 
-// serviceStatus is one Service's status row.
 func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1033,7 +1005,6 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	return out
 }
 
-// Services is GET /v1/services.
 func (c *Controller) Services() []api.ServiceStatus {
 	c.mu.Lock()
 	f := c.state.Fleet
@@ -1048,15 +1019,12 @@ func (c *Controller) Services() []api.ServiceStatus {
 	return out
 }
 
-// isService reports whether name is a Service of the applied Fleet.
 func (c *Controller) isService(name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.state.Fleet != nil && c.state.Fleet.HasService(name)
 }
 
-// writeServiceLogs writes a Service's audit lines and container output to w
-// (text), following both when follow is set.
 func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow bool, tail int, w func(string) error) error {
 	var sub chan string
 	if follow {

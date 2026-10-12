@@ -7,8 +7,8 @@ import (
 
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-// NewULID returns a ULID (48-bit millisecond time, 80 random bits) in
-// Crockford base32: 26 characters, sortable by time.
+// NewULID returns a ULID: 48-bit millisecond time and 80 random bits in
+// Crockford base32, so IDs sort by time.
 func NewULID(t time.Time) string {
 	var b [16]byte
 	ms := uint64(t.UnixMilli())

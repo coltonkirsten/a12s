@@ -79,8 +79,8 @@ export function credentialEnv(cfg: Config): Record<string, string> {
  * Moves reclaimed content onto the tmpfs secret: temp file + rename inside tmpfs (root-owned, so the rename cannot be
  * redirected), so a crash never leaves a half moved secret. The Controller injects from outside this process, so the
  * commit is a compare-and-swap: if the secret or .generation changed since `seen`, the reclaim is dropped and the
- * injected material wins. The check and the rename run under the `.lock` flock the injection's rename also takes
- * (review #35), and the injection touches its file after publishing it under that lock (#61, #65), so a refresh
+ * injected material wins. The check and the rename run under the `.lock` flock the injection's rename also takes,
+ * and the injection touches its file after publishing it under that lock, so a refresh
  * written before then reads as older; an image without flock(1) falls back to the unlocked check, a microsecond window.
  */
 function writeSecret(cfg: Config, name: string, content: string, seen: SecretStamp, beforeCommit?: () => void): boolean {
@@ -104,7 +104,7 @@ function writeSecret(cfg: Config, name: string, content: string, seen: SecretSta
 }
 
 /**
- * Creates the lock file, or repairs one created by an older peer, as root-only 0600 (review #62): the agent can
+ * Creates the lock file, or repairs one created by an older peer, as root-only 0600: the agent can
  * traverse secrets/, and an agent-readable lock would let it hold the flock and stall reclaim and injection.
  */
 function secureLock(cfg: Config, lock: string): void {

@@ -28,7 +28,7 @@ bundle-claude-code bundle-codex:
 	@test -n "$(VERSION)" || { echo "usage: make $@ VERSION=x.y.z" >&2; exit 1; }
 	$(DOCKER) build --build-arg VERSION=$(VERSION) -t a12s/$@:$(VERSION) images/bundles/$(@:bundle-%=%)
 
-# Reference Services (services/, enhancements §5.8): ordinary images, pinned like any other.
+# Reference Services (services/): ordinary images, pinned like any other.
 SVC_TAG ?= 0.1
 .PHONY: services svc-cron svc-webhook svc-mcp svc-mcp-postgres
 services: svc-cron svc-webhook svc-mcp svc-mcp-postgres

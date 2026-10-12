@@ -11,7 +11,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// fakeService is a Service container in the fake driver.
 type fakeService struct {
 	spec    driver.ServiceSpec
 	running bool

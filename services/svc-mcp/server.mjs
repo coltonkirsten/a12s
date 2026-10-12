@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// svc-mcp: the reference MCP wrapper Service (enhancements §5.8). It serves any
+// svc-mcp: the reference MCP wrapper Service. It serves any
 // stdio MCP server over Streamable HTTP at :8080/mcp, one child process per MCP
 // session, with credentials mapped into the child's env (envFrom) and forwarder
 // addresses split into host/port variables (hostPortFrom). Computers that

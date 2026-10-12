@@ -17,7 +17,7 @@ export interface SendReply {
 }
 
 /**
- * The `send` system tool (enhancements §5.3): computerd enqueues to another Computer's inbox over its own mTLS
+ * The `send` system tool: computerd enqueues to another Computer's inbox over its own mTLS
  * identity; the Controller checks the grant and sets via = computer:<name>. The agent holds no credential.
  */
 export function sendToInbox(cfg: Config, tls: TlsMaterial, req: SendRequest): Promise<SendReply> {

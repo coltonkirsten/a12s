@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Commits a reclaimed credential onto the tmpfs secret (review #35). Run under `flock <secrets>/.lock`, the lock the
+// Commits a reclaimed credential onto the tmpfs secret. Run under `flock <secrets>/.lock`, the lock the
 // Controller's injection takes around its rename, so the compare-and-swap check and the rename are one step against it.
 // Usage: secretcommit.js '<JSON {dir, name, tmp, seen}>'  → prints "committed" or "stale".
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, renameSync, rmSync } from 'node:fs';

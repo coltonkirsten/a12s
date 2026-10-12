@@ -15,18 +15,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Service is a non-agent container the Controller runs from the Fleet file
-// (enhancements §5). A Service inherits nothing from defaults: its own
-// fields are complete, and the image manifest (or the inline manifest)
-// fills what the file doesn't say.
+// Service inherits nothing from defaults: the image (or inline) manifest fills
+// what the file doesn't say.
 type Service struct {
-	// Image is required and pinned in fleet.lock.
-	Image string `yaml:"image" json:"image"`
-	// Manifest supplies or overrides the image's /a12s/service.json.
+	Image    string           `yaml:"image" json:"image"`
 	Manifest *ServiceManifest `yaml:"manifest,omitempty" json:"manifest,omitempty"`
-	// Config is portable, non-secret data, given to the Service as
-	// /run/a12s/config/config.json. Its "env" map is exported into the
-	// Service's environment by a12s-init.
+	// Config must be non-secret; it lands in /run/a12s/config/config.json and
+	// its "env" map is exported into the Service's environment by a12s-init.
 	Config      map[string]any `yaml:"config,omitempty" json:"config,omitempty"`
 	Credentials []string       `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 	Egress      ServiceEgress  `yaml:"egress,omitempty" json:"egress,omitzero"`
@@ -34,51 +29,41 @@ type Service struct {
 	Uses        []Use          `yaml:"uses,omitempty" json:"uses,omitempty"`
 	Resources   Resources      `yaml:"resources,omitempty" json:"resources,omitzero"`
 	State       ServiceState   `yaml:"state,omitempty" json:"state,omitzero"`
-	// Publish is "<ip>:<hostPort>:<port>": the only ingress a12s has.
+	// Publish entries are "<ip>:<hostPort>:<port>": the only ingress a12s has.
 	Publish []string `yaml:"publish,omitempty" json:"publish,omitempty"`
 }
 
-// ServiceEgress is a Service's egress: the allowlist a Computer has, plus
-// named TCP destinations (Services only).
 type ServiceEgress struct {
 	Allow []string    `yaml:"allow" json:"allow"`
 	TCP   []TCPEgress `yaml:"tcp,omitempty" json:"tcp,omitempty"`
 }
 
-// AllowsAll reports whether the allowlist contains "*".
 func (e ServiceEgress) AllowsAll() bool { return Egress{Allow: e.Allow}.AllowsAll() }
 
-// TCPEgress is one named external TCP destination, reachable from the
-// Service as <name>.egress.a12s:<port>.
+// TCPEgress is reachable from the Service as <name>.egress.a12s:<port>.
 type TCPEgress struct {
 	Name string `yaml:"name" json:"name"`
 	Host string `yaml:"host" json:"host"`
 	Port int    `yaml:"port" json:"port"`
 }
 
-// Grants are capabilities written on the side that acts (§5.3).
+// Grants are written on the side that acts.
 type Grants struct {
-	// Send lists the Computers whose inboxes this may enqueue to.
 	Send []string `yaml:"send,omitempty" json:"send,omitempty"`
 }
 
-// ServiceState overrides the manifest's state drive size.
 type ServiceState struct {
 	Size Bytes `yaml:"size,omitempty" json:"size,omitzero"`
 }
 
-// Use is one entry of `uses`: a Service name, and whether its MCP ports are
-// registered with the harness (default yes). Written as a bare name or as
-// {name, mcp}.
+// Use is written as a bare name or {name, mcp}; MCP defaults to yes.
 type Use struct {
 	Name string `json:"name"`
 	MCP  *bool  `json:"mcp,omitempty"`
 }
 
-// WantsMCP reports whether the Service's MCP ports are wired in.
 func (u Use) WantsMCP() bool { return u.MCP == nil || *u.MCP }
 
-// UnmarshalYAML accepts "db" or {name: db, mcp: false}.
 func (u *Use) UnmarshalYAML(n *yaml.Node) error {
 	switch n.Kind {
 	case yaml.ScalarNode:
@@ -106,7 +91,6 @@ func (u *Use) UnmarshalYAML(n *yaml.Node) error {
 	return errors.New("uses: each entry is a Service name or {name, mcp}")
 }
 
-// MarshalYAML writes the bare name unless mcp is set.
 func (u Use) MarshalYAML() (any, error) {
 	if u.MCP == nil {
 		return u.Name, nil
@@ -114,7 +98,6 @@ func (u Use) MarshalYAML() (any, error) {
 	return map[string]any{"name": u.Name, "mcp": *u.MCP}, nil
 }
 
-// MarshalJSON writes the bare name unless mcp is set.
 func (u Use) MarshalJSON() ([]byte, error) {
 	if u.MCP == nil {
 		return json.Marshal(u.Name)
@@ -123,7 +106,6 @@ func (u Use) MarshalJSON() ([]byte, error) {
 	return json.Marshal(plain(u))
 }
 
-// UnmarshalJSON accepts "db" or {"name": "db", "mcp": false}.
 func (u *Use) UnmarshalJSON(b []byte) error {
 	var s string
 	if json.Unmarshal(b, &s) == nil {
@@ -139,7 +121,6 @@ func (u *Use) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// UseNames returns the Service names of a uses list.
 func UseNames(us []Use) []string {
 	out := make([]string, len(us))
 	for i, u := range us {
@@ -148,17 +129,12 @@ func UseNames(us []Use) []string {
 	return out
 }
 
-// ServiceNames returns the Service names in sorted order.
 func (f *Fleet) ServiceNames() []string { return sortedKeys(f.Services) }
 
-// hasService reports whether the Fleet declares a Service of that name.
 func (f *Fleet) hasService(name string) bool { _, ok := f.Services[name]; return ok }
 
-// HasService reports whether the Fleet declares a Service of that name.
 func (f *Fleet) HasService(name string) bool { return f.hasService(name) }
 
-// serviceForbidden are the fields a Service may not have, with the reason
-// and the fix (§3 "Rules that follow from the file").
 var serviceForbidden = []struct{ key, why, fix string }{
 	{"harness", "a Service runs no harness", "remove it; a Service that wants a harness is a Computer"},
 	{"home", "a Service has no home drive", "remove it; use the manifest's state drive for data that must persist"},
@@ -168,8 +144,8 @@ var serviceForbidden = []struct{ key, why, fix string }{
 	{"drives", "a Service attaches no Fleet drives", "remove it; use the manifest's state drive"},
 }
 
-// decodeService decodes one services.<name> node, refusing Computer-only
-// fields with a fix line rather than yaml's "field not found".
+// decodeService refuses Computer-only fields with a fix line rather than yaml's
+// "field not found".
 func decodeService(name string, n *yaml.Node, s *Service) error {
 	n = mapping(n)
 	var errs []error
@@ -193,7 +169,6 @@ func decodeService(name string, n *yaml.Node, s *Service) error {
 	return nil
 }
 
-// computerOnlyEgress refuses egress.tcp on a Computer with a fix line.
 func computerOnlyEgress(name string, n *yaml.Node) error {
 	n = mapping(n)
 	if n.Kind != yaml.MappingNode {
@@ -215,15 +190,14 @@ var (
 	reservedFn = map[string]bool{"controller": true}
 )
 
-// Publish is one parsed publish entry.
 type Publish struct {
 	IP       netip.Addr
 	HostPort int
 	Port     int
 }
 
-// ParsePublish parses "127.0.0.1:8787:8080". The address must be written
-// out: 127.0.0.1, or 0.0.0.0 (or another host address) explicitly.
+// ParsePublish requires the address written out, so exposing on 0.0.0.0 is
+// always explicit.
 func ParsePublish(s string) (Publish, error) {
 	m := publishRE.FindStringSubmatch(s)
 	if m == nil {
@@ -241,7 +215,6 @@ func ParsePublish(s string) (Publish, error) {
 	return Publish{IP: ip, HostPort: hp, Port: p}, nil
 }
 
-// validateServices checks the parts of services: that need no image.
 func (f *Fleet) validateServices() []error {
 	var errs []error
 	bad := func(field, fix, format string, args ...any) {
@@ -329,7 +302,6 @@ func (f *Fleet) validateServices() []error {
 	return errs
 }
 
-// validateGrants checks a grants block: send names only Computers.
 func (f *Fleet) validateGrants(field string, g Grants) []error {
 	var errs []error
 	seen := map[string]bool{}
@@ -352,7 +324,6 @@ func (f *Fleet) validateGrants(field string, g Grants) []error {
 	return errs
 }
 
-// validateUses checks a uses list: names only Services, never itself.
 func (f *Fleet) validateUses(field, self string, uses []Use) []error {
 	var errs []error
 	seen := map[string]bool{}
@@ -376,7 +347,6 @@ func (f *Fleet) validateUses(field, self string, uses []Use) []error {
 	return errs
 }
 
-// a12sPaths are where a Service's state and tmpfs paths may not go.
 var a12sPaths = []string{"/run/a12s", "/tmp", "/a12s", "/proc", "/sys", "/dev"}
 
 func checkServicePath(p string) error {
@@ -394,7 +364,6 @@ func checkServicePath(p string) error {
 	return nil
 }
 
-// isPrivate reports whether a is not a public unicast address.
 func isPrivate(a netip.Addr) bool {
 	a = a.Unmap()
 	return a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() ||
@@ -410,7 +379,6 @@ func (f *Fleet) allowsPrivate(a netip.Addr) bool {
 	return false
 }
 
-// validateAllowPrivate checks egress.allowPrivate: CIDRs of private ranges.
 func (f *Fleet) validateAllowPrivate() []error {
 	var errs []error
 	for _, s := range f.Egress.AllowPrivate {
@@ -425,8 +393,8 @@ func (f *Fleet) validateAllowPrivate() []error {
 	return errs
 }
 
-// GrantWarnings are non-fatal remarks shown by `a12s up`: a principal listed
-// in a power policy that can't send to the Computer never wakes it.
+// GrantWarnings: a principal in a power policy that can't send to the
+// Computer never wakes it.
 func (f *Fleet) GrantWarnings() []string {
 	var out []string
 	for _, name := range f.ComputerNames() {

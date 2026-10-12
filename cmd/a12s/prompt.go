@@ -38,7 +38,7 @@ func runPrompt(g *globals, args []string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// (1) An interactive command shouldn't hang until somebody wakes the Computer (§4.9).
+	// An interactive command shouldn't hang until somebody wakes the Computer.
 	st, err := status(ctx, c)
 	if err != nil {
 		return err
@@ -53,7 +53,6 @@ func runPrompt(g *globals, args []string) error {
 		return fmt.Errorf("fleet %s has no Computer %q", st.Fleet, name)
 	}
 	if cs.Phase == api.PhaseAsleep || cs.Phase == api.PhaseStopping {
-		// The power policy may wake it for local (§4.14); otherwise fail with the reason.
 		if p := cs.Power; cs.Phase == api.PhaseAsleep && p != nil && p.AutoWake == api.AutoWakeOn && slices.Contains(p.WakeOnMessage, api.PrincipalLocal) {
 			dim(os.Stderr, "waking "+name+" (power policy)")
 		} else {
@@ -65,7 +64,7 @@ func runPrompt(g *globals, args []string) error {
 		}
 	}
 
-	// (2) Enqueue; the idempotency key makes a retry after a lost response safe.
+	// The idempotency key makes a retry after a lost response safe.
 	req := api.EnqueueRequest{Body: text, Fresh: *fresh, IdempotencyKey: cli.NewRequestID()}
 	var res api.EnqueueResponse
 	for attempt := 1; ; attempt++ {
@@ -103,7 +102,6 @@ func runPrompt(g *globals, args []string) error {
 		}
 	}()
 
-	// (3) Follow the Message until it is delivered, then its Turn.
 	turn, err := f2.waitDelivered(ctx)
 	if err != nil {
 		return err
@@ -133,8 +131,6 @@ func runPrompt(g *globals, args []string) error {
 	return exitCode(1)
 }
 
-// promptFollow follows one Message for `a12s prompt` and carries the
-// latched cancel intent.
 type promptFollow struct {
 	c    *cli.Client
 	name string
@@ -146,7 +142,6 @@ type promptFollow struct {
 	presses     int
 }
 
-// interrupt handles one Ctrl-C; it returns false on the second.
 func (p *promptFollow) interrupt() bool {
 	p.mu.Lock()
 	p.presses++
@@ -189,8 +184,6 @@ func (p *promptFollow) wasInterrupted() bool {
 	return p.interrupted
 }
 
-// waitDelivered follows the Message stream to its delivery and returns the
-// Turn. Held, withdrawn, discarded, expired and replaced end the command.
 func (p *promptFollow) waitDelivered(ctx context.Context) (string, error) {
 	var turn string
 	var end error
@@ -285,8 +278,6 @@ func (p *promptFollow) waitDelivered(ctx context.Context) (string, error) {
 	return turn, end
 }
 
-// turnPrinter renders one turn's events: text to stdout as it arrives, the
-// start and end lines around it, everything else as one dim stderr line.
 type turnPrinter struct {
 	turn, kind  string
 	mine        string // the caller's Message id, for the batch line
@@ -351,7 +342,6 @@ func (p *turnPrinter) endLine() {
 	}
 }
 
-// dim writes one line, faint when w is a terminal.
 func dim(w io.Writer, line string) {
 	if f, ok := w.(*os.File); ok && isTerminal(f) {
 		fmt.Fprintf(w, "\x1b[2m%s\x1b[0m\n", line)
@@ -446,8 +436,7 @@ func runLogs(g *globals, args []string) error {
 		Path:       computerPath(pos[0], "/events"),
 		After:      *since,
 		SendCursor: true,
-		// Without --follow, stop at computerd's replay boundary.
-		UntilHead: !*follow,
+		UntilHead:  !*follow,
 	}
 	err = s.Run(ctx, func(e api.Event) (bool, error) {
 		if g.json {

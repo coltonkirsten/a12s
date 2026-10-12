@@ -1,15 +1,7 @@
 //go:build unix
 
-// Package serviceinit is a12s-init (enhancements §5.5): the a12s binary,
-// mounted read-only into every Service, run as its entrypoint. It does the
-// privileged part of the start and nothing else: it prepares the state and
-// tmpfs mounts for the manifest uid, waits for the Controller's injection,
-// exports the Service's config env, then drops to the manifest uid (every
-// capability goes with uid 0) and execs the image's own program.
-//
-// It also carries the two other in-container helpers the Controller needs
-// without a shell in the image: WriteFile (the injection write) and
-// Forward (a Service's publish forwarder).
+// Package serviceinit is a12s-init, every Service's entrypoint. It does only the
+// privileged part of the start, then drops to the manifest uid before exec.
 package serviceinit
 
 import (
@@ -30,7 +22,6 @@ import (
 	"time"
 )
 
-// Paths inside a Service.
 const (
 	RunDir         = "/run/a12s"
 	SecretsDir     = RunDir + "/secrets"
@@ -40,17 +31,14 @@ const (
 	GenerationFile = SecretsDir + "/.generation"
 )
 
-// Env is what a12s-init reads (set by the Driver).
 const (
 	EnvUser  = "A12S_SERVICE_USER" // "uid:gid"
 	EnvState = "A12S_STATE_AT"
 	EnvTmpfs = "A12S_TMPFS" // comma-separated
 )
 
-// BarrierTimeout bounds the wait for the Controller's injection.
 var BarrierTimeout = 5 * time.Minute
 
-// Init runs a12s-init: args is the image's program and its arguments.
 func Init(args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("a12s-init: no program to run (the image has no entrypoint or command)")
@@ -114,8 +102,7 @@ func splitList(s string) []string {
 	return out
 }
 
-// prepareState hands an empty state mount to the manifest uid. A mount
-// that already has content keeps its ownership (it is the Service's data).
+// prepareState chowns only an empty mount; existing content is the Service's data.
 func prepareState(dir string, uid, gid int) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -143,8 +130,6 @@ func waitFile(p string, timeout time.Duration) error {
 	}
 }
 
-// exportConfigEnv sets each config.env entry in the environment (strings
-// as they are; anything else as JSON).
 func exportConfigEnv(p string) error {
 	data, err := os.ReadFile(p)
 	if errors.Is(err, os.ErrNotExist) {
@@ -181,8 +166,7 @@ func exportConfigEnv(p string) error {
 	return nil
 }
 
-// drop switches to uid:gid with no supplementary groups. Leaving uid 0
-// clears every capability; no-new-privileges keeps them from coming back.
+// Leaving uid 0 clears every capability; no-new-privileges keeps them from coming back.
 func drop(uid, gid int) error {
 	if err := syscall.Setgroups([]int{gid}); err != nil {
 		return fmt.Errorf("a12s-init: setgroups: %w", err)
@@ -199,11 +183,8 @@ func drop(uid, gid int) error {
 	return nil
 }
 
-// WriteFile is the Controller's injection write: stdin to path, owned by
-// owner ("uid:gid") with mode, in a root-owned directory with dirMode. The
-// bytes go to a temporary file first and are renamed over path, so a
-// reader never sees a partial file and nothing is written through an
-// existing path.
+// WriteFile renames a temp file over path so a reader never sees a partial
+// file and nothing is written through an existing path (symlink).
 func WriteFile(path, owner, mode, dirMode string, stdin io.Reader) error {
 	uid, gid, err := parseOwner(owner)
 	if err != nil {
@@ -263,9 +244,6 @@ func parseOwner(s string) (int, int, error) {
 	return uid, gid, nil
 }
 
-// Forward runs a publish forwarder: each "<port>=<host>:<port>" listens on
-// the first port and forwards every connection to the target. It never
-// returns unless a listener fails.
 func Forward(specs []string, stderr io.Writer) error {
 	if len(specs) == 0 {
 		return errors.New("publish-forward: nothing to forward")
@@ -317,8 +295,6 @@ func closeWrite(c net.Conn) {
 	}
 }
 
-// LoginHold is a login container's process: it makes HOME, XDG_* and the
-// output directory on the tmpfs and waits to be removed.
 func LoginHold() error {
 	for _, d := range []string{"home", "config", "cache", "data", "state", "out"} {
 		if err := os.MkdirAll(filepath.Join(RunDir, "login", d), 0o700); err != nil {
@@ -331,7 +307,6 @@ func LoginHold() error {
 	return nil
 }
 
-// LoginRead prints what the login command wrote to $A12S_LOGIN_OUT.
 func LoginRead(w io.Writer) error {
 	p := filepath.Join(RunDir, "login", "out", "credential")
 	data, err := os.ReadFile(p)

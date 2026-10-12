@@ -12,7 +12,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// #54: when two Computers' networks are removed and their replacements
+// When two Computers' networks are removed and their replacements
 // reuse the subnets in reverse, a connection is never attributed to the
 // old owner of its address: the mapping is dropped with the network, and
 // rebuilt from the engine before a replacement starts.
@@ -50,7 +50,7 @@ func TestRecycledSubnetsDoNotInheritIdentity(t *testing.T) {
 	}
 }
 
-// #54: a Computer whose address cannot be verified does not start.
+// A Computer whose address cannot be verified does not start.
 func TestStartFailsClosedWithoutAVerifiedAddress(t *testing.T) {
 	h := newHarness(t)
 	h.c.selfAddrs = h.d.controllerAddrs
@@ -68,13 +68,13 @@ func TestStartFailsClosedWithoutAVerifiedAddress(t *testing.T) {
 	}
 }
 
-// #56: a refresh that starts while a Computer's network is being removed
+// A refresh that starts while a Computer's network is being removed
 // cannot snapshot that network and publish it after the address was reused
 // and verified by another Computer. The refresh is launched mid-removal and
 // held, if its snapshot still shows builder's network, until tester has
 // taken builder's address and verified it; then it may publish. The removal
-// waits until the refresh has either snapshotted or is blocked behind it
-// (review #59): no timing window.
+// waits until the refresh has either snapshotted or is blocked behind it:
+// no timing window.
 func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -131,7 +131,7 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	}
 }
 
-// #57: every refusal of an unmapped address is logged, including a cached
+// Every refusal of an unmapped address is logged, including a cached
 // miss within a second of the last refresh.
 func TestUnknownAddressRefusalsAreLogged(t *testing.T) {
 	h := newHarness(t)
@@ -149,8 +149,8 @@ func TestUnknownAddressRefusalsAreLogged(t *testing.T) {
 }
 
 // Start's resume pass runs before any apply: an `up` arriving while the
-// restarted Controller is still resuming waits for it (it once ran first,
-// and the resume then re-converged the Fleet behind it).
+// restarted Controller is still resuming waits for it; otherwise the resume
+// would re-converge the Fleet behind it.
 func TestApplyWaitsForTheResume(t *testing.T) {
 	h := newHarness(t)
 	res := h.up(labFleet(t, nil), nil, false)

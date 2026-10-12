@@ -28,11 +28,8 @@ const (
 
 var bundleNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._+-]{0,63}$`)
 
-// EnsureBundle extracts a HarnessBundle image's /bundle into the Fleet's
-// bundle cache volume as <kind>-<version>-<short image ID>/. Throwaway containers are created
-// from the bundle image (never started, so the image needs no shell), one
-// with the cache volume mounted, and the files move through the archive API.
-// bundle.json is written last, so its presence marks a complete extraction.
+// EnsureBundle never starts the extractor containers, so the image needs no shell.
+// bundle.json is written last: its presence marks a complete extraction.
 func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bundle, error) {
 	imageID, err := d.ensureImage(ctx, imageRef)
 	if err != nil {
@@ -42,9 +39,8 @@ func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bund
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: %w", imageRef, err)
 	}
 
-	// Two throwaway containers: Docker keeps a container locked while it
-	// streams an archive out of it, so copying out of and into the same
-	// container deadlocks once the bundle outgrows the socket buffers.
+	// Two containers: Docker locks a container while streaming an archive out,
+	// so copying out of and into the same one deadlocks on large bundles.
 	created, err := d.createExtractor(ctx, imageID, true)
 	if err != nil {
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: create extractor: %w", imageRef, err)
@@ -86,8 +82,6 @@ func (d *Driver) EnsureBundle(ctx context.Context, imageRef string) (driver.Bund
 	return out, nil
 }
 
-// createExtractor creates a never-started container from a bundle image,
-// with the bundle cache mounted when withCache, and returns its ID.
 func (d *Driver) createExtractor(ctx context.Context, imageID string, withCache bool) (string, error) {
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
@@ -141,8 +135,7 @@ func (d *Driver) readManifest(ctx context.Context, containerID string) (driver.B
 	return m, nil
 }
 
-// rebaseBundleTar copies a tar stream rooted at from/ to one rooted at to/,
-// holding bundle.json back to write it last. Entries are owned by root.
+// rebaseBundleTar holds bundle.json back to write it last; entries are owned by root.
 func rebaseBundleTar(r io.Reader, w io.Writer, from, to string) error {
 	tr, tw := tar.NewReader(r), tar.NewWriter(w)
 	var manifest *tar.Header
@@ -188,7 +181,6 @@ func rebaseBundleTar(r io.Reader, w io.Writer, from, to string) error {
 	return tw.Close()
 }
 
-// ensureImage returns the local image ID for ref, pulling it if missing.
 func (d *Driver) ensureImage(ctx context.Context, ref string) (string, error) {
 	res, err := d.cli.ImageInspect(ctx, ref)
 	if err == nil {
@@ -210,7 +202,6 @@ func (d *Driver) ensureImage(ctx context.Context, ref string) (string, error) {
 	return res.ID, nil
 }
 
-// EnsureImage returns the local image ID for ref, pulling it if missing.
 func (d *Driver) EnsureImage(ctx context.Context, ref string) (string, error) {
 	id, err := d.ensureImage(ctx, ref)
 	if err != nil {

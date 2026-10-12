@@ -5,7 +5,7 @@ import type { EventEnvelope, Journal } from './journal.js';
 import type { SendReply, SendRequest } from './send.js';
 import type { Leases } from './leases.js';
 
-const MAX_BODY = 2 << 20; // a 1 MiB render plus 2,000 inbox entries (enhancements §4.3)
+const MAX_BODY = 2 << 20; // a 1 MiB render plus 2,000 inbox entries
 const KEEPALIVE_MS = 15_000;
 const REPLAY_PAGE = 500;
 const MAX_QUEUED = 10_000;
@@ -85,7 +85,7 @@ export function controllerOnly(handler: Handler): Handler {
   };
 }
 
-/** The §5 contract, served over mTLS to the Controller. */
+/** The Controller-facing API, served over mTLS. */
 export function apiHandler(computer: Computer, journal: Journal): Handler {
   return wrap(async (req, res, url) => {
     const path = url.pathname;

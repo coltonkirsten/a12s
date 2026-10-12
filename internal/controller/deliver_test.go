@@ -53,7 +53,7 @@ func reqIDs(r api.TurnRequest) []string {
 	return out
 }
 
-// Gate 1: three sends while busy become one Turn, in seq order, rendered per §4.8.
+// Three sends while busy become one Turn, in seq order.
 func TestBatchedWhileBusy(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -80,7 +80,7 @@ func TestBatchedWhileBusy(t *testing.T) {
 	}
 }
 
-// Gate 2 (no policy): a sleeping Computer keeps its Messages; wake delivers them in one Turn.
+// A sleeping Computer keeps its Messages; wake delivers them in one Turn.
 func TestNoWakeWithoutPolicy(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, true)
@@ -98,7 +98,7 @@ func TestNoWakeWithoutPolicy(t *testing.T) {
 	}
 }
 
-// Gate 4 (Controller side): no receipt -> returned, redelivered under a new Batch id with attempts 1.
+// No receipt -> returned, redelivered under a new Batch id with attempts 1.
 func TestRedeliveryBeforeDispatch(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -129,7 +129,7 @@ func TestRedeliveryBeforeDispatch(t *testing.T) {
 	}
 }
 
-// Gate 10: a resume failure before dispatch returns the Batch and holds the
+// A resume failure before dispatch returns the Batch and holds the
 // inbox; only resume --new delivers again, in a new session.
 func TestResumeFailureHolds(t *testing.T) {
 	h := newHarness(t)
@@ -170,7 +170,7 @@ func TestConflictReturnsWithoutAttempt(t *testing.T) {
 	}
 }
 
-// Gate 8 tail: an owed restart_harness continuation runs before the next Batch, once.
+// An owed restart_harness continuation runs before the next Batch, once.
 func TestContinuationRunsBeforeBatch(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, true)
@@ -192,7 +192,7 @@ func TestContinuationRunsBeforeBatch(t *testing.T) {
 	}
 }
 
-// Gate 20 (synchronous parts): expires 0 to idle, busy, asleep and held Computers.
+// Expires 0 to idle, busy, asleep and held Computers.
 func TestNowOrNever(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, func(f *fleet.Fleet) {}), nil, false)
@@ -231,7 +231,7 @@ func TestNowOrNever(t *testing.T) {
 	}
 }
 
-// Gate 21 (return path): a claimed keyed Message returned while a newer one is pending is replaced.
+// A claimed keyed Message returned while a newer one is pending is replaced.
 func TestReturnedKeyedMessageIsReplaced(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -258,7 +258,7 @@ func TestReturnedKeyedMessageIsReplaced(t *testing.T) {
 	}
 }
 
-// Gate 7 (stub harness): ten clients, 2,000 Messages, Turns back to back.
+// Ten clients, 2,000 Messages, Turns back to back.
 //
 // By default 10 clients send 30 each (300 > the 200-message cap, so clients
 // still meet 429 backpressure). A12S_SLOW_TEST=1 runs the full 2,000 (19s
@@ -338,7 +338,7 @@ func TestDeliveryRace(t *testing.T) {
 	t.Logf("%d messages in %d turns", total, len(builder.requestsSnapshot()))
 }
 
-// Gate 5 (first half): the Controller dies after the claim, before the POST.
+// The Controller dies after the claim, before the POST.
 func TestClaimedBeforePostSurvivesRestart(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, true)
@@ -358,7 +358,7 @@ func TestClaimedBeforePostSurvivesRestart(t *testing.T) {
 	}
 }
 
-// §4.9: the Message stream starts with a snapshot and ends delivered.
+// The Message stream starts with a snapshot and ends delivered.
 func TestMessageStream(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, true)

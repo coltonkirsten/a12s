@@ -1,7 +1,4 @@
-// Package controller is the a12s Controller (§4, §6, §7): it reconciles the
-// applied Fleet onto a Driver, holds power state and credentials, issues
-// certificates, injects secrets, runs the egress proxy and the lease
-// listener, and serves the CLI's API.
+// Package controller reconciles an applied Fleet onto a Driver and serves the CLI's API.
 package controller
 
 import (
@@ -29,10 +26,9 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// APIPort is where the CLI API listens, on the Fleet bridge only.
+// APIPort listens on the Fleet bridge only.
 const APIPort = 7000
 
-// Config is the Controller's environment.
 type Config struct {
 	Fleet    string // A12S_FLEET
 	StateDir string // A12S_STATE_DIR, default /var/lib/a12s
@@ -45,12 +41,10 @@ type Config struct {
 	// APIAddr overrides the API listen address (host:port). By default the
 	// API listens on the Controller's IP on the bridge network a12s-F.
 	APIAddr string // A12S_API_ADDR
-	// TimeScale divides power-policy durations (idle time, the wake rate
-	// window); 1 in production, larger for the exit gate's test speed.
+	// TimeScale divides power-policy durations; 1 in production, larger in tests.
 	TimeScale float64 // A12S_TEST_TIME_SCALE
 }
 
-// ConfigFromEnv reads the Config from the environment.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
 		Fleet:    os.Getenv("A12S_FLEET"),
@@ -90,7 +84,7 @@ func ConfigFromEnv() (Config, error) {
 type Timing struct {
 	ReadyTimeout   time.Duration // computerd answering after start
 	Poll           time.Duration // status polling and stream reconnects
-	SleepFlush     time.Duration // §7: bounded flush of an interrupted turn
+	SleepFlush     time.Duration // bounded flush of an interrupted turn
 	RestartBackoff time.Duration // first restart delay after an unexpected death; doubles
 	MaxRestarts    int           // then Error{retryable}
 	ReadBack       time.Duration // a Driver change showing in Observe
@@ -113,7 +107,6 @@ var defaultTiming = Timing{
 	HealthPoll:     time.Second,
 }
 
-// computerdClient is what the Controller needs from computerd.
 type computerdClient interface {
 	Status(ctx context.Context) (api.ComputerdStatus, error)
 	StartTurn(ctx context.Context, req api.TurnRequest) (api.TurnResponse, error)
@@ -126,13 +119,11 @@ type computerdClient interface {
 	CloseIdleConnections()
 }
 
-// Controller reconciles one Fleet.
 type Controller struct {
 	cfg Config
 	drv driver.Driver
 	// now is the power policy's clock (time.Now; a test moves it).
-	now func() time.Time
-	// inbox is fleet.db (enhancements §4.1).
+	now       func() time.Time
 	inbox     *inbox.Store
 	inboxKick chan struct{}
 	closeOnce sync.Once
@@ -141,7 +132,6 @@ type Controller struct {
 	logger    *log.Logger
 	ctx       context.Context // set by Start; outlives requests
 
-	// newClient makes the computerd client of a Computer.
 	newClient func(name string) computerdClient
 	// selfAddrs returns the Controller's IP on each network it is attached
 	// to; nil outside Docker.
@@ -150,8 +140,8 @@ type Controller struct {
 	// bg counts the Controller's background goroutines (event streams,
 	// restarts, idle applies, the watch), so Stop can wait for them.
 	bg sync.WaitGroup
-	// bgMu serializes admission to bg (spawn's check and Add) with Wait
-	// closing it, so no worker is added once Wait has begun (review #60).
+	// bgMu serializes admission to bg (spawn's check and Add) with Wait closing it, so no
+	// worker is added once Wait has begun.
 	bgMu     sync.Mutex
 	stopping bool
 
@@ -191,7 +181,6 @@ type Controller struct {
 	addrsAt    time.Time
 }
 
-// New returns a Controller over drv, loading its state from cfg.StateDir.
 func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 	st, err := loadState(filepath.Join(cfg.StateDir, stateFile))
 	if err != nil {
@@ -242,8 +231,7 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 	return c, nil
 }
 
-// lockComputer takes applyMu shared and the Computer's own lock, and
-// returns the unlock.
+// lockComputer takes applyMu shared, then the Computer's own lock.
 func (c *Controller) lockComputer(name string) func() {
 	c.applyMu.RLock()
 	c.mu.Lock()
@@ -314,7 +302,6 @@ func (c *Controller) client(name string) computerdClient {
 	return cl
 }
 
-// ContainerName is the Computer's container on Docker (`a12s shell`).
 func (c *Controller) containerName(name string) string { return "a12s-" + c.cfg.Fleet + "-" + name }
 
 // Start resumes the persisted Fleet (attaching to running Computers,
@@ -382,8 +369,6 @@ func (c *Controller) Start(ctx context.Context) {
 	}
 }
 
-// Run is `a12s controller`: it serves the API on the Fleet bridge, the
-// lease listener and the egress proxy until ctx ends.
 func Run(ctx context.Context, cfg Config) error {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return err
@@ -473,15 +458,13 @@ func (c *Controller) newProxy() *Proxy {
 	return p
 }
 
-// refreshAddrs rebuilds the map from the Controller's address on each
-// Computer network to that Computer.
 func (c *Controller) refreshAddrs(ctx context.Context) error {
 	if c.selfAddrs == nil {
 		return nil
 	}
 	if !c.netMu.TryLock() {
 		if c.netContended != nil {
-			c.netContended(ctx) // tests: this refresh waits for a removal (review #59)
+			c.netContended(ctx) // tests: this refresh waits for a removal
 		}
 		c.netMu.Lock()
 	}
@@ -510,8 +493,7 @@ func (c *Controller) refreshAddrs(ctx context.Context) error {
 	return nil
 }
 
-// removeNetworked removes a Computer, and so its network, and reads that
-// back, holding netMu throughout after dropping its proxy mapping.
+// removeNetworked holds netMu throughout, after dropping the Computer's proxy mapping.
 func (c *Controller) removeNetworked(ctx context.Context, name, what string) error {
 	c.netMu.Lock()
 	defer c.netMu.Unlock()
@@ -556,7 +538,6 @@ func (c *Controller) verifyAddr(ctx context.Context, name string) error {
 	return fmt.Errorf("the Controller has no address on %s's network; egress would not be identifiable", name)
 }
 
-// identify maps the proxy's local address to the Computer on that network.
 func (c *Controller) identify(local netip.Addr) (string, bool) {
 	c.mu.Lock()
 	name, ok := c.proxyIPs[local]
@@ -581,8 +562,6 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	return name, ok
 }
 
-// policy is a Computer's or Service's egress policy: that of its active
-// generation.
 func (c *Controller) policy(name string) (Policy, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -596,7 +575,6 @@ func (c *Controller) policy(name string) (Policy, bool) {
 	return NewPolicy(rec.Active.Allow, rec.Active.SignInHosts, rec.Active.Unenforced), true
 }
 
-// egressMode is the active egress mode of a Computer, for status.
 func (c *Controller) egressModeLocked(rec *Record) string {
 	switch {
 	case rec.Active.Unenforced:
@@ -627,7 +605,6 @@ func (c *Controller) authorizeLease(computer, drive string) error {
 	return fmt.Errorf("%s does not attach drive %s writable", computer, drive)
 }
 
-// denied journals a denied egress request in the Computer (§8 gate 7).
 func (c *Controller) denied(name, host string, port int, reason string) {
 	if c.isService(name) {
 		c.auditf(name, "egress denied %s (%s)", net.JoinHostPort(host, strconv.Itoa(port)), reason)

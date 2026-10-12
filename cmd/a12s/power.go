@@ -15,8 +15,7 @@ import (
 
 func runSleep(g *globals, args []string) error { return power(g, "sleep", api.PowerAsleep, args) }
 
-// runWake re-reads the bindings and sends each Computer its credentials:
-// injected credentials do not survive sleep.
+// runWake re-sends credentials because injected credentials do not survive sleep.
 func runWake(g *globals, args []string) error { return power(g, "wake", api.PowerAwake, args) }
 
 func power(g *globals, verb string, state api.Power, args []string) error {
@@ -161,7 +160,6 @@ func runApply(g *globals, args []string) error {
 	return nil
 }
 
-// powerServices sleeps or wakes Services; a wake re-sends their credentials.
 func powerServices(ctx context.Context, g *globals, c *cli.Client, f *fleet.Fleet, verb string, state api.Power, names []string) error {
 	reqs := make([]api.ServicePowerRequest, len(names))
 	if state == api.PowerAwake {

@@ -14,7 +14,6 @@ type Schedule struct {
 	domStar, dowStar         bool
 }
 
-// ParseSchedule parses a cron expression.
 func ParseSchedule(expr string) (*Schedule, error) {
 	f := strings.Fields(expr)
 	if len(f) != 5 {

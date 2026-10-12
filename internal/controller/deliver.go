@@ -14,8 +14,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// postTimeout bounds a Turn POST to computerd; an answer that takes longer
-// is "outcome unknown" and settled from the journal (§4.6).
+// postTimeout bounds a Turn POST; a slower answer is "outcome unknown" and settled from the journal.
 const postTimeout = 10 * time.Second
 
 // drainState coalesces drain requests for one Computer: one drainer runs,
@@ -24,8 +23,7 @@ type drainState struct {
 	running, again bool
 }
 
-// kick asks for a drain of a Computer's inbox (§4.5 "when the drainer
-// runs"): on every enqueue, eligibility transition and Controller start.
+// kick runs on every enqueue, eligibility transition and Controller start.
 func (c *Controller) kick(name string) {
 	c.mu.Lock()
 	if c.drains == nil {
@@ -65,8 +63,6 @@ func (c *Controller) kick(name string) {
 	}
 }
 
-// kickLater retries a drain that could not finish (computerd unreachable,
-// an answer lost) after a pause.
 func (c *Controller) kickLater(name string) {
 	c.spawn(func() {
 		select {
@@ -77,7 +73,6 @@ func (c *Controller) kickLater(name string) {
 	})
 }
 
-// kickAll drains every Computer of the Fleet (Controller start).
 func (c *Controller) kickAll() {
 	c.mu.Lock()
 	var names []string
@@ -90,9 +85,8 @@ func (c *Controller) kickAll() {
 	}
 }
 
-// drainOnce is one idle boundary (§4.5): settle any claimed Batch, leave a
-// staged generation to applyStaged, run an owed continuation, then claim
-// and POST the next Batch. It reports whether it should be retried later.
+// drainOnce is one idle boundary: settle any claimed Batch, leave a staged generation to
+// applyStaged, run an owed continuation, then claim and POST the next Batch.
 func (c *Controller) drainOnce(name string) (retry bool) {
 	if c.inbox == nil {
 		return false
@@ -110,22 +104,20 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 	unlock := c.lockComputer(name)
 	defer unlock()
 
-	// (0) Settle before anything else: a restart never delivers newer
-	// Messages ahead of older claimed ones.
+	// Settle first: a restart never delivers newer Messages ahead of older claimed ones.
 	settled, retry := c.settleOpen(ctx, name)
 	if !settled {
 		return retry
 	}
-	// Ended Messages are sealed in the journal before the next drain (§4.10).
+	// Ended Messages are sealed in the journal before the next drain.
 	if c.flushJournal(ctx, name) {
 		retry = true
 	}
 	reason, st := c.deliverable(ctx, name)
 	switch {
 	case reason == "continuation":
-		// (2) Work already in progress runs before the inbox, unless an
-		// operator asked for a new session (`inbox resume --new`), which
-		// has nothing to continue (§4.5).
+		// Work already in progress runs before the inbox, unless an operator asked for a new
+		// session (`inbox resume --new`), which has nothing to continue.
 		if ov, err := c.inbox.SessionOverride(ctx, name); err == nil && ov == api.SessionNew {
 			cctx, cancel := context.WithTimeout(ctx, postTimeout)
 			id, err := c.client(name).CancelContinuation(cctx, "cancelled by a12s inbox resume --new")
@@ -142,13 +134,12 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 	case reason == "unreachable":
 		return true
 	case reason == "asleep":
-		// An enqueue, a hold lifted or credentials loaded: wake on policy (§4.14).
+		// An enqueue, a hold lifted or credentials loaded: wake on policy.
 		c.maybeAutoWake(ctx, name)
 		return retry
 	case reason != "":
 		return retry
 	}
-	// (3) Drain.
 	b, err := c.inbox.Claim(ctx, name)
 	if err != nil {
 		c.logf("%s: claim: %v", name, err)
@@ -180,7 +171,7 @@ func (c *Controller) deliverable(ctx context.Context, name string) (string, api.
 	case phase == api.PhaseBusy:
 		return "busy", api.ComputerdStatus{}
 	case phase != api.PhaseReady || closed || transition || staged:
-		// (1) A staged generation applies before the next drain (applyStaged kicks).
+		// A staged generation applies before the next drain (applyStaged kicks).
 		return "not_ready", api.ComputerdStatus{}
 	}
 	if held, _, err := c.inbox.Held(ctx, name); err == nil && held {
@@ -210,8 +201,7 @@ const (
 	postUnknown              // no answer: settle from the journal later
 )
 
-// postBatch sends a claimed Batch to computerd under the admission gate,
-// so a sleep or restage that closes it next sees the Turn (§4.5).
+// postBatch holds the admission gate so a sleep or restage that closes it next sees the Turn.
 func (c *Controller) postBatch(ctx context.Context, name string, b *inbox.Batch) postOutcome {
 	c.mu.Lock()
 	rt := c.rtLocked(name)
@@ -225,7 +215,7 @@ func (c *Controller) postBatch(ctx context.Context, name string, b *inbox.Batch)
 		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "not_ready"})
 		return postReturned
 	}
-	// A hold set after the claim wins: holds take this same gate (§4.7).
+	// A hold set after the claim wins: holds take this same gate.
 	if held, _, err := c.inbox.Held(ctx, name); err != nil || held {
 		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "held"})
 		return postReturned
@@ -239,9 +229,8 @@ func (c *Controller) postBatch(ctx context.Context, name string, b *inbox.Batch)
 	return c.sendBatch(ctx, name, b, req)
 }
 
-// afterTurn applies the hold a delivered Batch owes once its Turn's end is
-// known (§4.3 oversized, §4.6 dispatched-then-resume.failed): delivery
-// settles at dispatch, before the failure exists.
+// afterTurn applies the hold a delivered Batch owes once its Turn's end is known: delivery
+// settles at dispatch, before an oversized or resume failure exists.
 func (c *Controller) afterTurn(name, turn string) {
 	if c.inbox == nil || turn == "" {
 		return
@@ -267,8 +256,6 @@ func (c *Controller) afterTurn(name, turn string) {
 	}
 }
 
-// sendBatch POSTs a Batch's stored request (or its lookup-only replay) and
-// records what computerd said.
 func (c *Controller) sendBatch(ctx context.Context, name string, b *inbox.Batch, req api.TurnRequest) postOutcome {
 	pctx, cancel := context.WithTimeout(ctx, postTimeout)
 	res, err := c.client(name).StartTurn(pctx, req)
@@ -314,8 +301,7 @@ func (c *Controller) returnBatch(ctx context.Context, name string, b *inbox.Batc
 	}
 }
 
-// settleOpen settles every open Batch of a Computer by the §4.6 table. It
-// reports whether none is left open, and whether to retry later.
+// settleOpen reports whether no Batch is left open, and whether to retry later.
 func (c *Controller) settleOpen(ctx context.Context, name string) (bool, bool) {
 	open, err := c.inbox.OpenBatches(ctx, name)
 	if err != nil {
@@ -331,8 +317,7 @@ func (c *Controller) settleOpen(ctx context.Context, name string) (bool, bool) {
 	return true, false
 }
 
-// oversizedRE recognizes a harness refusing a prompt for its size; it only
-// chooses the hold reason, never whether the Batch was delivered (§4.6).
+// oversizedRE only chooses the hold reason, never whether the Batch was delivered.
 var oversizedRE = regexp.MustCompile(`(?i)prompt is too long|too many tokens|context (window|length)|maximum context|input is too long|too large`)
 
 // settleBatch settles one Batch from computerd's journal: dispatched is
@@ -389,7 +374,6 @@ func itoaBytes(b *inbox.Batch) string {
 	return strconv.Itoa(len(b.Request.Prompt)) + " bytes"
 }
 
-// sendBatchReplay replays a Batch's POST whose answer was lost.
 func (c *Controller) sendBatchReplay(ctx context.Context, name string, b *inbox.Batch, req api.TurnRequest) postOutcome {
 	pctx, cancel := context.WithTimeout(ctx, postTimeout)
 	res, err := c.client(name).StartTurn(pctx, req)
@@ -409,8 +393,7 @@ func (c *Controller) sendBatchReplay(ctx context.Context, name string, b *inbox.
 	return postUnknown
 }
 
-// runContinuation starts computerd's owed restart_harness continuation with
-// its own id as requestId: a replay gets the same Turn back (§4.5).
+// runContinuation uses the continuation's own id as requestId so a replay gets the same Turn back.
 func (c *Controller) runContinuation(ctx context.Context, name, id string) {
 	c.mu.Lock()
 	rt := c.rtLocked(name)
@@ -427,8 +410,8 @@ func (c *Controller) runContinuation(ctx context.Context, name, id string) {
 	c.logf("%s: continuation %s started as turn %s", name, id, res.TurnID)
 }
 
-// nowOrNeverEnqueue is POST …/inbox with expires: 0 (§4.11): admitted only
-// if the Computer takes it at once; the call answers after computerd does.
+// nowOrNeverEnqueue is POST …/inbox with expires: 0: admitted only if the Computer takes it
+// at once; the call answers after computerd does.
 func (c *Controller) nowOrNeverEnqueue(w http.ResponseWriter, r *http.Request, name string, k caller, req api.EnqueueRequest) {
 	ctx := r.Context()
 	unlock := c.lockComputer(name)
@@ -488,10 +471,8 @@ func (c *Controller) nowOrNeverEnqueue(w http.ResponseWriter, r *http.Request, n
 	c.kick(name)
 }
 
-// flushJournal seals a Computer's ended, unjournaled Messages in its journal
-// through computerd (§4.10). It needs the Computer awake; asleep, the
-// records wait in fleet.db and flush before the first drain after wake. It
-// reports whether some are still owed.
+// flushJournal needs the Computer awake; asleep, the records wait in fleet.db and flush before
+// the first drain after wake. It reports whether some are still owed.
 func (c *Controller) flushJournal(ctx context.Context, name string) bool {
 	switch c.phase(name) {
 	case api.PhaseReady, api.PhaseBusy:

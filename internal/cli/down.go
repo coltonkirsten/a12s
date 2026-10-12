@@ -19,19 +19,9 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
 )
 
-// Down is the CLI's side of `a12s down`. It talks to Docker directly, the
-// way EnsureController does, rather than asking the Controller: the
-// Controller cannot remove its own container, network and state volume
-// while it answers the request, and down must also work when the Controller
-// is stopped, crashed, or already gone.
-//
-// Only objects labeled a12s.fleet=<fleet> are touched, and each is checked
-// again before it is removed. Drives (volumes labeled a12s.drive) are kept
-// unless purge is set; every other a12s volume of the Fleet (Controller
-// state with the CA, the bundle cache) is removed. In ~/.a12s/<fleet> only
-// the CLI's own controller.json is removed.
+// Down talks to Docker directly: the Controller cannot remove its own
+// container while answering, and down must work when it is gone.
 
-// DownDocker is the part of the Docker client that Down uses.
 type DownDocker interface {
 	ContainerList(ctx context.Context, o client.ContainerListOptions) (client.ContainerListResult, error)
 	ContainerStop(ctx context.Context, id string, o client.ContainerStopOptions) (client.ContainerStopResult, error)
@@ -47,33 +37,28 @@ type DownDocker interface {
 
 var _ DownDocker = (*client.Client)(nil)
 
-// Drive is one drive volume of a Fleet, as `a12s drive ls` names it.
 type Drive struct {
 	ID     string // the a12s.drive label: "home-<computer>" or "drive-<name>"
 	Name   string // "home-<computer>" or the work drive's name
 	Volume string // the Docker volume
 }
 
-// DownPlan is what `a12s down` found for a Fleet.
 type DownPlan struct {
 	Fleet      string
 	Containers []container.Summary // Controller first, then Computers, then anything else
 	Networks   []string
 	Volumes    []string // non-drive volumes: Controller state, bundle cache
 	Drives     []Drive
-	// Data are the Fleet's data volumes (a12s.data: fleet.db with the
-	// inboxes). Kept like drives; destroyed only by purge.
+	// Data volumes hold fleet.db with the inboxes: kept like drives, destroyed only by purge.
 	Data       []string
 	StateDir   string   // ~/.a12s/<fleet>, "" when absent or not a directory
 	StateFiles []string // the CLI's own files in it (controller.json)
 }
 
-// Empty reports whether nothing of the Fleet exists, drives aside.
 func (p *DownPlan) Empty() bool {
 	return len(p.Containers) == 0 && len(p.Networks) == 0 && len(p.Volumes) == 0 && len(p.StateFiles) == 0
 }
 
-// DownResult is what Down did.
 type DownResult struct {
 	Containers    []string // names
 	Networks      []string
@@ -90,7 +75,6 @@ func fleetFilter(fleetName string) client.Filters {
 	return make(client.Filters).Add("label", docker.LabelFleet+"="+fleetName)
 }
 
-// PlanDown lists the Fleet's Docker objects and state directory.
 func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, error) {
 	if fleetName == "" {
 		return nil, errors.New("down: fleet name is required")
@@ -180,8 +164,6 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 	return p, nil
 }
 
-// DriveName is the name `a12s drive ls` shows for a drive ID: "home-<c>"
-// stays, "drive-<name>" becomes "<name>".
 func DriveName(id string) string {
 	if strings.HasPrefix(id, "home-") {
 		return id
@@ -192,29 +174,16 @@ func DriveName(id string) string {
 	return strings.TrimPrefix(id, "drive-")
 }
 
-// computerStopTimeout matches `a12s sleep`: computerd gets a bounded flush.
 const computerStopTimeout = docker.StopTimeout
 
-// Down removes the Fleet in two passes. First every Controller, so nothing
-// can restart, replace or recreate a Computer, listing again until none is
-// left. Then it removes what that last listing shows: Computers (stopped gracefully, in
-// parallel) and any other a12s container of the Fleet, then networks,
-// non-drive volumes and the Controller's files in the state directory.
-//
-// Drives are removed only when purge is true, and only the drives in
-// confirmed (the ones the operator was shown); a drive that appeared since
-// is kept. Every volume is inspected again right before removal and left
-// alone if it no longer belongs to the Fleet or changed kind.
-//
-// Objects that vanished meanwhile are not errors, so down is idempotent.
-// It keeps going after a failure and returns every error.
+// Down removes every Controller first so nothing can recreate a Computer, and
+// purges only the drives the operator confirmed. Vanished objects are not errors.
 func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*DownResult, error) {
 	res := &DownResult{}
 	var errs []error
 
-	// Remove every Controller, then list again; repeat while a listing still
-	// shows one (one replaced or started while the purge prompt was open).
-	// The plan itself is only trusted for which drives were confirmed.
+	// List again until no Controller remains: one may have started while the purge
+	// prompt was open. The plan is only trusted for which drives were confirmed.
 	var now *DownPlan
 	for round := 0; ; round++ {
 		var err error
@@ -320,7 +289,6 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 	return res, errors.Join(errs...)
 }
 
-// maxControllerRounds bounds how often down removes a reappearing Controller.
 const maxControllerRounds = 3
 
 func controllers(cs []container.Summary) []container.Summary {
@@ -340,9 +308,8 @@ func containerName(c container.Summary) string {
 	return c.ID
 }
 
-// removeContainer stops a Computer gracefully first (computerd flushes its
-// journal, the harness gets SIGTERM), then force-removes the container.
-// Anonymous volumes go with it; named volumes (drives) never do.
+// removeContainer stops gracefully first so computerd flushes its journal.
+// Named volumes (drives) never go with the container.
 func removeContainer(ctx context.Context, dc DownDocker, c container.Summary, graceful bool) error {
 	name := containerName(c)
 	if graceful && c.State == container.StateRunning {
@@ -359,10 +326,8 @@ func removeContainer(ctx context.Context, dc DownDocker, c container.Summary, gr
 	return nil
 }
 
-// removeNetwork removes a network after checking it still belongs to the
-// Fleet. It never disconnects anything: the Fleet's own containers are gone
-// by now, so a remaining endpoint is someone else's, and the network is
-// left alone with an error naming it.
+// removeNetwork never disconnects anything: the Fleet's containers are gone by
+// now, so a remaining endpoint is someone else's.
 func removeNetwork(ctx context.Context, dc DownDocker, fleetName, name string) error {
 	n, err := dc.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
@@ -391,10 +356,8 @@ func removeNetwork(ctx context.Context, dc DownDocker, fleetName, name string) e
 	return nil
 }
 
-// removeVolume removes a volume after inspecting it again: it must still
-// carry the Fleet's label and the same drive ID (driveID "" means it must
-// carry no drive label at all). It is never force-removed, so Docker refuses one
-// that any container, a12s or not, still mounts.
+// removeVolume never force-removes, so Docker refuses a volume any container still
+// mounts. driveID "" means it must carry no drive label at all.
 func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID string) error {
 	v, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
@@ -416,8 +379,6 @@ func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID s
 	return nil
 }
 
-// removeDataVolume removes a data volume after inspecting it again: it must
-// still carry the Fleet's label and the data label, and no drive label.
 func removeDataVolume(ctx context.Context, dc DownDocker, fleetName, name string) error {
 	v, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
@@ -437,10 +398,8 @@ func removeDataVolume(ctx context.Context, dc DownDocker, fleetName, name string
 	return nil
 }
 
-// removeStateFiles removes the files the CLI owns in ~/.a12s/<fleet>
-// (controller.json and its temp files), then the directory only if that
-// left it empty. Anything else there, such as credentials a bindings file
-// points at, is kept. It never follows a symlink.
+// removeStateFiles keeps anything it does not own, such as credentials a bindings
+// file points at, and never follows a symlink.
 func removeStateFiles(dir string) (removed []string, removedDir bool, err error) {
 	fi, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -474,7 +433,6 @@ func removeStateFiles(dir string) (removed []string, removedDir bool, err error)
 	return removed, false, nil // not empty: other files are kept
 }
 
-// ownStateFile reports whether a file in ~/.a12s/<fleet> is the CLI's own.
 func ownStateFile(name string) bool {
 	return name == controllerFileName || strings.HasPrefix(name, controllerTempPrefix)
 }

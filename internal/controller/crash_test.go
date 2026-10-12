@@ -9,7 +9,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// Gate 3: two sends to a sleeping Computer, then wake --clear-inbox: no Turn,
+// Two sends to a sleeping Computer, then wake --clear-inbox: no Turn,
 // two inbox.discarded records with bodies; a retry with the same requestId
 // clears nothing that arrived later.
 func TestWakeClearInbox(t *testing.T) {
@@ -38,7 +38,7 @@ func TestWakeClearInbox(t *testing.T) {
 	h.waitMessage("scout", c.ID, api.MsgDelivered)
 }
 
-// Gate 20 tail / §4.10: an expiry while asleep is journaled at wake; while
+// An expiry while asleep is journaled at wake; while
 // awake (held), at once.
 func TestDeferredJournaling(t *testing.T) {
 	h := newHarness(t)
@@ -78,7 +78,7 @@ func TestStopHold(t *testing.T) {
 	}
 }
 
-// Gate 5 (second half): claimed rows, a hold and a session override survive
+// Claimed rows, a hold and a session override survive
 // a Controller restart and are acted on afterwards.
 func TestInboxStateSurvivesRestart(t *testing.T) {
 	h := newHarness(t)

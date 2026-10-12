@@ -32,7 +32,7 @@ export function mcpConfigArgs(servers: Record<string, McpServer>): string[] {
 }
 
 /** Any turn notification from the harness is evidence it received the prompt; the first one, or the turn/start
- * response, emits turn.dispatched ahead of the events (§4.6). */
+ * response, emits turn.dispatched ahead of the events. */
 function received(t: ActiveTurn): void {
   if (t.dispatched) return;
   t.dispatched = true;
@@ -106,7 +106,7 @@ export class CodexAdapter implements Adapter {
         ...(input.model ? { model: input.model } : {}),
       });
       turn.turnId = String(r.turn.id);
-      // The turn/start response carrying the harness's turn id is Codex's evidence of receipt (§4.6).
+      // The turn/start response carrying the harness's turn id is Codex's evidence of receipt.
       received(turn);
     } catch (err) {
       this.turn = null;

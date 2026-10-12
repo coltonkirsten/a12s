@@ -20,26 +20,23 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// BindingsFile is the default bindings file name, next to the Fleet file.
 const BindingsFile = "a12s.bindings.yaml"
 
-// Bindings maps each credential name to where it comes from on this machine
-// (§3 "Where secrets come from"). The file is per deployment and never
-// committed.
+// Bindings is per deployment and never committed.
 type Bindings struct {
 	Path        string             `yaml:"-"`
 	Exists      bool               `yaml:"-"`
 	Credentials map[string]Binding `yaml:"credentials"`
 }
 
-// Binding is one credential source: exactly one of File or Env.
+// Binding sets exactly one of File or Env.
 type Binding struct {
 	File string `yaml:"file,omitempty"`
 	Env  string `yaml:"env,omitempty"`
 }
 
-// LoadBindings reads a bindings file. A missing file is not an error here:
-// it is an empty set, and Resolve reports it if any credential is needed.
+// LoadBindings treats a missing file as empty; Resolve reports it if any
+// credential is needed.
 func LoadBindings(path string) (*Bindings, error) {
 	b := &Bindings{Path: path}
 	data, err := os.ReadFile(path)
@@ -68,8 +65,8 @@ func LoadBindings(path string) (*Bindings, error) {
 	return b, nil
 }
 
-// Needed maps each credential name the given Computers reference to the
-// Computers that reference it. No names means every Computer in the Fleet.
+// Needed maps credential names to the Computers that reference them. No names
+// means every Computer in the Fleet.
 func Needed(f *fleet.Fleet, computers ...string) map[string][]string {
 	if len(computers) == 0 {
 		computers = f.ComputerNames()
@@ -87,8 +84,6 @@ func Needed(f *fleet.Fleet, computers ...string) map[string][]string {
 	return need
 }
 
-// NeededByServices maps each credential name the Fleet's Services (or the
-// named ones) reference to those Services.
 func NeededByServices(f *fleet.Fleet, services ...string) map[string][]string {
 	if len(services) == 0 {
 		services = f.ServiceNames()
@@ -106,11 +101,8 @@ func NeededByServices(f *fleet.Fleet, services ...string) map[string][]string {
 	return need
 }
 
-// ResolveBound reads the material of every needed credential that has a
-// binding and skips the rest: a Service credential without one is the
-// Controller's call (a login the Service's manifest produces leaves only
-// that Service waiting, enhancements §5.5). A binding that does not read
-// is still an error.
+// ResolveBound skips unbound names: a Service waiting on a login should not
+// block the rest. A binding that does not read is still an error.
 func (b *Bindings) ResolveBound(need map[string][]string) (api.Credentials, error) {
 	creds := api.Credentials{}
 	var errs []error
@@ -132,8 +124,6 @@ func (b *Bindings) ResolveBound(need map[string][]string) (api.Credentials, erro
 	return creds, nil
 }
 
-// Resolve reads the material of every needed credential. Every name must
-// resolve; the error lists all that do not, with the Computers needing them.
 func (b *Bindings) Resolve(need map[string][]string) (api.Credentials, error) {
 	creds := api.Credentials{}
 	if len(need) == 0 {
@@ -190,7 +180,6 @@ func (b *Bindings) read(s Binding) ([]byte, error) {
 	return data, nil
 }
 
-// ExpandHome replaces a leading "~" or "~/" with the user's home directory.
 func ExpandHome(p string) (string, error) {
 	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p, nil

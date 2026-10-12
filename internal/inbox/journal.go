@@ -11,7 +11,7 @@ import (
 )
 
 // Discarded is the sealed-journal record of a Message that ended without
-// delivery (§4.10): inbox.discarded with its body.
+// delivery.
 type Discarded struct {
 	ID         string            `json:"id"`
 	Seq        int64             `json:"seq"`
@@ -26,8 +26,6 @@ type Discarded struct {
 	ReplacedBy string            `json:"replacedBy,omitempty"`
 }
 
-// Unjournaled returns a Computer's ended Messages not yet sealed in its
-// journal, oldest first, up to about maxBytes of serialized records.
 func (s *Store) Unjournaled(ctx context.Context, computer string, maxBytes int) ([]Discarded, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, seq, sender, via, created_at, body, metadata, end_reason, ended_by, expires_at, replaced_by
 		FROM messages WHERE computer = ? AND journaled = 0 ORDER BY seq LIMIT 500`, computer)
@@ -66,7 +64,6 @@ func (s *Store) Unjournaled(ctx context.Context, computer string, maxBytes int) 
 	return out, rows.Err()
 }
 
-// MarkJournaled records that these Messages are sealed in the journal.
 func (s *Store) MarkJournaled(ctx context.Context, ids []string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		for _, id := range ids {
@@ -78,8 +75,8 @@ func (s *Store) MarkJournaled(ctx context.Context, ids []string) error {
 	})
 }
 
-// Prune deletes terminal rows older than the retention that are sealed in
-// the journal, their events and settled Batches (§4.3).
+// Prune never deletes an unjournaled row, so a discarded body is sealed
+// before it is lost.
 func (s *Store) Prune(ctx context.Context) (int64, error) {
 	cutoff := ms(s.now().Add(-Retention))
 	var n int64
@@ -98,10 +95,8 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 	return n, err
 }
 
-// WakeClear is a wake's clear-inbox operation (§4.7): recorded with the
-// inbox head at acceptance under the client's requestId, then applied. A
-// retried request with the same id is the same operation, so it never
-// clears a Message that arrived later.
+// WakeClear records the inbox head under requestId before applying, so a
+// retry with the same id never clears a Message that arrived later.
 func (s *Store) WakeClear(ctx context.Context, computer, requestID, by string) (int64, int, error) {
 	var through int64
 	n := 0

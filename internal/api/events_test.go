@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// The fixtures are the payload shapes computerd emits, copied from
-// computerd/src/computer.ts (turn.started, resume.failed, turn.finished on
-// failure, diagnostic) and computerd/src/adapters (turn.finished, text.delta).
+// The fixtures are copied from computerd/src/computer.ts and
+// computerd/src/adapters; keep them in sync.
 func TestComputerdPayloads(t *testing.T) {
 	tests := []struct {
 		name string

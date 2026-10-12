@@ -11,35 +11,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LockFile is the lock's file name, next to the Fleet file.
 const LockFile = "fleet.lock"
 
-// Lock pins image, bundle and preset digests (PLAN "HarnessBundle image").
-// Entries are only ever added; an existing pin changes only by editing the file.
+// Lock entries are only ever added; an existing pin changes only by editing the file.
 type Lock struct {
-	// Images maps a tier ("slim", "browser") or a custom image reference to an image ID.
-	Images map[string]string `yaml:"images" json:"images"`
-	// Bundles maps "kind@version" to the HarnessBundle image ID.
-	Bundles map[string]string `yaml:"bundles" json:"bundles"`
-	// Presets maps a preset path, as written in the Fleet, to its content hash.
-	Presets map[string]string `yaml:"presets" json:"presets"`
-	// Services maps "<service>@<image ref>" to the Service's image ID
-	// (enhancements §5.6). Append-only like the rest.
+	Images   map[string]string `yaml:"images" json:"images"`
+	Bundles  map[string]string `yaml:"bundles" json:"bundles"`
+	Presets  map[string]string `yaml:"presets" json:"presets"`
 	Services map[string]string `yaml:"services,omitempty" json:"services,omitempty"`
 }
 
-// ServiceKey returns the Lock.Services key of a Service: "name@ref".
 func ServiceKey(name, ref string) string { return name + "@" + ref }
 
-// BundleKey returns the Lock.Bundles key for a harness kind and version.
 func BundleKey(kind, version string) string { return kind + "@" + version }
 
-// NewLock returns an empty lock.
 func NewLock() *Lock {
 	return &Lock{Images: map[string]string{}, Bundles: map[string]string{}, Presets: map[string]string{}, Services: map[string]string{}}
 }
 
-// LoadLock reads a lock file. A missing file is an empty lock.
+// LoadLock treats a missing file as an empty lock.
 func LoadLock(path string) (*Lock, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -56,7 +46,7 @@ func LoadLock(path string) (*Lock, error) {
 	return l, nil
 }
 
-// Save writes the lock to path atomically.
+// Save writes atomically so a crash never leaves a truncated lock.
 func (l *Lock) Save(path string) error {
 	l.fillMaps()
 	var buf bytes.Buffer
@@ -102,19 +92,15 @@ func (l *Lock) fillMaps() {
 	}
 }
 
-// PinImage records digest for an image key unless it is already pinned.
-// It reports whether the lock changed.
+// PinImage never moves an existing pin. It reports whether the lock changed.
 func (l *Lock) PinImage(key, digest string) bool { return pin(&l.Images, key, digest) }
 
-// PinBundle records digest for kind@version unless it is already pinned.
 func (l *Lock) PinBundle(kind, version, digest string) bool {
 	return pin(&l.Bundles, BundleKey(kind, version), digest)
 }
 
-// PinPreset records the content hash of a preset path unless it is already pinned.
 func (l *Lock) PinPreset(path, digest string) bool { return pin(&l.Presets, path, digest) }
 
-// PinService records the image ID of a Service's ref unless already pinned.
 func (l *Lock) PinService(name, ref, digest string) bool {
 	return pin(&l.Services, ServiceKey(name, ref), digest)
 }

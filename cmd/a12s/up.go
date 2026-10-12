@@ -29,9 +29,7 @@ func runUp(g *globals, args []string) error {
 	return g.up(*asleep, *image, nil)
 }
 
-// runLock is `a12s lock update services/<svc>`: the explicit way to move a
-// Service's pin on an unchanged ref (enhancements §5.6). It resolves the
-// ref again and applies the Fleet, as `a12s up` does.
+// runLock is the only way to move a Service's pin on an unchanged ref.
 func runLock(g *globals, args []string) error {
 	fs := g.flags("lock")
 	image := fs.String("controller-image", cli.DefaultControllerImage, "Controller image")
@@ -60,8 +58,6 @@ func runLock(g *globals, args []string) error {
 	return g.up(false, *image, refresh)
 }
 
-// up applies the Fleet file: `a12s up`, and `a12s lock update` with the
-// Services whose pins move in refresh.
 func (g *globals) up(asleep bool, image string, refresh []string) error {
 	f, err := fleet.Load(g.fleetPath)
 	if err != nil {
@@ -111,9 +107,7 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 	return g.finishUp(onDisk, lock, &resp, asleep, os.Stdout, os.Stderr)
 }
 
-// finishUp writes new pins to fleet.lock and prints the summary, then each
-// Computer that did not converge. What converged stays applied and pinned;
-// any failure still fails the command.
+// finishUp keeps what converged applied and pinned; any failure still fails the command.
 func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse, asleep bool, stdout, stderr io.Writer) error {
 	if resp.Lock != nil {
 		lock = resp.Lock
@@ -148,9 +142,8 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 	return nil
 }
 
-// presets tars every home.preset directory, keyed by the path as written in
-// the Fleet, and pins each content hash in lock. A pinned preset whose
-// content changed is an error: moving a pin is an explicit lock edit.
+// presets refuses a pinned preset whose content changed: moving a pin is an
+// explicit lock edit.
 func (g *globals) presets(f *fleet.Fleet, lock *fleet.Lock) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	for _, name := range f.ComputerNames() {
@@ -184,8 +177,6 @@ func cloneLock(l *fleet.Lock) *fleet.Lock {
 	return &fleet.Lock{Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Presets: maps.Clone(l.Presets), Services: maps.Clone(l.Services)}
 }
 
-// addedPins lists lock keys in next that are not in prev ("slim",
-// "claude-code@2.1.280", "./presets/scout"), or that differ from prev.
 func addedPins(prev, next *fleet.Lock) []string {
 	var out []string
 	for _, pair := range [][2]map[string]string{

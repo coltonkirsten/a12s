@@ -37,7 +37,6 @@ COPY bundle /bundle
 
 const bundleJSON = `{"kind":"codex","version":"0.0.0-test","arch":"arm64","bin":"bin/codex","signInHosts":["auth.openai.com"]}`
 
-// TestDockerIntegration drives a real Docker Engine. Run with A12S_DOCKER_TEST=1.
 func TestDockerIntegration(t *testing.T) {
 	if os.Getenv("A12S_DOCKER_TEST") != "1" {
 		t.Skip("set A12S_DOCKER_TEST=1 to run against Docker")
@@ -84,7 +83,6 @@ func TestDockerIntegration(t *testing.T) {
 	}
 	t.Logf("capabilities: %+v", caps)
 
-	// Drives.
 	home := driver.DriveSpec{ID: driver.HomeDriveID("c"), Kind: driver.DriveHome, Computer: "c", Size: 1 << 30}
 	data := driver.DriveSpec{ID: driver.WorkDriveID("data"), Kind: driver.DriveWork}
 	ref := driver.DriveSpec{ID: driver.WorkDriveID("ref"), Kind: driver.DriveWork}
@@ -98,7 +96,6 @@ func TestDockerIntegration(t *testing.T) {
 		}
 	}
 
-	// Bundle.
 	b, err := d.EnsureBundle(ctx, bundleRef)
 	must(t, err)
 	if b.Manifest.Kind != "codex" || b.Manifest.Version != "0.0.0-test" || !strings.HasPrefix(b.ImageID, "sha256:") ||
@@ -122,7 +119,6 @@ func TestDockerIntegration(t *testing.T) {
 		t.Fatalf("same-version bundles share an identity: %s %s", b.ImageID, other.ImageID)
 	}
 
-	// Stage generation 1 with a preset.
 	presetDir := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(presetDir, ".claude"), 0o755))
 	must(t, os.WriteFile(filepath.Join(presetDir, ".claude", "settings.json"), []byte(`{"preset":true}`), 0o644))
@@ -478,7 +474,6 @@ func buildImage(ctx context.Context, t *testing.T, cli *client.Client, tag strin
 	}
 }
 
-// cleanup removes everything labeled with the test Fleet, and the test images.
 func cleanup(t *testing.T, cli *client.Client, fleetName string, images ...string) {
 	ctx := context.Background()
 	f := make(client.Filters).Add("label", LabelFleet+"="+fleetName)
@@ -511,7 +506,7 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// sameCaps compares capability lists ignoring order and the CAP_ prefix the engine adds.
+// sameCaps ignores order and the CAP_ prefix the engine adds.
 func sameCaps(a, b []string) bool {
 	norm := func(caps []string) []string {
 		out := make([]string, len(caps))

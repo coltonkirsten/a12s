@@ -244,8 +244,7 @@ func TestCreateOptions(t *testing.T) {
 		"A12S_PROXY=http://a12s-lab-controller:3128", "A12S_CONTROLLER=https://a12s-lab-controller:7443",
 		"A12S_MODEL=claude-fable-5-1",
 	}
-	// A set, not an ordered slice: what computerd reads must be there with
-	// these values; order, and a new variable, are not this test's concern.
+	// Compared as a set: order and extra variables are not this test's concern.
 	for _, kv := range wantEnv {
 		if !slices.Contains(o.Config.Env, kv) {
 			t.Errorf("env lacks %s: %q", kv, o.Config.Env)

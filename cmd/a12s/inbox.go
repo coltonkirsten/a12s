@@ -15,7 +15,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/cli"
 )
 
-// metaFlag collects repeated --meta k=v.
 type metaFlag map[string]string
 
 func (m metaFlag) String() string { return "" }
@@ -28,7 +27,6 @@ func (m metaFlag) Set(v string) error {
 	return nil
 }
 
-// parseExpires reads 0, 90, 90s, 15m, 1h or 7d as whole seconds.
 func parseExpires(s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {

@@ -17,8 +17,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// Exec runs cmd in a running Computer as root or as the agent (1000:1000),
-// feeding stdin if given, and returns the exit code and combined output.
 func (d *Driver) Exec(ctx context.Context, computer string, cmd []string, stdin io.Reader, asRoot bool) (int, string, error) {
 	if len(cmd) == 0 {
 		return -1, "", fmt.Errorf("exec %s: empty command", computer)
@@ -33,8 +31,6 @@ func (d *Driver) Exec(ctx context.Context, computer string, cmd []string, stdin 
 	return d.exec(ctx, d.ContainerName(computer), user, cmd, stdin)
 }
 
-// exec runs cmd in a container as user and returns its exit code and
-// combined output.
 func (d *Driver) exec(ctx context.Context, containerName, user string, cmd []string, stdin io.Reader) (int, string, error) {
 	computer := strings.TrimPrefix(containerName, "a12s-"+d.fleet+"-")
 	created, err := d.cli.ExecCreate(ctx, containerName, client.ExecCreateOptions{
@@ -94,9 +90,7 @@ func (d *Driver) exec(ctx context.Context, containerName, user string, cmd []str
 	}
 }
 
-// Connect dials a service inside the Computer over the Computer's internal
-// network. Only a process attached to that network, the controller
-// container, can reach it; elsewhere Connect returns ErrNotOnNetwork.
+// Connect works only from a process on the Computer's internal network (the controller).
 func (d *Driver) Connect(ctx context.Context, computer, service string) (net.Conn, error) {
 	if service != driver.ServiceComputerd {
 		return nil, fmt.Errorf("connect %s: unknown service %q", computer, service)
@@ -131,7 +125,6 @@ func (d *Driver) Connect(ctx context.Context, computer, service string) (net.Con
 	return conn, nil
 }
 
-// runningComputer observes one Computer and requires it to be running.
 func (d *Driver) runningComputer(ctx context.Context, computer string) (driver.ComputerState, error) {
 	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(computer), client.ContainerInspectOptions{})
 	if isNotFound(err) {
@@ -150,8 +143,6 @@ func (d *Driver) runningComputer(ctx context.Context, computer string) (driver.C
 	return st, nil
 }
 
-// onLocalNetwork reports whether this process has an interface address in
-// any of subnets.
 func onLocalNetwork(subnets []netip.Prefix) (bool, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -175,8 +166,7 @@ func onLocalNetwork(subnets []netip.Prefix) (bool, error) {
 	return false, nil
 }
 
-// Sessions counts the exec sessions running in a Computer now (`a12s shell`
-// or any docker exec): an attached session keeps it from auto-sleeping.
+// Sessions counts every docker exec, not just a12s shell; any keeps the Computer awake.
 func (d *Driver) Sessions(ctx context.Context, computer string) (int, error) {
 	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(computer), client.ContainerInspectOptions{})
 	if isNotFound(err) {

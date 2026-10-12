@@ -13,7 +13,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// Observe lists the Fleet's Computers and drives.
 func (d *Driver) Observe(ctx context.Context) (driver.Observation, error) {
 	obs := driver.Observation{
 		Computers: map[string]driver.ComputerState{},
@@ -110,11 +109,9 @@ func (d *Driver) computerState(name string, c container.InspectResponse) driver.
 	return st
 }
 
-// isStopExit reports whether an exit code is what a clean stop produces:
-// 0, SIGTERM (143) or SIGKILL after the stop timeout (137).
+// isStopExit: 143 is SIGTERM and 137 is SIGKILL after the stop timeout.
 func isStopExit(code int) bool { return code == 0 || code == 143 || code == 137 }
 
-// Watch streams died, OOM-killed and removed Computers of this Fleet.
 func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 	// Label filters AND together, so the role is checked per event instead.
 	filters := d.fleetFilter().

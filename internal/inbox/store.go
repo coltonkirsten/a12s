@@ -1,8 +1,5 @@
-// Package inbox is the Controller's durable per-Computer inbox (enhancements
-// §4): Messages in fleet.db, their events, limits, holds and scoped API
-// tokens. Every mutation is one SQLite transaction; the database runs in WAL
-// mode with synchronous=FULL, so an enqueue is on disk before it is
-// acknowledged.
+// Package inbox is the Controller's durable per-Computer inbox in fleet.db.
+// WAL with synchronous=FULL means an enqueue is on disk before it is acknowledged.
 package inbox
 
 import (
@@ -23,7 +20,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// Limits (§4.3, §4.11, §4.12, §4.13).
 const (
 	MaxBody           = 64 << 10
 	MaxMetaKeys       = 16
@@ -40,20 +36,17 @@ const (
 	MinMaxBytes        = 8 << 10
 	CeilMaxBytes       = 1 << 20
 	// PreambleReserve is set aside inside maxBytes for a Batch's header,
-	// intro, safety block and end line (§4.8).
+	// intro, safety block and end line.
 	PreambleReserve = 4 << 10
 
 	// Retention of terminal rows (pruned only once journaled).
 	Retention = 7 * 24 * time.Hour
 )
 
-// labelRE is the character set of sender and replace keys (§4.2, §4.12).
 var labelRE = regexp.MustCompile(`^[A-Za-z0-9._:@/#-]{1,64}$`)
 
-// ValidLabel reports whether s may be a sender or replace key.
 func ValidLabel(s string) bool { return labelRE.MatchString(s) }
 
-// Error is an inbox failure with its HTTP status, code and fix.
 type Error struct {
 	Status  int
 	Code    api.ErrorCode
@@ -68,12 +61,11 @@ func errf(status int, code api.ErrorCode, fix, format string, args ...any) *Erro
 	return &Error{Status: status, Code: code, Message: fmt.Sprintf(format, args...), Fix: fix}
 }
 
-// Store is fleet.db.
 type Store struct {
 	db  *sql.DB
 	now func() time.Time
-	// notify, when set, is called after a commit that changed an inbox,
-	// with the Computer's name (the drainer's and expiry timer's trigger).
+	// notify triggers the drainer and expiry timer after a commit that
+	// changed an inbox.
 	notify func(computer string)
 }
 
@@ -145,7 +137,6 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 `
 
-// Open opens (creating if needed) fleet.db at path.
 func Open(path string) (*Store, error) {
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
@@ -157,8 +148,8 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open fleet.db: %w", err)
 	}
-	// One connection: transactions are serialized in-process, which is the
-	// ordering §4.5 relies on, and SQLite never returns SQLITE_BUSY to us.
+	// One connection: transactions are serialized in-process, which claim
+	// ordering relies on, and SQLite never returns SQLITE_BUSY.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema + batchSchema + powerSchema + serviceSchema + registrySchema); err != nil {
 		db.Close()
@@ -167,13 +158,10 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db, now: time.Now}, nil
 }
 
-// Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// SetClock replaces the clock (tests).
 func (s *Store) SetClock(now func() time.Time) { s.now = now }
 
-// OnChange sets the function called after a commit that changed an inbox.
 func (s *Store) OnChange(f func(computer string)) { s.notify = f }
 
 func (s *Store) changed(computer string) {
@@ -186,7 +174,6 @@ func ms(t time.Time) int64 { return t.UnixMilli() }
 
 func fromMS(v int64) time.Time { return time.UnixMilli(v).UTC() }
 
-// tx runs fn in an immediate transaction.
 func (s *Store) tx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -213,10 +200,8 @@ func event(tx *sql.Tx, computer, message, typ string, at time.Time, principal st
 	return err
 }
 
-// Limits are an inbox's resolved limits.
 type Limits = api.InboxLimits
 
-// BuiltinLimits are the limits of an inbox the Fleet says nothing about.
 func BuiltinLimits() Limits {
 	return Limits{
 		MaxMessages: api.LimitValue{Value: DefaultMaxMessages, Source: "builtin"},
@@ -224,16 +209,13 @@ func BuiltinLimits() Limits {
 	}
 }
 
-// Config is an inbox's Fleet configuration: limits and the Batch intro.
 type Config struct {
 	Limits Limits
 	Intro  string
 }
 
-// SyncFleet records the declared Computers and their configuration: inboxes
-// of new Computers are created, a returning name reattaches its orphaned
-// inbox, undeclared ones become orphaned, and a limit or intro change is an
-// event.
+// SyncFleet orphans an undeclared Computer's inbox rather than deleting it, so
+// a returning name reattaches its pending Messages.
 func (s *Store) SyncFleet(ctx context.Context, declared map[string]Config, by string) error {
 	var touched []string
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -313,7 +295,6 @@ func (s *Store) SyncFleet(ctx context.Context, declared map[string]Config, by st
 	return err
 }
 
-// inboxRow is an inbox's settings.
 type inboxRow struct {
 	nextSeq  int64
 	declared bool
@@ -340,14 +321,12 @@ func usage(tx *sql.Tx, computer string) (api.InboxUsage, error) {
 	return u, err
 }
 
-// Enqueue is the admission of one Message (§4.4, §4.11, §4.12, §4.13).
 type Enqueue struct {
 	Computer  string
 	Principal string // via
 	Req       api.EnqueueRequest
 }
 
-// EnqueueResult is what Enqueue did.
 type EnqueueResult struct {
 	Message  api.Message
 	Created  bool   // false: an idempotent repeat
@@ -355,7 +334,6 @@ type EnqueueResult struct {
 	Position int
 }
 
-// requestHash identifies the fields an idempotent repeat must match.
 func requestHash(r api.EnqueueRequest, sender string) string {
 	h := sha256.New()
 	exp := "none"
@@ -367,8 +345,6 @@ func requestHash(r api.EnqueueRequest, sender string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// SenderFor is the sender label a request resolves to: its own, or the
-// principal's name.
 func SenderFor(req api.EnqueueRequest, principal string) string {
 	if req.Sender != "" {
 		return req.Sender
@@ -376,7 +352,6 @@ func SenderFor(req api.EnqueueRequest, principal string) string {
 	return principal
 }
 
-// ValidateRequest checks an enqueue body against the static limits.
 func ValidateRequest(req api.EnqueueRequest, principal string) *Error {
 	switch {
 	case req.Body == "":
@@ -422,16 +397,13 @@ func ValidateRequest(req api.EnqueueRequest, principal string) *Error {
 	return nil
 }
 
-// ErrUnknownInbox is returned for a Computer with no declared inbox.
 var ErrUnknownInbox = errors.New("no such inbox")
 
-// NowOrNever, when set on an Enqueue of expires 0, runs inside the enqueue
-// transaction after the row is inserted. It decides whether the Computer can
-// take the Message now; returning an *Error rolls the enqueue back.
+// NowOrNever runs inside the enqueue transaction after the row is inserted;
+// returning an *Error rolls the enqueue back.
 type NowOrNever func(tx *Tx, m api.Message) *Error
 
-// Enqueue admits a Message. A nil Message and an *Error are returned for a
-// refusal.
+// Enqueue returns an *Error as the error for a refusal.
 func (s *Store) Enqueue(ctx context.Context, e Enqueue, non NowOrNever) (*EnqueueResult, error) {
 	req := e.Req
 	if verr := ValidateRequest(req, e.Principal); verr != nil {
@@ -472,8 +444,8 @@ func (s *Store) Enqueue(ctx context.Context, e Enqueue, non NowOrNever) (*Enqueu
 		now := s.now()
 		nowOrNever := req.Expires != nil && *req.Expires == 0
 
-		// The replace candidate: the pending Message in (computer, via, key).
-		// A now-or-never Message replaces nothing (§4.11).
+		// A now-or-never Message replaces nothing: if it is refused, the old
+		// one must still be pending.
 		var old *api.Message
 		if req.ReplaceKey != "" && !nowOrNever {
 			var oldID string
@@ -503,7 +475,7 @@ func (s *Store) Enqueue(ctx context.Context, e Enqueue, non NowOrNever) (*Enqueu
 		if old != nil {
 			newM, newB = newM-1, newB-old.Bytes
 		}
-		// A replace that grows neither count nor bytes is always admitted (§4.12).
+		// A replace that grows neither count nor bytes is admitted even over limits.
 		growsNothing := old != nil && newM <= use.Messages && newB <= use.Bytes
 		if !growsNothing {
 			if bytes > maxB-PreambleReserve {
@@ -601,15 +573,12 @@ func (e *Error) withReason(reason string) *Error {
 	return e
 }
 
-// WithReason sets details.reason on a not_idle refusal.
 func (e *Error) WithReason(reason string) *Error { return e.withReason(reason) }
 
-// NotIdle is the refusal of a now-or-never Message (§4.11).
 func NotIdle(computer, reason string) *Error {
 	return errf(409, api.ErrNotIdle, "retry later, or omit expires to queue it", "%s can't take the message now (%s)", computer, reason).withReason(reason)
 }
 
-// Tx is an open fleet.db transaction handed to a NowOrNever hook.
 type Tx struct {
 	tx *sql.Tx
 	s  *Store
@@ -625,8 +594,8 @@ func position(tx *sql.Tx, m *api.Message) (int, error) {
 	return n, err
 }
 
-// endTx moves a pending row to a terminal state and records the event. The
-// row's sealed-journal record is owed (journaled = 0).
+// endTx sets journaled = 0: the row's sealed-journal record is owed before
+// it can be pruned.
 func endTx(tx *sql.Tx, id, state, reason, by string, at time.Time, data map[string]any) error {
 	res, err := tx.Exec(`UPDATE messages SET state = ?, ended_at = ?, end_reason = ?, ended_by = ?, journaled = 0 WHERE id = ? AND state = 'pending'`,
 		state, ms(at), reason, by, id)
@@ -681,8 +650,8 @@ func getMessage(tx *sql.Tx, computer, id string, bodies bool) (*api.Message, err
 	return m, err
 }
 
-// Get returns one Message. With via set, only a Message whose via matches
-// is visible (the send action reads only its own).
+// Get with via set sees only that principal's Messages (the send action
+// reads only its own).
 func (s *Store) Get(ctx context.Context, computer, id, via string, bodies bool) (*api.Message, error) {
 	var m *api.Message
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -696,7 +665,6 @@ func (s *Store) Get(ctx context.Context, computer, id, via string, bodies bool) 
 	return m, err
 }
 
-// stateError is the 409 for acting on a Message that is not pending.
 func stateError(m *api.Message) *Error {
 	code := map[string]api.ErrorCode{
 		api.MsgClaimed: api.ErrAlreadyClaimed, api.MsgDelivered: api.ErrAlreadyDelivered, api.MsgExpired: api.ErrExpired,
@@ -710,8 +678,7 @@ func stateError(m *api.Message) *Error {
 	return e
 }
 
-// Withdraw withdraws a pending Message. With via set, only that
-// principal's Messages can be withdrawn.
+// Withdraw with via set can only withdraw that principal's Messages.
 func (s *Store) Withdraw(ctx context.Context, computer, id, via, by string) (*api.Message, error) {
 	var m *api.Message
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -785,7 +752,7 @@ func (s *Store) Clear(ctx context.Context, computer string, throughSeq *int64, o
 	return n, err
 }
 
-// Hold stops delivery for an inbox; it still accepts.
+// Hold stops delivery only; the inbox still accepts.
 func (s *Store) Hold(ctx context.Context, computer, reason, diagnostic, by string) error {
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		ib, err := getInbox(tx, computer)
@@ -806,8 +773,7 @@ func (s *Store) Hold(ctx context.Context, computer, reason, diagnostic, by strin
 	return err
 }
 
-// Resume lifts a hold. With newSession, a one-shot session override is
-// attached to the next Batch (§4.6).
+// Resume with newSession attaches a one-shot session override to the next Batch.
 func (s *Store) Resume(ctx context.Context, computer string, newSession bool, by string) error {
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		ib, err := getInbox(tx, computer)
@@ -832,8 +798,6 @@ func (s *Store) Resume(ctx context.Context, computer string, newSession bool, by
 	return err
 }
 
-// ExpireDue expires every pending Message whose deadline has passed and
-// returns the Computers whose inboxes changed.
 func (s *Store) ExpireDue(ctx context.Context) ([]string, error) {
 	var touched []string
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -850,7 +814,7 @@ func (s *Store) ExpireDue(ctx context.Context) ([]string, error) {
 	return touched, err
 }
 
-// expireTx expires due pending rows (of one Computer, or all with "").
+// expireTx takes computer "" for all Computers.
 func expireTx(tx *sql.Tx, computer string, now time.Time) ([]string, error) {
 	// Strictly past: a now-or-never Message (expiresAt = createdAt) is claimable in its own transaction.
 	q := `SELECT id, computer, expires_at FROM messages WHERE state = 'pending' AND expires_at IS NOT NULL AND expires_at < ?`
@@ -891,7 +855,6 @@ func expireTx(tx *sql.Tx, computer string, now time.Time) ([]string, error) {
 	return touched, nil
 }
 
-// NextExpiry is the earliest deadline among pending Messages, if any.
 func (s *Store) NextExpiry(ctx context.Context) (time.Time, bool, error) {
 	var v sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `SELECT MIN(expires_at) FROM messages WHERE state = 'pending' AND expires_at IS NOT NULL`).Scan(&v)
@@ -901,7 +864,6 @@ func (s *Store) NextExpiry(ctx context.Context) (time.Time, bool, error) {
 	return fromMS(v.Int64), true, nil
 }
 
-// ListOptions filter List.
 type ListOptions struct {
 	State  string // "" or "pending": outstanding; "all"; or one state
 	After  int64
@@ -910,7 +872,6 @@ type ListOptions struct {
 	Limit  int
 }
 
-// Summary returns an inbox's state.
 func (s *Store) Summary(ctx context.Context, computer string) (*api.InboxSummary, error) {
 	var sum *api.InboxSummary
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -946,7 +907,6 @@ func summaryTx(tx *sql.Tx, computer string, now time.Time) (*api.InboxSummary, e
 	return sum, nil
 }
 
-// List returns an inbox's summary and Messages in seq order.
 func (s *Store) List(ctx context.Context, computer string, o ListOptions) (*api.InboxListResponse, error) {
 	var out *api.InboxListResponse
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -990,7 +950,6 @@ func (s *Store) List(ctx context.Context, computer string, o ListOptions) (*api.
 	return out, err
 }
 
-// Inboxes lists every inbox's summary, declared and orphaned.
 func (s *Store) Inboxes(ctx context.Context) ([]api.InboxSummary, error) {
 	var out []api.InboxSummary
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -1021,7 +980,6 @@ func (s *Store) Inboxes(ctx context.Context) ([]api.InboxSummary, error) {
 	return out, err
 }
 
-// InboxEvent is one row of inbox_events.
 type InboxEvent struct {
 	ID        int64           `json:"id"`
 	Computer  string          `json:"computer"`
@@ -1032,8 +990,6 @@ type InboxEvent struct {
 	Data      json.RawMessage `json:"data"`
 }
 
-// Events returns inbox events of a Computer after id, optionally of one
-// Message.
 func (s *Store) Events(ctx context.Context, computer, message string, after int64, limit int) ([]InboxEvent, error) {
 	q := `SELECT id, computer, message, type, at, principal, data FROM inbox_events WHERE computer = ? AND id > ?`
 	args := []any{computer, after}
@@ -1063,8 +1019,7 @@ func (s *Store) Events(ctx context.Context, computer, message string, after int6
 	return out, rows.Err()
 }
 
-// SessionOverride returns the inbox's pending one-shot session override
-// ("" or "new").
+// SessionOverride returns "" or "new".
 func (s *Store) SessionOverride(ctx context.Context, computer string) (string, error) {
 	var o string
 	err := s.db.QueryRowContext(ctx, `SELECT session_override FROM inboxes WHERE computer = ?`, computer).Scan(&o)

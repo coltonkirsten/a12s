@@ -9,19 +9,16 @@ import (
 	"io"
 )
 
-// Frame is one dispatched SSE message.
 type Frame struct {
 	ID    string // the id: field ("" if absent)
 	Event string // the event: field ("" for the default "message")
 	Data  []byte // data: lines joined with "\n"
 }
 
-// Reader reads frames from an SSE body.
 type Reader struct {
 	r *bufio.Reader
 }
 
-// NewReader returns a Reader on r.
 func NewReader(r io.Reader) *Reader { return &Reader{r: bufio.NewReaderSize(r, 64<<10)} }
 
 // Next returns the next frame. A frame is dispatched only when its blank
