@@ -452,6 +452,7 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 		cs.Generation, cs.Session, cs.CredentialGeneration = rec.Generation, rec.Session, rec.CredentialGeneration
 		cs.ResumePending = rec.ResumePending
 		cs.EgressMode = c.egressModeLocked(rec)
+		cs.Seccomp = rec.Active.Seccomp
 		if rec.pending() {
 			cs.StagedGeneration = rec.StagedGeneration
 			cs.Warnings = append(cs.Warnings, fmt.Sprintf("generation %d staged; applies when idle (a12s apply --interrupt to force)", rec.StagedGeneration))

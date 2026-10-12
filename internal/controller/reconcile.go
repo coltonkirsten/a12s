@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coltonkirsten/a12s/images/browser"
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -28,7 +27,7 @@ import (
 
 func imageRef(image string) string {
 	switch image {
-	case fleet.TierSlim, fleet.TierBrowser:
+	case fleet.TierSlim:
 		return version.Image(image)
 	}
 	return image
@@ -71,6 +70,10 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 	if err := serviceCredentialErrors(f, manifests, creds); err != nil {
 		return api.PutFleetResponse{}, err
 	}
+	profiles, err := admitSeccomp(f, req.Seccomp, lock, &admitWarnings)
+	if err != nil {
+		return api.PutFleetResponse{}, err
+	}
 
 	// Durable sleep marks, read before taking the lock.
 	sleptMarks := map[string]bool{}
@@ -97,7 +100,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 	if c.state.Fleet != nil {
 		previousServices = c.state.Fleet.Services
 	}
-	c.state.Fleet, c.state.Lock = f, lock
+	c.state.Fleet, c.state.Lock, c.state.Seccomp = f, lock, profiles
 	maps.Copy(c.state.BundleHosts, hosts)
 	newServices := []string{}
 	for _, name := range f.ServiceNames() {
@@ -360,6 +363,7 @@ func (c *Controller) activeLocked(name string) Active {
 		Unenforced:  c.state.Fleet.Egress.Unenforced(),
 		Send:        slices.Clone(comp.Grants.Send),
 		Uses:        c.endpointsLocked(comp.Uses),
+		Seccomp:     comp.Security.Seccomp,
 	}
 }
 
@@ -919,7 +923,7 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
 // Lock (generation and preset bytes unset), and the hash of what makes a
 // generation: image, bundle, resources, drives, environment, egress, the
-// Fleet's egress enforcement and the preset's digest.
+// Fleet's egress enforcement and the preset's and seccomp profile's digests.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -952,8 +956,12 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 	if comp.Home.Preset != "" {
 		spec.PresetDigest = lock.Presets[comp.Home.Preset]
 	}
-	if spec.Tier == fleet.TierBrowser {
-		spec.Seccomp = browser.Seccomp
+	var seccompDigest string
+	if p := comp.Security.Seccomp; p != "" {
+		seccompDigest = lock.Seccomp[p]
+		if spec.Seccomp = c.state.Seccomp[seccompDigest]; spec.Seccomp == "" {
+			return driver.ComputerSpec{}, "", fmt.Errorf("seccomp profile %s is not stored; run a12s up to send it", p)
+		}
 	}
 	for _, m := range comp.Drives {
 		spec.Drives = append(spec.Drives, driver.Mount{DriveID: driver.WorkDriveID(m.Name), At: m.At, ReadOnly: m.ReadOnly})
@@ -968,12 +976,42 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		// Omitted when enforced, so enforced generations keep their hash.
 		Unenforced bool   `json:",omitempty"`
 		Preset     string `json:",omitempty"`
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced(), spec.PresetDigest})
+		Seccomp    string `json:",omitempty"`
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced(), spec.PresetDigest, seccompDigest})
 	if err != nil {
 		return spec, "", err
 	}
 	sum := sha256.Sum256(b)
 	return spec, hex.EncodeToString(sum[:]), nil
+}
+
+// admitSeccomp checks every security.seccomp profile the CLI sent and pins its digest. The profile comes only
+// from the Fleet's owner, never from an image, and replaces nothing but the seccomp filter: capabilities and
+// no-new-privileges stay as they are.
+func admitSeccomp(f *fleet.Fleet, sent map[string]string, lock *fleet.Lock, warnings *[]string) (map[string]string, error) {
+	profiles := map[string]string{}
+	lock.Seccomp = map[string]string{}
+	for _, name := range f.ComputerNames() {
+		p := f.Computers[name].Security.Seccomp
+		if p == "" {
+			continue
+		}
+		data, ok := sent[p]
+		if !ok {
+			return nil, errorf(http.StatusBadRequest, api.ErrInvalid, "computers.%s.security.seccomp: %q was not sent with the Fleet", name, p)
+		}
+		allowAll, err := fleet.ValidateSeccomp([]byte(data))
+		if err != nil {
+			return nil, errorf(http.StatusBadRequest, api.ErrInvalid, "computers.%s.security.seccomp: %s: %v", name, p, err)
+		}
+		if allowAll {
+			*warnings = append(*warnings, fmt.Sprintf("computers.%s.security.seccomp: %s allows every syscall it does not list", name, p))
+		}
+		sum := fleet.HashSeccomp([]byte(data))
+		lock.SetSeccomp(p, sum)
+		profiles[sum] = data
+	}
+	return profiles, nil
 }
 
 // hashPresetTar is fleet.HashPreset computed over the tar stream
@@ -1019,13 +1057,13 @@ func (c *Controller) admitComputerImage(ctx context.Context, ref, id string) (wa
 	v := img.Labels[driver.LabelComputerdVersion]
 	switch {
 	case v == "":
-		return "", fmt.Errorf("%s has no %s label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM %s (or the browser tier)", ref, driver.LabelComputerdVersion, base)
+		return "", fmt.Errorf("%s has no %s label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM %s", ref, driver.LabelComputerdVersion, base)
 	case !img.Computerd:
 		return "", fmt.Errorf("%s has no computerd at %s  fix: build it FROM %s and keep /opt/a12s", ref, driver.ComputerdMain, base)
 	}
 	warning, err = version.CheckComputerd(v)
 	if err != nil {
-		return "", fmt.Errorf("%s: %v  fix: rebuild it FROM %s (or the browser tier)", ref, err, base)
+		return "", fmt.Errorf("%s: %v  fix: rebuild it FROM %s", ref, err, base)
 	}
 	return warning, nil
 }

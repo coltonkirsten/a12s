@@ -83,15 +83,10 @@ build() { # name dockerfile context [build-args...]
     "${args[@]}" -f "$file" -t "$REGISTRY/$name:$version" "$ctx"
 }
 build slim images/slim/Dockerfile . "A12S_VERSION=$tag"
-build browser images/browser/Dockerfile . "SLIM_IMAGE=$REGISTRY/slim:$version"
 build controller images/controller/Dockerfile . "A12S_VERSION=$tag" "A12S_REGISTRY=$REGISTRY"
-build svc-cron services/go.Dockerfile . SERVICE=svc-cron
-build svc-webhook services/go.Dockerfile . SERVICE=svc-webhook
-build svc-mcp services/svc-mcp/Dockerfile .
-build svc-mcp-postgres services/svc-mcp/postgres.Dockerfile services/svc-mcp "SVC_MCP_IMAGE=$REGISTRY/svc-mcp:$version"
 
 step "computer images carry the computerd label"
-for img in slim browser; do
+for img in slim; do
   got=$(docker buildx imagetools inspect "$REGISTRY/$img:$version" --format '{{ json .Image }}' \
     | jq -r '.["linux/amd64"].config.Labels["ai.a12s.computerd.version"]')
   echo "$img: $got"; [ "$got" = "$tag" ] || die "$img carries computerd version '$got', want $tag"

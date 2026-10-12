@@ -272,13 +272,6 @@ test('credential generation is acknowledged only once applied; a busy turn defer
   await computer.shutdown(100);
 });
 
-test('browser tier: harness env carries NODE_PATH for Playwright', async () => {
-  const { harnessEnv } = await import('../adapters/spawn.js');
-  const deps = (imageTier: string) => ({ cfg: testConfig({ imageTier }), credentialEnv: () => ({}), mcpServers: {} });
-  assert.equal(harnessEnv(deps('browser')).NODE_PATH, '/opt/a12s/playwright-mcp/node_modules');
-  assert.equal(harnessEnv(deps('slim')).NODE_PATH, undefined);
-});
-
 test('a stop that lands during the pre-dispatch credential restart cancels without dispatching', async () => {
   const cfg = testConfig();
   writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');

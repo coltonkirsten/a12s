@@ -100,7 +100,7 @@ type ComputerSpec struct {
 	// Preset is a tar copied onto the home drive before the first start and again whenever PresetDigest changes.
 	Preset       []byte `json:"preset,omitempty"`
 	PresetDigest string `json:"presetDigest,omitempty"`
-	// Seccomp replaces the substrate default profile; the browser tier needs its own.
+	// Seccomp is a profile from the Fleet's security.seccomp that replaces the substrate default.
 	Seccomp string     `json:"seccomp,omitempty"`
 	Uses    []Endpoint `json:"uses,omitempty"`
 	Send    []string   `json:"send,omitempty"`

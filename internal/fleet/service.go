@@ -239,8 +239,8 @@ func (f *Fleet) validateServices() []error {
 		switch {
 		case s.Image == "":
 			bad(field+".image", "set an image reference", "required")
-		case s.Image == TierSlim || s.Image == TierBrowser:
-			bad(field+".image", "use the Service's own image reference", "%q is a Computer image tier; a Service runs its own image", s.Image)
+		case s.Image == TierSlim:
+			bad(field+".image", "use the Service's own image reference", "%q is the Computer base image; a Service runs its own image", s.Image)
 		default:
 			if _, err := reference.ParseAnyReference(s.Image); err != nil {
 				bad(field+".image", "", "%q is not a valid image reference: %v", s.Image, err)

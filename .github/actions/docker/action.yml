@@ -1,6 +1,5 @@
-# Docker for the image jobs in ci.yml: the containerd image store, so a build can start FROM an image built just
-# before it (browser on slim, svc-mcp-postgres on svc-mcp) and still read and write the GitHub Actions build cache
-# (scripts/check.sh with CHECK_DOCKER_CACHE=gha).
+# Docker for the image jobs in ci.yml: the containerd image store, so a build can load its image locally and still
+# read and write the GitHub Actions build cache (scripts/check.sh with CHECK_DOCKER_CACHE=gha).
 name: docker with build cache
 description: containerd image store plus the cache token for docker buildx
 runs:

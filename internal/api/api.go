@@ -35,6 +35,9 @@ type PutFleetRequest struct {
 	// written in the Fleet; the CLI sends them because the Controller cannot
 	// read the host.
 	Presets map[string][]byte `json:"presets,omitempty"`
+	// Seccomp holds each security.seccomp profile keyed by its path as written in the Fleet, sent for the same
+	// reason.
+	Seccomp map[string]string `json:"seccomp,omitempty"`
 }
 
 type PutFleetResponse struct {
@@ -98,9 +101,11 @@ type ComputerStatus struct {
 	Session       string   `json:"session,omitempty"`
 	ActiveTurn    string   `json:"activeTurn,omitempty"`
 	Harness       Harness  `json:"harness"`
-	Image         string   `json:"image"` // tier or image reference
-	Autonomy      string   `json:"autonomy"`
-	Generation    int64    `json:"generation"`
+	Image         string   `json:"image"` // slim or an image reference
+	// Seccomp is the Fleet's security.seccomp path when the Computer runs with a custom seccomp profile.
+	Seccomp    string `json:"seccomp,omitempty"`
+	Autonomy   string `json:"autonomy"`
+	Generation int64  `json:"generation"`
 	// StagedGeneration is greater than Generation while a change waits for idle.
 	StagedGeneration     int64       `json:"stagedGeneration,omitempty"`
 	CredentialGeneration int64       `json:"credentialGeneration,omitempty"`

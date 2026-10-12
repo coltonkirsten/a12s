@@ -9,7 +9,7 @@ is done ([Quickstart](../README.md#quickstart)), and use the TypeScript or Pytho
 - [Change an agent's instructions](#change-an-agents-instructions)
 - [Give agents tools and network access](#give-agents-tools-and-network-access)
 - [Run work on a schedule](#run-work-on-a-schedule)
-- [Start work from a GitHub webhook](#start-work-from-a-github-webhook)
+- [Start work from a webhook](#start-work-from-a-webhook)
 - [Let another program in](#let-another-program-in)
 - [Any language: the HTTP API](#any-language-the-http-api)
 - [See what's going on](#see-whats-going-on)
@@ -235,37 +235,33 @@ put it in a Service ([Services](services.md)).
 
 ## Run work on a schedule
 
-Add the reference clock Service and let it send to a Computer:
+The simplest clock is the host's own: `a12s send` enqueues and exits, whether the Computer is busy or asleep.
 
-```yaml
-services:
-  clock:
-    image: ghcr.io/coltonkirsten/a12s/svc-cron:0.2.1     # match your a12s version
-    grants: { send: [lead] }
-    config:
-      jobs:
-        - { name: standup, cron: "0 9 * * 1-5", to: lead, body: "Summarize what changed yesterday.", replace: standup }
+```sh
+# crontab -e
+0 9 * * 1-5  /opt/homebrew/bin/a12s -F ~/team/fleet.yaml send lead "Summarize what changed yesterday." --replace standup
 ```
 
-`a12s init <dir> --with cron` writes this for you. `replace` keeps at most one pending standup if lead is busy.
-To let the clock wake a sleeping Computer, add `power: { wakeOnMessage: { from: [service:clock] } }` to it
-([Inbox and power](inbox.md#power-policy)).
+`--replace standup` keeps at most one pending standup if lead is busy. To let it wake a sleeping Computer, add
+`power: { wakeOnMessage: { from: [local] } }` to it ([Inbox and power](inbox.md#power-policy)).
 
-## Start work from a GitHub webhook
+To keep the schedule inside the Fleet (it runs wherever the Fleet runs, under its own grant), run a clock Service:
+[Services: Write a Service with svckit](services.md#write-a-service-with-svckit) builds one, and the wake rule is
+then `from: [service:clock]`.
 
-```yaml
-services:
-  hooks:
-    image: ghcr.io/coltonkirsten/a12s/svc-webhook:0.2.1
-    credentials: [webhook-secret]                  # a12s creds set webhook-secret
-    grants: { send: [lead] }
-    publish: ["127.0.0.1:8787:8080"]
-    config:
-      routes: [{ path: /github, to: lead, secretFrom: webhook-secret }]
+## Start work from a webhook
+
+Whatever receives the webhook sends the Message. From your own server, use the SDK with a token that may only send
+to lead (`a12s token create hooks --actions send --computers lead`, see [below](#let-another-program-in)), check
+the sender's signature, then:
+
+```ts
+await a12s.send("lead", { body: `GitHub ${event}: ${summary}`, sender: "github", metadata: { source: "github", event } });
 ```
 
-Point the GitHub webhook (through your tunnel) at `/github` on port 8787. Signed deliveries become Messages to lead
-with `metadata: {source: github, event}`; unsigned ones are refused.
+To run the receiver inside the Fleet instead, write a Service with `grants.send` and `publish:`
+([Services](services.md#write-a-service-with-svckit)); the v0.2.1 source has a
+[GitHub webhook bridge](https://github.com/coltonkirsten/a12s/tree/v0.2.1/services/svc-webhook) to copy.
 
 ## Let another program in
 

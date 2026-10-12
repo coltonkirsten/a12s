@@ -57,9 +57,10 @@ presets:
 
 func TestLoadLockPlanShape(t *testing.T) {
 	path := filepath.Join(t.TempDir(), LockFile)
-	doc := `images:  { slim: "sha256:a", browser: "sha256:b" }
+	doc := `images:  { slim: "sha256:a", "me/agent:1": "sha256:b" }
 bundles: { "claude-code@2.1.280": "sha256:c", "codex@0.154.0": "sha256:d" }
 presets: { "./presets/scout": "sha256:e" }   # content hash of the directory
+seccomp: { "./profiles/chromium.json": "sha256:f" }
 `
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
@@ -69,10 +70,11 @@ presets: { "./presets/scout": "sha256:e" }   # content hash of the directory
 		t.Fatal(err)
 	}
 	want := &Lock{
-		Images:   map[string]string{"slim": "sha256:a", "browser": "sha256:b"},
+		Images:   map[string]string{"slim": "sha256:a", "me/agent:1": "sha256:b"},
 		Bundles:  map[string]string{"claude-code@2.1.280": "sha256:c", "codex@0.154.0": "sha256:d"},
 		Presets:  map[string]string{"./presets/scout": "sha256:e"},
 		Services: map[string]string{},
+		Seccomp:  map[string]string{"./profiles/chromium.json": "sha256:f"},
 	}
 	if !reflect.DeepEqual(l, want) {
 		t.Errorf("got %+v want %+v", l, want)

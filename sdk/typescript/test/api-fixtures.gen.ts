@@ -22,6 +22,7 @@ export const statusResponse: T.StatusResponse = {
         "model": "model"
       },
       "image": "image",
+      "seccomp": "seccomp",
       "autonomy": "autonomy",
       "generation": 1,
       "stagedGeneration": 1,
@@ -217,6 +218,9 @@ export const putFleetResponse: T.PutFleetResponse = {
     },
     "services": {
       "k": "services"
+    },
+    "seccomp": {
+      "k": "seccomp"
     }
   },
   "errors": {

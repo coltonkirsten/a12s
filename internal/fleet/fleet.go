@@ -16,9 +16,8 @@ const (
 
 // Any other image value is a custom image reference.
 const (
-	TierSlim    = "slim"
-	TierBrowser = "browser"
-	TierCustom  = "custom"
+	TierSlim   = "slim"
+	TierCustom = "custom"
 )
 
 const (
@@ -81,6 +80,7 @@ type Computer struct {
 	Credentials []string     `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 	Drives      []DriveMount `yaml:"drives,omitempty" json:"drives,omitempty"`
 	Egress      Egress       `yaml:"egress,omitempty" json:"egress,omitzero"`
+	Security    Security     `yaml:"security,omitempty" json:"security,omitzero"`
 	// Inbox is Controller state, not container config: never hashed into a generation.
 	Inbox Inbox `yaml:"inbox,omitempty" json:"inbox,omitzero"`
 	// Power is Controller state, never hashed into a generation. Off unless set.
@@ -113,10 +113,17 @@ type Inbox struct {
 
 func (c Computer) Tier() string {
 	switch c.Image {
-	case TierSlim, TierBrowser:
+	case TierSlim:
 		return c.Image
 	}
 	return TierCustom
+}
+
+// Security is set only by the Fleet's owner: nothing an image carries can loosen the sandbox.
+type Security struct {
+	// Seccomp is a seccomp profile (Docker's JSON format), relative to the Fleet file, that replaces the substrate's
+	// default profile. Capabilities and no-new-privileges are unchanged by it.
+	Seccomp string `yaml:"seccomp,omitempty" json:"seccomp,omitempty"`
 }
 
 type Harness struct {

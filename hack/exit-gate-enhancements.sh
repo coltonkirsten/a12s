@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The enhancements end-to-end check (see CONTRIBUTING.md), against the local Docker
-# engine with examples/services (renamed fleet "gate"). Usage:
+# engine with hack/gate/fleet.yaml. Usage:
 #   hack/exit-gate-enhancements.sh <workdir> <logfile> [sections...]
-# Needs: bin/a12s, a12s/{controller,slim}:dev, the claude-code 2.1.280 bundle, `make services`, and
+# Needs: bin/a12s, a12s/{controller,slim}:dev, the claude-code 2.1.280 bundle, hack/gate/services.sh, and
 # ~/.a12s/anthropic (a setup-token or OAuth access token). Sections: setup inbox services amendment teardown.
 set -uo pipefail
 W=${1:?workdir}; LOG=${2:?logfile}; shift 2
@@ -28,7 +28,7 @@ long_turn() { a prompt "$1" "Use your Bash tool to run exactly this command: pyt
 
 if [[ " $SECTIONS " == *" setup "* ]]; then
   log "== enhancements exit gate on $(docker version --format '{{.Server.Version}} {{.Server.Arch}}'), a12s $(git -C "$REPO" rev-parse --short HEAD) =="
-  sed -e 's/metadata: { name: lab }/metadata: { name: gate }/' "$REPO/examples/services/fleet.yaml" > fleet.yaml
+  sed -e 's/metadata: { name: lab }/metadata: { name: gate }/' "$REPO/hack/gate/fleet.yaml" > fleet.yaml
   # The services section adds the minute tick later; the base Fleet keeps the clock quiet.
   python3 - <<'PY'
 import re
@@ -286,8 +286,8 @@ fi
 
 if [[ " $SECTIONS " == *" cli "* ]]; then
   log "## 19 CLI from zero (scaffold, doctor) and --json on every listing"
-  rm -rf /tmp/gate19 && a init /tmp/gate19 --with db > /tmp/gate19.out 2>&1; cat /tmp/gate19.out >> "$LOG"
-  check "19 init --with db scaffolds a valid Fleet" eval 'grep -q "a12s creds set postgres" /tmp/gate19.out && a --fleet /tmp/gate19/fleet.yaml doctor --json > /tmp/gate19.doc; python3 -c "import json; json.load(open(\"/tmp/gate19.doc\"))"'
+  rm -rf /tmp/gate19 && a init /tmp/gate19 > /tmp/gate19.out 2>&1; cat /tmp/gate19.out >> "$LOG"
+  check "19 init scaffolds a valid Fleet" eval 'grep -q "a12s creds set anthropic" /tmp/gate19.out && a --fleet /tmp/gate19/fleet.yaml doctor --json > /tmp/gate19.doc; python3 -c "import json; json.load(open(\"/tmp/gate19.doc\"))"'
   ( cd /tmp/gate19 && "$A12S" up > /tmp/gate19.up 2>&1 ); cat /tmp/gate19.up >> "$LOG"
   check "19 the first up stops with the fix line" grep -q 'fix: a12s creds set' /tmp/gate19.up
   rm -rf /tmp/gate19

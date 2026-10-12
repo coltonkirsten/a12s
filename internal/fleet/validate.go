@@ -96,6 +96,10 @@ func (f *Fleet) Validate() error {
 	return errors.Join(errs...)
 }
 
+// removedBrowserTier was a built-in image before 0.3.0; naming it gets a migration hint instead of a pull of
+// docker.io/library/browser.
+const removedBrowserTier = "browser"
+
 func (c Computer) validate(field string, drives map[string]Drive) []error {
 	var errs []error
 	bad := func(sub, format string, args ...any) {
@@ -112,11 +116,16 @@ func (c Computer) validate(field string, drives map[string]Drive) []error {
 	}
 	switch {
 	case c.Image == "":
-		bad("image", "required: %s, %s or an image reference", TierSlim, TierBrowser)
+		bad("image", "required: %s or an image reference", TierSlim)
+	case c.Image == removedBrowserTier:
+		bad("image", "the browser image is no longer part of a12s: build one FROM %s with Chromium and set security.seccomp (docs/images.md#custom-images)", TierSlim)
 	case c.Tier() == TierCustom:
 		if _, err := reference.ParseAnyReference(c.Image); err != nil {
-			bad("image", "%q is neither a tier (%s, %s) nor a valid image reference: %v", c.Image, TierSlim, TierBrowser, err)
+			bad("image", "%q is neither %s nor a valid image reference: %v", c.Image, TierSlim, err)
 		}
+	}
+	if p := c.Security.Seccomp; p != "" && (path.IsAbs(p) || strings.Contains(p, "\\")) {
+		bad("security.seccomp", "%q must be a path relative to the Fleet file", p)
 	}
 	switch c.Autonomy {
 	case AutonomyFull, AutonomyRestricted:

@@ -235,6 +235,9 @@
       },
       "services": {
         "k": "services"
+      },
+      "seccomp": {
+        "k": "seccomp"
       }
     },
     "errors": {
@@ -360,6 +363,7 @@
           "model": "model"
         },
         "image": "image",
+        "seccomp": "seccomp",
         "autonomy": "autonomy",
         "generation": 1,
         "stagedGeneration": 1,

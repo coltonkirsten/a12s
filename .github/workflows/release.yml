@@ -85,16 +85,11 @@ jobs:
               "${args[@]}" -f "$file" -t "$REGISTRY/$name:$tag" "$ctx"
           }
           build slim images/slim/Dockerfile . "A12S_VERSION=$TAG"
-          build browser images/browser/Dockerfile . "SLIM_IMAGE=$REGISTRY/slim:$tag"
           build controller images/controller/Dockerfile . "A12S_VERSION=$TAG" "A12S_REGISTRY=$REGISTRY"
-          build svc-cron services/go.Dockerfile . SERVICE=svc-cron
-          build svc-webhook services/go.Dockerfile . SERVICE=svc-webhook
-          build svc-mcp services/svc-mcp/Dockerfile .
-          build svc-mcp-postgres services/svc-mcp/postgres.Dockerfile services/svc-mcp "SVC_MCP_IMAGE=$REGISTRY/svc-mcp:$tag"
       - name: computer images carry the computerd label
         run: |
           tag="${TAG#v}"
-          for img in slim browser; do
+          for img in slim; do
             got=$(docker buildx imagetools inspect "$REGISTRY/$img:$tag" --format '{{ json .Image }}' | jq -r '.["linux/amd64"].config.Labels["ai.a12s.computerd.version"]')
             echo "$img: $got"; test "$got" = "$TAG"
           done

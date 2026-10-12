@@ -101,7 +101,7 @@ flowchart LR
 | Example | What it shows |
 |---|---|
 | [Stream a reply](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/stream-a-reply) | Send one coding agent a task from a script and print its answer as it streams. |
-| [Scheduled agent](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/scheduled-agent) | A clock Service wakes an agent every minute; your script watches each run. |
+| [Browser agent](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/browser-agent) | Extend a12s: your own image with Chromium, and a seccomp profile set in `fleet.yaml`. |
 
 ## Docs
 

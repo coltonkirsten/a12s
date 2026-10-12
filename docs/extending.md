@@ -8,22 +8,22 @@ customizes goes through four surfaces:
 | The Fleet file | Computers, harness versions and models, credentials, drives, egress, grants, Services | your `fleet.yaml` |
 | Images | Agent images built FROM an a12s base; any image as a Service | your Dockerfiles and registry |
 | The SDK | Apps that send work, read inboxes and stream events | `@coltonkirsten/a12s` on npm, `a12s` on PyPI ([SDK](sdk.md)) |
-| `svckit` | Custom Services written in Go | `github.com/coltonkirsten/a12s/services/svckit` |
+| `svckit` | Custom Services written in Go ([Services: Write a Service with svckit](services.md#write-a-service-with-svckit)) | `github.com/coltonkirsten/a12s/services/svckit` |
 
 a12s holds no app policy. Who talks to whom, what a task means, and how results combine belong in your app and
 your Fleet's grants, not in a12s.
 
-The examples assume a release binary (`a12s version` prints `v0.2.1`), whose images live at
+The examples assume a release binary (`a12s version` prints `v0.3.0`), whose images live at
 `ghcr.io/coltonkirsten/a12s`. In a source build, use the local refs instead (`a12s/slim:dev`).
 
 ## A custom agent image
 
-`image:` takes `slim`, `browser`, or your own image built FROM one of them. Use this to add tools an agent needs
-(a toolchain, a CLI, fonts).
+`image:` takes `slim` or your own image built FROM it. Use this to add tools an agent needs (a toolchain, a CLI,
+fonts, a browser).
 
 ```dockerfile
 # images/agent-jq/Dockerfile
-FROM ghcr.io/coltonkirsten/a12s/slim:0.2.1
+FROM ghcr.io/coltonkirsten/a12s/slim:0.3.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
@@ -54,7 +54,7 @@ and checks it at admission:
 Otherwise nothing changes and `up` says why:
 
 ```text
-computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM ghcr.io/coltonkirsten/a12s/slim:0.2.1 (or the browser tier)
+computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM ghcr.io/coltonkirsten/a12s/slim:0.3.0
 ```
 
 What a custom image can't change: a12s always starts computerd as root (your `ENTRYPOINT`, `CMD`, `USER` and
@@ -62,6 +62,10 @@ What a custom image can't change: a12s always starts computerd as root (your `EN
 mounted over `/home`. Install tools system-wide (under `/usr` or `/opt`), not into `/home/agent`. To pick up a new
 image, change its tag in `fleet.yaml`: a pinned ref keeps running the pinned ID. When you upgrade a12s to a new minor
 (or, from 1.0, a new major), rebuild FROM the new base; admission refuses the old image until you do.
+
+An image can't change its own sandbox. If its software needs syscalls Docker's default seccomp profile blocks
+(Chromium's sandbox does), set [`security.seccomp`](security.md#seccomp) on the Computer in `fleet.yaml`; see
+[Images: A browser in your image](images.md#a-browser-in-your-image).
 
 ## A custom Service
 
@@ -84,69 +88,10 @@ computers:
     uses: [cache]          # reaches cache.a12s:6379; nothing else in the Fleet can
 ```
 
-**Your own image, in Go, with svckit.** svckit is the small library the reference Services use: config, credentials,
-the Service's mTLS identity, and the inbox calls its grants allow. It imports only the standard library.
-
-```sh
-export GOPRIVATE=github.com/coltonkirsten/*      # the module is private; git must be able to read it
-go get github.com/coltonkirsten/a12s/services/svckit@v0.2.1
-```
-
-```go
-package main
-
-import (
-	"log"
-	"net/http"
-	"time"
-
-	"github.com/coltonkirsten/a12s/services/svckit"
-)
-
-type config struct {
-	To    string `json:"to"`
-	Every string `json:"every"`
-}
-
-func main() {
-	var cfg config
-	if err := svckit.LoadConfig(&cfg); err != nil {
-		log.Fatal(err)
-	}
-	every, err := svckit.ParseDuration(cfg.Every)
-	if err != nil {
-		log.Fatal(err)
-	}
-	c, err := svckit.NewClient()
-	if err != nil {
-		log.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	svckit.Health(mux)
-	go http.ListenAndServe(":8080", mux)
-	for range time.Tick(every) {
-		if _, _, err := c.Send(cfg.To, svckit.Enqueue{Body: "Status check: anything blocked?", Sender: "heartbeat"}); err != nil {
-			log.Print(err) // a 403 no_grant names the missing grant
-		}
-	}
-}
-```
-
-```json
-{ "a12s": 1, "name": "heartbeat", "version": "1.0.0", "user": 1000,
-  "health": { "http": { "port": 8080, "path": "/healthz" } } }
-```
-
-```yaml
-services:
-  heartbeat:
-    image: my-org/heartbeat:1
-    grants: { send: [analyst] }
-    config: { to: analyst, every: 30m }
-```
-
-A Service written in another language does the same with the files and variables in
-[What a Service gets](services.md#what-a-service-gets).
+**Your own image.** Bake the manifest into an image whose program reads its config and credentials from
+`/run/a12s` and calls the Controller as its grants allow. In Go, `svckit` does that for you:
+[Services: Write a Service with svckit](services.md#write-a-service-with-svckit) builds a clock end to end. Any other
+language uses the files and variables in [What a Service gets](services.md#what-a-service-gets).
 
 ## Harness version and model
 

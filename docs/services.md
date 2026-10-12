@@ -11,10 +11,9 @@ fan-out needs.
 ```yaml
 services:
   clock:
-    image: a12s/svc-cron:0.1        # pinned in fleet.lock as clock@a12s/svc-cron:0.1
+    image: my-org/clock:1           # pinned in fleet.lock as clock@my-org/clock:1
     grants: { send: [scout] }        # may enqueue to scout's inbox; nothing else
-    config:
-      jobs: [{ name: tick, cron: "*/15 * * * *", to: scout, body: "Check the queue." }]
+    config: { to: scout, every: 15m }
 computers:
   scout:
     uses: [db]                       # may reach db's declared ports; db's MCP port becomes the a12s-db tool
@@ -44,7 +43,7 @@ Every Service image carries `/a12s/service.json`. A stock image can be described
 ```json
 {
   "a12s": 1,
-  "name": "svc-mcp",
+  "name": "db-mcp",
   "version": "0.1.0",
   "user": 1000,
   "health": { "http": { "port": 8080, "path": "/healthz" }, "interval": "10s", "startup": "60s" },
@@ -107,18 +106,85 @@ a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
 a12s sleep <svc> / a12s wake <svc>        # --all includes Services
 a12s shell <svc> [--root]                 # audited
 a12s lock update services/<svc>           # move a pin on an unchanged ref
-a12s init --with db,cron                  # scaffold the reference Services
 ```
 
-## The reference Services
+## Write a Service with svckit
 
-Built by `make services`, pinned like any other image. They use nothing a third-party image doesn't get.
+`svckit` (`github.com/coltonkirsten/a12s/services/svckit`) is a small Go library, standard library only, for the
+files and variables above: `LoadConfig` reads the config, `Secret` a credential, `NewClient` builds the mTLS client
+whose `Send` and `Get` enqueue and read back Messages as far as the grants allow, `Health` registers `/healthz`, and
+`ParseDuration` reads `0`, `90s`, `15m`, `1h` or `7d`. A clock that sends on an interval:
 
-| Service | Config | Grants |
-|---|---|---|
-| `a12s/svc-cron:0.1` | `jobs: [{name, cron, to, body, fresh?, metadata?, expires?, replace?}]`, `tz?`. A slot's idempotency key is `<job>/<slot>`; `replace` becomes the replace key and `expires` the deadline; each fire reads back the previous Message and logs `<job> m_… expired unread`. Missed slots are skipped. | `send` |
-| `a12s/svc-mcp:0.1` | `command`, `args` (with `${VAR}` expansion), `env`, `envFrom: {VAR: credential}`, `hostPortFrom: {A12S_SERVICE_X_Y: [HOSTVAR, PORTVAR]}`. Serves the stdio MCP server over Streamable HTTP at `:8080/mcp`, one process per session. | none |
-| `a12s/svc-mcp-postgres:0.1` | svc-mcp with `@modelcontextprotocol/server-postgres@0.6.2` baked in at `/opt/mcp/bin/mcp-server-postgres`, so the pin pins the software. A `config.command` of `npx -y …` would fetch at start and defeat the lock; `a12s doctor` warns on it. | none |
-| `a12s/svc-webhook:0.1` | `routes: [{path, to, secretFrom, fresh?}]`. Checks GitHub's `X-Hub-Signature-256` with the credential, enqueues a summary with `metadata: {source: github, event}`; unsigned posts get 401 and enqueue nothing. | `send`, plus `publish` |
+```sh
+go mod init example.com/clock && go get github.com/coltonkirsten/a12s/services/svckit@v0.3.0
+```
 
-`examples/services/fleet.yaml` runs all of them next to three Computers.
+```go
+// main.go
+package main
+
+import (
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/coltonkirsten/a12s/services/svckit"
+)
+
+type config struct {
+	To    string `json:"to"`
+	Every string `json:"every"`
+}
+
+func main() {
+	var cfg config
+	if err := svckit.LoadConfig(&cfg); err != nil {
+		log.Fatal(err)
+	}
+	every, err := svckit.ParseDuration(cfg.Every)
+	if err != nil {
+		log.Fatal(err)
+	}
+	c, err := svckit.NewClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	svckit.Health(mux)
+	go http.ListenAndServe(":8080", mux)
+	for range time.Tick(every) {
+		if _, _, err := c.Send(cfg.To, svckit.Enqueue{Body: "Status check: anything blocked?", Sender: "clock"}); err != nil {
+			log.Print(err) // a 403 no_grant names the missing grant
+		}
+	}
+}
+```
+
+```json
+{ "a12s": 1, "name": "clock", "version": "1.0.0", "user": 1000,
+  "health": { "http": { "port": 8080, "path": "/healthz" } } }
+```
+
+```dockerfile
+FROM golang:1.26 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/clock .
+
+FROM alpine:3
+COPY --from=build /out/clock /usr/local/bin/clock
+COPY service.json /a12s/service.json
+USER 1000:1000
+CMD ["/usr/local/bin/clock"]
+```
+
+`docker build -t my-org/clock:1 .`, then use it as in the example at the top of this page. A Service in another
+language does the same with the files and variables in [What a Service gets](#what-a-service-gets).
+
+Complete Services to copy from are in the v0.2.1 source:
+[cron, a GitHub webhook bridge, an MCP bridge (stdio MCP server over HTTP) and a Postgres MCP server](https://github.com/coltonkirsten/a12s/tree/v0.2.1/services).
+Their images stay published as `ghcr.io/coltonkirsten/a12s/svc-<name>:0.2.1` and run like any other Service image;
+[the v0.2.1 Services page](https://github.com/coltonkirsten/a12s/blob/v0.2.1/docs/services.md#the-reference-services)
+lists their config.

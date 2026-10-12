@@ -16,10 +16,10 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 
 | Command | What it does |
 |---|---|
-| `a12s init [dir] [--harness claude-code\|codex] [--with db,cron]` | Scaffold `fleet.yaml`, `fleet.lock` (pinning this a12s release), an empty bindings file, `.gitignore` and a README. `--with` adds reference Services: `db` (Postgres plus an MCP server), `cron` (a clock). |
-| `a12s up [--asleep] [--controller-image ref]` | Start the Controller if needed, validate and apply the Fleet: create, update or stage Computers and Services, pin new digests in `fleet.lock`. `--asleep` creates new Computers asleep. |
+| `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (one Computer, `hello`, on `image: slim`), `fleet.lock` (pinning this a12s release), an empty bindings file, `.gitignore` and a README. |
+| `a12s up [--asleep] [--controller-image ref]` | Start the Controller if needed, validate and apply the Fleet: create, update or stage Computers and Services, pin new digests in `fleet.lock`. It prints `<name> runs with custom seccomp profile <path>` for each Computer with [`security.seccomp`](security.md#seccomp). `--asleep` creates new Computers asleep. |
 | `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy Computers now, interrupting their Turns after the grace period. |
-| `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
+| `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp <path>` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
 | `a12s down [--purge [--yes]]` | Remove the Fleet's containers, networks and Controller; keep drives and the inbox database. `--purge` also destroys them after listing them and asking. Neither touches credentials saved with `creds set` (`~/.a12s/<fleet>/`). |
 | `a12s doctor` | Check the Fleet file, Docker, images and bundles, bindings, the Controller, egress and every Computer's and Service's health. One line per check with the fix; exits 1 on any failure. |
 | `a12s lock update services/<svc>` | Re-pin a Service whose image ref hasn't changed. |
