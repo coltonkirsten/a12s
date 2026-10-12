@@ -1,90 +1,127 @@
-# a12s — agent computers
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+    <img alt="a12s" src=".github/assets/logo-light.svg" height="64">
+  </picture>
+</p>
 
-a12s runs AI coding agents (Claude Code, Codex) as durable, isolated computers on Docker. One file declares them,
-one command starts them, and your app sends them work and watches them do it.
+<p align="center"><b>Run AI coding agents as isolated computers.</b></p>
 
-```text
-fleet.yaml ──a12s up──▶  lead   worker1   worker2      each a Computer: its own disk, session, inbox and network rules
-                           ▲  └──send──▶   │    │      agents hand work to each other through their inboxes
-your app (TS, Python, ─────┘ ◀──events─────┴────┘      your app sends work and follows every Turn as it streams
-browser, curl)
-```
+<p align="center">
+  <a href="https://github.com/coltonkirsten/a12s/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/coltonkirsten/a12s/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://www.npmjs.com/package/@coltonkirsten/a12s"><img alt="npm" src="https://img.shields.io/npm/v/@coltonkirsten/a12s?label=npm"></a>
+  <a href="https://pypi.org/project/a12s/"><img alt="PyPI" src="https://img.shields.io/pypi/v/a12s?label=pypi"></a>
+  <a href="https://github.com/coltonkirsten/a12s/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/coltonkirsten/a12s"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+</p>
 
-- **Computers keep their state.** Each has a home drive, a conversation (session) that survives sleep, and an inbox
-  that takes work while it is busy or asleep. Containers come and go; the Computer stays.
-- **Safe by default.** Credentials live only in memory, agents run as non-root on a read-only root filesystem, and
-  all traffic goes through an allowlisting proxy.
-- **Built for apps.** SDKs for TypeScript and Python, a browser gateway, an HTTP API, and a template repo.
+## What is a12s?
 
-## Quickstart (5 minutes)
+a12s runs Claude Code and Codex agents on your machine, each in its own Docker container with its own
+disk, conversation and inbox. You describe them in one file, start them with one command, and send them work from
+TypeScript, Python or the command line.
 
-Needs Docker running and a Claude subscription or API access.
+- **They keep their state.** Stop an agent and start it tomorrow: its files and conversation are still there.
+- **They are locked down.** No network except the hosts you list, no root, and credentials kept only in memory.
+- **They take work like a queue.** Send a task while an agent is busy or asleep; it runs when the agent is free.
+
+## Install
 
 ```sh
-brew install coltonkirsten/tap/a12s
+brew install coltonkirsten/tap/a12s      # the CLI (macOS and Linux); or a binary from Releases
+npm install @coltonkirsten/a12s          # TypeScript / JavaScript SDK
+pip install a12s                         # Python SDK
+```
 
-a12s init hello && cd hello        # fleet.yaml with one Computer, "hello"
-claude setup-token                 # prints a long-lived sk-ant-oat… token
-a12s creds set anthropic           # paste it; stored 0600 under ~/.a12s
-a12s up                            # first run pulls the images (about 1.5 GB)
+Needs Docker running, and a Claude subscription or an Anthropic API key.
+
+## Quickstart
+
+Start one agent:
+
+```sh
+a12s init hello && cd hello              # writes fleet.yaml: one Claude Code agent named "hello"
+claude setup-token                       # prints a long-lived token; or use an API key
+a12s creds set anthropic                 # paste it
+a12s up                                  # the first run downloads the images (about 1.5 GB)
 a12s prompt hello "Reply with the single word pong."
 ```
 
-`prompt` prints `turn … started`, `pong`, `turn … completed`. Then:
+Then send it work from code:
 
-```sh
-a12s gateway                       # opens your browser: every Computer, live, with a send box
-a12s down                          # stop everything; disks and conversations are kept
-```
+<table>
+<tr><th>TypeScript / JavaScript (<code>hello.mjs</code>)</th><th>Python (<code>hello.py</code>)</th></tr>
+<tr><td>
 
-## Build a multi-agent app
+```js
+import { connect } from "@coltonkirsten/a12s";
 
-Start from the template: a lead that splits a task between two workers, an app in TypeScript and in Python, and a
-live browser view.
-
-```sh
-gh repo create my-agents --private --template coltonkirsten/a12s-starter --clone && cd my-agents
-make demo                          # bind credentials, a12s up, run one task end to end
-```
-
-Or add the SDK to your own app:
-
-```ts
-import { connect } from "@coltonkirsten/a12s";       // npm install @coltonkirsten/a12s
-
-const a12s = await connect();                        // finds the running Fleet
+const a12s = await connect();
 const turn = await a12s.prompt("hello", "Name three prime numbers.");
 console.log(turn.text);
 ```
 
+</td><td>
+
 ```python
-import a12s                                          # pip install a12s
+import a12s
 
 client = a12s.connect()
 turn = client.prompt("hello", "Name three prime numbers.")
 print(turn.text)
 ```
 
-## Learn it
+</td></tr>
+</table>
 
-Read these in order; each takes a few minutes.
+Run it in the same folder: `node hello.mjs` or `python hello.py`. `a12s down` stops everything and keeps the disks.
 
-1. [Concepts](docs/concepts.md): the five ideas you need (Fleet, Computer, Message, Turn, Event) and how they fit.
-2. [Recipes](docs/recipes.md): lead and workers, a live dashboard, changing an agent's instructions, schedules,
-   webhooks, tools and network access.
-3. [SDK](docs/sdk.md): TypeScript and Python, side by side.
+## How it works
 
-Reference: [Fleet file](docs/fleet-file.md) · [CLI](docs/cli.md) · [HTTP API](docs/api.md) ·
-[Inbox and power](docs/inbox.md) · [Services](docs/services.md) · [Credentials](docs/credentials.md) ·
-[Extending](docs/extending.md) · [Images](docs/images.md) · [Security](docs/security.md) ·
-[Architecture](docs/architecture.md)
+```mermaid
+flowchart LR
+  F["fleet.yaml"] -- "a12s up" --> C["Controller"]
+  App["Your app<br/>TS, Python, HTTP"] -- "send work, stream events" --> C
+  C --> A["Computer<br/>Claude Code"]
+  C --> B["Computer<br/>Codex"]
+  C --> S["Service<br/>cron, webhook, MCP"]
+  S -. "puts work in an inbox" .-> A
+```
 
-Coding agents: [`llms.txt`](llms.txt) is the whole thing on one page, with exact commands.
+- **Fleet file:** `fleet.yaml` lists your agents (Computers) and helpers (Services). `a12s up` makes the machine match it.
+- **Controller:** a small server on your machine that starts the containers, holds the credentials and queues work.
+- **Computer:** one agent with its own disk, conversation and inbox. Its network is closed except for the hosts you allow.
+- **Service:** a non-agent container, such as a clock, a webhook receiver or a database, that may only do what the
+  Fleet file grants it.
 
-## Status
+## Examples
 
-a12s is early (`a12s.ai/v1alpha1`, see [CHANGELOG](CHANGELOG.md)). It runs on Docker: Docker Desktop on macOS
-(arm64) and Docker Engine on Linux (amd64, arm64). Fleet files and the API may still change before 1.0; the
-`--json` output is the stable contract.
+[a12s-cookbook](https://github.com/coltonkirsten/a12s-cookbook) has complete examples in TypeScript and Python:
 
-Building a12s itself: [CONTRIBUTING.md](CONTRIBUTING.md). MIT licensed.
+| Example | What it shows |
+|---|---|
+| [Stream a reply](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/stream-a-reply) | Send one coding agent a task from a script and print its answer as it streams. |
+| [Scheduled agent](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/scheduled-agent) | A clock Service wakes an agent every minute; your script watches each run. |
+
+## Docs
+
+- [Concepts](docs/concepts.md): Fleet, Computer, Message, Turn and Event, in a few minutes.
+- [Recipes](docs/recipes.md): agents that hand work to each other, web apps, schedules, webhooks, tools and network access.
+- [SDK](docs/sdk.md): TypeScript and Python, side by side.
+- Reference: [Fleet file](docs/fleet-file.md) · [CLI](docs/cli.md) · [HTTP API](docs/api.md) ·
+  [Inbox and power](docs/inbox.md) · [Services](docs/services.md) · [Credentials](docs/credentials.md) ·
+  [Extending](docs/extending.md) · [Images](docs/images.md) · [Security](docs/security.md) ·
+  [Architecture](docs/architecture.md)
+- Coding agents: [`llms.txt`](llms.txt) is all of a12s on one page, with exact commands.
+
+a12s is early (`a12s.ai/v1alpha1`). It runs on Docker Desktop on macOS (arm64) and Docker Engine on Linux (amd64,
+arm64). The Fleet file and API may change before 1.0; [CHANGELOG](CHANGELOG.md) says what changed.
+
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building from source and the
+checks a PR must pass. Report security issues privately: [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)

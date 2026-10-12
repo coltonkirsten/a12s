@@ -1,0 +1,34 @@
+name: Bug report
+description: Something in a12s does not work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest fleet.yaml and commands that show it.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: a12s version
+      description: Output of `a12s version`
+      placeholder: a12s v0.2.1
+    validations: { required: true }
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15 arm64, Docker Desktop 4.x
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: Relevant output of `a12s status` or `a12s logs <name>`. Remove any secrets.
+      render: text

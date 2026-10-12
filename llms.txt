@@ -30,21 +30,14 @@ claude setup-token                    # prints sk-ant-oat…; or use an Anthropi
 
 ## New project
 
-From the template (lead + two workers, TS and Python apps, browser dashboard):
-
-```sh
-gh repo create my-agents --private --template coltonkirsten/a12s-starter --clone && cd my-agents
-make demo                             # asks for the token once, a12s up, runs one task
-```
-
-From scratch:
-
 ```sh
 a12s init myproj && cd myproj         # fleet.yaml (one Computer "hello"), fleet.lock, bindings, .gitignore
 a12s creds set anthropic              # reads the token from stdin; run it in the Fleet's directory
 a12s up
 a12s prompt hello "Reply with the single word pong."
 ```
+
+Complete runnable examples, TypeScript and Python: https://github.com/coltonkirsten/a12s-cookbook
 
 ## fleet.yaml
 

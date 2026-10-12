@@ -1,7 +1,7 @@
 # Recipes
 
 Each recipe is complete: copy it, run it, change it. They assume a12s is installed and `a12s creds set anthropic`
-is done ([Quickstart](../README.md#quickstart-5-minutes)), and use the TypeScript or Python SDK ([SDK](sdk.md)).
+is done ([Quickstart](../README.md#quickstart)), and use the TypeScript or Python SDK ([SDK](sdk.md)).
 
 - [Lead and workers](#lead-and-workers)
 - [A web app (React, Vite, any dev server)](#a-web-app-react-vite-any-dev-server)
@@ -17,8 +17,7 @@ is done ([Quickstart](../README.md#quickstart-5-minutes)), and use the TypeScrip
 ## Lead and workers
 
 A lead splits a task, hands the parts to two workers, and combines their answers. The agents talk through their
-inboxes; your app sends the task and watches. This is what the
-[starter template](https://github.com/coltonkirsten/a12s-starter) runs.
+inboxes; your app sends the task and watches.
 
 ```text
 team/
