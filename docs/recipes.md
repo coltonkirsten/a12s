@@ -201,7 +201,7 @@ a12s gateway --web web          # opens http://127.0.0.1:7012/?key=…
 ```
 
 To show whole answers instead of events, use `a12s.turns()` the same way. The page can send work with
-`a12s.send(...)`; those Messages arrive `via="token:gateway"`. Limit what the page may do with
+`a12s.send(...)`; those Messages arrive `via="token:gateway-7012"` (the gateway's port). Limit what the page may do with
 `--allow status,events` (read-only) and `--computers lead`.
 
 ## Change an agent's instructions

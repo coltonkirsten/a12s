@@ -266,3 +266,12 @@ func TestFinishUpPartialFailure(t *testing.T) {
 		t.Errorf("exit %d, want 1", code)
 	}
 }
+
+func TestStaleGatewayTokensSparesLiveSiblings(t *testing.T) {
+	tokens := []api.Token{{Name: "gateway-7012"}, {Name: "gateway-7013"}, {Name: "gateway-7014"}, {Name: "gateway"}, {Name: "gateway-ci"}, {Name: "app"}}
+	live := map[int]bool{7013: true}
+	got := staleGatewayTokens(tokens, 7012, func(p int) bool { return live[p] })
+	if strings.Join(got, ",") != "gateway-7012,gateway-7014" {
+		t.Fatalf("stale = %v", got)
+	}
+}
