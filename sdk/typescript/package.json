@@ -28,7 +28,9 @@
     "directory": "sdk/typescript"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org",
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",

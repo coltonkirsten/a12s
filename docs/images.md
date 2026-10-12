@@ -16,7 +16,7 @@ A source build (`a12s version` says `dev`) uses local images: `a12s/slim:dev`, `
 `ghcr.io/coltonkirsten/a12s/<slim|browser|controller|svc-*>:<release>` and
 `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<harness version>`. `.github/workflows/release.yml` pushes all of them,
 for linux/amd64 and linux/arm64, before it publishes the binaries. `a12s up` pulls missing images on the host with
-the docker CLI, so a private registry works through your `docker login`.
+the docker CLI. The a12s images are public; a private registry of your own works through your `docker login`.
 
 ## Custom images
 

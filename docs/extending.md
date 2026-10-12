@@ -213,12 +213,10 @@ a warning on every status line. Services reach external TCP hosts with `egress.t
 ## Apps: the client SDK
 
 `@coltonkirsten/a12s-client` is a typed TypeScript client for the Controller's API: apply the Fleet, status, send and
-prompt, inbox list/get/withdraw, the event stream and Services. It's published privately to GitHub Packages.
+prompt, inbox list/get/withdraw, the event stream and Services. It's published to npm.
 
-```ini
-# .npmrc
-@coltonkirsten:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```sh
+npm i @coltonkirsten/a12s-client
 ```
 
 ```ts
