@@ -8,7 +8,7 @@ A Fleet is declared in three files that sit side by side:
 | `a12s.bindings.yaml` | **no** | Where each named credential comes from on this machine. |
 | `fleet.lock` | yes | The exact image, bundle, preset and Service digests the Fleet runs. |
 
-`a12s init` scaffolds all three (plus a `.gitignore` for the bindings file).
+`a12s init` scaffolds all three (plus a `.gitignore` for the bindings file and a README).
 
 The CLI finds the Fleet file from `--fleet`/`-F`, then `$A12S_FLEET`, then the nearest `fleet.yaml` in the current
 directory or a parent. The bindings file is `a12s.bindings.yaml` next to it unless `--bindings` says otherwise.
@@ -131,11 +131,16 @@ The CLI reads the bindings on the host and sends the values to the Controller wi
 ## fleet.lock
 
 ```yaml
+a12s:     v0.1.0
 images:   { slim: "sha256:…", browser: "sha256:…" }
 bundles:  { "claude-code@2.1.280": "sha256:…", "codex@0.154.0": "sha256:…" }
 presets:  { "./presets/scout": "sha256:…" }
 services: { "db@a12s/svc-mcp-postgres:0.1": "sha256:…" }
 ```
+
+`a12s: v0.1.0` pins the a12s release. A release binary of another version refuses to apply the Fleet and says how to
+upgrade: install that version, or change the line to the new version and run `a12s up`. `a12s init` and the first
+`a12s up` of a release binary write it; a source build only warns.
 
 `a12s up` resolves and appends missing entries and never changes an existing one. Moving a version forward is
 explicit: change the version or ref in `fleet.yaml` (a new key), or run `a12s lock update services/<svc>` to re-pin

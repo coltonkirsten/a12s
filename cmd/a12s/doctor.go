@@ -12,6 +12,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
 	"github.com/coltonkirsten/a12s/internal/fleet"
+	"github.com/coltonkirsten/a12s/internal/version"
 )
 
 type check struct {
@@ -99,21 +100,21 @@ func doctor(ctx context.Context, g *globals) []check {
 				seen["i"+img] = true
 				ref := img
 				if img == fleet.TierSlim || img == fleet.TierBrowser {
-					ref = "a12s/" + img + ":dev"
+					ref = version.Image(img)
 				}
 				if have(ref, lock.Images[img]) {
 					ok("image %s", ref)
 				} else {
-					bad("make image-"+img, "image %s is not on this machine", ref)
+					bad(fetchFix("make image-"+img, ref), "image %s is not on this machine", ref)
 				}
 			}
 			if k := c.Harness.BundleKey(); !seen["b"+k] {
 				seen["b"+k] = true
-				ref := "a12s/bundle-" + c.Harness.Kind + ":" + c.Harness.Version
+				ref := version.Bundle(c.Harness.Kind, c.Harness.Version)
 				if have(ref, lock.Bundles[k]) {
 					ok("bundle %s", k)
 				} else {
-					bad(fmt.Sprintf("make bundle-%s VERSION=%s", c.Harness.Kind, c.Harness.Version), "bundle %s is not on this machine", k)
+					bad(fetchFix(fmt.Sprintf("make bundle-%s VERSION=%s", c.Harness.Kind, c.Harness.Version), ref), "bundle %s is not on this machine", k)
 				}
 			}
 		}
@@ -123,7 +124,7 @@ func doctor(ctx context.Context, g *globals) []check {
 				ok("service image %s", s.Image)
 			} else {
 				fix := "docker pull " + s.Image
-				if strings.HasPrefix(s.Image, "a12s/svc-") {
+				if !version.Release() && strings.HasPrefix(s.Image, "a12s/svc-") {
 					fix = "make services"
 				}
 				bad(fix, "service image %s is not on this machine", s.Image)
@@ -132,7 +133,7 @@ func doctor(ctx context.Context, g *globals) []check {
 		if have(cli.DefaultControllerImage, "") {
 			ok("controller image %s", cli.DefaultControllerImage)
 		} else {
-			bad("make image-controller", "controller image %s is not on this machine", cli.DefaultControllerImage)
+			bad(fetchFix("make image-controller", cli.DefaultControllerImage), "controller image %s is not on this machine", cli.DefaultControllerImage)
 		}
 	}
 
@@ -243,4 +244,12 @@ func fetchesAtStart(cfg map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// fetchFix is the build target in a source build and a pull in a release, whose images come from the registry.
+func fetchFix(makeTarget, ref string) string {
+	if version.Release() {
+		return "docker login ghcr.io && docker pull " + ref
+	}
+	return makeTarget
 }

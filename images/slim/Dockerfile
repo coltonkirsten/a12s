@@ -1,7 +1,8 @@
 # a12s slim tier: Debian slim + Node + basic tools + computerd. Never contains a harness.
 # Build context: repo root.  docker build -f images/slim/Dockerfile -t a12s/slim:dev .
 
-FROM node:24-bookworm-slim AS computerd
+# computerd is plain JavaScript, so it builds once on the build platform for every target.
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS computerd
 WORKDIR /src
 COPY computerd/package.json computerd/package-lock.json ./
 # The SDK's optional bundled claude binary is never used (the HarnessBundle supplies it).
@@ -29,6 +30,10 @@ COPY --from=computerd /src/package.json /opt/a12s/computerd/package.json
 COPY --from=computerd /src/node_modules /opt/a12s/computerd/node_modules
 COPY --from=computerd /src/dist /opt/a12s/computerd/dist
 RUN mkdir -p /opt/a12s/bundles
+
+# Custom Computer images are built FROM this one and inherit the label; admission refuses an image without it.
+ARG A12S_VERSION=dev
+LABEL ai.a12s.computerd.version=$A12S_VERSION
 
 ENV NODE_ENV=production
 # computerd runs as root (with a reduced capability set from the driver) and

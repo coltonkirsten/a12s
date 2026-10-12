@@ -13,6 +13,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
 	"github.com/coltonkirsten/a12s/internal/fleet"
+	"github.com/coltonkirsten/a12s/internal/version"
 )
 
 func runUp(g *globals, args []string) error {
@@ -67,7 +68,13 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 	if err != nil {
 		return err
 	}
+	if err := checkA12sPin(onDisk, os.Stderr); err != nil {
+		return err
+	}
 	lock := cloneLock(onDisk)
+	if lock.A12s == "" && version.Release() {
+		lock.A12s = version.Version
+	}
 	b, err := cli.LoadBindings(g.bindings())
 	if err != nil {
 		return err
@@ -88,6 +95,7 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 
 	ctx, cancel := interruptible()
 	defer cancel()
+	cli.PullMissing(ctx, cli.FleetImages(f, image), os.Stderr)
 	c, err := cli.EnsureController(ctx, cli.StartOptions{
 		Fleet: f.Metadata.Name,
 		Image: image,
@@ -110,6 +118,7 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 // finishUp keeps what converged applied and pinned; any failure still fails the command.
 func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse, asleep bool, stdout, stderr io.Writer) error {
 	if resp.Lock != nil {
+		resp.Lock.A12s = lock.A12s
 		lock = resp.Lock
 	}
 	if added := addedPins(onDisk, lock); len(added) > 0 {
@@ -174,11 +183,14 @@ func (g *globals) presets(f *fleet.Fleet, lock *fleet.Lock) (map[string][]byte, 
 }
 
 func cloneLock(l *fleet.Lock) *fleet.Lock {
-	return &fleet.Lock{Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Presets: maps.Clone(l.Presets), Services: maps.Clone(l.Services)}
+	return &fleet.Lock{A12s: l.A12s, Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Presets: maps.Clone(l.Presets), Services: maps.Clone(l.Services)}
 }
 
 func addedPins(prev, next *fleet.Lock) []string {
 	var out []string
+	if next.A12s != prev.A12s {
+		out = append(out, "a12s@"+next.A12s)
+	}
 	for _, pair := range [][2]map[string]string{
 		{prev.Images, next.Images}, {prev.Bundles, next.Bundles}, {prev.Presets, next.Presets}, {prev.Services, next.Services},
 	} {
@@ -192,4 +204,18 @@ func addedPins(prev, next *fleet.Lock) []string {
 		out = append(out, keys...)
 	}
 	return out
+}
+
+// checkA12sPin keeps a Fleet on the a12s release its lock names: images, the Controller and computerd all come from
+// that release, so a different binary would run a mix.
+func checkA12sPin(l *fleet.Lock, stderr io.Writer) error {
+	switch {
+	case l.A12s == "" || l.A12s == version.Version:
+		return nil
+	case !version.Release():
+		fmt.Fprintf(stderr, "warning: %s pins a12s %s; this is a source build (dev) using local images\n", fleet.LockFile, l.A12s)
+		return nil
+	}
+	return fmt.Errorf("%s pins a12s %s, but this binary is %s\n  fix: install a12s %s, or to upgrade the Fleet set `a12s: %s` in %s and run a12s up",
+		fleet.LockFile, l.A12s, version.Version, l.A12s, version.Version, fleet.LockFile)
 }

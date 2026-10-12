@@ -23,17 +23,18 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/fleet"
 	"github.com/coltonkirsten/a12s/internal/inbox"
+	"github.com/coltonkirsten/a12s/internal/version"
 )
 
 func imageRef(image string) string {
 	switch image {
 	case fleet.TierSlim, fleet.TierBrowser:
-		return "a12s/" + image + ":dev"
+		return version.Image(image)
 	}
 	return image
 }
 
-func bundleRef(h fleet.Harness) string { return "a12s/bundle-" + h.Kind + ":" + h.Version }
+func bundleRef(h fleet.Harness) string { return version.Bundle(h.Kind, h.Version) }
 
 // PutFleet is `a12s up`; admission errors change nothing.
 func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api.PutFleetResponse, error) {

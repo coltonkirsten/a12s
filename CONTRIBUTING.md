@@ -32,9 +32,20 @@ make services     # the reference Services: svc-cron, svc-webhook, svc-mcp, svc-
 CI (`.github/workflows/ci.yml`) runs `go build`, `gofmt`, `go vet`, `go test`, computerd's lint, build and tests,
 and builds the slim and browser images and checks the Chromium sandbox. It needs no secrets.
 
+## Releasing
+
+Push a `v*` tag. `.github/workflows/release.yml` pushes the slim, browser, controller and reference Service images to
+`ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the default harness bundles if
+missing, then runs GoReleaser (`.goreleaser.yaml`): binaries for darwin and linux on amd64 and arm64, built with the
+release version and registry, and the formula in `coltonkirsten/homebrew-tap`. Last it publishes
+`@coltonkirsten/a12s-client` to GitHub Packages.
+
+It needs one secret, `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to the tap repo.
+
 ## Repository layout
 
 ```text
+internal/version/          the release version and the image refs it resolves (set by -ldflags)
 cmd/a12s/                  the CLI and, as `a12s controller`, the Controller (one Go binary)
 internal/fleet/            Fleet file: parse, defaults merge, validation, fleet.lock, Service manifests
 internal/driver/           Driver interface and types

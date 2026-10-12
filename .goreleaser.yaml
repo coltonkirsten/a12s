@@ -1,0 +1,47 @@
+# Release binaries and the Homebrew formula. Images are built by the images job in .github/workflows/release.yml.
+version: 2
+project_name: a12s
+
+builds:
+  - id: a12s
+    main: ./cmd/a12s
+    binary: a12s
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/coltonkirsten/a12s/internal/version.Version={{ .Tag }}
+      - -X github.com/coltonkirsten/a12s/internal/version.Registry=ghcr.io/coltonkirsten/a12s
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+
+brews:
+  - name: a12s
+    repository:
+      owner: coltonkirsten
+      name: homebrew-tap
+      git:
+        url: git@github.com:coltonkirsten/homebrew-tap.git
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY }}"
+    directory: Formula
+    homepage: https://github.com/coltonkirsten/a12s
+    description: Agent computers on Docker, declared in one Fleet file
+    license: MIT
+    # The release assets are in a private repo: the strategy in the tap downloads them with HOMEBREW_GITHUB_API_TOKEN.
+    download_strategy: GitHubPrivateRepositoryReleaseDownloadStrategy
+    custom_require: "../lib/private_strategy"
+    install: |
+      bin.install "a12s"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/a12s version")
