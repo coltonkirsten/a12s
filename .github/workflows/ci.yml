@@ -60,6 +60,10 @@ jobs:
               - examples/**
               - sdk/fixtures/**
               - sdk/typescript/test/api-fixtures.gen.ts
+              - llms.txt # its API surface block is checked against the routes and SDK clients
+              - sdk/typescript/src/client.ts
+              - sdk/python/a12s/_client.py
+              - sdk/python/a12s/_async.py
             sdk:
               - *shared
               - sdk/typescript/**

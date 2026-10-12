@@ -33,7 +33,8 @@ Most code here is written and reviewed by agents. These rules apply to every cha
 ## Where things are
 
 - `README.md`: overview and quickstart. `llms.txt`: the whole user-facing surface on one page, for agents; update it
-  when a command, a Fleet field or an SDK method changes. `CONTRIBUTING.md`: build, test, layout, end-to-end scripts.
+  when a command, a Fleet field or an SDK method changes (its API surface block is generated and checked by
+  `go test ./internal/controller`). `CONTRIBUTING.md`: build, test, layout, end-to-end scripts.
   `CHANGELOG.md`: user-visible changes per release, breaking ones with what to do.
 - `docs/`: concepts, recipes, SDK, HTTP API, Fleet file, CLI, inbox and power policy, Services, credentials,
   security, architecture, images.
