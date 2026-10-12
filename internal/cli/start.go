@@ -20,14 +20,16 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
+	"github.com/coltonkirsten/a12s/internal/version"
 )
 
+var DefaultControllerImage = version.Image("controller")
+
 const (
-	DefaultControllerImage = "a12s/controller:dev"
-	ControllerPort         = "7000/tcp"
-	controllerStateDir     = "/var/lib/a12s"
-	controllerDataDir      = "/var/lib/a12s-data"
-	dockerSocket           = "/var/run/docker.sock"
+	ControllerPort     = "7000/tcp"
+	controllerStateDir = "/var/lib/a12s"
+	controllerDataDir  = "/var/lib/a12s-data"
+	dockerSocket       = "/var/run/docker.sock"
 )
 
 type ControllerNames struct {

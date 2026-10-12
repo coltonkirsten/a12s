@@ -47,6 +47,7 @@ func commands() []command {
 		{"drive", "ls | rm <name> [--yes]", "list drives; rm and down --purge are the only commands that destroy data", runDrive},
 		{"down", "[--purge [--yes]]", "remove Computers, Controller and network; keep drives (--purge destroys them)", runDown},
 		{"doctor", "", "check Docker, images, bindings, the Controller and Service health; one fix per line", runDoctor},
+		{"version", "", "print the a12s release and where its images come from", runVersion},
 		{"completion", "bash|zsh", "print a shell completion script", runCompletion},
 		{"controller", "", "run the Controller (inside its container)", runControllerCmd},
 	}

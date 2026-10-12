@@ -15,6 +15,8 @@ const LockFile = "fleet.lock"
 
 // Lock entries are only ever added; an existing pin changes only by editing the file.
 type Lock struct {
+	// A12s is the a12s release this Fleet runs on; a release binary of another version refuses to apply it.
+	A12s     string            `yaml:"a12s,omitempty" json:"a12s,omitempty"`
 	Images   map[string]string `yaml:"images" json:"images"`
 	Bundles  map[string]string `yaml:"bundles" json:"bundles"`
 	Presets  map[string]string `yaml:"presets" json:"presets"`

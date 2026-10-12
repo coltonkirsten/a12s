@@ -9,6 +9,17 @@ There are two tiers, plus custom image references (`image: ghcr.io/you/your-imag
 | `slim` (`a12s/slim:dev`) | `node:24-bookworm-slim` plus ca-certificates, git, ripgrep, python3, curl, util-linux, and computerd. |
 | `browser` (`a12s/browser:dev`) | `slim` plus Debian Chromium, fonts, the Playwright library and the Playwright MCP server, and a seccomp profile so Chromium keeps its own sandbox. |
 
+## Image references
+
+A source build (`a12s version` says `dev`) uses local images: `a12s/slim:dev`, `a12s/browser:dev`,
+`a12s/controller:dev`, `a12s/bundle-<kind>:<version>`. A release build resolves the images published with it:
+`ghcr.io/coltonkirsten/a12s/<slim|browser|controller|svc-*>:<release>` and
+`ghcr.io/coltonkirsten/a12s/bundle-<kind>:<harness version>`. `.github/workflows/release.yml` pushes all of them,
+for linux/amd64 and linux/arm64, before it publishes the binaries. `a12s up` pulls missing images on the host with
+the docker CLI, so a private registry works through your `docker login`.
+
+## Custom images
+
 Toolchain-heavy images should be derived from a tier rather than a new tier. A custom image needs computerd at
 `/opt/a12s/computerd` and should ship `flock(1)` (util-linux), which secret injection uses.
 
@@ -27,7 +38,8 @@ whose filesystem is `/bundle/{bundle.json, bin/<binary>, …}`:
   `/opt/a12s/bundles/<kind>-<version>-<imageID[:12]>/`, keyed by image identity.
 - `signInHosts` are added to that Computer's egress allowlist automatically, so a Fleet lists only the hosts its work
   needs.
-- Default refs are `a12s/bundle-<kind>:<version>`; `fleet.lock` pins the image ID.
+- Default refs are `a12s/bundle-<kind>:<version>` in a source build and
+  `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>` in a release; `fleet.lock` pins the image ID.
 - Bumping a harness is one edit to `harness.version` and an `a12s up`. No image is rebuilt.
 
 `make bundles` builds the Claude Code and Codex bundles locally. `.github/workflows/bundles.yml` builds each new

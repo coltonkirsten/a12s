@@ -1,0 +1,125 @@
+# On a v* tag: push every image of the release to ghcr.io/coltonkirsten/a12s/<name>:<version>, make sure the
+# default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDK.
+# Binaries go last so a released binary never points at images that are not there yet.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/coltonkirsten/a12s
+  SOURCE: https://github.com/${{ github.repository }}
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build and push
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          build() { # name dockerfile context [build-args...]
+            local name="$1" file="$2" ctx="$3"; shift 3
+            local args=()
+            for a in "$@"; do args+=(--build-arg "$a"); done
+            docker buildx build --platform linux/amd64,linux/arm64 --push \
+              --label "org.opencontainers.image.source=$SOURCE" \
+              --label "org.opencontainers.image.version=$tag" \
+              "${args[@]}" -f "$file" -t "$REGISTRY/$name:$tag" "$ctx"
+          }
+          build slim images/slim/Dockerfile . "A12S_VERSION=$GITHUB_REF_NAME"
+          build browser images/browser/Dockerfile . "SLIM_IMAGE=$REGISTRY/slim:$tag"
+          build controller images/controller/Dockerfile . "A12S_VERSION=$GITHUB_REF_NAME" "A12S_REGISTRY=$REGISTRY"
+          build svc-cron services/go.Dockerfile . SERVICE=svc-cron
+          build svc-webhook services/go.Dockerfile . SERVICE=svc-webhook
+          build svc-mcp services/svc-mcp/Dockerfile .
+          build svc-mcp-postgres services/svc-mcp/postgres.Dockerfile services/svc-mcp "SVC_MCP_IMAGE=$REGISTRY/svc-mcp:$tag"
+      - name: computer images carry the computerd label
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for img in slim browser; do
+            got=$(docker buildx imagetools inspect "$REGISTRY/$img:$tag" --format '{{ json .Image }}' | jq -r '.["linux/amd64"].config.Labels["ai.a12s.computerd.version"]')
+            echo "$img: $got"; test "$got" = "$GITHUB_REF_NAME"
+          done
+
+  bundles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # `a12s init` writes these harness versions; a release must resolve them.
+      - name: publish the default bundles if missing
+        run: |
+          set -euo pipefail
+          for kv in claude-code=2.1.280 codex=0.154.0; do
+            kind="${kv%%=*}" v="${kv#*=}"
+            if docker manifest inspect "$REGISTRY/bundle-$kind:$v" > /dev/null 2>&1; then echo "$kind $v: published"; continue; fi
+            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg VERSION="$v" \
+              --label "org.opencontainers.image.source=$SOURCE" -t "$REGISTRY/bundle-$kind:$v" "images/bundles/$kind"
+          done
+
+  binaries:
+    needs: [images, bundles]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+
+  sdk:
+    needs: binaries
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: "@coltonkirsten"
+      - run: npm ci
+      - run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+      - run: npm run build && npm test
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

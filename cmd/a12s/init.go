@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/coltonkirsten/a12s/internal/fleet"
+	"github.com/coltonkirsten/a12s/internal/version"
 )
 
 // runInit leaves credentials unbound on purpose: the first `a12s up` stops with
@@ -56,6 +59,22 @@ func runInit(g *globals, args []string) error {
 			return err
 		}
 	}
+	lockPath := filepath.Join(dir, fleet.LockFile)
+	if _, err := os.Stat(lockPath); errors.Is(err, fs2NotExist) {
+		l := fleet.NewLock()
+		if version.Release() {
+			l.A12s = version.Version
+		}
+		if err := l.Save(lockPath); err != nil {
+			return err
+		}
+	}
+	readme := filepath.Join(dir, "README.md")
+	if _, err := os.Stat(readme); errors.Is(err, fs2NotExist) {
+		if err := os.WriteFile(readme, []byte(starterReadme(filepath.Base(absDir(dir)))), 0o644); err != nil {
+			return err
+		}
+	}
 	gi := filepath.Join(dir, ".gitignore")
 	if data, err := os.ReadFile(gi); err != nil || !strings.Contains(string(data), "a12s.bindings.yaml") {
 		f, err := os.OpenFile(gi, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -66,9 +85,9 @@ func runInit(g *globals, args []string) error {
 		f.Close()
 	}
 	if g.json {
-		return printJSON(map[string]any{"dir": dir, "files": []string{fleetPath, bpath, gi}})
+		return printJSON(map[string]any{"dir": dir, "files": []string{fleetPath, lockPath, bpath, gi, readme}})
 	}
-	fmt.Printf("wrote %s, a12s.bindings.yaml and .gitignore in %s\n", "fleet.yaml", dir)
+	fmt.Printf("wrote fleet.yaml, fleet.lock, a12s.bindings.yaml, .gitignore and README.md in %s\n", dir)
 	cred := "anthropic"
 	if *harness == "codex" {
 		cred = "openai"
@@ -129,7 +148,7 @@ computers:
 		b.WriteString("\nservices:\n")
 	}
 	if db {
-		b.WriteString(`  pg:                       # the Fleet's own Postgres, a stock image described inline
+		fmt.Fprintf(&b, `  pg:                       # the Fleet's own Postgres, a stock image described inline
     image: postgres:17
     manifest:
       ports: { db: { port: 5432, protocol: tcp } }
@@ -141,7 +160,7 @@ computers:
     config: { env: { POSTGRES_PASSWORD_FILE: /run/a12s/secrets/postgres } }
 
   db:                       # an MCP server that holds the database login; Computers that use it never see it
-    image: a12s/svc-mcp-postgres:0.1
+    image: %[1]s
     credentials: [postgres]
     uses: [pg]
     config:
@@ -149,16 +168,16 @@ computers:
       args: ["postgresql://postgres@${PGHOST}:${PGPORT}/postgres"]
       envFrom: { PGPASSWORD: postgres }
       hostPortFrom: { A12S_SERVICE_PG_DB: [PGHOST, PGPORT] }
-`)
+`, version.Service("svc-mcp-postgres"))
 	}
 	if cron {
-		b.WriteString(`  clock:                    # a cron: enqueues into hello's inbox on a schedule
-    image: a12s/svc-cron:0.1
+		fmt.Fprintf(&b, `  clock:                    # a cron: enqueues into hello's inbox on a schedule
+    image: %[1]s
     grants: { send: [hello] }
     config:
       jobs:
         - { name: morning, cron: "0 7 * * *", to: hello, body: "Good morning. Summarize what is on your plate." }
-`)
+`, version.Service("svc-cron"))
 	}
 	bindings := "# Per deployment, git-ignored. Maps each credential name in fleet.yaml to where it comes from here.\n# a12s creds set <name> fills this in.\ncredentials: {}\n"
 	return b.String(), bindings, nil
@@ -174,4 +193,15 @@ func validFleetName(s string) bool {
 		}
 	}
 	return true
+}
+
+func starterReadme(name string) string {
+	pin := "the a12s version in fleet.lock"
+	if version.Release() {
+		pin = "a12s " + version.Version + ", pinned in fleet.lock"
+	}
+	return "# " + name + "\n\n" +
+		"An a12s Fleet. a12s is a pinned dependency (" + pin + "), installed like Docker: never vendor or edit its source here.\n" +
+		"Extend it through fleet.yaml, your own images and Services, and the client SDK.\n\n" +
+		"```sh\na12s creds set anthropic   # once per machine\na12s up\na12s prompt hello \"hi\"\na12s down\n```\n"
 }

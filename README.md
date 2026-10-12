@@ -27,7 +27,36 @@ a12s status                  # power, session, inbox, warnings
 a12s down                    # remove Computers and Controller, keep drives
 ```
 
-## Quickstart (macOS)
+## Install
+
+a12s is a tool you install, like Docker. A project pins a release in its `fleet.lock`; it never vendors or edits
+a12s source. The repo, release assets and images are private, so installing needs a GitHub token with `repo` (to
+download the release) and `read:packages` (to pull images from ghcr.io):
+
+```sh
+export HOMEBREW_GITHUB_API_TOKEN=<token>          # brew downloads the private release asset with it
+brew tap coltonkirsten/tap https://github.com/coltonkirsten/homebrew-tap   # git needs access to the private tap
+brew install coltonkirsten/tap/a12s
+echo <token> | docker login ghcr.io -u <github-user> --password-stdin      # images are pulled on the host
+a12s version                                       # a12s v0.1.0 (images from ghcr.io/coltonkirsten/a12s)
+```
+
+A released binary resolves every image by its own version: `slim` is `ghcr.io/coltonkirsten/a12s/slim:<version>`,
+the Controller is `…/controller:<version>`, and `a12s init` writes the reference Services as `…/svc-cron:<version>`.
+Harness bundles are versioned by the harness (`…/bundle-claude-code:2.1.280`). `a12s up` pulls missing images with
+your `docker login`. A source build (`make build`) is version `dev` and uses the local images from `make images`.
+
+```sh
+a12s init myproject && cd myproject   # fleet.yaml, fleet.lock (pins the a12s release), .gitignore, README
+a12s creds set anthropic              # paste a `claude setup-token` token
+a12s up && a12s prompt hello "Reply with the single word pong."
+a12s down
+```
+
+To build on a12s without forking it (your own Services, agent images, harness versions, credentials, drives and
+egress, and the TypeScript client), see [Extending a12s](docs/extending.md).
+
+## Quickstart from source (macOS)
 
 Needs Go 1.26+, Docker Desktop running, and Claude Code signed in to your Claude account.
 
@@ -60,7 +89,7 @@ written to the image or a disk. For Codex, bind `openai` to an OpenAI API key or
 ### Start your own Fleet
 
 ```sh
-a12s init demo --with cron && cd demo     # scaffold fleet.yaml, bindings and .gitignore, plus a clock Service
+a12s init demo --with cron && cd demo     # scaffold fleet.yaml, fleet.lock, bindings, .gitignore, plus a clock Service
 a12s creds set anthropic                  # paste a `claude setup-token` token
 make -C .. services && a12s up            # build the reference Services, then start everything
 a12s doctor                               # one line per check, with the fix
@@ -85,6 +114,7 @@ a12s doctor                               # one line per check, with the fix
 - [Security model](docs/security.md): isolation, egress, identity and honest limits
 - [Architecture](docs/architecture.md): the Controller, the Docker driver, computerd, the APIs and the journal
 - [Images and harness bundles](docs/images.md): the slim and browser tiers, bundles, the Chromium sandbox
+- [Extending a12s](docs/extending.md): custom Services and agent images, the client SDK, without forking
 
 ## Status
 
