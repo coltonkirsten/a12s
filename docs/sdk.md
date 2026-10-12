@@ -182,12 +182,31 @@ the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-
 ```
 
 The page may use `status`, `events`, `send` and `inbox` on every Computer; narrow that with
-`--allow status,events` and `--computers lead,worker1`. Each gateway has its own token, `gateway-<port>`, so Messages from the page arrive `via` `token:gateway-7012`. It
-is revoked when the gateway stops; one left by a killed gateway is removed when the next gateway starts. Several
-gateways can serve one Fleet on different `--port`s. The gateway
-answers only `127.0.0.1` and `localhost`, needs its key, and refuses writes from other origins, so other sites open in
-the same browser can't use it. It is for this machine: to serve a page to other people, put your own server and
-authentication in front of a scoped token.
+`--allow status,events` and `--computers lead,worker1`. Each gateway has its own token, `gateway-<port>`, so Messages
+from the page arrive `via` `token:gateway-7012`. It is revoked when the gateway stops; one left by a killed gateway is
+removed when the next gateway starts. Several gateways can serve one Fleet on different `--port`s.
+
+The gateway answers only `127.0.0.1` and `localhost`, needs its key, and refuses writes from other origins, so other
+sites open in the same browser can't use it. It is for this machine: a non-loopback `--addr` (`0.0.0.0`, a LAN
+address) or a request for any other host name is refused, with the fix below.
+
+### Serve other people
+
+The gateway has no users, only one key. To put an app in front of other people, run your own server next to the
+Fleet: it logs people in, decides what each may do, and calls a12s with a scoped token from server code, never the
+browser.
+
+```sh
+a12s token create web --actions send,status --computers lead
+```
+
+```ts
+// your server, on the Fleet's machine, behind your login
+const a12s = await connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
+app.post("/ask", requireLogin, async (req, res) => res.json(await a12s.send("lead", { body: req.body.q, sender: req.user.id })));
+```
+
+The Controller's port is in `~/.a12s/<fleet>/controller.json`; Messages arrive `via="token:web"`, with your `sender`.
 
 With a bundler, `npm install @coltonkirsten/a12s` and `import { connect } from "@coltonkirsten/a12s"` work the same way:
 in a browser, `connect()` talks to the page's own origin.

@@ -63,8 +63,12 @@ func Handler(cfg Config) http.Handler {
 		mux.Handle("/", http.FileServerFS(builtin))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !loopbackHost(r.Host) {
-			refuse(w, http.StatusForbidden, "the gateway only answers http://127.0.0.1 or http://localhost", "open the page at http://127.0.0.1:<port>")
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if !LoopbackHost(host) {
+			refuse(w, http.StatusForbidden, "the gateway only answers http://127.0.0.1 or http://localhost on this machine, not "+r.Host, ServeOthers)
 			return
 		}
 		if o := r.Header.Get("Origin"); o != "" && r.Method != http.MethodGet && r.Method != http.MethodHead && o != "http://"+r.Host {
@@ -155,11 +159,11 @@ func devTransport() http.RoundTripper {
 	return t
 }
 
-func loopbackHost(hostport string) bool {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-	}
+// ServeOthers is what to do instead of exposing the gateway, which holds a Fleet token behind nothing but a key.
+const ServeOthers = "To serve other people, put your own server with login in front of a scoped token; see docs/sdk.md#serve-other-people"
+
+// LoopbackHost reports whether host (no port) names this machine only.
+func LoopbackHost(host string) bool {
 	host = strings.Trim(host, "[]")
 	if host == "localhost" {
 		return true
