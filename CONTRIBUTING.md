@@ -20,6 +20,8 @@ npm run lint      # type-check
 npm test          # build, then node --test
 ```
 
+The client SDK in `sdk/typescript` builds and tests the same way.
+
 Images:
 
 ```sh
@@ -57,6 +59,7 @@ internal/cli/              CLI helpers: client, bindings, creds, SSE, output for
 internal/computerd/        Go client for computerd's HTTP+SSE API
 internal/serviceinit/      a12s-init: the Service entrypoint, privilege drop and TCP forwarders
 internal/sse/              SSE reader and writer
+sdk/typescript/            @coltonkirsten/a12s-client, the typed client apps use
 computerd/                 TypeScript daemon inside every Computer: server, journal, adapters, system tools, MCP bridge
 images/slim, images/browser, images/controller   container images
 images/bundles/            HarnessBundle images and conformance.sh
