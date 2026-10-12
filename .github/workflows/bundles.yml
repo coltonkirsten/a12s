@@ -1,11 +1,13 @@
-# On demand only (Actions > bundles > Run workflow; docs/images.md): discovers the latest
-# Claude Code and Codex versions and, for each one not yet in ghcr, builds linux/amd64 +
-# linux/arm64, runs the conformance check on both, then pushes.
+# Daily, or by hand (Actions > bundles > Run workflow; docs/images.md): discovers the latest
+# Claude Code and Codex versions and stops if both are already in ghcr (a few seconds, no build).
+# For each one that is not, builds linux/amd64 + linux/arm64, runs the conformance check on both, then pushes.
 # The fetch stage runs on the build platform, so the build needs no emulation;
 # only the arm64 conformance run uses QEMU.
 name: bundles
 
 on:
+  schedule:
+    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       claude_version:

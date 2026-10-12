@@ -1,5 +1,5 @@
 // Minimal MCP stdio client: launch Playwright MCP exactly as computerd would, navigate to a data: URL.
-// Exits 1 unless the page's text comes back (the tiers step of make check).
+// Exits 1 unless the page's text comes back (the tiers step of scripts/check.sh).
 setTimeout(() => { console.error('FAIL: timed out'); process.exit(1); }, 60_000).unref();
 import { spawn } from 'node:child_process';
 const p = spawn('node', ['/opt/a12s/playwright-mcp/node_modules/@playwright/mcp/cli.js', '--config', '/opt/a12s/playwright-mcp/config.json'], { stdio: ['pipe', 'pipe', 'inherit'] });

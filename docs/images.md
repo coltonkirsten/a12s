@@ -14,8 +14,8 @@ There are two tiers, plus custom image references (`image: ghcr.io/you/your-imag
 A source build (`a12s version` says `dev`) uses local images: `a12s/slim:dev`, `a12s/browser:dev`,
 `a12s/controller:dev`, `a12s/bundle-<kind>:<version>`. A release build resolves the images published with it:
 `ghcr.io/coltonkirsten/a12s/<slim|browser|controller|svc-*>:<release>` and
-`ghcr.io/coltonkirsten/a12s/bundle-<kind>:<harness version>`. `make release` pushes all of them,
-for linux/amd64 and linux/arm64, before it publishes the binaries. `a12s up` pulls missing images on the host with
+`ghcr.io/coltonkirsten/a12s/bundle-<kind>:<harness version>`. The release workflow (`.github/workflows/release.yml`, on a `v*` tag) pushes all of them, for linux/amd64 and
+linux/arm64, before it publishes the binaries. `a12s up` pulls missing images on the host with
 the docker CLI. The a12s images are public; a private registry of your own works through your `docker login`.
 
 ## Custom images
@@ -47,8 +47,8 @@ whose filesystem is `/bundle/{bundle.json, bin/<binary>, …}`:
   `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>` in a release; `fleet.lock` pins the image ID.
 - Bumping a harness is one edit to `harness.version` and an `a12s up`. No image is rebuilt.
 
-`make bundles` builds the Claude Code and Codex bundles locally. `.github/workflows/bundles.yml`, started by hand,
-builds the latest upstream releases for amd64 and arm64, runs `images/bundles/conformance.sh` (which checks the adapter's
+`make bundles` builds the Claude Code and Codex bundles locally. `.github/workflows/bundles.yml` checks daily (or by hand) for a
+Claude Code or Codex release that is not yet in ghcr; it stops there when there is none. For a new one it builds it for amd64 and arm64, runs `images/bundles/conformance.sh` (which checks the adapter's
 protocol and the receipt signal the inbox relies on), and publishes `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>`.
 
 ## The browser tier
