@@ -2,6 +2,13 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Changed
+- `llms.txt` is enough on its own to build on a12s: credentials (and the wrapped setup-token paste), every Fleet
+  field, what the agent sees, streaming with `prompt(..., { onEvent })`, a hand-off recipe, custom images, Services
+  with a complete svckit example and manifest, and a gateway page. The README links its raw URL for coding agents.
+
 ## v0.3.0 (2026-10-12)
 
 a12s is now its core: the Controller, computerd, the slim image, the harness bundles, svckit, the TypeScript and
