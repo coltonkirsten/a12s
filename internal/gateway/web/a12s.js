@@ -431,13 +431,18 @@ var TurnBuilder = class {
     if (!ev.turn) return void 0;
     const key = `${ev.computer}\0${ev.turn}`;
     let t = this.open.get(key);
-    if (!t) this.open.set(key, t = { text: "", messages: [] });
+    if (!t) this.open.set(key, t = { text: "", afterTool: false, messages: [] });
     switch (ev.type) {
       case "turn.started":
         t.messages = ev.data.inbox?.messages ?? [];
         t.startedAt = ev.ts;
         return void 0;
+      case "tool.started":
+        t.afterTool = true;
+        return void 0;
       case "text.delta":
+        if (t.afterTool && t.text && !t.text.endsWith("\n")) t.text += "\n";
+        t.afterTool = false;
         t.text += ev.data.text;
         return void 0;
       case "turn.finished":

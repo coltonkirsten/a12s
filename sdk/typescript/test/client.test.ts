@@ -231,7 +231,9 @@ test("events: every Computer merged, ready() after each stream is live, then tur
     setTimeout(() => {
       res.write(e(6, "turn.started", { inbox: { batch: "b", pendingAfter: 0, messages: [{ id: "m", via: "local", sender: "app" }] } }));
       res.write(e(7, "text.delta", { text: `hi from ${name}` }));
-      res.write(e(8, "turn.finished", { status: "completed", usage: null }));
+      res.write(e(8, "tool.started", { id: "u", name: "mcp__a12s__send" }));
+      res.write(e(9, "text.delta", { text: "SENT" }));
+      res.write(e(10, "turn.finished", { status: "completed", usage: null }));
     }, 30);
   });
   try {
@@ -243,7 +245,7 @@ test("events: every Computer merged, ready() after each stream is live, then tur
       got.push(`${t.computer}:${t.status}:${t.text}`);
       if (got.length === 2) break;
     }
-    assert.deepEqual(got.sort(), ["lead:completed:hi from lead", "w1:completed:hi from w1"]);
+    assert.deepEqual(got.sort(), ["lead:completed:hi from lead\nSENT", "w1:completed:hi from w1\nSENT"]);
   } finally {
     close();
   }

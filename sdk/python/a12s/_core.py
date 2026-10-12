@@ -205,6 +205,7 @@ def delivered_turn(ev: Event, computer: str, id: str) -> str | None:
 @dataclass
 class _OpenTurn:
     text: str = ""
+    after_tool: bool = False
     messages: list[TurnInboxMessage] = field(default_factory=list)
     started_at: str | None = None
 
@@ -226,9 +227,15 @@ class TurnBuilder:
             messages = inbox.get("messages") if isinstance(inbox, dict) else None
             t.messages = [from_json(TurnInboxMessage, m) for m in messages] if isinstance(messages, list) else []
             t.started_at = ev.ts or None
+        elif ev.type == "tool.started":
+            t.after_tool = True
         elif ev.type == "text.delta":
             text = data.get("text")
             if isinstance(text, str):
+                # Text before and after a tool call are separate messages: keep them on separate lines.
+                if t.after_tool and t.text and not t.text.endswith("\n"):
+                    t.text += "\n"
+                t.after_tool = False
                 t.text += text
         elif ev.type == "turn.finished":
             del self._open[key]
