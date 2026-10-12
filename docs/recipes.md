@@ -4,6 +4,7 @@ Each recipe is complete: copy it, run it, change it. They assume a12s is install
 is done ([Quickstart](../README.md#quickstart-5-minutes)), and use the TypeScript or Python SDK ([SDK](sdk.md)).
 
 - [Lead and workers](#lead-and-workers)
+- [A web app (React, Vite, any dev server)](#a-web-app-react-vite-any-dev-server)
 - [A live dashboard in the browser](#a-live-dashboard-in-the-browser)
 - [Change an agent's instructions](#change-an-agents-instructions)
 - [Give agents tools and network access](#give-agents-tools-and-network-access)
@@ -125,6 +126,47 @@ one; the workers' replies then continue that new conversation. Leave it out when
 To see who handed work to whom, look at `t.messages`: each has `via` (`computer:worker1`, `local`, …) and `sender`.
 What an agent sent is in `t.tools`: a worker's `send` is the call named `mcp__a12s__send`, and `input.body` is its
 result.
+
+## A web app (React, Vite, any dev server)
+
+This is the way to build a frontend on a Fleet. Run your dev server through the gateway: the page and the API share
+one origin, so the page needs no token, no CORS setup and no proxy config, and hot reload keeps working.
+
+```sh
+npm create vite@latest web -- --template react-ts && cd web
+npm install && npm install @coltonkirsten/a12s
+a12s gateway -F ../fleet.yaml -- npm run dev    # open http://127.0.0.1:7012, not the dev server's own port
+```
+
+```tsx
+// src/App.tsx
+import { useEffect, useState } from "react";
+import { connect } from "@coltonkirsten/a12s";
+
+const a12s = await connect();                    // same origin as the gateway: no URL, no token
+
+export default function App() {
+  const [computers, setComputers] = useState<string[]>([]);
+  const [sent, setSent] = useState("");
+  useEffect(() => {
+    a12s.status().then((s) => setComputers(s.computers.map((c) => c.name)));
+  }, []);
+  return (
+    <main>
+      <p>{computers.join(", ")}</p>
+      <button onClick={async () => setSent((await a12s.send("hello", "Hi from the page")).id)}>Send</button>
+      <p>{sent}</p>
+    </main>
+  );
+}
+```
+
+`a12s gateway -- <command>` starts the command, waits for the URL it prints (`Local: http://localhost:5173/`), and
+forwards everything except `/v1/` and `/a12s.js` to it, websockets (Vite's hot reload) included. Ctrl-C stops both.
+If your dev server doesn't print its URL, add `--dev-port 3000`. If it is already running, use
+`a12s gateway --dev http://localhost:5173` instead. Next.js, webpack and other dev servers work the same way.
+
+For production, `npm run build` and serve the output with `a12s gateway --web dist`.
 
 ## A live dashboard in the browser
 

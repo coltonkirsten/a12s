@@ -27,13 +27,11 @@ func newGateway(t *testing.T, web fstest.MapFS) (*httptest.Server, *[]*http.Requ
 	}))
 	t.Cleanup(ctl.Close)
 	u, _ := url.Parse(ctl.URL)
-	var h http.Handler
-	if web == nil {
-		h = Handler(u, "scoped", nil)
-	} else {
-		h = Handler(u, "scoped", web)
+	cfg := Config{Controller: u, Token: "scoped"}
+	if web != nil {
+		cfg.Web = web
 	}
-	gw := httptest.NewServer(h)
+	gw := httptest.NewServer(Handler(cfg))
 	t.Cleanup(gw.Close)
 	return gw, &seen
 }

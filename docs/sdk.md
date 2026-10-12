@@ -157,9 +157,15 @@ in between: it serves your page, serves the TypeScript SDK at `/a12s.js`, and fo
 with a scoped token the page never sees.
 
 ```sh
-a12s gateway                 # the built-in dashboard: every Computer, live events, a send box
-a12s gateway --web ./web     # your own app instead, at http://127.0.0.1:7012
+a12s gateway                     # the built-in dashboard: every Computer, live events, a send box
+a12s gateway -- npm run dev      # your dev server (Vite, Next.js, …) behind the gateway, hot reload included
+a12s gateway --dev http://localhost:5173   # a dev server that is already running
+a12s gateway --web ./dist        # a built app (a directory of files)
 ```
+
+Everything is at http://127.0.0.1:7012. With a dev server, the gateway forwards every request except `/v1/` and
+`/a12s.js` to it, websockets included, so the page and the API share one origin. It finds the dev server's port in
+the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-web-app-react-vite-any-dev-server).
 
 ```html
 <script type="module">
@@ -175,7 +181,8 @@ answers only `127.0.0.1` and `localhost` and refuses writes from other origins, 
 browser can't use it. It is for this machine: to serve a page to other people, put your own server and
 authentication in front of a scoped token.
 
-With a bundler, `npm install @coltonkirsten/a12s` and `import { connect } from "@coltonkirsten/a12s"` work the same way.
+With a bundler, `npm install @coltonkirsten/a12s` and `import { connect } from "@coltonkirsten/a12s"` work the same way:
+in a browser, `connect()` talks to the page's own origin.
 
 ## Everything else
 
