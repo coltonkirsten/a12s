@@ -20,7 +20,11 @@ npm run lint      # type-check
 npm test          # build, then node --test
 ```
 
-The client SDK in `sdk/typescript` builds and tests the same way.
+The client SDK in `sdk/typescript` builds and tests the same way; `npm test` also bundles its root entry with esbuild
+`--platform=browser`, so a `node:` import there fails. Its types in `src/types.ts` are hand-written; to keep them in
+step with `internal/api`, `go test ./internal/api` renders every API type into `sdk/typescript/test/api-fixtures.gen.ts`
+and fails if the file is stale. After changing an API type, run `go test ./internal/api -run TestSDKFixtures -update`
+and fix `src/types.ts` until the SDK's `npm run lint` passes.
 
 Images:
 

@@ -107,12 +107,27 @@ export interface ComputerStatus {
   generation: number;
   stagedGeneration?: number;
   credentialGeneration?: number;
-  homeSize?: number;
+  /** A quantity such as "10Gi". */
+  homeSize?: string;
   drives?: string[];
   egressMode?: string;
   warnings?: string[];
   inbox?: InboxSummary;
+  /** Set only on a wake --clear-inbox answer: how many Messages were discarded. */
+  inboxCleared?: number;
   power?: PowerStatus;
+}
+
+export interface DriveRow {
+  name: string;
+  kind: "home" | "work" | "state";
+  computer?: string;
+  service?: string;
+  /** A quantity such as "10Gi". */
+  size?: string;
+  access?: string;
+  attachedTo?: string[];
+  orphaned?: boolean;
 }
 
 export interface ServiceStatus {
@@ -139,8 +154,10 @@ export interface StatusResponse {
   fleet: string;
   egressEnforcement: string;
   computers: ComputerStatus[];
+  orphanedDrives?: DriveRow[];
   credentialsLoaded: boolean;
   warnings?: string[];
+  orphanedInboxes?: InboxSummary[];
   services?: ServiceStatus[];
 }
 
