@@ -16,6 +16,44 @@ change.
 - Each Computer and Service has its own isolated internal Docker network with isolated gateway mode. There is no
   path to host services, to other Computers or to the Controller's owner API. Containers publish no ports, except a
   Service's explicit `publish:`.
+- Computers and Services run under Docker's default seccomp profile, unless the Fleet sets `security.seccomp` on
+  a Computer (below).
+
+## Seccomp
+
+Some software in a custom image needs syscalls Docker's default profile blocks; Chromium's own sandbox, for example,
+needs user namespaces (`clone`/`unshare` with `CLONE_NEWUSER`). `security.seccomp` gives one Computer (or every
+Computer, from `defaults`) its own profile instead of turning that sandbox off:
+
+```yaml
+computers:
+  browser:
+    image: ghcr.io/you/browser-agent:1
+    security:
+      seccomp: ./profiles/chromium.json     # relative to fleet.yaml
+```
+
+- **It replaces only the seccomp filter.** The Computer keeps `no-new-privileges`, the same capabilities, the
+  read-only root filesystem and everything else above. There is no privileged mode and no capability option.
+- **Only the Fleet's owner sets it.** It is read from `fleet.yaml`, never from an image label or file, so a pulled
+  image can't loosen its own sandbox.
+- **It is checked before anything changes.** `a12s up` reads the file and refuses it unless it is a seccomp profile
+  in Docker's JSON format with only the known top-level fields (`defaultAction`, `defaultErrnoRet`, `architectures`,
+  `archMap`, `syscalls`, `flags`), every syscall rule naming its syscalls and a valid `SCMP_ACT_*` action. Profiles
+  that hand decisions to an outside process (`SCMP_ACT_NOTIFY`, `listenerPath`) are refused, and so is one that lists
+  no syscalls with a default other than `SCMP_ACT_ALLOW`. Errors name the field:
+  `computers.browser.security.seccomp: ./profiles/chromium.json: …`. The Controller checks again.
+- **It is pinned and visible.** `fleet.lock` records the profile's sha256 under `seccomp:`, and the digest is part of
+  the Computer's generation: editing the profile restages the Computer at its next idle boundary, like any other
+  change. `a12s up` prints `<name> runs with custom seccomp profile <path>`, and `a12s status` shows
+  `seccomp <path>` on that Computer's line.
+- A profile whose `defaultAction` is `SCMP_ACT_ALLOW` is accepted with a warning: it allows every syscall it does
+  not list.
+
+Start from [Docker's default profile](https://github.com/moby/profiles/blob/main/seccomp/default.json) and add only
+what the software needs; the cookbook's
+[browser-agent](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/browser-agent) profile does that
+for Chromium.
 
 ## Egress
 

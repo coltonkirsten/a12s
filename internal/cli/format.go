@@ -55,6 +55,17 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	return lines
 }
 
+// SeccompLines names every Computer that runs with its own seccomp profile instead of the default.
+func SeccompLines(f *fleet.Fleet) []string {
+	var out []string
+	for _, name := range f.ComputerNames() {
+		if p := f.Computers[name].Security.Seccomp; p != "" {
+			out = append(out, fmt.Sprintf("%s runs with custom seccomp profile %s", name, p))
+		}
+	}
+	return out
+}
+
 func UpErrors(r *api.PutFleetResponse) []string {
 	var out []string
 	for _, name := range sortedKeys(r.Errors) {
@@ -106,6 +117,9 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		}
 		if m := egressMarker(st, c); m != "" {
 			extra = append(extra, m)
+		}
+		if c.Seccomp != "" {
+			extra = append(extra, "seccomp "+c.Seccomp)
 		}
 		if in := InboxCell(c.Inbox); in != "" {
 			extra = append(extra, in)

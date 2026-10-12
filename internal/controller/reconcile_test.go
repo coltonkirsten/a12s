@@ -39,18 +39,18 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 	// Missing pins were resolved; the preset hash matches the directory's.
 	want, _ := fleet.HashPreset("../../examples/lab/presets/scout")
 	l := res.Lock
-	if l.Images["slim"] != "sha256:slim1" || l.Images["browser"] != "sha256:browser1" ||
+	if l.Images["slim"] != "sha256:slim1" || len(l.Images) != 1 || len(l.Seccomp) != 0 ||
 		l.Bundles["claude-code@2.1.280"] != "sha256:claude1" || l.Bundles["codex@0.154.0"] != "sha256:codex1" ||
 		l.Presets["./presets/scout"] != want {
 		t.Fatalf("lock = %+v (preset want %s)", l, want)
 	}
 
-	// Specs: pinned IDs run, presets and the browser seccomp profile travel.
+	// Specs: pinned IDs run, presets travel, the default seccomp profile applies.
 	scout, tester := h.d.get("scout").spec, h.d.get("tester").spec
 	if scout.Image != "sha256:slim1" || scout.Bundle.Image != "sha256:claude1" || len(scout.Preset) == 0 || scout.Seccomp != "" {
 		t.Errorf("scout spec = %+v", scout)
 	}
-	if tester.Seccomp == "" || tester.CPUMillis != 2000 || tester.Memory != 4<<30 {
+	if tester.Seccomp != "" || tester.CPUMillis != 2000 || tester.Memory != 4<<30 {
 		t.Errorf("tester spec: seccomp %d bytes, cpu %d, mem %d", len(tester.Seccomp), tester.CPUMillis, tester.Memory)
 	}
 
@@ -440,7 +440,6 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 	defer func(v string) { version.Version = v }(version.Version)
 	version.Version = "v0.2.0"
 	h.d.setImage(version.Image(fleet.TierSlim), "sha256:slim020")
-	h.d.setImage(version.Image(fleet.TierBrowser), "sha256:browser020")
 	_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: withImage("me/old:1"), Credentials: labCreds, Presets: labPresets(t)})
 	if err == nil || !strings.Contains(err.Error(), "computers.scout.image: me/old:1: its computerd is from a12s v0.1.0, which this Controller (v0.2.0) cannot drive  fix: rebuild it FROM") {
 		t.Fatalf("an older-minor 0.x image is refused: err = %v", err)
@@ -480,5 +479,64 @@ func TestChangedPresetIsRepinnedAndApplied(t *testing.T) {
 	}
 	if spec := h.d.get("scout").spec; spec.PresetDigest != after || !bytes.Equal(spec.Preset, buf.Bytes()) {
 		t.Fatalf("scout spec preset = %q (%d bytes)", spec.PresetDigest, len(spec.Preset))
+	}
+}
+
+// A custom seccomp profile comes only from the Fleet: it is pinned, carried into the spec, and editing it restages
+// the Computer like any other generation change.
+func TestSeccompProfileIsPinnedAndApplied(t *testing.T) {
+	h := newHarness(t)
+	chromium, err := os.ReadFile("../fleet/testdata/chromium-seccomp.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const path = "./profiles/chromium.json"
+	withProfile := labFleet(t, func(f *fleet.Fleet) {
+		c := f.Computers["tester"]
+		c.Security.Seccomp = path
+		f.Computers["tester"] = c
+	})
+	put := func(profile string, lock *fleet.Lock) (api.PutFleetResponse, error) {
+		return h.c.PutFleet(context.Background(), api.PutFleetRequest{
+			Fleet: withProfile, Lock: lock, Credentials: labCreds, Presets: labPresets(t),
+			Seccomp: map[string]string{path: profile},
+		})
+	}
+
+	if _, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: withProfile, Credentials: labCreds, Presets: labPresets(t)}); err == nil || !strings.Contains(err.Error(), "computers.tester.security.seccomp") {
+		t.Fatalf("a profile that was not sent is refused: %v", err)
+	}
+	if _, err := put(`{"defaultAction":"SCMP_ACT_ERRNO","listenerPath":"/run/x.sock","syscalls":[]}`, nil); err == nil || !strings.Contains(err.Error(), "not a seccomp profile") {
+		t.Fatalf("a malformed profile is refused: %v", err)
+	}
+
+	res, err := put(string(chromium), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := res.Lock.Seccomp[path]
+	if pin != fleet.HashSeccomp(chromium) {
+		t.Fatalf("lock seccomp = %v", res.Lock.Seccomp)
+	}
+	if spec := h.d.get("tester").spec; spec.Seccomp != string(chromium) {
+		t.Fatalf("tester spec seccomp = %d bytes", len(spec.Seccomp))
+	}
+	if spec := h.d.get("scout").spec; spec.Seccomp != "" {
+		t.Fatal("scout keeps the default profile")
+	}
+	if st := h.c.computerStatus(context.Background(), "tester"); st.Seccomp != path {
+		t.Fatalf("status seccomp = %q", st.Seccomp)
+	}
+
+	edited := strings.Replace(string(chromium), `"defaultErrnoRet": 1`, `"defaultErrnoRet": 38`, 1)
+	changed, err := put(edited, res.Lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.Lock.Seccomp[path] == pin || !slices.Equal(changed.Updated, []string{"tester"}) {
+		t.Fatalf("up = %+v, lock seccomp %v", changed, changed.Lock.Seccomp)
+	}
+	if spec := h.d.get("tester").spec; spec.Seccomp != edited {
+		t.Fatal("the edited profile was not applied")
 	}
 }

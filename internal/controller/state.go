@@ -30,6 +30,9 @@ type State struct {
 	// admitted with.
 	Services  map[string]*ServiceRecord         `json:"services,omitempty"`
 	Manifests map[string]*fleet.ServiceManifest `json:"manifests,omitempty"`
+	// Seccomp is each security.seccomp profile of the applied Fleet, by digest: a restarted Controller stages
+	// Computers from it.
+	Seccomp map[string]string `json:"seccomp,omitempty"`
 }
 
 type Record struct {
@@ -73,6 +76,8 @@ type Active struct {
 	// the proxy allow.
 	Send []string          `json:"send,omitempty"`
 	Uses []driver.Endpoint `json:"uses,omitempty"`
+	// Seccomp is the security.seccomp path this generation runs with.
+	Seccomp string `json:"seccomp,omitempty"`
 }
 
 func (r *Record) pending() bool { return r.StagedGeneration > r.Generation }

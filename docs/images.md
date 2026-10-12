@@ -1,34 +1,66 @@
 # Images and harness bundles
 
-## Image tiers
+## The slim image
 
-There are two tiers, plus custom image references (`image: ghcr.io/you/your-image:tag`).
+Every Computer runs `slim` or an image built FROM it (`image: ghcr.io/you/your-image:tag`).
 
-| Tier | Contents |
+| Image | Contents |
 |---|---|
 | `slim` (`a12s/slim:dev`) | `node:24-bookworm-slim` plus ca-certificates, git, ripgrep, python3, curl, util-linux, and computerd. |
-| `browser` (`a12s/browser:dev`) | `slim` plus Debian Chromium, fonts, the Playwright library and the Playwright MCP server, and a seccomp profile so Chromium keeps its own sandbox. |
 
 ## Image references
 
-A source build (`a12s version` says `dev`) uses local images: `a12s/slim:dev`, `a12s/browser:dev`,
-`a12s/controller:dev`, `a12s/bundle-<kind>:<version>`. A release build resolves the images published with it:
-`ghcr.io/coltonkirsten/a12s/<slim|browser|controller|svc-*>:<release>` and
+A source build (`a12s version` says `dev`) uses local images: `a12s/slim:dev`, `a12s/controller:dev`,
+`a12s/bundle-<kind>:<version>`. A release build resolves the images published with it:
+`ghcr.io/coltonkirsten/a12s/<slim|controller>:<release>` and
 `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<harness version>`. The release workflow (`.github/workflows/release.yml`, on a `v*` tag) pushes all of them, for linux/amd64 and
 linux/arm64, before it publishes the binaries. `a12s up` pulls missing images on the host with
 the docker CLI. The a12s images are public; a private registry of your own works through your `docker login`.
 
 ## Custom images
 
-Toolchain-heavy images should be derived from a tier rather than a new tier: `FROM ghcr.io/coltonkirsten/a12s/slim:<release>`
-(or `a12s/slim:dev` in a source build), then add your tools. Admission accepts a custom image only if it carries the
-`ai.a12s.computerd.version` label (set on the tiers and inherited by every image built FROM them) from a compatible
+Add tools by deriving an image: `FROM ghcr.io/coltonkirsten/a12s/slim:<release>` (or `a12s/slim:dev` in a source
+build), then install what the agent needs. Admission accepts a custom image only if it carries the
+`ai.a12s.computerd.version` label (set on slim and inherited by every image built FROM it) from a compatible
 release (same major, and same minor while 0.x; a `dev` build on either side only warns) and has computerd at
 `/opt/a12s/computerd/dist/main.js`; otherwise `a12s up` changes nothing and says how to fix it. a12s starts
 computerd as root itself, so an image's `ENTRYPOINT`, `CMD`, `USER` and `HEALTHCHECK` are ignored. A worked example
 is in [Extending a12s](extending.md#a-custom-agent-image).
 
-Build them with `make images` (slim, browser and controller).
+An image never changes the sandbox it runs in. When software in it needs syscalls Docker's default seccomp profile
+blocks, the Fleet's owner sets [`security.seccomp`](fleet-file.md#computer-fields) on that Computer; a label or file
+in the image can't.
+
+Build the a12s images with `make images` (slim and controller).
+
+### A browser in your image
+
+a12s ships no browser. To give an agent one, build an image FROM slim with Chromium (and Playwright or the
+Playwright MCP server, if the agent should drive it through MCP). Chromium's own sandbox needs user-namespace
+syscalls (`clone`/`unshare` with `CLONE_NEWUSER`, `setns`, `chroot`) that Docker's default seccomp profile blocks;
+without them it fails with "No usable sandbox!". Don't fall back to `--no-sandbox`: give that Computer a profile that
+is Docker's default plus those syscalls.
+
+```yaml
+computers:
+  browser:
+    image: ghcr.io/you/browser-agent:1      # FROM ghcr.io/coltonkirsten/a12s/slim:0.3.0 + Chromium
+    security:
+      seccomp: ./profiles/chromium.json     # relative to fleet.yaml
+```
+
+The cookbook's [browser-agent example](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/browser-agent)
+has the Dockerfile, `profiles/chromium.json` and the Fleet. Browser traffic goes through the egress proxy like
+everything else; a profile kept on the home drive survives sleep.
+
+Linux hosts that restrict unprivileged user namespaces with AppArmor (Ubuntu 23.10+, including GitHub runners) also
+need:
+
+```sh
+sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+Docker Desktop doesn't.
 
 ## Harness bundles
 
@@ -50,50 +82,3 @@ whose filesystem is `/bundle/{bundle.json, bin/<binary>, …}`:
 `make bundles` builds the Claude Code and Codex bundles locally. `.github/workflows/bundles.yml` checks daily (or by hand) for a
 Claude Code or Codex release that is not yet in ghcr; it stops there when there is none. For a new one it builds it for amd64 and arm64, runs `images/bundles/conformance.sh` (which checks the adapter's
 protocol and the receipt signal the inbox relies on), and publishes `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>`.
-
-## The browser tier
-
-The agent drives the browser through Playwright MCP (navigate, click, type, read the page as an accessibility
-snapshot, screenshot), which works the same for Claude Code and Codex. Browser traffic goes through the egress proxy
-like everything else. The profile lives on the home drive (`~/.cache/ms-playwright/mcp-…`), so it survives sleep.
-
-computerd launches Playwright MCP as a stdio server, as the agent (uid 1000), in `/home/agent`:
-
-```text
-command: node
-args:    /opt/a12s/playwright-mcp/node_modules/@playwright/mcp/cli.js
-         --config /opt/a12s/playwright-mcp/config.json
-         --proxy-server $A12S_PROXY
-```
-
-`config.json` sets `executablePath: /usr/bin/chromium`, `headless: true` and `chromiumSandbox: true`. Scripts the
-agent writes can `require("playwright")` (`NODE_PATH` is set) and must launch with
-`executablePath: "/usr/bin/chromium", chromiumSandbox: true`.
-
-### Chromium sandbox and seccomp
-
-`images/browser/seccomp.json` is Docker's default seccomp profile plus one rule allowing `clone`, `unshare`, `setns`
-and `chroot`, so Chromium's namespace sandbox works without `CAP_SYS_ADMIN` and without `--no-sandbox`. Without it
-Chromium fails with "No usable sandbox!".
-
-Linux hosts that restrict unprivileged user namespaces with AppArmor (Ubuntu 23.10+, including GitHub runners) also
-need:
-
-```sh
-sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
-```
-
-Docker Desktop doesn't.
-
-To check the sandbox by hand:
-
-```sh
-docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
-  --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp \
-  --tmpfs /home/agent:uid=1000,gid=1000 -e HOME=/home/agent -w /home/agent \
-  --network none -v "$PWD/images/browser/test:/test:ro" --entrypoint node \
-  a12s/browser:dev /test/render.mjs     # or /test/mcp.mjs (via Playwright MCP)
-```
-
-`render.mjs` prints the page title and heading from a `data:` URL, a screenshot size, and `chrome://sandbox`, which
-should report the namespace and seccomp-BPF sandboxes as active. `make check-full` runs the same checks.

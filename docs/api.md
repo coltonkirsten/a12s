@@ -32,7 +32,10 @@ is the owner token; `a12s token create` makes scoped ones (see [Inbox: scoped to
 | `POST /v1/computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status |
 | `POST /v1/tokens`, `GET /v1/tokens`, `DELETE /v1/tokens/{name}` | scoped tokens (owner only) |
-| `PUT /v1/fleet` | what `a12s up` sends (owner only) |
+| `PUT /v1/fleet` | what `a12s up` sends (owner only): the Fleet, `lock`, credentials, `presets`, and `seccomp` (each `security.seccomp` path → the profile's JSON text) → the updated `lock` and what changed |
+
+The field-by-field shapes are in `internal/api` and the SDKs' types. A ComputerStatus carries `seccomp` (the
+`security.seccomp` path) when the Computer runs with its own seccomp profile.
 
 ### Sending a Message
 

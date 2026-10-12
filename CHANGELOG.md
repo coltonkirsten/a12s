@@ -2,9 +2,35 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.3.0 (2026-10-12)
+
+a12s is now its core: the Controller, computerd, the slim image, the harness bundles, svckit, the TypeScript and
+Python SDKs, and the gateway. The release publishes the `slim`, `controller`, `bundle-claude-code` and `bundle-codex`
+images.
+
+### Breaking
+- **The `browser` image is gone**, and computerd no longer wires the Playwright MCP server (or `NODE_PATH`).
+  `image: browser` now fails validation; `A12S_IMAGE_TIER` is `slim` or `custom`. What to do: build the cookbook's
+  [browser-agent](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/browser-agent) image (FROM slim
+  with Chromium), copy its `profiles/chromium.json` next to your `fleet.yaml`, replace `image: browser` with your
+  image and add `security: { seccomp: ./profiles/chromium.json }`. See
+  [Images: A browser in your image](docs/images.md#a-browser-in-your-image).
+- **The reference Services are gone**: `svc-cron`, `svc-webhook`, `svc-mcp` and `svc-mcp-postgres`, with
+  `examples/services`, `make services` and `make image-browser`. The Services feature itself is unchanged. What to do:
+  keep using the published `ghcr.io/coltonkirsten/a12s/svc-*:0.2.1` images by pinning that tag, build them from the
+  [v0.2.1 source](https://github.com/coltonkirsten/a12s/tree/v0.2.1/services), or write your own with svckit
+  ([Services: Write a Service with svckit](docs/services.md#write-a-service-with-svckit)).
+- **`a12s init --with db,cron` is gone.** `a12s init` always scaffolds one Computer, `hello`, on `image: slim`. What
+  to do: add Services to `fleet.yaml` yourself.
+- `scripts/check.sh` steps are `go computerd sdk python slim controller bundles` (`services` and `tiers` are gone).
 
 ### Added
+- **`security.seccomp`** on a Computer (or in `defaults`): a seccomp profile in Docker's JSON format, relative to the
+  Fleet file, that replaces Docker's default profile for that Computer. Only the Fleet's owner sets it, never an
+  image; it changes only the seccomp filter (capabilities and `no-new-privileges` stay). `a12s up` checks the profile
+  before sending anything, pins its digest in `fleet.lock` under `seccomp:`, and restages the Computer when it
+  changes; `a12s up` and `a12s status` name every Computer that runs with one. See
+  [Security: Seccomp](docs/security.md#seccomp).
 - **`a12s gateway -- npm run dev`**: run your dev server (Vite, Next.js, …) behind the gateway. It starts the command,
   finds its port in the URL it prints (or `--dev-port`), and forwards everything except `/v1/` and `/a12s.js` to it,
   websockets included, so the page and the API share one origin and hot reload works. `--dev <url>` proxies a dev

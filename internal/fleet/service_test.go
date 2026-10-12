@@ -22,7 +22,7 @@ computers:
     grants: { send: [scout] }
 services:
   clock:
-    image: a12s/svc-cron:0.1
+    image: example/cron:0.1
     grants: { send: [scout, builder] }
     config:
       jobs:
@@ -37,11 +37,11 @@ services:
       user: 999
     credentials: [postgres]
   db:
-    image: ghcr.io/coltonkirsten/a12s/svc-mcp-postgres:0.1
+    image: ghcr.io/example/mcp-postgres:0.1
     credentials: [postgres]
     uses: [pg]
   hooks:
-    image: a12s/svc-webhook:0.1
+    image: example/webhook:0.1
     grants: { send: [builder] }
     publish: ["127.0.0.1:8787:8080"]
 `
@@ -151,20 +151,20 @@ func TestValidateServiceManifest(t *testing.T) {
 	if err := ValidateService("db", f.Services["db"], nil, "ghcr.io/x/y", nil); err == nil || !strings.Contains(err.Error(), "/a12s/service.json") || !strings.Contains(err.Error(), "fix: add services.db.manifest") {
 		t.Fatalf("no manifest: %v", err)
 	}
-	img, err := ParseManifest([]byte(`{"a12s":1,"name":"svc-webhook","version":"0.1.0","user":1000,
+	img, err := ParseManifest([]byte(`{"a12s":1,"name":"webhook","version":"0.1.0","user":1000,
 "health":{"http":{"port":8080,"path":"/healthz"}},"ports":{"http":{"port":8080}},
 "credentials":[{"name":"gh-webhook","required":true}],"login":null}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	hooks := f.Services["hooks"]
-	err = ValidateService("hooks", hooks, img, "a12s/svc-webhook:0.1", nil)
+	err = ValidateService("hooks", hooks, img, "example/webhook:0.1", nil)
 	if err == nil || !strings.Contains(err.Error(), "gh-webhook") {
 		t.Fatalf("required credential: %v", err)
 	}
 	hooks.Credentials = []string{"gh-webhook"}
 	hooks.Publish = []string{"127.0.0.1:8787:9090"}
-	if err := ValidateService("hooks", hooks, img, "a12s/svc-webhook:0.1", nil); err == nil || !strings.Contains(err.Error(), "9090") {
+	if err := ValidateService("hooks", hooks, img, "example/webhook:0.1", nil); err == nil || !strings.Contains(err.Error(), "9090") {
 		t.Fatalf("publish undeclared: %v", err)
 	}
 	// Inline fields override the image's, field by field.
@@ -184,16 +184,16 @@ func TestValidateServiceManifest(t *testing.T) {
 
 func TestLockServices(t *testing.T) {
 	l := NewLock()
-	if !l.PinService("clock", "a12s/svc-cron:0.1", "sha256:a") || l.PinService("clock", "a12s/svc-cron:0.1", "sha256:b") {
+	if !l.PinService("clock", "example/cron:0.1", "sha256:a") || l.PinService("clock", "example/cron:0.1", "sha256:b") {
 		t.Fatal("pin is append-only")
 	}
-	if l.Services["clock@a12s/svc-cron:0.1"] != "sha256:a" {
+	if l.Services["clock@example/cron:0.1"] != "sha256:a" {
 		t.Fatalf("%v", l.Services)
 	}
 }
 
-func TestServicesExampleParses(t *testing.T) {
-	f, err := Load("../../examples/services/fleet.yaml")
+func TestGateFleetParses(t *testing.T) {
+	f, err := Load("../../hack/gate/fleet.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

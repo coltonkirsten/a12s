@@ -16,25 +16,14 @@ var (
 	Registry = "a12s"
 )
 
-// DevServiceTag is the tag `make services` gives the reference Services in a source build.
-const DevServiceTag = "0.1"
-
 // Release reports whether this binary was built by the release pipeline.
 func Release() bool { return Version != "dev" }
 
 // tag is the image tag of this release: "0.1.0" for v0.1.0.
 func tag() string { return strings.TrimPrefix(Version, "v") }
 
-// Image is an a12s-built image of this release: slim, browser, controller.
+// Image is an a12s-built image of this release: slim, controller.
 func Image(name string) string { return Registry + "/" + name + ":" + tag() }
-
-// Service is a reference Service image of this release: svc-cron, svc-mcp, svc-mcp-postgres, svc-webhook.
-func Service(name string) string {
-	if !Release() {
-		return Registry + "/" + name + ":" + DevServiceTag
-	}
-	return Image(name)
-}
 
 // Bundle is a HarnessBundle; bundles are versioned by the harness, not by a12s.
 func Bundle(kind, harnessVersion string) string {

@@ -1,4 +1,4 @@
-# a12s slim tier: Debian slim + Node + basic tools + computerd. Never contains a harness.
+# a12s slim image: Debian slim + Node + basic tools + computerd. Never contains a harness.
 # Build context: repo root.  docker build -f images/slim/Dockerfile -t a12s/slim:dev .
 
 # computerd is plain JavaScript, so it builds once on the build platform for every target.

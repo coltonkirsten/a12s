@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func TestParseLabExample(t *testing.T) {
 	if builder.Harness.Kind != HarnessCodex || !reflect.DeepEqual(builder.Credentials, []string{"openai", "github"}) || builder.Autonomy != AutonomyFull {
 		t.Errorf("builder %+v", builder)
 	}
-	if tester.Image != TierBrowser || tester.Resources.CPU != 2000 || tester.Resources.Memory != 4*Bytes(1<<30) {
+	if tester.Image != TierSlim || tester.Resources.CPU != 2000 || tester.Resources.Memory != 4*Bytes(1<<30) {
 		t.Errorf("tester %+v", tester)
 	}
 }
@@ -110,11 +111,11 @@ defaults:
   image: slim
   autonomy: full
 computers:
-  c: { autonomy: restricted, image: browser }
+  c: { autonomy: restricted, image: me/agent:1 }
 `,
 			want: Computer{
 				Harness:  Harness{Kind: HarnessClaudeCode, Version: "1.10"},
-				Image:    TierBrowser,
+				Image:    "me/agent:1",
 				Autonomy: AutonomyRestricted,
 			},
 		},
@@ -296,5 +297,48 @@ func TestQuantities(t *testing.T) {
 		if _, err := ParseCPU(in); err == nil {
 			t.Errorf("ParseCPU(%q): want error", in)
 		}
+	}
+}
+
+func TestValidateSeccomp(t *testing.T) {
+	chromium, err := os.ReadFile("testdata/chromium-seccomp.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowAll, err := ValidateSeccomp(chromium); err != nil || allowAll {
+		t.Fatalf("chromium profile: allowAll %v, err %v", allowAll, err)
+	}
+	if allowAll, err := ValidateSeccomp([]byte(`{"defaultAction":"SCMP_ACT_ALLOW"}`)); err != nil || !allowAll {
+		t.Fatalf("allow-by-default profile: allowAll %v, err %v", allowAll, err)
+	}
+	for _, bad := range []string{
+		``,
+		`unconfined`,
+		`{"defaultAction":"SCMP_ACT_ERRNO"}`,
+		`{"defaultAction":"ALLOW_EVERYTHING","syscalls":[{"names":["read"],"action":"SCMP_ACT_ALLOW"}]}`,
+		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["read"],"action":"SCMP_ACT_NOTIFY"}],"listenerPath":"/x"}`,
+		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["read"],"action":"SCMP_ACT_NOTIFY"}]}`,
+		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"action":"SCMP_ACT_ALLOW"}]}`,
+		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["read"],"action":"SCMP_ACT_ALLOW"}]} {}`,
+	} {
+		if _, err := ValidateSeccomp([]byte(bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
+func TestSecurityAndRemovedBrowserTier(t *testing.T) {
+	for yaml, want := range map[string]string{
+		"image: browser": "no longer part of a12s",
+		"image: slim\n    security: { seccomp: /etc/x.json }": "must be a path relative to the Fleet file",
+	} {
+		_, err := Parse([]byte(base + "computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    " + yaml + "\n"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", yaml, err, want)
+		}
+	}
+	f, err := Parse([]byte(base + "defaults:\n  security: { seccomp: ./profiles/chromium.json }\ncomputers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    image: me/agent:1\n"))
+	if err != nil || f.Computers["c"].Security.Seccomp != "./profiles/chromium.json" {
+		t.Fatalf("security from defaults: %v %+v", err, f)
 	}
 }

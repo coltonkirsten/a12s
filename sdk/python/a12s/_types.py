@@ -89,6 +89,7 @@ class ComputerStatus:
     active_turn: str | None = None
     harness: Harness
     image: str
+    seccomp: str | None = None
     autonomy: str
     generation: int
     staged_generation: int | None = None

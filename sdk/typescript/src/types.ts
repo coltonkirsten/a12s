@@ -30,6 +30,8 @@ export interface Lock {
   bundles: Record<string, string>;
   presets: Record<string, string>;
   services?: Record<string, string>;
+  /** Each security.seccomp profile's digest, by its path in the Fleet file. */
+  seccomp?: Record<string, string>;
 }
 
 export interface PutFleetRequest {
@@ -41,6 +43,8 @@ export interface PutFleetRequest {
   refresh?: string[];
   /** Home presets as base64 tar streams, keyed by their path in the Fleet. */
   presets?: Record<string, string>;
+  /** security.seccomp profiles (JSON text), keyed by their path in the Fleet. */
+  seccomp?: Record<string, string>;
 }
 
 export interface ServiceChanges {
@@ -103,6 +107,8 @@ export interface ComputerStatus {
   activeTurn?: string;
   harness: Harness;
   image: string;
+  /** The Fleet's security.seccomp path, when the Computer runs with a custom seccomp profile. */
+  seccomp?: string;
   autonomy: string;
   generation: number;
   stagedGeneration?: number;

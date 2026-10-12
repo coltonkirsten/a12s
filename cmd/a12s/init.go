@@ -13,11 +13,10 @@ import (
 )
 
 // runInit leaves credentials unbound on purpose: the first `a12s up` stops with
-// the fix line (`a12s creds set postgres`), the only step left.
+// the fix line (`a12s creds set anthropic`), the only step left.
 func runInit(g *globals, args []string) error {
 	fs := g.flags("init")
 	harness := fs.String("harness", "claude-code", "claude-code or codex")
-	with := fs.String("with", "", "reference Services to add: db, cron (comma-separated)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -29,17 +28,7 @@ func runInit(g *globals, args []string) error {
 	if len(pos) == 1 {
 		dir = pos[0]
 	}
-	var extras []string
-	for _, w := range strings.Split(*with, ",") {
-		switch w = strings.TrimSpace(w); w {
-		case "":
-		case "db", "cron":
-			extras = append(extras, w)
-		default:
-			return usageError(fmt.Sprintf("--with %s: the reference Services are db and cron", w))
-		}
-	}
-	text, bindings, err := scaffold(filepath.Base(absDir(dir)), *harness, extras)
+	text, bindings, err := scaffold(filepath.Base(absDir(dir)), *harness)
 	if err != nil {
 		return err
 	}
@@ -92,13 +81,7 @@ func runInit(g *globals, args []string) error {
 	if *harness == "codex" {
 		cred = "openai"
 	}
-	fmt.Printf("next: a12s creds set %s", cred)
-	for _, e := range extras {
-		if e == "db" {
-			fmt.Print(", a12s creds set postgres")
-		}
-	}
-	fmt.Println(", then a12s up")
+	fmt.Printf("next: a12s creds set %s, then a12s up\n", cred)
 	return nil
 }
 
@@ -111,7 +94,7 @@ func absDir(d string) string {
 	return d
 }
 
-func scaffold(dirName, harness string, extras []string) (string, string, error) {
+func scaffold(dirName, harness string) (string, string, error) {
 	name := strings.ToLower(dirName)
 	if !validFleetName(name) {
 		name = "fleet"
@@ -125,12 +108,7 @@ func scaffold(dirName, harness string, extras []string) (string, string, error) 
 	default:
 		return "", "", usageError("--harness is claude-code or codex")
 	}
-	db, cron := false, false
-	for _, e := range extras {
-		db, cron = db || e == "db", cron || e == "cron"
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, `apiVersion: a12s.ai/v1alpha1
+	text := fmt.Sprintf(`apiVersion: a12s.ai/v1alpha1
 kind: Fleet
 metadata: { name: %s }
 
@@ -141,46 +119,8 @@ computers:
     credentials: [%s]
     egress: { allow: [%s] }
 `, name, h, cred, host)
-	if db {
-		b.WriteString("    # uses: [db]            # give hello the database tool (registered as a12s-db)\n")
-	}
-	if db || cron {
-		b.WriteString("\nservices:\n")
-	}
-	if db {
-		fmt.Fprintf(&b, `  pg:                       # the Fleet's own Postgres, a stock image described inline
-    image: postgres:17
-    manifest:
-      ports: { db: { port: 5432, protocol: tcp } }
-      health: { exec: ["pg_isready", "-U", "postgres"] }
-      state: { at: /var/lib/postgresql/data, size: 5Gi }
-      tmpfs: [/var/run/postgresql]
-      user: 999
-    credentials: [postgres]
-    config: { env: { POSTGRES_PASSWORD_FILE: /run/a12s/secrets/postgres } }
-
-  db:                       # an MCP server that holds the database login; Computers that use it never see it
-    image: %[1]s
-    credentials: [postgres]
-    uses: [pg]
-    config:
-      command: ["/opt/mcp/bin/mcp-server-postgres"]
-      args: ["postgresql://postgres@${PGHOST}:${PGPORT}/postgres"]
-      envFrom: { PGPASSWORD: postgres }
-      hostPortFrom: { A12S_SERVICE_PG_DB: [PGHOST, PGPORT] }
-`, version.Service("svc-mcp-postgres"))
-	}
-	if cron {
-		fmt.Fprintf(&b, `  clock:                    # a cron: enqueues into hello's inbox on a schedule
-    image: %[1]s
-    grants: { send: [hello] }
-    config:
-      jobs:
-        - { name: morning, cron: "0 7 * * *", to: hello, body: "Good morning. Summarize what is on your plate." }
-`, version.Service("svc-cron"))
-	}
 	bindings := "# Per deployment, git-ignored. Maps each credential name in fleet.yaml to where it comes from here.\n# a12s creds set <name> fills this in.\ncredentials: {}\n"
-	return b.String(), bindings, nil
+	return text, bindings, nil
 }
 
 func validFleetName(s string) bool {

@@ -8,7 +8,7 @@ whose `ci-ok` check passed. Locally you only need fast feedback, on macOS or Lin
 ```sh
 git clone https://github.com/coltonkirsten/a12s.git && cd a12s
 make check                     # Go, both SDKs, API fixtures: about 1.5 minutes, no Docker
-scripts/check.sh tiers         # optional: one Docker step, if you changed what it covers
+scripts/check.sh slim          # optional: one Docker step, if you changed what it covers
 ```
 
 Push a branch (or a fork) and open a PR against `main`; CI does the rest. Nothing depends on a particular machine.
@@ -31,7 +31,7 @@ Needs Go 1.26+, Node 24, Docker Desktop running, and a `claude setup-token` toke
 ```sh
 gh repo clone coltonkirsten/a12s && cd a12s
 make build                     # go build; also writes bin/a12s (version dev: uses the local images below)
-make images bundles            # slim, browser and controller images + Claude Code and Codex bundles
+make images bundles            # slim and controller images + Claude Code and Codex bundles
 
 cd examples/quickstart
 cp a12s.bindings.yaml.example a12s.bindings.yaml   # anthropic -> ~/.a12s/anthropic
@@ -71,10 +71,9 @@ The Python SDK in `sdk/python` parses the same fixtures strictly into its datacl
 Images:
 
 ```sh
-make images       # a12s/slim:dev, a12s/browser:dev, a12s/controller:dev
+make images       # a12s/slim:dev, a12s/controller:dev
 make bundles      # a12s/bundle-claude-code:<v>, a12s/bundle-codex:<v>
                   # (versions: BUNDLE_CLAUDE_VERSIONS, BUNDLE_CODEX_VERSIONS)
-make services     # the reference Services: svc-cron, svc-webhook, svc-mcp, svc-mcp-postgres
 ```
 
 ## Checks: `make check` and `make check-full`
@@ -82,7 +81,7 @@ make services     # the reference Services: svc-cron, svc-webhook, svc-mcp, svc-
 ```sh
 make check        # fast local feedback: go, sdk, python (about 1.5 minutes, no Docker)
 make check-full   # everything CI runs, in one go; stops at the first failure (needs Docker; about 15 minutes cold)
-scripts/check.sh go sdk    # any subset of: go computerd sdk python services tiers controller bundles
+scripts/check.sh go sdk    # any subset of: go computerd sdk python slim controller bundles
 ```
 
 `make check` runs `go build`, `gofmt`, `go vet` and `go test` (which includes the Go to TypeScript/Python API fixture
@@ -90,15 +89,14 @@ drift check), the TypeScript SDK's lint and tests (including the browser bundle)
 `internal/gateway/web/a12s.js` matches its build, and the Python SDK's tests and `mypy --strict` on Python 3.10 and
 3.14 (`CHECK_PYTHONS` overrides).
 
-`make check-full` adds computerd's lint, build and tests, svc-mcp against a stub server, the reference Service
-images, the slim, browser and controller images with the Chromium sandbox and Playwright checks, and both default
-harness bundles with `images/bundles/conformance.sh`. Afterwards it prunes dangling images and the build cache
+`make check-full` adds computerd's lint, build and tests, the slim image (it carries computerd and its label), the
+controller image, and both default harness bundles with `images/bundles/conformance.sh`. Afterwards it prunes dangling images and the build cache
 (`CHECK_KEEP_CACHE=1` keeps them).
 
 ### CI: the gate
 
-`.github/workflows/ci.yml` runs every `scripts/check.sh` step as its own job (go, sdk, python, computerd, services,
-tiers, controller, bundles) on each pull request to `main`, on linux/amd64:
+`.github/workflows/ci.yml` runs every `scripts/check.sh` step as its own job (go, sdk, python, computerd, slim,
+controller, bundles) on each pull request to `main`, on linux/amd64:
 
 - **Only what changed.** A `changes` job (dorny/paths-filter) maps the PR's files to the steps whose inputs they touch;
   the rest are skipped. A docs-only PR runs no test job. Editing `ci.yml`, `scripts/check.sh` or `.github/actions/`
@@ -151,9 +149,9 @@ machine with Docker, on an up-to-date main whose CI passed:
 make release VERSION=0.5.0
 ```
 
-`scripts/release.sh` builds from a clean checkout of `origin/main`. It pushes the slim, browser, controller and
-reference Service images to `ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the
-default harness bundles if missing, tags `v<version>` and pushes the tag, then runs GoReleaser (`.goreleaser.yaml`):
+`scripts/release.sh` builds from a clean checkout of `origin/main`. It pushes the slim and controller images to
+`ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the default harness bundles
+if missing, tags `v<version>` and pushes the tag, then runs GoReleaser (`.goreleaser.yaml`):
 binaries for darwin and linux on amd64 and arm64, built with the release version and registry, and the formula in
 `coltonkirsten/homebrew-tap`. It attaches the SDK `coltonkirsten-a12s-*.tgz` and `a12s-*.whl` to the GitHub release, and publishes
 `@coltonkirsten/a12s` to npm if `NPM_TOKEN` is set and `a12s` to PyPI if `PYPI_TOKEN` is set; without them it skips with a
@@ -188,10 +186,10 @@ internal/sse/              SSE reader and writer
 sdk/typescript/            the `@coltonkirsten/a12s` npm package: the TypeScript client apps use
 sdk/python/                the `a12s` PyPI package: the Python client, sync and asyncio
 computerd/                 TypeScript daemon inside every Computer: server, journal, adapters, system tools, MCP bridge
-images/slim, images/browser, images/controller   container images
+images/slim, images/controller   container images
 images/bundles/            HarnessBundle images and conformance.sh
-services/                  reference Services (svc-cron, svc-mcp, svc-webhook) and svckit, their shared Go library
-examples/                  runnable Fleets: quickstart, lab, services
+services/svckit/           svckit, the Go library for writing Services
+examples/                  runnable Fleets: quickstart, lab
 hack/                      end-to-end scripts
 ```
 
@@ -226,8 +224,9 @@ hack/exit-gate.sh <logfile>
 #   examples/lab/a12s.bindings.yaml and GH_TOKEN.
 
 hack/exit-gate-enhancements.sh <workdir> <logfile> [setup inbox services amendment cli teardown]
-#   examples/services: inbox delivery and crash safety, Services, grants, login, expiry, replace keys,
-#   power policy, CLI. Needs bin/a12s, the images, the claude-code bundle, `make services` and ~/.a12s/anthropic.
+#   hack/gate/fleet.yaml: inbox delivery and crash safety, Services, grants, login, expiry, replace keys,
+#   power policy, CLI. Needs bin/a12s, the images, the claude-code bundle, ~/.a12s/anthropic and the v0.2.1
+#   reference Services, built from that tag by hack/gate/services.sh.
 ```
 
 Both use real model calls. `A12S_TEST_TIME_SCALE` (≥ 1) divides `sleepAfterIdle` and the wake rate window so the
@@ -237,5 +236,5 @@ power-policy checks run in seconds; never set it in production (the Controller l
 
 - Keep changes small and focused, with tests for behavior changes.
 - `ci-ok` green before merge (required on `main`). `make check` is the quick local loop; the Docker steps
-  (`scripts/check.sh services tiers controller bundles`) run locally too if you want them before CI.
+  (`scripts/check.sh slim controller bundles`) run locally too if you want them before CI.
 - Update the docs in `docs/` when behavior changes: they describe the current state of the code.

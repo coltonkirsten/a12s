@@ -27,7 +27,7 @@ func FleetImages(f *fleet.Fleet, controllerImage string) []string {
 	for _, name := range f.ComputerNames() {
 		c := f.Computers[name]
 		switch c.Image {
-		case fleet.TierSlim, fleet.TierBrowser:
+		case fleet.TierSlim:
 			add(version.Image(c.Image))
 		default:
 			add(c.Image)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local checks: `make check` (go sdk python: what PR CI runs), `make check-full` (all steps, needs Docker) or
-# `scripts/check.sh <step>...` with steps go computerd sdk python services tiers controller bundles.
+# `scripts/check.sh <step>...` with steps go computerd sdk python slim controller bundles.
 # Stops at the first failure. The Docker steps prune dangling images and build cache when they finish.
 # Runs on macOS (bash 3.2 is enough) and Linux. CI (.github/workflows/ci.yml) runs each step as its own job and sets
 # CHECK_DOCKER_CACHE=gha so image builds reuse GitHub's build cache; locally Docker's own layer cache does that.
@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
 
-all=(go computerd sdk python services tiers controller bundles)
+all=(go computerd sdk python slim controller bundles)
 steps=("$@")
 [ ${#steps[@]} -gt 0 ] || steps=("${all[@]}")
 
@@ -79,8 +79,7 @@ run_python() {
 }
 
 # dbuild <cache-scope> <docker build args...>: docker build, or with CHECK_DOCKER_CACHE=gha (CI) a buildx build that
-# reads and writes the GitHub Actions cache. Images stay in the local image store either way, so a later build can
-# start FROM them (browser on slim, svc-mcp-postgres on svc-mcp).
+# reads and writes the GitHub Actions cache. Images stay in the local image store either way.
 dbuild() {
   local scope=$1; shift
   if [ "${CHECK_DOCKER_CACHE:-}" = gha ]; then
@@ -96,39 +95,13 @@ docker_up() {
   used_docker=1
 }
 
-run_services() {
-  need node "Node 24+"
-  step "svc-mcp against a stub MCP server"; q sh services/svc-mcp/test/run.sh
+run_slim() {
   docker_up
-  step "reference Service images (as make services)"
-  q dbuild svc-cron -f services/go.Dockerfile --build-arg SERVICE=svc-cron -t a12s/svc-cron:0.1 .
-  q dbuild svc-webhook -f services/go.Dockerfile --build-arg SERVICE=svc-webhook -t a12s/svc-webhook:0.1 .
-  q dbuild svc-mcp -f services/svc-mcp/Dockerfile -t a12s/svc-mcp:0.1 .
-  q dbuild svc-mcp-postgres -f services/svc-mcp/postgres.Dockerfile --build-arg SVC_MCP_IMAGE=a12s/svc-mcp:0.1 \
-    -t a12s/svc-mcp-postgres:0.1 services/svc-mcp
-  step "Service manifests are in the images"
-  for s in svc-cron svc-webhook svc-mcp svc-mcp-postgres; do
-    docker run --rm --entrypoint cat "a12s/$s:0.1" /a12s/service.json | python3 -m json.tool > /dev/null
-  done
-  q docker run --rm --entrypoint ls a12s/svc-mcp-postgres:0.1 /opt/mcp/bin/mcp-server-postgres
-}
-
-run_tiers() {
-  docker_up
-  step "slim image";    q dbuild slim -f images/slim/Dockerfile -t a12s/slim:dev .
-  step "browser image"; q dbuild browser -f images/browser/Dockerfile --build-arg SLIM_IMAGE=a12s/slim:dev -t a12s/browser:dev .
-  local sandbox=(--user 1000:1000 --cap-drop ALL --security-opt no-new-privileges
-    --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp
-    --tmpfs /home/agent:uid=1000,gid=1000 -e HOME=/home/agent -w /home/agent
-    --network none -v "$root/images/browser/test:/test:ro" --entrypoint node)
-  step "Chromium sandbox (docs/images.md)"
-  docker run --rm "${sandbox[@]}" a12s/browser:dev /test/render.mjs > "$log/render" 2>&1 || { cat "$log/render"; return 1; }
-  grep -q 'hello from chromium' "$log/render" && grep -q 'adequately sandboxed' "$log/render" || { cat "$log/render"; return 1; }
-  step "agent scripts can require playwright"
-  docker run --rm --user 1000:1000 --network none --entrypoint node \
-    -e NODE_PATH=/opt/a12s/playwright-mcp/node_modules -w /tmp \
-    a12s/browser:dev -e "require('playwright'); console.log('playwright ok')" | grep -q 'playwright ok'
-  step "Playwright MCP navigates"; q docker run --rm "${sandbox[@]}" a12s/browser:dev /test/mcp.mjs
+  step "slim image"; q dbuild slim -f images/slim/Dockerfile -t a12s/slim:dev .
+  step "slim carries computerd and its label"
+  docker run --rm --entrypoint test a12s/slim:dev -f /opt/a12s/computerd/dist/main.js
+  [ -n "$(docker image inspect a12s/slim:dev --format '{{ index .Config.Labels "ai.a12s.computerd.version" }}')" ] \
+    || { echo "a12s/slim:dev has no ai.a12s.computerd.version label"; return 1; }
 }
 
 run_controller() {

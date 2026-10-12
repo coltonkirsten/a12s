@@ -105,8 +105,8 @@ each), so many Computers don't exhaust Docker's default pool. There are no host 
 - **Codex:** `codex app-server` over JSON-RPC on stdio, one long-lived child per Computer: `thread/start` or
   `thread/resume`, `turn/start`, `turn/interrupt`. Every server request (approvals, user input, elicitation) is
   answered according to `autonomy`.
-- Both get the `a12s` system tools MCP server; the browser tier adds Playwright MCP; each used Service's MCP port is
-  registered as `a12s-<svc>` through a stdio-to-HTTP bridge.
+- Both get the `a12s` system tools MCP server; each used Service's MCP port is registered as `a12s-<svc>` through a
+  stdio-to-HTTP bridge.
 
 A Turn counts as **dispatched** when the adapter has evidence the harness received the prompt (Claude Code's echo of
 the user message; Codex's `turn/start` response). The inbox uses this to decide whether a Batch was delivered.

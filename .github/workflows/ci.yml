@@ -32,8 +32,7 @@ jobs:
       sdk: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.sdk == 'true' }}
       python: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.python == 'true' }}
       computerd: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.computerd == 'true' }}
-      services: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.services == 'true' }}
-      tiers: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.tiers == 'true' }}
+      slim: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.slim == 'true' }}
       controller: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.controller == 'true' }}
       bundles: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.bundles == 'true' }}
     steps:
@@ -75,18 +74,11 @@ jobs:
             computerd:
               - *shared
               - computerd/**
-            services:
-              - *shared
-              - .dockerignore
-              - go.mod
-              - go.sum
-              - services/**
-            tiers:
+            slim:
               - *shared
               - .dockerignore
               - computerd/**
               - images/slim/**
-              - images/browser/**
             controller:
               - *go
               - .dockerignore
@@ -156,27 +148,10 @@ jobs:
   # The Docker steps of scripts/check.sh, amd64 only (release.yml builds both architectures). Each image has its own
   # GitHub Actions build-cache scope (.github/actions/docker, CHECK_DOCKER_CACHE=gha); the runner is thrown away, so
   # no prune (CHECK_KEEP_CACHE=1).
-  # svc-mcp against a stub server, the reference Service images and their manifests.
-  services:
+  # slim image: builds, carries computerd and its label.
+  slim:
     needs: changes
-    if: needs.changes.outputs.services == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      CHECK_DOCKER_CACHE: gha
-      CHECK_KEEP_CACHE: "1"
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: ./.github/actions/docker
-      - run: scripts/check.sh services
-
-  # slim and browser images, the Chromium sandbox and Playwright checks.
-  tiers:
-    needs: changes
-    if: needs.changes.outputs.tiers == 'true'
+    if: needs.changes.outputs.slim == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -185,7 +160,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/docker
-      - run: scripts/check.sh tiers
+      - run: scripts/check.sh slim
 
   # controller image; its binary starts and asks for its config.
   controller:
@@ -217,7 +192,7 @@ jobs:
 
   # The single required check (branch protection on main). Skipped jobs count as passing; failed or cancelled do not.
   ci-ok:
-    needs: [changes, go, sdk, python, computerd, services, tiers, controller, bundles]
+    needs: [changes, go, sdk, python, computerd, slim, controller, bundles]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2

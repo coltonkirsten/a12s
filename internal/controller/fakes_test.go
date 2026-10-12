@@ -78,7 +78,7 @@ func newFakeDriver(cds *fakeComputerds) *fakeDriver {
 	return &fakeDriver{
 		computers: map[string]*fakeContainer{},
 		drives:    map[string]bool{},
-		images:    map[string]string{"a12s/slim:dev": "sha256:slim1", "a12s/browser:dev": "sha256:browser1"},
+		images:    map[string]string{"a12s/slim:dev": "sha256:slim1"},
 		bundles: map[string]driver.Bundle{
 			"a12s/bundle-claude-code:2.1.280": bundle("claude-code", "2.1.280", "sha256:claude1", "platform.claude.com"),
 			"a12s/bundle-codex:0.154.0":       bundle("codex", "0.154.0", "sha256:codex1", "auth.openai.com"),

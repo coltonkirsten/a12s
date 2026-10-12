@@ -20,7 +20,7 @@ grep_file() { grep -q -- "$1" "$2"; }
 log "== exit gate on $(docker version --format '{{.Server.Version}} {{.Server.Arch}}') =="
 cp fleet.yaml fleet.yaml.orig
 
-log "## 1 one file: four Computers, both harnesses, slim and browser"
+log "## 1 one file: four Computers, both harnesses"
 check "1 fleet declares four computers" test "$(grep -cE '^  (scout|builder|tester|reviewer):' fleet.yaml)" -eq 4
 
 log "## 2 one command: a12s up brings all four to Ready"
@@ -100,14 +100,14 @@ denied7() { grep -q '^turn t_[0-9a-f]* completed$' /tmp/gate7.out && grep ' diag
 check "7 example.com denied with a diagnostic event (this turn)" denied7
 
 log "## 8 bump the harness version in the lock; next turn uses it; no image rebuilt"
-before=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/(slim|browser):dev' | sort)
+before=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/slim:dev' | sort)
 sed -i.bak 's/version: 2.1.280, model: claude-fable-5-1/version: 2.1.281, model: claude-fable-5-1/' fleet.yaml
 run $A12S up; run cat fleet.lock
 $A12S prompt scout "Reply with the single word pong." > /tmp/gate8.out; cat /tmp/gate8.out >> "$LOG"
-after=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/(slim|browser):dev' | sort)
+after=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/slim:dev' | sort)
 v281() { grep -q '^turn t_[0-9a-f]* started (claude-code 2.1.281' /tmp/gate8.out && turn_ok /tmp/gate8.out pong; }
 check "8 scout's next turn runs 2.1.281" v281
-check "8 tier images unchanged" test "$before" = "$after"
+check "8 slim image unchanged" test "$before" = "$after"
 cp fleet.yaml.orig fleet.yaml; rm -f fleet.yaml.bak fleet.yaml.orig
 
 log "== leaving the fleet asleep =="

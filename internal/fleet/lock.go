@@ -21,6 +21,8 @@ type Lock struct {
 	Bundles  map[string]string `yaml:"bundles" json:"bundles"`
 	Presets  map[string]string `yaml:"presets" json:"presets"`
 	Services map[string]string `yaml:"services,omitempty" json:"services,omitempty"`
+	// Seccomp is each security.seccomp profile's digest, by its path in the Fleet file.
+	Seccomp map[string]string `yaml:"seccomp,omitempty" json:"seccomp,omitempty"`
 }
 
 func ServiceKey(name, ref string) string { return name + "@" + ref }
@@ -28,7 +30,7 @@ func ServiceKey(name, ref string) string { return name + "@" + ref }
 func BundleKey(kind, version string) string { return kind + "@" + version }
 
 func NewLock() *Lock {
-	return &Lock{Images: map[string]string{}, Bundles: map[string]string{}, Presets: map[string]string{}, Services: map[string]string{}}
+	return &Lock{Images: map[string]string{}, Bundles: map[string]string{}, Presets: map[string]string{}, Services: map[string]string{}, Seccomp: map[string]string{}}
 }
 
 // LoadLock treats a missing file as an empty lock.
@@ -92,6 +94,9 @@ func (l *Lock) fillMaps() {
 	if l.Services == nil {
 		l.Services = map[string]string{}
 	}
+	if l.Seccomp == nil {
+		l.Seccomp = map[string]string{}
+	}
 }
 
 // PinImage never moves an existing pin. It reports whether the lock changed.
@@ -109,6 +114,14 @@ func (l *Lock) SetPreset(path, digest string) {
 		l.Presets = map[string]string{}
 	}
 	l.Presets[path] = digest
+}
+
+// SetSeccomp records a profile's current digest, replacing an older one: the profile is the project's own source.
+func (l *Lock) SetSeccomp(path, digest string) {
+	if l.Seccomp == nil {
+		l.Seccomp = map[string]string{}
+	}
+	l.Seccomp[path] = digest
 }
 
 func (l *Lock) PinService(name, ref, digest string) bool {

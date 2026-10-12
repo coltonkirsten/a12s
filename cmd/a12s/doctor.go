@@ -99,7 +99,7 @@ func doctor(ctx context.Context, g *globals) []check {
 			if img := c.Image; !seen["i"+img] {
 				seen["i"+img] = true
 				ref := img
-				if img == fleet.TierSlim || img == fleet.TierBrowser {
+				if img == fleet.TierSlim {
 					ref = version.Image(img)
 				}
 				if have(ref, lock.Images[img]) {
@@ -123,11 +123,7 @@ func doctor(ctx context.Context, g *globals) []check {
 			if have(s.Image, lock.Services[fleet.ServiceKey(name, s.Image)]) {
 				ok("service image %s", s.Image)
 			} else {
-				fix := "docker pull " + s.Image
-				if !version.Release() && strings.HasPrefix(s.Image, "a12s/svc-") {
-					fix = "make services"
-				}
-				bad(fix, "service image %s is not on this machine", s.Image)
+				bad("docker pull "+s.Image, "service image %s is not on this machine", s.Image)
 			}
 		}
 		if have(cli.DefaultControllerImage, "") {
