@@ -20,7 +20,7 @@ host                          a12s-<fleet>-controller (bridge network a12s-<flee
 
 ## Controller
 
-The Controller runs in a container started by `a12s up` (`a12s/controller:dev` by default). It:
+The Controller runs in a container started by `a12s up` (`ghcr.io/coltonkirsten/a12s/controller:<version>` for a release, `a12s/controller:dev` for a source build). It:
 
 - **Reconciles** the Fleet against what exists, through the Driver interface. Every mutation carries a
   generation; stale writes are rejected and success is read back, never assumed. Changes to a busy Computer are
