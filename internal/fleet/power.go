@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// Power policy bounds (enhancements §4.14).
 const (
 	MinSleepAfterIdle      = time.Minute
 	MaxSleepAfterIdle      = 7 * 24 * time.Hour
@@ -16,17 +15,15 @@ const (
 	MaxMaxWakesPerHour     = 60
 )
 
-// PowerSettings are a Computer's resolved power policy.
 type PowerSettings struct {
 	SleepAfterIdle  time.Duration // 0: off
 	WakeFrom        []string      // empty: nothing wakes it
 	MaxWakesPerHour int
 }
 
-// On reports whether any part of the policy is set.
 func (p PowerSettings) On() bool { return p.SleepAfterIdle > 0 || len(p.WakeFrom) > 0 }
 
-// ParseIdle reads "off" or a duration with s, m, h or d units.
+// ParseIdle accepts "off" or a duration with s, m, h or d units.
 func ParseIdle(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if s == "off" || s == "" {
@@ -46,9 +43,8 @@ func ParseIdle(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// ResolvePower resolves a Computer's power policy (defaults are merged in
-// at decode; wakeOnMessage.from is a list, so it replaces). The Fleet must
-// have validated.
+// ResolvePower: wakeOnMessage.from is a list, so a Computer's replaces the
+// defaults' rather than merging. The Fleet must have validated.
 func (f *Fleet) ResolvePower(name string) PowerSettings {
 	p := f.Computers[name].Power
 	out := PowerSettings{MaxWakesPerHour: DefaultMaxWakesPerHour}
@@ -66,8 +62,6 @@ func (f *Fleet) ResolvePower(name string) PowerSettings {
 
 var principalNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// validatePower checks one power block; known says whether a Computer or
-// Service of that name exists.
 func validatePower(field string, p Power, computer func(string) bool, service func(string) bool) []error {
 	var errs []error
 	bad := func(sub, fix, format string, args ...any) {

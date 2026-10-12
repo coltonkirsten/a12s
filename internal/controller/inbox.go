@@ -16,7 +16,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// caller is the authenticated identity of an owner-API request.
 type caller struct {
 	principal string     // "local" or "token:<name>"
 	token     *api.Token // nil for the owner
@@ -33,7 +32,6 @@ func callerOf(r *http.Request) caller {
 
 func (k caller) owner() bool { return k.principal == api.PrincipalLocal && k.token == nil }
 
-// may reports whether the caller may perform action on computer.
 func (k caller) may(action, computer string) bool {
 	return k.owner() || (k.token != nil && inbox.Allows(k.token, action, computer))
 }
@@ -85,7 +83,6 @@ func allow(action, computerParam string, h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// inboxFail writes an inbox error.
 func inboxFail(w http.ResponseWriter, err error) {
 	var ie *inbox.Error
 	switch {
@@ -98,7 +95,6 @@ func inboxFail(w http.ResponseWriter, err error) {
 	}
 }
 
-// syncInboxes records the Fleet's Computers and inbox settings in fleet.db.
 func (c *Controller) syncInboxes(ctx context.Context, f *fleet.Fleet, by string) error {
 	if c.inbox == nil || f == nil {
 		return nil
@@ -152,7 +148,6 @@ func ownOnly(k caller, computer string) string {
 	return k.principal
 }
 
-// allowSendOrInbox admits callers holding send or inbox on the Computer.
 func allowSendOrInbox(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		k := callerOf(r)
@@ -277,8 +272,7 @@ func (c *Controller) writeSummary(w http.ResponseWriter, r *http.Request, name s
 	writeJSON(w, http.StatusOK, sum)
 }
 
-// tokenNameRE binds token names to a DNS label of at most 63 characters, so
-// "token:<name>" never needs escaping in a frame (§4.13 wire bounds).
+// tokenNameRE limits token names to a DNS label so "token:<name>" never needs escaping in a frame.
 var tokenNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func (c *Controller) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
@@ -337,10 +331,8 @@ func (c *Controller) handleTokenDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// expiryLoop expires pending Messages at their deadlines (§4.11): a timer
-// on the earliest expiresAt, re-armed on every inbox change; on start it
-// expires everything overdue first. It also prunes, hourly, what is past
-// retention and sealed in the journal.
+// expiryLoop arms a timer on the earliest expiresAt, re-armed on every inbox change, and expires
+// everything overdue on start. It also prunes, hourly, what is past retention and sealed.
 func (c *Controller) expiryLoop(ctx context.Context) {
 	var pruned time.Time
 	for ctx.Err() == nil {
@@ -371,8 +363,6 @@ func (c *Controller) expiryLoop(ctx context.Context) {
 	}
 }
 
-// inboxChanged is the store's change hook: it re-arms the expiry timer
-// and kicks the Computer's drainer.
 func (c *Controller) inboxChanged(name string) {
 	select {
 	case c.inboxKick <- struct{}{}:

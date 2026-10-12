@@ -19,8 +19,7 @@ import (
 	"time"
 )
 
-// endpoint mirrors driver.Endpoint (A12S_USES) and tcpEgress
-// driver.TCPEgress (A12S_EGRESS_TCP); kept local so a12s-init stays small.
+// endpoint and tcpEgress mirror driver types locally so a12s-init stays small.
 type endpoint struct {
 	Service  string `json:"service"`
 	Number   int    `json:"number"`
@@ -34,11 +33,8 @@ type tcpEgress struct {
 	Env  string `json:"env"`
 }
 
-// wire sets the address variable of every used Service port and of every
-// named TCP egress. HTTP ports are reached as http://<svc>.a12s:<port>
-// through the proxy; TCP ports and egress get a local forwarder on an
-// allocated loopback port, bridged by CONNECT through the proxy (§5.4). The
-// forwarder is a child process at the manifest uid, holding the listeners.
+// wire: TCP ports and egress get a loopback forwarder bridged by CONNECT through
+// the proxy; the forwarder runs as a child at the manifest uid, never as root.
 func wire(uid, gid int) error {
 	var uses []endpoint
 	var egress []tcpEgress
@@ -103,8 +99,7 @@ func wire(uid, gid int) error {
 	return nil
 }
 
-// ServeForwards is `a12s service-forward <proxy> <target>...`: listener i
-// is inherited as fd 3+i and forwards to target i through the proxy.
+// ServeForwards: listener i is inherited as fd 3+i and forwards to target i.
 func ServeForwards(proxy string, targets []string, stderr io.Writer) error {
 	if len(targets) == 0 {
 		return errors.New("service-forward: no targets")
@@ -138,7 +133,6 @@ func ServeForwards(proxy string, targets []string, stderr io.Writer) error {
 	return <-errc
 }
 
-// DialThroughProxy opens a CONNECT tunnel to target through an HTTP proxy.
 func DialThroughProxy(proxy, target string) (net.Conn, error) {
 	pu, err := url.Parse(proxy)
 	if err != nil || pu.Host == "" {

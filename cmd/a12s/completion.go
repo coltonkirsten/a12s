@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// subcommands are the second words the shells complete.
 var subcommands = map[string][]string{
 	"inbox":   {"rm", "clear", "hold", "resume"},
 	"token":   {"create", "ls", "rm"},
@@ -15,7 +14,6 @@ var subcommands = map[string][]string{
 	"lock":    {"update"},
 }
 
-// runCompletion is `a12s completion bash|zsh`: a script to source.
 func runCompletion(_ *globals, args []string) error {
 	if len(args) != 1 {
 		return usageError("completion bash|zsh")

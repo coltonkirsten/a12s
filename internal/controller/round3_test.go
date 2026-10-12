@@ -20,7 +20,7 @@ func bumpModel(name string) func(*fleet.Fleet) {
 	}
 }
 
-// #24: a running Computer whose computerd does not answer is not idle: a
+// A running Computer whose computerd does not answer is not idle: a
 // change is staged, not applied over a turn that may be running; only
 // apply --interrupt forces it.
 func TestUnknownStatusIsBusy(t *testing.T) {
@@ -44,7 +44,7 @@ func TestUnknownStatusIsBusy(t *testing.T) {
 	}
 }
 
-// #26: Ready is published only once Observe shows the generation running.
+// Ready is published only once Observe shows the generation running.
 func TestReadyIsReadBack(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -62,7 +62,7 @@ func TestReadyIsReadBack(t *testing.T) {
 	}
 }
 
-// #30: the Fleet's egress enforcement is part of a Computer's generation:
+// The Fleet's egress enforcement is part of a Computer's generation:
 // a busy Computer keeps its enforcement until its staged generation applies.
 func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
 	h := newHarness(t)
@@ -87,7 +87,7 @@ func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
 	waitFor(t, func() bool { p, _ := h.c.policy("scout"); return p.Check("anything.example", 443) == "" })
 }
 
-// #51: two idle Computers swapping exclusive drives converge: each releases
+// Two idle Computers swapping exclusive drives converge: each releases
 // the drive the other needs, and no drive ever has two attachments.
 func TestExclusiveDriveSwap(t *testing.T) {
 	h := newHarness(t)
@@ -119,7 +119,7 @@ func TestExclusiveDriveSwap(t *testing.T) {
 	}
 }
 
-// #52: a corrupted cached preset is repaired by the next up.
+// A corrupted cached preset is repaired by the next up.
 func TestCorruptPresetIsRepairedByUp(t *testing.T) {
 	h := newHarness(t)
 	res := h.up(labFleet(t, nil), nil, false)
@@ -136,7 +136,7 @@ func TestCorruptPresetIsRepairedByUp(t *testing.T) {
 	}
 }
 
-// #53: a swap submitted while both holders are busy converges once both
+// A swap submitted while both holders are busy converges once both
 // turns end, with no further command and never two attachments.
 func TestExclusiveDriveSwapWhileBothBusy(t *testing.T) {
 	h := newHarness(t)

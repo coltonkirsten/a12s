@@ -21,7 +21,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// Paths inside a Computer (PLAN "Container").
 const (
 	homeMount = "/home"
 	agentHome = "/home/agent"
@@ -30,16 +29,12 @@ const (
 	agentGID  = 1000
 	agentUser = "1000:1000"
 
-	// presetMarker records preset state on the home drive, outside the
-	// agent's home and owned by root: "pending" while copying, "applied" after.
+	// presetMarker sits outside the agent's home and is root-owned so the agent can't forge it.
 	presetMarker = "/home/.a12s-preset"
 
 	gatewayModeOption = "com.docker.network.bridge.gateway_mode_ipv4"
 )
 
-// StageComputer creates the container for spec.Generation, with its network
-// and mounts, leaving it stopped. A stopped older generation is replaced; the
-// same generation is left as is; a running Computer is never touched.
 func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) error {
 	if err := checkSpec(spec); err != nil {
 		return fmt.Errorf("stage %s: %w", spec.Name, err)
@@ -66,8 +61,7 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 			return fmt.Errorf("stage %s generation %d: generation %d is staged: %w", spec.Name, spec.Generation, staged, driver.ErrStaleGeneration)
 		}
 		if staged == spec.Generation {
-			// Same generation: done only if its bootstrap finished; a stage
-			// interrupted mid-way is replaced, never reported as success.
+			// A stage interrupted mid-way is replaced, never reported as success.
 			done, err := d.bootstrapped(ctx, c.ID, spec)
 			if err != nil {
 				return fmt.Errorf("stage %s: %w", spec.Name, err)
@@ -111,8 +105,7 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 	return nil
 }
 
-// discard removes a half-staged container after cause, and reports a failed
-// removal alongside cause rather than assuming the container is gone.
+// discard reports a failed removal rather than assuming the container is gone.
 func (d *Driver) discard(ctx context.Context, containerID string, cause error) error {
 	if _, err := d.cli.ContainerRemove(context.WithoutCancel(ctx), containerID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
 		return errors.Join(cause, fmt.Errorf("remove half-staged container: %w", err))
@@ -120,9 +113,6 @@ func (d *Driver) discard(ctx context.Context, containerID string, cause error) e
 	return cause
 }
 
-// bootstrapped reports whether an existing container of spec's generation
-// finished staging: its bundle is in the cache and, with a preset, the
-// marker says "applied" (or the home was initialized without one).
 func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driver.ComputerSpec) (bool, error) {
 	if err := d.checkBundle(ctx, containerID, spec); err != nil {
 		return false, nil
@@ -150,12 +140,9 @@ func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driv
 	return false, nil // "pending": the copy did not finish
 }
 
-// mountPointRE is the character set a mount point may use; A12S_DRIVES
-// separates entries with ',' and modes with ':'.
+// mountPointRE excludes ',' and ':', which A12S_DRIVES uses as separators.
 var mountPointRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
-// reservedMount reports whether a work drive would mount over a path the
-// Computer itself owns.
 func reservedMount(at string) bool {
 	for _, r := range []string{"/", homeMount, "/run", "/opt/a12s", "/tmp", "/proc", "/sys", "/dev"} {
 		if at == r || (r != "/" && strings.HasPrefix(at, r+"/")) {
@@ -188,7 +175,6 @@ func checkSpec(s driver.ComputerSpec) error {
 	return nil
 }
 
-// createOptions builds the container for one Computer generation.
 func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateOptions {
 	if spec.ProxyURL == "" {
 		spec.ProxyURL = "http://" + d.ControllerName() + ":3128"
@@ -256,7 +242,6 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 	}
 }
 
-// checkBundle verifies the Computer's bundle is in the cache.
 func (d *Driver) checkBundle(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
 	p := path.Join(spec.Bundle.Path(), bundleManifest)
 	_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: p})
@@ -269,11 +254,8 @@ func (d *Driver) checkBundle(ctx context.Context, containerID string, spec drive
 	return nil
 }
 
-// applyPreset copies a preset tar into /home/agent of a stopped container,
-// owned by the agent, once per home drive: when the home is still empty
-// (before computerd first creates /home/agent), or when an earlier copy did
-// not finish. A root-owned marker beside /home/agent reads "pending" during
-// the copy and "applied" only after it succeeded.
+// applyPreset runs once per home drive; the marker reads "pending" during the
+// copy and "applied" only after success, so an interrupted copy is retried.
 func (d *Driver) applyPreset(ctx context.Context, containerID string, preset []byte) error {
 	state, err := d.readFile(ctx, containerID, presetMarker)
 	if err != nil {
@@ -316,8 +298,6 @@ func (d *Driver) writeMarker(ctx context.Context, containerID, state string) err
 	return nil
 }
 
-// readFile returns a small file's content from a container, or "" if it
-// does not exist.
 func (d *Driver) readFile(ctx context.Context, containerID, p string) (string, error) {
 	res, err := d.cli.CopyFromContainer(ctx, containerID, client.CopyFromContainerOptions{SourcePath: p})
 	if isNotFound(err) {
@@ -338,8 +318,7 @@ func (d *Driver) readFile(ctx context.Context, containerID, p string) (string, e
 	return string(b), nil
 }
 
-// rebasePresetTar prefixes every entry with dir/, adds dir/ itself, and makes
-// the agent own everything. Entries that would leave dir are rejected.
+// rebasePresetTar rejects entries that would escape dir.
 func rebasePresetTar(r io.Reader, w io.Writer, dir string) error {
 	tr, tw := tar.NewReader(r), tar.NewWriter(w)
 	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeDir, Name: dir + "/", Mode: 0o755, Uid: agentUID, Gid: agentGID}); err != nil {
@@ -378,13 +357,10 @@ func rebasePresetTar(r io.Reader, w io.Writer, dir string) error {
 	return nil
 }
 
-// ensureNetwork creates the Computer's isolated internal network with a /29
-// from the pool, unless it already exists.
 func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, error) {
 	return d.ensureNetworkFor(ctx, computer, RoleComputer)
 }
 
-// ownerLabel is the label naming a network's or container's owner by role.
 func ownerLabel(role string) string {
 	if role == RoleService {
 		return LabelService
@@ -392,8 +368,6 @@ func ownerLabel(role string) string {
 	return LabelComputer
 }
 
-// ensureNetworkFor creates the isolated internal network of a Computer or
-// a Service (role), unless it already exists.
 func (d *Driver) ensureNetworkFor(ctx context.Context, computer, role string) (string, error) {
 	name := d.NetworkName(computer)
 	res, err := d.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
@@ -439,8 +413,7 @@ func (d *Driver) ensureNetworkFor(ctx context.Context, computer, role string) (s
 	return name, nil
 }
 
-// checkNetwork accepts an existing network for reuse only if it is exactly
-// what ensureNetwork would create: internal, isolated gateway, our labels.
+// checkNetwork refuses to reuse a network that isn't internal, gateway-isolated and ours.
 func (d *Driver) checkNetwork(n network.Network, computer, role string) error {
 	switch {
 	case !n.Internal:
@@ -453,7 +426,6 @@ func (d *Driver) checkNetwork(n network.Network, computer, role string) error {
 	return nil
 }
 
-// allocateSubnet returns the first /bits prefix in pool that overlaps none of used.
 func allocateSubnet(pool netip.Prefix, bits int, used []netip.Prefix) (netip.Prefix, error) {
 	size := uint32(1) << (32 - bits)
 	start := pool.Masked().Addr().As4()
@@ -473,9 +445,7 @@ next:
 	return netip.Prefix{}, fmt.Errorf("subnet pool %s is exhausted", pool)
 }
 
-// ConnectController attaches the Fleet's controller container to a Computer
-// network, so it can reach computerd and serve as that network's proxy. It
-// does nothing when there is no controller container (yet).
+// ConnectController is a no-op when no controller container exists yet.
 func (d *Driver) ConnectController(ctx context.Context, networkName string) error {
 	res, err := d.cli.ContainerInspect(ctx, d.ControllerName(), client.ContainerInspectOptions{})
 	if isNotFound(err) {
@@ -496,7 +466,6 @@ func (d *Driver) ConnectController(ctx context.Context, networkName string) erro
 	return nil
 }
 
-// SetPower starts or stops the staged generation.
 func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Power, generation int64) error {
 	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(computer), client.ContainerInspectOptions{})
 	if isNotFound(err) {
@@ -535,8 +504,6 @@ func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Pow
 	return nil
 }
 
-// RemoveComputer deletes the Computer's container and network. Its drives
-// are kept. Removing a missing Computer succeeds.
 func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 	name := d.ContainerName(computer)
 	res, err := d.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
@@ -572,10 +539,8 @@ func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 	return nil
 }
 
-// ControllerAddrs returns the controller container's IP on each network it
-// is attached to, by network name. The Controller uses it to find its own
-// address on the Fleet bridge (where the API listens) and on each Computer
-// network (which identifies the Computer behind an egress proxy connection).
+// ControllerAddrs: the address on each Computer network identifies the Computer
+// behind an egress proxy connection.
 func (d *Driver) ControllerAddrs(ctx context.Context) (map[string]netip.Addr, error) {
 	res, err := d.cli.ContainerInspect(ctx, d.ControllerName(), client.ContainerInspectOptions{})
 	if err != nil {

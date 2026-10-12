@@ -11,11 +11,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// StartLogin is POST /v1/services/{s}/login: a memory-only container of the
-// pinned Service image, on the Service's network under its egress policy,
-// for the CLI to run the manifest's login command in (enhancements §5.5).
-// The credential never touches the Controller: the CLI reads it over the
-// exec stream and writes it on the host.
+// StartLogin's container is memory-only and the credential never touches the Controller: the
+// CLI reads it over the exec stream and writes it on the host.
 func (c *Controller) StartLogin(ctx context.Context, name string) (api.LoginResponse, error) {
 	c.mu.Lock()
 	f := c.state.Fleet
@@ -60,7 +57,6 @@ func (c *Controller) StartLogin(ctx context.Context, name string) (api.LoginResp
 	return api.LoginResponse{Container: l.Container, User: l.User, Command: slices.Clone(m.Login.Command), Read: l.Read, Produces: m.Login.Produces}, nil
 }
 
-// EndLogin removes the login container, and every tmpfs with it.
 func (c *Controller) EndLogin(ctx context.Context, name string) error {
 	if err := c.drv.RemoveLogin(ctx, name); err != nil {
 		return err

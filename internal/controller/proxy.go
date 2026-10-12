@@ -15,11 +15,9 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// ProxyPort is the egress proxy's port on every Computer network.
 const ProxyPort = 3128
 
-// Policy is one Computer's egress policy (§6): the Fleet's egress.allow plus
-// its bundle's signInHosts.
+// Policy is the Fleet's egress.allow plus the bundle's signInHosts.
 type Policy struct {
 	Hosts map[string]bool
 	// AllowAll is `allow: ["*"]`: any public host on any port.
@@ -29,7 +27,6 @@ type Policy struct {
 	Unenforced bool
 }
 
-// NewPolicy builds a policy from allowlist entries and sign-in hosts.
 func NewPolicy(allow, signIn []string, unenforced bool) Policy {
 	p := Policy{Hosts: map[string]bool{}, Unenforced: unenforced}
 	for _, h := range append(append([]string(nil), allow...), signIn...) {
@@ -77,8 +74,6 @@ var blockedPrefixes = func() []netip.Prefix {
 	return out
 }()
 
-// BlockedAddr returns why addr may not be dialed, or "" for a public unicast
-// address.
 func BlockedAddr(addr netip.Addr) string {
 	a := addr.Unmap()
 	if !a.IsValid() {
@@ -106,15 +101,11 @@ func BlockedAddr(addr netip.Addr) string {
 type Proxy struct {
 	Identify func(local netip.Addr) (computer string, ok bool)
 	Policy   func(computer string) (Policy, bool)
-	// Resolve looks up a host; Dial connects to a validated address.
-	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
-	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
-	// Denied is told about every denied request (it journals a diagnostic).
-	Denied func(computer, host string, port int, reason string)
-	// Internal decides a <name>.a12s target (enhancements §5.4), before and
-	// independently of Policy: the pinned address to dial, or an HTTP status
-	// and the reason. plain is an absolute-URI (non-TLS) request. Nil:
-	// .a12s names are denied.
+	Resolve  func(ctx context.Context, host string) ([]netip.Addr, error)
+	Dial     func(ctx context.Context, network, addr string) (net.Conn, error)
+	Denied   func(computer, host string, port int, reason string)
+	// Internal decides a <name>.a12s target before and independently of Policy. plain is an
+	// absolute-URI (non-TLS) request. Nil: .a12s names are denied.
 	Internal func(ctx context.Context, caller, host string, port int, plain bool) (netip.AddrPort, int, string)
 }
 
@@ -125,7 +116,6 @@ func IsInternal(host string) bool {
 	return h == "a12s" || strings.HasSuffix(h, ".a12s")
 }
 
-// NewProxy returns a proxy that resolves with the system resolver.
 func NewProxy(identify func(netip.Addr) (string, bool), policy func(string) (Policy, bool), denied func(string, string, int, string)) *Proxy {
 	d := &net.Dialer{Timeout: 10 * time.Second}
 	return &Proxy{
@@ -139,9 +129,8 @@ func NewProxy(identify func(netip.Addr) (string, bool), policy func(string) (Pol
 	}
 }
 
-// ServeHTTP proxies CONNECT tunnels only: plaintext requests are refused,
-// so every allowed destination is reached over TLS (§6 "declared hosts and
-// HTTPS ports"); `*` keeps any port, still over CONNECT.
+// ServeHTTP refuses plaintext so every allowed destination is reached over TLS; `*` keeps
+// any port, still over CONNECT.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	computer, ok := p.identify(r)
 	if !ok {
@@ -272,7 +261,6 @@ func (p *Proxy) serveInternalHTTP(w http.ResponseWriter, r *http.Request, caller
 	}
 }
 
-// plainTarget is the host and port of an absolute-URI request.
 func plainTarget(r *http.Request) (string, int, bool) {
 	if !r.URL.IsAbs() || r.URL.Host == "" {
 		return "", 0, false

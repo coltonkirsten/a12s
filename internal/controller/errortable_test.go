@@ -11,8 +11,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// TestErrorTable walks the errors with a known fix (enhancements §6.3 "Error
-// contract"): each must say what to do, as a `fix:` line in the text or the
+// TestErrorTable walks the errors with a known fix: each must say what to do, as a `fix:` line in the text or the
 // API error's fix field.
 func TestErrorTable(t *testing.T) {
 	h := newHarness(t)

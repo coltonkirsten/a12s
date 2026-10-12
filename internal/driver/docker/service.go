@@ -29,28 +29,22 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// Services keep the capability set computerd uses for its bootstrap; a12s-init
-// drops all of them when it switches to the manifest uid (§5.5).
+// serviceCapAdd is needed only for a12s-init's bootstrap; it drops all of them
+// when it switches to the manifest uid.
 var serviceCapAdd = []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"}
 
 const initCacheMount = "/a12s-init-cache"
 
-// noHealthcheck disables an image's HEALTHCHECK in every container a12s
-// creates from a Service image.
 var noHealthcheck = &container.HealthConfig{Test: []string{"NONE"}}
 
-// InitVolume is the read-only volume holding the a12s-init binary.
 func (d *Driver) InitVolume() string { return "a12s-" + d.fleet + "-init" }
 
-// PublishName is a Service's publish forwarder container.
 func (d *Driver) PublishName(service string) string { return d.ContainerName(service) + "-publish" }
 
 func (d *Driver) serviceFilter() client.Filters {
 	return d.fleetFilter().Add("label", LabelRole+"="+RoleService)
 }
 
-// initBinary returns the a12s binary that becomes a12s-init (the running
-// executable unless Config.InitBinary says otherwise) and its short hash.
 func (d *Driver) initBinary() ([]byte, string, error) {
 	d.initOnce.Do(func() {
 		p := d.initPath
@@ -72,7 +66,6 @@ func (d *Driver) initBinary() ([]byte, string, error) {
 	return d.initData, d.initSum, d.initErr
 }
 
-// initExec is the a12s-init path inside a Service.
 func (d *Driver) initExec() (string, error) {
 	_, sum, err := d.initBinary()
 	if err != nil {
@@ -81,8 +74,7 @@ func (d *Driver) initExec() (string, error) {
 	return path.Join(driver.InitDir, sum, "a12s"), nil
 }
 
-// ensureInit copies the a12s binary into the init volume, once per binary
-// version, through a never-started container of imageID.
+// ensureInit uses a never-started container, so the Service image needs no shell.
 func (d *Driver) ensureInit(ctx context.Context, imageID string) error {
 	data, sum, err := d.initBinary()
 	if err != nil {
@@ -126,7 +118,6 @@ func (d *Driver) ensureInit(ctx context.Context, imageID string) error {
 	return nil
 }
 
-// ServiceImage reads /a12s/service.json and the declared VOLUMEs of an image.
 func (d *Driver) ServiceImage(ctx context.Context, imageID string) (driver.ServiceImage, error) {
 	res, err := d.cli.ImageInspect(ctx, imageID)
 	if err != nil {
@@ -167,8 +158,6 @@ func (d *Driver) ServiceImage(ctx context.Context, imageID string) (driver.Servi
 	return out, nil
 }
 
-// StageService creates the Service's container for spec.Generation, with its
-// own internal network, state drive and a12s-init, leaving it stopped.
 func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) error {
 	if err := checkServiceSpec(spec); err != nil {
 		return fmt.Errorf("stage service %s: %w", spec.Name, err)
@@ -228,9 +217,8 @@ func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) erro
 	if err := d.ConnectController(ctx, netName); err != nil {
 		return fmt.Errorf("stage service %s: %w", spec.Name, err)
 	}
-	// Docker gives every image VOLUME without an exact mount its own
-	// anonymous volume, even under a tmpfs; mount each one as tmpfs too, so
-	// nothing an image writes there reaches the disk or outlives it.
+	// Docker gives every unmounted image VOLUME an anonymous disk volume, even
+	// under a tmpfs; mount each as tmpfs so nothing reaches disk.
 	if img.Config != nil {
 		for v := range img.Config.Volumes {
 			v = path.Clean(v)
@@ -316,8 +304,7 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 			User:       "0:0", // a12s-init's bootstrap; it drops to spec.User before exec
 			Entrypoint: []string{initExec, "service-init", "--"},
 			Cmd:        program,
-			// An image HEALTHCHECK would run image code as the container's
-			// user (root, for a12s-init); a12s runs the manifest's check.
+			// An image HEALTHCHECK would run image code as root; a12s runs the manifest's check.
 			Healthcheck: noHealthcheck,
 			Env:         env,
 			StopTimeout: &stop,
@@ -346,11 +333,8 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 	}
 }
 
-// createPublish creates the Service's publish forwarder: a container that
-// runs only a12s's own forwarder (never Service code), publishes the host
-// ports on the Fleet bridge and forwards each to the Service over the
-// Service's network. The Service itself stays on its internal network, so
-// publishing gives it no route out.
+// createPublish runs only a12s's forwarder (never Service code) on the bridge,
+// so the Service stays on its internal network and publishing gives it no route out.
 func (d *Driver) createPublish(ctx context.Context, spec driver.ServiceSpec, initExec string) error {
 	ports := network.PortMap{}
 	exposed := network.PortSet{}
@@ -423,8 +407,6 @@ func (d *Driver) removePublish(ctx context.Context, service string) error {
 	return nil
 }
 
-// SetServicePower starts or stops the staged generation, and its publish
-// forwarder with it.
 func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.Power, generation int64) error {
 	c, err := d.serviceContainer(ctx, name)
 	if isNotFound(err) || errors.Is(err, driver.ErrNotFound) {
@@ -471,8 +453,6 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 	return nil
 }
 
-// RemoveService deletes the Service's container, forwarder and network.
-// Its state drive is kept. Removing a missing Service succeeds.
 func (d *Driver) RemoveService(ctx context.Context, name string) error {
 	if err := d.removePublish(ctx, name); err != nil {
 		return fmt.Errorf("remove service %s: %w", name, err)
@@ -507,7 +487,6 @@ func (d *Driver) RemoveService(ctx context.Context, name string) error {
 	return nil
 }
 
-// serviceContainer inspects a Service's container and checks it is ours.
 func (d *Driver) serviceContainer(ctx context.Context, name string) (container.InspectResponse, error) {
 	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(name), client.ContainerInspectOptions{})
 	if isNotFound(err) {
@@ -534,7 +513,6 @@ func (d *Driver) runningService(ctx context.Context, name string) (driver.Comput
 	return st, nil
 }
 
-// ServiceExec runs cmd in a running Service as user.
 func (d *Driver) ServiceExec(ctx context.Context, name, user string, cmd []string, stdin io.Reader) (int, string, error) {
 	if _, err := d.runningService(ctx, name); err != nil {
 		return -1, "", fmt.Errorf("exec %s: %w", name, err)
@@ -542,7 +520,6 @@ func (d *Driver) ServiceExec(ctx context.Context, name, user string, cmd []strin
 	return d.exec(ctx, d.ContainerName(name), user, cmd, stdin)
 }
 
-// DialService connects to a port of a running Service from the Controller.
 func (d *Driver) DialService(ctx context.Context, name string, port int) (net.Conn, error) {
 	st, err := d.runningService(ctx, name)
 	if err != nil {
@@ -569,7 +546,6 @@ func (d *Driver) DialService(ctx context.Context, name string, port int) (net.Co
 	return dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), strconv.Itoa(port)))
 }
 
-// ServiceLogs streams the Service container's stdout and stderr.
 func (d *Driver) ServiceLogs(ctx context.Context, name string, follow bool, tail int) (io.ReadCloser, error) {
 	c, err := d.serviceContainer(ctx, name)
 	if err != nil {
@@ -592,7 +568,6 @@ func (d *Driver) ServiceLogs(ctx context.Context, name string, follow bool, tail
 	return pr, nil
 }
 
-// ServiceWrite writes a file into a running Service through a12s-init.
 func (d *Driver) ServiceWrite(ctx context.Context, name, p, owner, mode, dirMode string, data []byte) error {
 	initExec, err := d.initExec()
 	if err != nil {
@@ -608,8 +583,7 @@ func (d *Driver) ServiceWrite(ctx context.Context, name, p, owner, mode, dirMode
 	return nil
 }
 
-// RefreshImage pulls ref when a registry has it (a locally built image that
-// no registry knows keeps its local ID) and returns the image ID.
+// RefreshImage keeps the local ID of a locally built image no registry knows.
 func (d *Driver) RefreshImage(ctx context.Context, ref string) (string, error) {
 	if pull, err := d.cli.ImagePull(ctx, ref, client.ImagePullOptions{}); err == nil {
 		_ = pull.Wait(ctx)
@@ -621,15 +595,10 @@ func (d *Driver) RefreshImage(ctx context.Context, ref string) (string, error) {
 	return res.ID, nil
 }
 
-// LoginName is a Service's login container.
 func (d *Driver) LoginName(service string) string { return d.ContainerName(service) + "-login" }
 
-// StartLogin creates and starts a Service's memory-only login container: the
-// pinned image run as the manifest uid with no capabilities, read-only
-// rootfs, HOME, XDG_* and $A12S_LOGIN_OUT under a tmpfs, every image VOLUME
-// on tmpfs, no state drive, on the Service's own network (so the Controller's
-// proxy applies the Service's egress policy). Its process is a12s holding the
-// container open; the CLI execs the login command into it.
+// StartLogin: no capabilities, read-only rootfs, everything writable on tmpfs, and
+// the Service's own network so the proxy applies the Service's egress policy.
 func (d *Driver) StartLogin(ctx context.Context, service string, spec driver.LoginSpec) (driver.Login, error) {
 	if spec.User == "" || strings.HasPrefix(spec.User, "0:") {
 		return driver.Login{}, fmt.Errorf("login %s: a login never runs as root", service)
@@ -704,7 +673,6 @@ func (d *Driver) StartLogin(ctx context.Context, service string, spec driver.Log
 	return driver.Login{Container: d.LoginName(service), User: spec.User, Read: []string{initExec, "login-read"}}, nil
 }
 
-// RemoveLogin deletes a Service's login container (and with it every tmpfs).
 func (d *Driver) RemoveLogin(ctx context.Context, service string) error {
 	res, err := d.cli.ContainerInspect(ctx, d.LoginName(service), client.ContainerInspectOptions{})
 	if isNotFound(err) {

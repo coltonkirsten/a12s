@@ -19,7 +19,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// command is one entry of the subcommand table.
 type command struct {
 	name    string
 	args    string
@@ -53,14 +52,11 @@ func commands() []command {
 	}
 }
 
-// globals are the flags every command accepts, before or after its name.
 type globals struct {
 	fleetPath    string
 	bindingsPath string
-	// json prints the result as JSON (events as JSON lines), §6.3.
-	json bool
-	// warnedF records that the deprecated -f was used for the Fleet file.
-	warnedF bool
+	json         bool
+	warnedF      bool
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
@@ -111,13 +107,12 @@ func usage(w io.Writer) {
 	}
 }
 
-// usageError is a bad invocation: exit code 2.
+// usageError exits with code 2.
 type usageError string
 
 func (e usageError) Error() string { return string(e) }
 
-// exitCode ends the program with a code and no message (the command has
-// already said what happened).
+// exitCode prints no message: the command has already said what happened.
 type exitCode int
 
 func (e exitCode) Error() string { return fmt.Sprintf("exit %d", int(e)) }
@@ -147,8 +142,7 @@ func (g *globals) register(fs *flag.FlagSet) {
 	g.registerFleet(fs, true)
 }
 
-// registerFleet registers the global flags; withF keeps the deprecated -f
-// for the Fleet file (commands where -f means follow pass false).
+// registerFleet: commands where -f means follow pass withF false.
 func (g *globals) registerFleet(fs *flag.FlagSet, withF bool) {
 	usage := "Fleet file; fleet.lock and " + cli.BindingsFile + " live beside it (default: $A12S_FLEET, then the nearest fleet.yaml upward)"
 	fs.StringVar(&g.fleetPath, "fleet", g.fleetPath, usage)
@@ -167,7 +161,6 @@ func (g *globals) registerFleet(fs *flag.FlagSet, withF bool) {
 	fs.BoolVar(&g.json, "json", g.json, "print the result as JSON (events as JSON lines)")
 }
 
-// flags returns a FlagSet for a command that also accepts the global flags.
 func (g *globals) flags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -175,7 +168,6 @@ func (g *globals) flags(name string) *flag.FlagSet {
 	return fs
 }
 
-// flagsFollow is flags for a command where -f means follow.
 func (g *globals) flagsFollow(name string, follow *bool) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -186,7 +178,7 @@ func (g *globals) flagsFollow(name string, follow *bool) *flag.FlagSet {
 }
 
 // defaultFleetPath is $A12S_FLEET, else the nearest fleet.yaml from the
-// working directory upward, else fleet.yaml (§6.3).
+// working directory upward, else fleet.yaml.
 func defaultFleetPath() string {
 	if p := os.Getenv("A12S_FLEET"); p != "" && (strings.HasSuffix(p, ".yaml") || strings.HasSuffix(p, ".yml") || strings.Contains(p, string(filepath.Separator))) {
 		return p
@@ -216,8 +208,8 @@ func mustGetwd() string {
 	return d
 }
 
-// parse parses flags anywhere among the arguments (`a12s prompt scout --new
-// "…"`) and returns the positional ones. Everything after "--" is positional.
+// parse accepts flags anywhere among the arguments, unlike flag.Parse.
+// Everything after "--" is positional.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
@@ -250,7 +242,6 @@ func (g *globals) bindings() string {
 	return filepath.Join(g.dir(), cli.BindingsFile)
 }
 
-// presetDir resolves a preset path as written in the Fleet (relative to the Fleet file).
 func (g *globals) presetDir(p string) string {
 	if filepath.IsAbs(p) {
 		return p
@@ -258,8 +249,8 @@ func (g *globals) presetDir(p string) string {
 	return filepath.Join(g.dir(), p)
 }
 
-// readFleet parses the Fleet file without validating it: commands other
-// than up only need its name and per-Computer details.
+// readFleet skips validation: commands other than up only need the name and
+// per-Computer details.
 func (g *globals) readFleet() (*fleet.Fleet, error) {
 	data, err := os.ReadFile(g.fleetPath)
 	if err != nil {
@@ -275,7 +266,6 @@ func (g *globals) readFleet() (*fleet.Fleet, error) {
 	return f, nil
 }
 
-// connect reads the Fleet file and finds its Controller.
 func (g *globals) connect() (*cli.Client, *fleet.Fleet, error) {
 	f, err := g.readFleet()
 	if err != nil {
@@ -288,17 +278,14 @@ func (g *globals) connect() (*cli.Client, *fleet.Fleet, error) {
 	return c, f, nil
 }
 
-// interruptible returns a context cancelled by Ctrl-C or SIGTERM.
 func interruptible() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-// computerPath is /v1/computers/<name><suffix>.
 func computerPath(name, suffix string) string {
 	return "/v1/computers/" + url.PathEscape(name) + suffix
 }
 
-// status fetches GET /v1/status.
 func status(ctx context.Context, c *cli.Client) (*api.StatusResponse, error) {
 	var st api.StatusResponse
 	if err := c.Do(ctx, "GET", "/v1/status", nil, &st); err != nil {
@@ -307,7 +294,6 @@ func status(ctx context.Context, c *cli.Client) (*api.StatusResponse, error) {
 	return &st, nil
 }
 
-// isTerminal reports whether f is a character device (a terminal).
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0

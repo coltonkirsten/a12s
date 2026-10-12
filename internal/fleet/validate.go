@@ -19,13 +19,8 @@ var (
 	hostRE       = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
-// reservedPaths may not be used, or contain, a work drive mount point.
 var reservedPaths = []string{"/home", "/opt/a12s", "/run", "/tmp", "/proc", "/sys", "/dev", "/etc", "/usr", "/bin", "/sbin", "/lib", "/var"}
 
-// Validate checks the Fleet against the §3 rules and returns every problem
-// found, joined, each prefixed with its field path.
-// ValidName reports whether s is a valid Fleet, Computer or drive name: a
-// lowercase DNS label of at most 40 characters.
 func ValidName(s string) bool { return nameRE.MatchString(s) }
 
 func (f *Fleet) Validate() error {

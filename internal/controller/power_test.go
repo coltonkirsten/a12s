@@ -43,7 +43,7 @@ func (h *harness) events(name string, typ string) int {
 	return n
 }
 
-// Gate 23: auto-sleep after idle; a listed principal's Message wakes it and
+// Auto-sleep after idle; a listed principal's Message wakes it and
 // is delivered with everything pending; an unlisted one doesn't wake it.
 func TestAutoSleepAndWakeOnMessage(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
@@ -76,7 +76,7 @@ func (h *harness) token(name string) string {
 	return decodeBody[api.Token](h.t, res).Secret
 }
 
-// Gate 23: things that keep it awake, and a held inbox that doesn't.
+// Things that keep it awake, and a held inbox that doesn't.
 func TestIdleDefinition(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	h.d.mu.Lock()
@@ -102,7 +102,7 @@ func TestIdleDefinition(t *testing.T) {
 	h.waitPhase("scout", api.PhaseBusy)
 }
 
-// Gate 23: the rate limit, recorded once, and the wake when the window reopens.
+// The rate limit, recorded once, and the wake when the window reopens.
 func TestWakeRateLimit(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, 1200) // a minute is 50ms; the window (3s) is crossed with advance
 	h.up(powerFleet(t, 1), nil, false)
@@ -135,7 +135,7 @@ func TestWakeRateLimit(t *testing.T) {
 	}
 }
 
-// Gate 23: manual sleep suppresses until a manual wake; --allow-wake leaves the policy in charge.
+// Manual sleep suppresses until a manual wake; --allow-wake leaves the policy in charge.
 func TestManualSleepSuppresses(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	f := powerFleet(t, 6)
@@ -172,7 +172,7 @@ func TestManualSleepSuppresses(t *testing.T) {
 	h2.waitMessage("scout", n.ID, api.MsgDelivered)
 }
 
-// Gate 23: after a Controller restart auto-wake pauses until a12s up, and
+// After a Controller restart auto-wake pauses until a12s up, and
 // expires 0 to a sleeping Computer bounces without a wake.
 func TestCredentialsPaused(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
@@ -196,7 +196,7 @@ func TestCredentialsPaused(t *testing.T) {
 	h2.waitMessage("scout", m.ID, api.MsgDelivered)
 }
 
-// Gate 23: a wake that fails pauses auto-wake (no loop).
+// A wake that fails pauses auto-wake (no loop).
 func TestFailedWakePauses(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	h.up(powerFleet(t, 6), nil, false)

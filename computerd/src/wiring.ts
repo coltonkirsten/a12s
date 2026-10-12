@@ -1,4 +1,4 @@
-// Service wiring inside a Computer (enhancements §5.4): every port of a used
+// Service wiring inside a Computer: every port of a used
 // Service gets an address variable; a TCP port gets a local forwarder on an
 // allocated loopback port bridged through the egress proxy with CONNECT; an
 // MCP port the Computer wants as a tool is registered with the harness through

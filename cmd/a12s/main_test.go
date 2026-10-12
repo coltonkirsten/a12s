@@ -210,7 +210,6 @@ func TestPromptEndToEnd(t *testing.T) {
 	}
 }
 
-// capture runs fn with os.Stdout and os.Stderr redirected.
 func capture(t *testing.T, fn func()) (string, string) {
 	t.Helper()
 	oldOut, oldErr := os.Stdout, os.Stderr

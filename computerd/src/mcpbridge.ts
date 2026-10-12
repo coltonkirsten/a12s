@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// a12s stdio -> HTTP MCP bridge (enhancements §5.4). The harness speaks MCP over
+// a12s stdio -> HTTP MCP bridge. The harness speaks MCP over
 // stdio; a Service serves it over Streamable HTTP at <url>. Each JSON-RPC line from
 // stdin is POSTed (through A12S_PROXY as a plain-HTTP absolute-URI request, the one
 // form the proxy accepts for .a12s names); JSON and SSE answers go to stdout.

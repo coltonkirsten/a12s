@@ -17,9 +17,8 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// fakeDocker holds containers, networks and volumes by name and records
-// every mutating call. Its List calls ignore filters, so PlanDown's own
-// label check is what keeps other fleets out.
+// fakeDocker's List calls ignore filters, so PlanDown's own label check is what
+// keeps other fleets out.
 type fakeDocker struct {
 	mu         sync.Mutex
 	containers map[string]container.Summary
@@ -27,13 +26,10 @@ type fakeDocker struct {
 	volumes    map[string]volume.Volume
 	calls      []string
 	filters    []client.Filters
-	// stopFail fails ContainerStop for this container name.
-	stopFail string
-	// relabel changes a network's fleet label at inspect time.
-	relabel map[string]string
-	// conflict makes ContainerRemove of these names fail with Conflict.
-	conflict map[string]bool
-	// onRemove runs (under the lock) after a container is removed.
+	stopFail   string
+	relabel    map[string]string
+	conflict   map[string]bool
+	// onRemove runs under the lock.
 	onRemove map[string]func()
 }
 
@@ -251,8 +247,6 @@ func (f *fakeDocker) names() (cs, ns, vs []string) {
 	return
 }
 
-// withHome points ~ at a temp dir holding ~/.a12s/qs/controller.json and a
-// credential file ~/.a12s/anthropic.
 func withHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()

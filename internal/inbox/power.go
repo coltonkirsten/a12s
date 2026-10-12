@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS wakes (
 CREATE INDEX IF NOT EXISTS wakes_at ON wakes (computer, at);
 `
 
-// PowerRow is a Computer's power-policy state in fleet.db (§4.14).
 type PowerRow struct {
 	SleptBy    string
 	SleptAt    *time.Time
@@ -38,7 +37,6 @@ func ensurePower(tx *sql.Tx, computer string) error {
 	return err
 }
 
-// Power returns a Computer's power state.
 func (s *Store) Power(ctx context.Context, computer string) (PowerRow, error) {
 	var r PowerRow
 	var at sql.NullInt64
@@ -60,9 +58,8 @@ func (s *Store) Power(ctx context.Context, computer string) (PowerRow, error) {
 	return r, err
 }
 
-// SetSlept records how a Computer went to sleep ("" on a manual wake, which
-// also clears a paused auto-wake) and clears the once-per-sleep suppression
-// marks.
+// SetSlept takes by "" for a manual wake, which also clears a paused
+// auto-wake. Suppression marks are once per sleep, so they reset here.
 func (s *Store) SetSlept(ctx context.Context, computer, by string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		if err := ensurePower(tx, computer); err != nil {
@@ -81,7 +78,6 @@ func (s *Store) SetSlept(ctx context.Context, computer, by string) error {
 	})
 }
 
-// SetPaused pauses or (with "") resumes automatic wakes for a Computer.
 func (s *Store) SetPaused(ctx context.Context, computer, reason string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		if err := ensurePower(tx, computer); err != nil {
@@ -92,19 +88,16 @@ func (s *Store) SetPaused(ctx context.Context, computer, reason string) error {
 	})
 }
 
-// ClearPaused resumes automatic wakes everywhere (a12s up).
 func (s *Store) ClearPaused(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE power SET paused = ''`)
 	return err
 }
 
-// PowerEvent appends a power-policy event to inbox_events.
 func (s *Store) PowerEvent(ctx context.Context, computer, typ string, data any) error {
 	return s.tx(ctx, func(tx *sql.Tx) error { return event(tx, computer, "", typ, s.now(), "controller", data) })
 }
 
-// Suppress records wake.suppressed once per sleep and reason; it reports
-// whether this call recorded it.
+// Suppress records wake.suppressed at most once per sleep and reason.
 func (s *Store) Suppress(ctx context.Context, computer, reason string, data map[string]any) (bool, error) {
 	recorded := false
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -133,7 +126,6 @@ func (s *Store) Suppress(ctx context.Context, computer, reason string, data map[
 	return recorded, err
 }
 
-// RecordWake counts an automatic wake and journals power.auto_wake.
 func (s *Store) RecordWake(ctx context.Context, computer string, data map[string]any) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := s.now()
@@ -147,7 +139,6 @@ func (s *Store) RecordWake(ctx context.Context, computer string, data map[string
 	})
 }
 
-// Wakes returns the automatic wakes of a Computer at or after since, oldest first.
 func (s *Store) Wakes(ctx context.Context, computer string, since time.Time) ([]time.Time, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT at FROM wakes WHERE computer = ? AND at >= ? ORDER BY at`, computer, ms(since))
 	if err != nil {
@@ -165,8 +156,6 @@ func (s *Store) Wakes(ctx context.Context, computer string, since time.Time) ([]
 	return out, rows.Err()
 }
 
-// WakeCandidate returns the oldest pending Message whose via is in from,
-// or "".
 func (s *Store) WakeCandidate(ctx context.Context, computer string, from []string) (string, string, error) {
 	if len(from) == 0 {
 		return "", "", nil
@@ -184,7 +173,7 @@ func (s *Store) WakeCandidate(ctx context.Context, computer string, from []strin
 	return id, via, err
 }
 
-// SyncPolicy records a Computer's power policy; a change is power_changed.
+// SyncPolicy emits power_changed only on a change, not on the first record.
 func (s *Store) SyncPolicy(ctx context.Context, computer string, policy any, by string) error {
 	b, _ := json.Marshal(policy)
 	return s.tx(ctx, func(tx *sql.Tx) error {

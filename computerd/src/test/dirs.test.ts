@@ -35,7 +35,7 @@ test('only empty, root-owned (here: test-owned), rw mount roots are handed over;
   rmSync(work, { recursive: true, force: true });
 });
 
-test('prepareDirs: modes per PLAN, and a symlink in place of a root-managed dir is refused', () => {
+test('prepareDirs: modes, and a symlink in place of a root-managed dir is refused', () => {
   const cfg = testConfig();
   prepareDirs(cfg);
   const mode = (p: string) => statSync(p).mode & 0o777;

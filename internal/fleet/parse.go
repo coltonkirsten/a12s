@@ -12,9 +12,8 @@ import (
 
 var errEmptyDocument = errors.New("empty document")
 
-// rawFleet is the document as written: defaults and computers stay YAML
-// nodes until defaults are merged in, so scalars keep their exact text
-// ("1.10" stays a string, not the float 1.1).
+// rawFleet keeps defaults and computers as YAML nodes until defaults are merged
+// in, so scalars keep their exact text ("1.10" stays a string, not the float 1.1).
 type rawFleet struct {
 	APIVersion string               `yaml:"apiVersion"`
 	Kind       string               `yaml:"kind"`
@@ -26,7 +25,6 @@ type rawFleet struct {
 	Services   map[string]yaml.Node `yaml:"services"`
 }
 
-// Load reads, parses and validates the Fleet file at path.
 func Load(path string) (*Fleet, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -39,7 +37,6 @@ func Load(path string) (*Fleet, error) {
 	return f, nil
 }
 
-// Parse parses a Fleet document, applies defaults and validates the result.
 func Parse(data []byte) (*Fleet, error) {
 	f, err := Decode(data)
 	if err != nil {
@@ -51,8 +48,7 @@ func Parse(data []byte) (*Fleet, error) {
 	return f, nil
 }
 
-// Decode parses a Fleet document and applies defaults without validating it.
-// Unknown fields are errors.
+// Decode applies defaults without validating. Unknown fields are errors.
 func Decode(data []byte) (*Fleet, error) {
 	var raw rawFleet
 	if err := decodeStrict(data, &raw); err != nil {
@@ -109,8 +105,7 @@ func Decode(data []byte) (*Fleet, error) {
 	return f, nil
 }
 
-// mapping returns n as a mapping node; null or absent becomes an empty mapping.
-// Other node kinds are returned as is and fail to decode into a Computer.
+// mapping returns other node kinds as is, so they fail to decode into a Computer.
 func mapping(n *yaml.Node) *yaml.Node {
 	for n.Kind == yaml.AliasNode {
 		n = n.Alias
@@ -121,8 +116,7 @@ func mapping(n *yaml.Node) *yaml.Node {
 	return n
 }
 
-// merge overlays over onto base: mappings merge key by key, everything else
-// (scalars and lists) replaces. Neither input is modified.
+// merge merges mappings key by key; scalars and lists replace. Neither input is modified.
 func merge(base, over *yaml.Node) *yaml.Node {
 	base, over = mapping(base), mapping(over)
 	if base.Kind != yaml.MappingNode || over.Kind != yaml.MappingNode {

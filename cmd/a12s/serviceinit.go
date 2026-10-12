@@ -6,8 +6,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/serviceinit"
 )
 
-// hidden are in-container helpers, not listed in usage: a12s-init and its
-// injection write (§5.5), and a Service's publish forwarder.
+// hidden are in-container helpers, not listed in usage.
 func hidden(name string, args []string) (error, bool) {
 	switch name {
 	case "service-init":

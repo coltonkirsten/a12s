@@ -14,8 +14,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/sse"
 )
 
-// GapError is returned when the server answers a cursor with an SSE `gap`
-// event: the events after After are no longer (or not yet) in the journal.
+// GapError means the events after After are no longer (or not yet) in the journal.
 type GapError struct {
 	After int64
 	Data  string
@@ -29,36 +28,25 @@ func (e *GapError) Error() string {
 	return msg
 }
 
-// Stream reads a Controller event stream (GET /v1/computers/{c}/events) and
-// reconnects with Last-Event-ID whenever the connection drops, so each event
-// is delivered exactly once, in seq order.
+// Stream reconnects with Last-Event-ID whenever the connection drops, so each
+// event is delivered exactly once, in seq order.
 type Stream struct {
 	Client *Client
-	// Path is the request path including any query, e.g.
-	// /v1/computers/scout/events?turn=t_1.
-	Path string
-	// After is the cursor: the last seq already seen. On the first connect
-	// it is sent as Last-Event-ID only when SendCursor is set (a ?turn=
-	// stream without a cursor replays that turn from its start); on every
-	// reconnect the last delivered seq is sent.
+	Path   string
+	// After is sent on the first connect only when SendCursor is set: a ?turn=
+	// stream without a cursor replays that turn from its start.
 	After      int64
 	SendCursor bool
-	// UntilHead ends the stream at the replay boundary, computerd's `head`
-	// event (`a12s logs` without --follow). A connection that ends before
-	// it is ErrReplayIncomplete, not a reconnect. Live streams ignore head.
+	// UntilHead: a connection that ends before computerd's `head` event is
+	// ErrReplayIncomplete, not a reconnect.
 	UntilHead bool
-	// GiveUp bounds how long reconnecting may keep failing. Zero means 2m.
-	GiveUp time.Duration
-	// OnReconnect, if set, is told about each dropped connection.
+	// GiveUp of zero means 2m.
+	GiveUp      time.Duration
 	OnReconnect func(after int64, err error)
 }
 
-// MaxMalformed is how many times in a row a stream may deliver a malformed
-// event after the same cursor before Run gives up.
 const MaxMalformed = 3
 
-// malformedError is an event that is not a valid journal event (bad JSON,
-// no seq or no type). The stream reconnects from the last good cursor.
 type malformedError struct {
 	after   int64
 	id      string
@@ -69,12 +57,8 @@ func (e *malformedError) Error() string {
 	return fmt.Sprintf("malformed event after seq %d (id %q): %s", e.after, e.id, Truncate(e.payload, 120))
 }
 
-// ErrReplayIncomplete is returned by an UntilHead stream that ended before
-// the replay boundary.
 var ErrReplayIncomplete = errors.New("replay incomplete")
 
-// Run delivers events to fn until fn returns stop or an error, the context
-// ends, or the server reports a gap.
 func (s *Stream) Run(ctx context.Context, fn func(api.Event) (stop bool, err error)) error {
 	giveUp := s.GiveUp
 	if giveUp == 0 {
@@ -125,8 +109,6 @@ func (s *Stream) Run(ctx context.Context, fn func(api.Event) (stop bool, err err
 	}
 }
 
-// connect runs one connection. It returns the last seq it delivered, whether
-// the stream is finished (fn stopped, head reached, gap or fn error), and the error.
 func (s *Stream) connect(ctx context.Context, after int64, sendCursor bool, fn func(api.Event) (bool, error)) (int64, bool, error) {
 	req, err := s.Client.NewRequest(ctx, http.MethodGet, s.Path, nil)
 	if err != nil {

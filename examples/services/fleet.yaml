@@ -1,4 +1,4 @@
-# Three Computers plus every reference Service (docs/services.md); hack/exit-gate-enhancements.sh runs it.
+# Three Computers plus every reference Service; hack/exit-gate-enhancements.sh runs it.
 # Reference images are built locally (make services); the gh Service
 # demonstrates a one-time login. Image names are local tags, so fleet.lock pins what you built.
 apiVersion: a12s.ai/v1alpha1

@@ -17,7 +17,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// runtime is a Computer's in-memory state.
 type runtime struct {
 	phase         api.Phase
 	failure       *api.Failure
@@ -28,11 +27,9 @@ type runtime struct {
 	transition   bool
 	cancelEvents context.CancelFunc
 	lastEventID  string
-	// credsHash identifies the credential material last injected.
-	credsHash string
-	// admit is held from a prompt's admission check until computerd has
-	// accepted it; closed (guarded by Controller.mu) stops admission while
-	// the Controller stops or restages the Computer.
+	credsHash    string
+	// admit is held from a prompt's admission check until computerd accepts it; closed (guarded
+	// by Controller.mu) stops admission while the Controller stops or restages the Computer.
 	admit  sync.Mutex
 	closed bool
 	// released is set while the old generation was removed to free its
@@ -40,8 +37,8 @@ type runtime struct {
 	released bool
 	// lastClear is what the last wake --clear-inbox discarded (its answer).
 	lastClear int
-	// idleSince is when the current idle run began (zero: not idle), and
-	// powerBusy marks a power-policy action in flight (§4.14).
+	// idleSince is when the current idle run began (zero: not idle); powerBusy marks a
+	// power-policy action in flight.
 	idleSince time.Time
 	powerBusy bool
 }
@@ -65,8 +62,8 @@ func (c *Controller) openAdmission(name string) {
 	c.rtLocked(name).closed = false
 }
 
-// confirm reads the Computer back through Observe until want holds: a
-// Driver call returning is not proof that it took effect (§4).
+// confirm reads the Computer back through Observe until want holds: a Driver call returning
+// is not proof that it took effect.
 func (c *Controller) confirm(ctx context.Context, name, what string, want func(st driver.ComputerState, exists bool) bool) error {
 	deadline := time.Now().Add(c.timing.ReadBack)
 	for {
@@ -97,7 +94,6 @@ func (c *Controller) rtLocked(name string) *runtime {
 	return r
 }
 
-// setPhase records a phase change and logs it, one line per change.
 func (c *Controller) setPhase(name string, phase api.Phase, failure *api.Failure) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -121,7 +117,6 @@ func (c *Controller) setPhaseLocked(name string, phase api.Phase, failure *api.F
 	}
 }
 
-// fail puts the Computer in Error and returns err.
 func (c *Controller) fail(name string, err error, retryable bool) error {
 	c.setPhase(name, api.PhaseError, &api.Failure{Reason: err.Error(), Retryable: retryable})
 	return err
@@ -139,8 +134,7 @@ func (c *Controller) setTransition(name string, on bool) {
 	c.rtLocked(name).transition = on
 }
 
-// credsHashLocked identifies the material for the Computer's credentials,
-// or "" when some is missing.
+// credsHashLocked returns "" when some credential material is missing.
 func (c *Controller) credsHashLocked(names []string) string {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
@@ -156,7 +150,6 @@ func (c *Controller) credsHashLocked(names []string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// observeOne returns the Computer as the Driver sees it now.
 func (c *Controller) observeOne(ctx context.Context, name string) (driver.ComputerState, bool, error) {
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -166,8 +159,6 @@ func (c *Controller) observeOne(ctx context.Context, name string) (driver.Comput
 	return st, ok, nil
 }
 
-// start powers on the staged generation, injects credentials and a
-// certificate, and waits for computerd: Starting -> Ready.
 func (c *Controller) start(ctx context.Context, name string) error {
 	c.setPhase(name, api.PhaseStarting, nil)
 	c.mu.Lock()
@@ -205,15 +196,12 @@ func (c *Controller) start(ctx context.Context, name string) error {
 	return nil
 }
 
-// confirmRunning reads back through Observe that the generation runs,
-// before the Computer is published Ready.
 func (c *Controller) confirmRunning(ctx context.Context, name string, gen int64) error {
 	return c.confirm(ctx, name, fmt.Sprintf("generation %d running", gen), func(st driver.ComputerState, exists bool) bool {
 		return exists && st.Generation == gen && st.Power == driver.PowerAwake && st.Running
 	})
 }
 
-// waitReady polls computerd until it answers with admission open.
 func (c *Controller) waitReady(ctx context.Context, name string) (api.ComputerdStatus, error) {
 	deadline := time.Now().Add(c.timing.ReadyTimeout)
 	cl := c.client(name)
@@ -246,8 +234,7 @@ func (c *Controller) waitReady(ctx context.Context, name string) (api.ComputerdS
 	}
 }
 
-// recordStatus keeps computerd's session and resumePending, persisted so an
-// asleep Computer shows them.
+// recordStatus persists computerd's session and resumePending so an asleep Computer shows them.
 func (c *Controller) recordStatus(name string, st api.ComputerdStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -271,8 +258,6 @@ func (c *Controller) recordStatusLocked(name string, st api.ComputerdStatus) {
 	}
 }
 
-// finalStatus records computerd's last status before the Controller stops
-// the Computer.
 func (c *Controller) finalStatus(ctx context.Context, name string) {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -281,8 +266,6 @@ func (c *Controller) finalStatus(ctx context.Context, name string) {
 	}
 }
 
-// observeStatus takes phase, active turn, session and resumePending from
-// computerd's status.
 func (c *Controller) observeStatus(name string, st api.ComputerdStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -304,7 +287,6 @@ func (c *Controller) observeStatus(name string, st api.ComputerdStatus) {
 	r.activeTurn = st.ActiveTurn
 }
 
-// subscribe follows the Computer's event stream to track Ready ⇄ Busy.
 func (c *Controller) subscribe(name string) {
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.mu.Lock()
@@ -454,7 +436,6 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 	}
 }
 
-// maybeApplyStaged applies a staged generation once the Computer is idle.
 func (c *Controller) maybeApplyStaged(name string) {
 	c.mu.Lock()
 	rec := c.state.Computers[name]
@@ -466,9 +447,8 @@ func (c *Controller) maybeApplyStaged(name string) {
 	}
 }
 
-// attach picks up a Computer that is already running (after a Controller
-// restart): it reads computerd's status and follows its events. Credentials
-// already injected stay in the Computer's tmpfs.
+// attach picks up a Computer already running after a Controller restart; credentials already
+// injected stay in its tmpfs.
 func (c *Controller) attach(ctx context.Context, name string) error {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -489,8 +469,7 @@ func (c *Controller) attach(ctx context.Context, name string) error {
 	return nil
 }
 
-// sleep closes admission, interrupts the active turn, allows a bounded
-// flush, and stops the Computer: Stopping -> Asleep (§7).
+// sleep closes admission, interrupts the active turn, allows a bounded flush, then stops the Computer.
 func (c *Controller) sleep(ctx context.Context, name string) error {
 	c.mu.Lock()
 	rec := c.state.Computers[name]
@@ -514,8 +493,8 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
 	c.interrupt(ctx, name, c.timing.SleepFlush)
-	// A claimed, undispatched Batch is returned; a dispatched one is
-	// delivered (§4.7). computerd is still up to answer.
+	// A claimed, undispatched Batch is returned; a dispatched one is delivered.
+	// computerd is still up to answer.
 	c.settleOpen(ctx, name)
 	c.finalStatus(ctx, name)
 	c.stopEvents(name)
@@ -526,8 +505,7 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	return nil
 }
 
-// stop powers the Computer down and reads that back. Its certificate is
-// refused from before the stop is issued.
+// stop: the Computer's certificate is refused before the stop is issued.
 func (c *Controller) stop(ctx context.Context, name string, gen int64) error {
 	c.unregisterCert(KindComputer, name)
 	if err := c.drv.SetPower(ctx, name, driver.PowerAsleep, gen); err != nil {
@@ -573,7 +551,6 @@ func (c *Controller) interrupt(ctx context.Context, name string, grace time.Dura
 	}
 }
 
-// watch restarts Computers that die while they should be awake.
 func (c *Controller) watch(ctx context.Context) {
 	for ctx.Err() == nil {
 		events, err := c.drv.Watch(ctx)
@@ -602,8 +579,6 @@ func (c *Controller) watch(ctx context.Context) {
 	}
 }
 
-// unexpected reports whether an event concerns the Computer's current
-// generation while it should be awake and the Controller is not changing it.
 func (c *Controller) unexpected(ev driver.Event) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -620,9 +595,7 @@ func (c *Controller) removed(ev driver.Event) {
 	}
 }
 
-// died restarts an unexpectedly dead Computer with backoff: SetPower awake
-// and inject again (the staged definition is unchanged). After MaxRestarts
-// it stays in Error until an operator acts.
+// died restarts with backoff; after MaxRestarts the Computer stays in Error until an operator acts.
 func (c *Controller) died(ev driver.Event) {
 	if !c.unexpected(ev) {
 		return

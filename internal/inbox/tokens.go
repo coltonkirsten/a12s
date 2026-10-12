@@ -14,7 +14,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// TokenPrefix marks a scoped token's secret.
 const TokenPrefix = "a12st_"
 
 func tokenHash(secret string) string {
@@ -22,8 +21,8 @@ func tokenHash(secret string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CreateToken stores a scoped token and returns it with its secret, which
-// is never stored (only its hash) and never shown again.
+// CreateToken stores only the secret's hash; the returned secret is the only
+// time it is ever visible.
 func (s *Store) CreateToken(ctx context.Context, name string, actions, computers []string) (*api.Token, error) {
 	var raw [24]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -43,7 +42,6 @@ func (s *Store) CreateToken(ctx context.Context, name string, actions, computers
 	return &api.Token{Name: name, Actions: actions, Computers: computers, CreatedAt: fromMS(ms(now)), Secret: secret}, nil
 }
 
-// LookupToken returns the scoped token whose secret this is.
 func (s *Store) LookupToken(ctx context.Context, secret string) (*api.Token, error) {
 	if !strings.HasPrefix(secret, TokenPrefix) {
 		return nil, nil
@@ -64,7 +62,6 @@ func (s *Store) LookupToken(ctx context.Context, secret string) (*api.Token, err
 	return &t, nil
 }
 
-// Tokens lists the scoped tokens, without secrets.
 func (s *Store) Tokens(ctx context.Context) ([]api.Token, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT name, actions, computers, created_at FROM tokens ORDER BY name`)
 	if err != nil {
@@ -87,7 +84,6 @@ func (s *Store) Tokens(ctx context.Context) ([]api.Token, error) {
 	return out, rows.Err()
 }
 
-// DeleteToken revokes a scoped token.
 func (s *Store) DeleteToken(ctx context.Context, name string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE name = ?`, name)
 	if err != nil {
@@ -99,8 +95,7 @@ func (s *Store) DeleteToken(ctx context.Context, name string) error {
 	return nil
 }
 
-// Allows reports whether a token may perform action on computer ("" for
-// Fleet-wide actions such as status).
+// Allows takes computer "" for Fleet-wide actions such as status.
 func Allows(t *api.Token, action, computer string) bool {
 	if !slices.Contains(t.Actions, action) {
 		return false

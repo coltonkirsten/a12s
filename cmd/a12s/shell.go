@@ -9,9 +9,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// runShell asks the Controller to audit the shell (it journals a lifecycle
-// event and names the container), then replaces this process with a local
-// `docker exec` (PLAN "Spec deviations: Shell").
+// runShell asks the Controller first so every shell is journaled, then
+// replaces this process with a local `docker exec`.
 func runShell(g *globals, args []string) error {
 	fs := g.flags("shell")
 	root := fs.Bool("root", false, "run as root instead of the agent user")

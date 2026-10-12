@@ -13,7 +13,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// UpSummary is what `a12s up` prints (Appendix A):
+// UpSummary prints:
 //
 //	created scout, builder (asleep: none)
 //	updated tester
@@ -55,8 +55,6 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	return lines
 }
 
-// UpErrors lists the Computers that did not converge, `<computer>: <reason>`,
-// in name order.
 func UpErrors(r *api.PutFleetResponse) []string {
 	var out []string
 	for _, name := range sortedKeys(r.Errors) {
@@ -65,7 +63,6 @@ func UpErrors(r *api.PutFleetResponse) []string {
 	return out
 }
 
-// ShortID abbreviates a session or turn id for a status row.
 func ShortID(id string) string {
 	const n = 8
 	if len(id) <= n {
@@ -74,9 +71,8 @@ func ShortID(id string) string {
 	return id[:n] + "…"
 }
 
-// WriteStatus prints one row per Computer, then every warning. A row's egress
-// marker comes from the Controller's observed EgressMode, never from the
-// local Fleet file, which may not be applied.
+// WriteStatus takes egress markers from the Controller's observed EgressMode,
+// never the local Fleet file, which may not be applied.
 func WriteStatus(w io.Writer, st *api.StatusResponse) {
 	var rows [][]string
 	for _, c := range st.Computers {
@@ -130,8 +126,6 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 	}
 }
 
-// WriteServices prints one row per Service (`a12s service ls`, and the
-// Services part of `a12s status`). A published port is loud on its row.
 func WriteServices(w io.Writer, services []api.ServiceStatus) {
 	rows := [][]string{{"SERVICE", "PHASE", "IMAGE", "PIN", "RESTARTS", "SEND", "USED BY", "PUBLISH"}}
 	dash := func(xs []string) string {
@@ -158,7 +152,6 @@ func WriteServices(w io.Writer, services []api.ServiceStatus) {
 	writeTable(w, rows)
 }
 
-// ShortImage is the first 12 hex digits of an image ID, or "".
 func ShortImage(id string) string {
 	h := strings.TrimPrefix(id, "sha256:")
 	if len(h) < 12 {
@@ -187,9 +180,6 @@ func phase(c api.ComputerStatus) string {
 	return p
 }
 
-// egressMarker is the row's loud egress marker, "" when egress is enforced.
-// A Controller that reports no EgressMode falls back to the Fleet-wide
-// enforcement it observed.
 func egressMarker(st *api.StatusResponse, c api.ComputerStatus) string {
 	mode := c.EgressMode
 	if mode == "" && st.EgressEnforcement == fleet.EnforcementUnenforced {
@@ -204,9 +194,6 @@ func egressMarker(st *api.StatusResponse, c api.ComputerStatus) string {
 	return ""
 }
 
-// StatusWarnings lists everything `a12s status` must say loudly: Fleet
-// warnings, orphaned drives, unenforced egress, credentials not loaded, and
-// each Computer's errors and warnings. Duplicates are dropped.
 func StatusWarnings(st *api.StatusResponse) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -251,7 +238,6 @@ func StatusWarnings(st *api.StatusResponse) []string {
 	return out
 }
 
-// WriteDrives prints `a12s drive ls`.
 func WriteDrives(w io.Writer, drives []api.DriveRow) {
 	rows := [][]string{{"NAME", "KIND", "SIZE", "ACCESS", "ATTACHED"}}
 	for _, d := range drives {
@@ -276,7 +262,6 @@ func WriteDrives(w io.Writer, drives []api.DriveRow) {
 	writeTable(w, rows)
 }
 
-// writeTable aligns cells in columns two spaces apart, without trailing blanks.
 func writeTable(w io.Writer, rows [][]string) {
 	var buf bytes.Buffer
 	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
@@ -291,8 +276,7 @@ func writeTable(w io.Writer, rows [][]string) {
 	}
 }
 
-// TurnStartedLine is `turn t_41 started (codex 0.154.0, gpt-6-astra, resumed: false)`.
-// The event names the harness; kind is the fallback when it does not.
+// TurnStartedLine uses kind only when the event does not name the harness.
 func TurnStartedLine(turn, kind string, d api.TurnStartedData) string {
 	if d.Harness.Kind != "" {
 		kind = d.Harness.Kind
@@ -308,8 +292,6 @@ func TurnStartedLine(turn, kind string, d api.TurnStartedData) string {
 	return fmt.Sprintf("turn %s started (%s)", turn, strings.Join(parts, ", "))
 }
 
-// BatchStartedLine is TurnStartedLine for the turn carrying the caller's
-// Message: "batch of 3: yours + cron:nightly-audit, agent:scout".
 func BatchStartedLine(turn, kind, mine string, d api.TurnStartedData) string {
 	line := TurnStartedLine(turn, kind, d)
 	if d.Inbox == nil || len(d.Inbox.Messages) < 2 {
@@ -327,7 +309,6 @@ func BatchStartedLine(turn, kind, mine string, d api.TurnStartedData) string {
 		fmt.Sprintf("batch of %d: yours + %s", len(d.Inbox.Messages), strings.Join(others, ", ")), 1)
 }
 
-// TurnFinishedLine is `turn t_41 completed`, with the error when there is one.
 func TurnFinishedLine(turn string, d api.TurnFinishedData) string {
 	s := fmt.Sprintf("turn %s %s", turn, d.Status)
 	if d.Error != "" {
@@ -336,8 +317,6 @@ func TurnFinishedLine(turn string, d api.TurnFinishedData) string {
 	return s
 }
 
-// EventLine is the one-line stderr summary of an event that is neither
-// text, nor the start or end of the turn.
 func EventLine(e api.Event) string {
 	var m map[string]any
 	_ = json.Unmarshal(e.Data, &m)
@@ -373,7 +352,6 @@ func EventLine(e api.Event) string {
 	return fmt.Sprintf("[%s] %s", e.Type, Truncate(Compact(e.Data), 160))
 }
 
-// LogLine is one journal line of `a12s logs`: `seq type data`.
 func LogLine(e api.Event) string {
 	s := fmt.Sprintf("%d %s", e.Seq, e.Type)
 	if d := Compact(e.Data); d != "" {
@@ -382,7 +360,6 @@ func LogLine(e api.Event) string {
 	return s
 }
 
-// Compact returns JSON on one line ("" for none).
 func Compact(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -394,7 +371,6 @@ func Compact(raw json.RawMessage) string {
 	return buf.String()
 }
 
-// Truncate shortens s to at most n runes, marking the cut.
 func Truncate(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -403,8 +379,6 @@ func Truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// InboxCell is a Computer's inbox in one status cell: "inbox 3/200 · 12Ki",
-// with OVER and held markers; "" when the inbox is empty and unheld.
 func InboxCell(in *api.InboxSummary) string {
 	if in == nil || (in.Usage.Messages == 0 && !in.Held) {
 		return ""
@@ -426,7 +400,6 @@ func kib(n int64) string {
 	return fmt.Sprintf("%dKi", (n+1023)/1024)
 }
 
-// WriteInbox prints `a12s inbox`: a summary, then one row per Message.
 func WriteInbox(w io.Writer, l *api.InboxListResponse, bodies bool) {
 	held := "not held"
 	if l.Held {
@@ -480,7 +453,6 @@ func WriteInbox(w io.Writer, l *api.InboxListResponse, bodies bool) {
 	}
 }
 
-// PowerCell renders the POWER column (§4.14 "What you see").
 func PowerCell(ps *api.PowerStatus, phase api.Phase) string {
 	if ps == nil {
 		return ""
@@ -514,7 +486,6 @@ func PowerCell(ps *api.PowerStatus, phase api.Phase) string {
 	return strings.Join(parts, " · ")
 }
 
-// WriteServiceDetail prints `a12s service status <svc>`.
 func WriteServiceDetail(w io.Writer, s api.ServiceStatus) {
 	dash := func(xs []string) string {
 		if len(xs) == 0 {

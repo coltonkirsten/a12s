@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// #58: a fleet/apply/power worker that outlives its caller is counted by
+// A fleet/apply/power worker that outlives its caller is counted by
 // the shutdown tracker, so Wait does not return while it still runs, and
-// none starts once the Controller is stopping (#60: not even when Wait
-// begins before the context is cancelled).
+// none starts once the Controller is stopping, even when Wait begins before
+// the context is cancelled.
 func TestWaitCountsDetachedWorkers(t *testing.T) {
 	h := newHarness(t)
 	reqCtx, hangUp := context.WithCancel(context.Background())
@@ -53,7 +53,7 @@ func TestWaitCountsDetachedWorkers(t *testing.T) {
 	}
 }
 
-// #60: admission is closed by Wait itself, so a worker cannot be added
+// Admission is closed by Wait itself, so a worker cannot be added
 // between the context check and Add once Wait has begun.
 func TestSpawnRefusedOnceWaitBegins(t *testing.T) {
 	c := &Controller{}

@@ -14,15 +14,13 @@ import (
 	"time"
 )
 
-// AgentUID and AgentGID own everything a preset puts in the agent's home.
 const (
 	AgentUID = 1000
 	AgentGID = 1000
 )
 
-// presetEntry is one normalized file in a preset directory. Modes are
-// normalized (0755 or 0644) so the hash does not depend on the umask of the
-// machine that checked out the repo.
+// Modes are normalized (0755 or 0644) so the hash does not depend on the umask
+// of the machine that checked out the repo.
 type presetEntry struct {
 	rel    string // slash-separated, relative to the preset root
 	typ    byte   // tar.TypeDir, tar.TypeReg or tar.TypeSymlink
@@ -81,9 +79,7 @@ func walkPreset(dir string) ([]presetEntry, error) {
 	return entries, nil
 }
 
-// HashPreset returns a deterministic content hash ("sha256:<hex>") of a preset
-// directory: paths, types, normalized modes, symlink targets and file bytes.
-// Timestamps and ownership are ignored.
+// HashPreset ignores timestamps and ownership so the hash is deterministic.
 func HashPreset(dir string) (string, error) {
 	entries, err := walkPreset(dir)
 	if err != nil {
@@ -120,9 +116,7 @@ func fileSHA256(p string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// WritePresetTar writes the preset directory as a tar stream whose entries are
-// relative to the agent's home and owned by the agent user, with normalized
-// modes and zero timestamps. It covers exactly what HashPreset hashes.
+// WritePresetTar must cover exactly what HashPreset hashes.
 func WritePresetTar(dir string, w io.Writer) error {
 	entries, err := walkPreset(dir)
 	if err != nil {

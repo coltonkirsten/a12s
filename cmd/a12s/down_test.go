@@ -21,8 +21,8 @@ func TestDownUsage(t *testing.T) {
 	}
 }
 
-// The Fleet name becomes ~/.a12s/<name>: one that is not a DNS label is
-// refused before anything is touched.
+// The Fleet name becomes ~/.a12s/<name>, so a non-DNS-label name is refused
+// before anything is touched.
 func TestDownRefusesBadFleetName(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "fleet.yaml")
 	data := "apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata:\n  name: ../evil\n"

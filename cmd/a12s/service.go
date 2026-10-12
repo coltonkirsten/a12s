@@ -92,7 +92,7 @@ func serviceStatus(g *globals, args []string) error {
 }
 
 func serviceLogs(g *globals, args []string) error {
-	// -f follows here (§6.3: the global -f becomes --fleet/-F).
+	// -f means follow here; the Fleet file is --fleet/-F.
 	var follow bool
 	fs := g.flagsFollow("service logs", &follow)
 	tail := fs.Int("tail", 0, "only the last N lines of each part")
@@ -138,8 +138,6 @@ func serviceLogs(g *globals, args []string) error {
 	return err
 }
 
-// splitTargets separates names into Computers and Services by the Fleet
-// file; an unknown name is an error.
 func splitTargets(names []string, isService func(string) bool, isComputer func(string) bool) (computers, services []string, err error) {
 	var unknown []string
 	for _, n := range names {

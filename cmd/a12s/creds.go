@@ -15,8 +15,7 @@ import (
 
 var credNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
-// runCreds is `a12s creds set <name>`: paste a token once; it is written to
-// ~/.a12s/<fleet>/<name> (0600, atomically) and bound in the bindings file.
+// runCreds writes the token 0600 and atomically, so a secret is never world-readable or half-written.
 func runCreds(g *globals, args []string) error {
 	if len(args) == 0 || args[0] != "set" {
 		return usageError("creds set <name>  (reads the value from stdin)")
@@ -77,12 +76,8 @@ func runCreds(g *globals, args []string) error {
 	return nil
 }
 
-// serviceLogin is `a12s service login <svc>`: the Controller starts a
-// memory-only container of the Service's pinned image; the login command
-// runs in it on this terminal; the credential it wrote comes back over the
-// exec stream and lands in ~/.a12s/<fleet>/<credential> (0600, atomic),
-// bound like `a12s creds set`. The container, and every tmpfs in it, is then
-// removed (enhancements §5.5).
+// serviceLogin runs the login in a memory-only container so the credential
+// never touches disk there; it lands on the host 0600, atomically.
 func serviceLogin(g *globals, args []string) error {
 	pos, err := parse(g.flags("service login"), args)
 	if err != nil {

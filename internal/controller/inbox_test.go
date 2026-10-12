@@ -132,7 +132,7 @@ func TestScopedTokens(t *testing.T) {
 	}
 }
 
-// Gate 22 (S1 part): Fleet limits, admission, over-limit, survival across a restart.
+// Fleet limits, admission, over-limit, survival across a restart.
 func TestInboxFleetLimits(t *testing.T) {
 	h := newHarness(t)
 	five, three := int64(5), int64(3)

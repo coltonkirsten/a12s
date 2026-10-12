@@ -1,7 +1,7 @@
 // Package svckit is the little a reference Service needs from a12s: its
 // config, its credentials, its mTLS identity toward the Controller, and the
 // inbox calls its grants allow. It uses nothing a third-party image doesn't
-// get (enhancements §5.8): files under /run/a12s and A12S_API.
+// get: files under /run/a12s and A12S_API.
 package svckit
 
 import (

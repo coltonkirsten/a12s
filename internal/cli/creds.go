@@ -12,8 +12,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// CredentialPath is where `a12s creds set` and `a12s service login` keep a
-// credential on the host: ~/.a12s/<fleet>/<name>.
 func CredentialPath(fleetName, name string) (string, error) {
 	dir, err := StateDir(fleetName)
 	if err != nil {
@@ -22,8 +20,8 @@ func CredentialPath(fleetName, name string) (string, error) {
 	return filepath.Join(dir, name), nil
 }
 
-// WriteSecret writes a credential atomically: a 0600 temporary file in the
-// same directory, renamed over path (enhancements §5.5 step 4).
+// WriteSecret writes a 0600 temp file in the same directory and renames it over
+// path, so a secret is never world-readable or half-written.
 func WriteSecret(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -51,8 +49,7 @@ func WriteSecret(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// BindFile records credentials.<name>: {file: <file>} in the bindings file,
-// creating it (0600) if needed and keeping everything else in it.
+// BindFile creates the bindings file 0600 and keeps everything else in it.
 func BindFile(bindingsPath, name, file string) error {
 	data, err := os.ReadFile(bindingsPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -109,7 +106,6 @@ func child(m *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-// homeRelative writes a path under the home directory as ~/….
 func homeRelative(p string) string {
 	home, err := os.UserHomeDir()
 	if err == nil && strings.HasPrefix(p, home+string(filepath.Separator)) {
