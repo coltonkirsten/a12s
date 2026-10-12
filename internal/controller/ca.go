@@ -20,9 +20,8 @@ import (
 	"time"
 )
 
-// CA is the Fleet's built-in certificate authority (§6 "Instance identity").
-// Its key lives on the Controller's state volume; leaf certificates are
-// issued in memory and never written by the Controller.
+// CA's key lives on the Controller's state volume; leaf certificates are issued in memory
+// and never written by the Controller.
 type CA struct {
 	fleet   string
 	cert    *x509.Certificate
@@ -38,7 +37,6 @@ const (
 	leafLife   = 2 * 365 * 24 * time.Hour
 )
 
-// LoadCA reads the CA from dir, creating it on first use.
 func LoadCA(dir, fleet string) (*CA, error) {
 	certPEM, err1 := os.ReadFile(filepath.Join(dir, caCertFile))
 	keyPEM, err2 := os.ReadFile(filepath.Join(dir, caKeyFile))
@@ -118,47 +116,38 @@ func newCA(cert *x509.Certificate, key *ecdsa.PrivateKey, certPEM []byte) *CA {
 // CertPEM is the CA certificate, as injected into /run/a12s/tls/ca.crt.
 func (ca *CA) CertPEM() []byte { return ca.certPEM }
 
-// Pool trusts exactly this CA.
 func (ca *CA) Pool() *x509.CertPool { return ca.pool }
 
-// Leaf is an issued certificate and its private key, PEM encoded.
 type Leaf struct {
 	CertPEM []byte
 	KeyPEM  []byte
-	// Serial is the certificate's serial number in hex: the active-
-	// certificate registry key (enhancements §5.3).
+	// Serial (hex) is the key in the active-certificate registry.
 	Serial string
 }
 
-// TLS returns the leaf as a tls.Certificate.
 func (l Leaf) TLS() (tls.Certificate, error) { return tls.X509KeyPair(l.CertPEM, l.KeyPEM) }
 
-// ControllerCN is the Controller's client identity. Only its certificate
-// carries client-auth usage; computerd requires both.
+// Only the Controller's certificate carries client-auth usage; computerd requires both.
 const ControllerCN = "controller"
 
-// ComputerCert issues a Computer's certificate: computerd serves with it
-// (SAN = the Computer's name). It has no client-auth usage, so it cannot
-// call another computerd; the Controller's lease listener alone accepts it
-// from a client (see ServerTLS).
+// ComputerCert has no client-auth usage, so a Computer cannot call another computerd;
+// only the Controller's lease listener accepts it from a client (see ServerTLS).
 func (ca *CA) ComputerCert(computer string, generation int64) (Leaf, error) {
 	return ca.issueTyped(computer, []string{computer}, Principal{Kind: KindComputer, Name: computer, Generation: generation})
 }
 
-// ServiceCert issues a Service's per-start certificate: a typed URI SAN and
-// no DNS name (a Service serves nothing a12s dials over TLS).
+// ServiceCert has a typed URI SAN and no DNS name: a Service serves nothing a12s dials over TLS.
 func (ca *CA) ServiceCert(service string, generation int64) (Leaf, error) {
 	return ca.issueTyped(service, nil, Principal{Kind: KindService, Name: service, Generation: generation})
 }
 
-// Principal kinds on the mTLS listener.
 const (
 	KindComputer = "computer"
 	KindService  = "service"
 )
 
 // Principal is the typed identity in a certificate's URI SAN:
-// a12s://<fleet>/<kind>/<name>/<generation> (enhancements §5.3).
+// a12s://<fleet>/<kind>/<name>/<generation>.
 type Principal struct {
 	Kind       string
 	Name       string
@@ -172,7 +161,6 @@ func (ca *CA) principalURI(p Principal) *url.URL {
 	return &url.URL{Scheme: "a12s", Host: ca.fleet, Path: "/" + p.Kind + "/" + p.Name + "/" + strconv.FormatInt(p.Generation, 10)}
 }
 
-// PrincipalOf reads the typed identity of a verified certificate.
 func (ca *CA) PrincipalOf(leaf *x509.Certificate) (Principal, error) {
 	if len(leaf.URIs) != 1 {
 		return Principal{}, errors.New("certificate has no a12s identity")
@@ -193,13 +181,10 @@ func (ca *CA) issueTyped(cn string, dns []string, p Principal) (Leaf, error) {
 	return ca.issueURI(cn, dns, []*url.URL{ca.principalURI(p)}, x509.ExtKeyUsageServerAuth)
 }
 
-// ControllerClientCert is what the Controller presents to computerd.
 func (ca *CA) ControllerClientCert() (Leaf, error) {
 	return ca.issue(ControllerCN, nil, x509.ExtKeyUsageClientAuth)
 }
 
-// ControllerServerCert serves the Controller's mTLS lease listener under
-// host (a12s-F-controller).
 func (ca *CA) ControllerServerCert(host string) (Leaf, error) {
 	return ca.issue(host, []string{host}, x509.ExtKeyUsageServerAuth)
 }
@@ -255,7 +240,7 @@ func parseCert(certPEM []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// writeFileAtomic writes data to path through a temporary file and rename.
+// writeFileAtomic goes through a temporary file and rename so readers never see a partial file.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
@@ -280,7 +265,6 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// ClientTLS is the Controller's TLS config toward computerd.
 func (ca *CA) ClientTLS() (*tls.Config, error) {
 	leaf, err := ca.ControllerClientCert()
 	if err != nil {
@@ -293,9 +277,7 @@ func (ca *CA) ClientTLS() (*tls.Config, error) {
 	return &tls.Config{Certificates: []tls.Certificate{cert}, RootCAs: ca.pool, MinVersion: tls.VersionTLS12}, nil
 }
 
-// ServerTLS is the lease listener's config: served as host, and every
-// client must present a Computer certificate issued by this CA (server-auth
-// usage, a DNS SAN naming the Computer). The Controller's own client
+// ServerTLS accepts only Computer certificates issued by this CA; the Controller's own client
 // certificate is refused.
 func (ca *CA) ServerTLS(host string) (*tls.Config, error) {
 	leaf, err := ca.ControllerServerCert(host)

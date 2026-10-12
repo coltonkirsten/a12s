@@ -15,7 +15,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// Astra final review #16: a Computer slept before `down` comes back asleep.
+// A Computer slept before `down` comes back asleep.
 func TestSleptComputerStaysAsleepAcrossDown(t *testing.T) {
 	h := newHarness(t)
 	f := labFleet(t, nil)
@@ -39,7 +39,7 @@ func TestSleptComputerStaysAsleepAcrossDown(t *testing.T) {
 	h2.waitPhase("scout", api.PhaseAsleep)
 }
 
-// Astra final review #3/#18: a certificate never outlives its container.
+// A certificate never outlives its container.
 func TestCertificateRefusedWhileServiceIsDown(t *testing.T) {
 	h := newHarness(t)
 	h.up(withServices(t, h.d, nil), nil, false)
@@ -57,7 +57,7 @@ func TestCertificateRefusedWhileServiceIsDown(t *testing.T) {
 	}
 }
 
-// Astra final review #2: named egress fails closed until the Controller has
+// Named egress fails closed until the Controller has
 // verified its own bridge, then remembers the last verified one, so an
 // engine read error never drops the bridge from the deny list.
 func TestNamedEgressFailsClosedWithoutBridge(t *testing.T) {
@@ -92,7 +92,7 @@ func TestNamedEgressFailsClosedWithoutBridge(t *testing.T) {
 	}
 }
 
-// Astra final review #4: a revocation is recorded in memory first, so a
+// A revocation is recorded in memory first, so a
 // registry delete that failed (the entry is still there) still refuses the
 // certificate while the container runs; the next start clears it.
 func TestRevocationHoldsWhenTheRegistryWriteFails(t *testing.T) {

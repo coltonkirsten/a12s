@@ -29,7 +29,7 @@ long_turn() { a prompt "$1" "Use your Bash tool to run exactly this command: pyt
 if [[ " $SECTIONS " == *" setup "* ]]; then
   log "== enhancements exit gate on $(docker version --format '{{.Server.Version}} {{.Server.Arch}}'), a12s $(git -C "$REPO" rev-parse --short HEAD) =="
   sed -e 's/metadata: { name: lab }/metadata: { name: gate }/' "$REPO/examples/services/fleet.yaml" > fleet.yaml
-  # Gate 11 adds the minute tick later; the base Fleet keeps the clock quiet.
+  # The services section adds the minute tick later; the base Fleet keeps the clock quiet.
   python3 - <<'PY'
 import re
 s=open('fleet.yaml').read()

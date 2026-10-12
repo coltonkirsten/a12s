@@ -9,11 +9,8 @@ import (
 	"strings"
 )
 
-// runInit is `a12s init [dir] [--harness claude-code|codex] [--with db,cron]`:
-// it scaffolds fleet.yaml, a12s.bindings.yaml and .gitignore (enhancements
-// §6.3). --with adds reference Services; a credential they need and nobody
-// bound yet makes the first `a12s up` stop with its fix line
-// (`a12s creds set postgres`), which is the only step left.
+// runInit leaves credentials unbound on purpose: the first `a12s up` stops with
+// the fix line (`a12s creds set postgres`), the only step left.
 func runInit(g *globals, args []string) error {
 	fs := g.flags("init")
 	harness := fs.String("harness", "claude-code", "claude-code or codex")
@@ -95,7 +92,6 @@ func absDir(d string) string {
 	return d
 }
 
-// scaffold returns the Fleet file and the bindings file for init.
 func scaffold(dirName, harness string, extras []string) (string, string, error) {
 	name := strings.ToLower(dirName)
 	if !validFleetName(name) {

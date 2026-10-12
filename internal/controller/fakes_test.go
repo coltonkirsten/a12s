@@ -350,7 +350,6 @@ func (d *fakeDriver) RemoveDrive(_ context.Context, id string) error {
 	return nil
 }
 
-// fakeComputerds holds one fake computerd per Computer name.
 type fakeComputerds struct {
 	mu  sync.Mutex
 	all map[string]*fakeComputerd
@@ -512,7 +511,6 @@ func (f *fakeComputerd) TurnSummary(_ context.Context, turn string) (api.TurnSum
 	return api.TurnSummary{}, &computerd.Error{Status: 404, Message: "unknown turn"}
 }
 
-// requestsSnapshot returns the accepted requests so far.
 func (f *fakeComputerd) requestsSnapshot() []api.TurnRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -610,7 +608,6 @@ func (f *fakeComputerd) setGate(g chan struct{}) {
 	f.gate = g
 }
 
-// finish ends the active turn.
 func (f *fakeComputerd) finish(status string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -833,7 +830,6 @@ func noSecretsOnDisk(t *testing.T, dir string) {
 	}
 }
 
-// get returns a copy of a container.
 func (d *fakeDriver) get(name string) fakeContainer {
 	d.mu.Lock()
 	defer d.mu.Unlock()

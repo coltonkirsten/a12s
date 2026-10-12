@@ -14,7 +14,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// LeasePort is the Controller's mTLS listener for Computers (A12S_CONTROLLER).
 const LeasePort = 7443
 
 const (
@@ -22,11 +21,9 @@ const (
 	maxLeaseTTL     = time.Hour
 )
 
-// Leases are the advisory locks behind the `lock` and `release` system
-// tools: one holder per (drive, path), expiring unless renewed. In memory.
+// Leases are in-memory advisory locks: one holder per (drive, path), expiring unless renewed.
 type Leases struct {
-	now func() time.Time
-	// authorize refuses a lease the Computer may not hold.
+	now       func() time.Time
 	authorize func(computer, drive string) error
 
 	mu    sync.Mutex
@@ -41,7 +38,6 @@ type lease struct {
 	expires  time.Time
 }
 
-// LeaseRequest is POST /v1/leases, and the body of DELETE /v1/leases.
 type LeaseRequest struct {
 	Computer string `json:"computer"`
 	Drive    string `json:"drive"`
@@ -49,14 +45,11 @@ type LeaseRequest struct {
 	TTL      int    `json:"ttl,omitempty"` // seconds
 }
 
-// LeaseResponse is a held lease.
 type LeaseResponse struct {
 	ID        string    `json:"id"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// NewLeases returns an empty lease table; authorize decides which
-// Computer may lock on which drive.
 func NewLeases(authorize func(computer, drive string) error) *Leases {
 	return &Leases{now: time.Now, authorize: authorize, byKey: map[leaseKey]*lease{}}
 }
@@ -72,7 +65,6 @@ func (l *Leases) Handler() http.Handler {
 	return mux
 }
 
-// peer is the Computer named by the client certificate.
 func peer(r *http.Request) []string {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil

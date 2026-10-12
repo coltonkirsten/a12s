@@ -11,14 +11,11 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// Message stream event types (§4.9): the inbox_events of one Message, in
-// the journal's event envelope so clients reuse their reconnecting reader.
-// The first event of a fresh subscription is a snapshot.
+// The first event of a fresh Message stream subscription is a snapshot.
 const (
 	MsgEventSnapshot = "snapshot"
 )
 
-// terminalMsgEvent ends a Message's stream.
 func terminalMsgEvent(t string) bool {
 	switch t {
 	case api.MsgDiscarded, api.MsgWithdrawn, api.MsgExpired, api.MsgReplaced:
@@ -27,7 +24,6 @@ func terminalMsgEvent(t string) bool {
 	return false
 }
 
-// inboxNotify returns a channel closed at the next inbox change.
 func (c *Controller) inboxNotify() <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -46,10 +42,8 @@ func (c *Controller) inboxBroadcast() {
 	c.inboxBcast = make(chan struct{})
 }
 
-// handleMessageEvents is GET /v1/computers/{c}/inbox/{id}/events: the
-// Message's current state and its inbox's hold first (a snapshot, so a
-// delivery or hold before the subscription is never missed), then its
-// inbox_events, replayable with Last-Event-ID.
+// handleMessageEvents sends a snapshot first, so a delivery or hold before the subscription
+// is never missed.
 func (c *Controller) handleMessageEvents(w http.ResponseWriter, r *http.Request) {
 	name, id := r.PathValue("c"), r.PathValue("id")
 	via := ownOnly(callerOf(r), name)

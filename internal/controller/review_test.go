@@ -14,7 +14,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// #24: a prompt being admitted when sleep starts is seen (and stopped) by
+// A prompt being admitted when sleep starts is seen (and stopped) by
 // sleep; a prompt after sleep has closed admission is refused.
 func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 	h := newHarness(t)
@@ -63,7 +63,7 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 	}
 }
 
-// #24: restaging an idle Computer closes admission before its idle check.
+// Restaging an idle Computer closes admission before its idle check.
 func TestRestageClosesAdmission(t *testing.T) {
 	h := newHarness(t)
 	res := h.up(labFleet(t, nil), nil, false)
@@ -91,7 +91,7 @@ func TestRestageClosesAdmission(t *testing.T) {
 	}
 }
 
-// #25: an exclusive drive moved from a busy Computer waits until the old
+// An exclusive drive moved from a busy Computer waits until the old
 // holder's generation is gone; there are never two attachments.
 func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
 	h := newHarness(t)
@@ -127,7 +127,7 @@ func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
 	}
 }
 
-// #26: a stage the Driver reports but Observe does not show is not
+// A stage the Driver reports but Observe does not show is not
 // recorded as done.
 func TestStageIsReadBack(t *testing.T) {
 	h := newHarness(t)
@@ -149,7 +149,7 @@ func TestStageIsReadBack(t *testing.T) {
 	}
 }
 
-// #28: a restart finishes removing Computers the Fleet dropped.
+// A restart finishes removing Computers the Fleet dropped.
 func TestRestartFinishesRemovals(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, fifth), nil, false)
@@ -165,7 +165,7 @@ func TestRestartFinishesRemovals(t *testing.T) {
 	}
 }
 
-// #29: presets survive a restart; without the bytes, staging is refused.
+// Presets survive a restart; without the bytes, staging is refused.
 func TestPresetsSurviveRestart(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -190,7 +190,7 @@ func TestPresetsSurviveRestart(t *testing.T) {
 	}
 }
 
-// #30: a staged egress change waits with the rest of the generation.
+// A staged egress change waits with the rest of the generation.
 func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 	h := newHarness(t)
 	res := h.up(labFleet(t, nil), nil, false)
@@ -214,7 +214,7 @@ func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 	}
 }
 
-// The old turns endpoint is gone: one way in (enhancements §4.4).
+// There is no turns endpoint: a Message is the one way to start a Turn.
 func TestTurnsEndpointIsGone(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -227,7 +227,7 @@ func TestTurnsEndpointIsGone(t *testing.T) {
 	}
 }
 
-// #37: after a Controller restart, credentials sent with up are injected
+// After a Controller restart, credentials sent with up are injected
 // into running Computers.
 func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	h := newHarness(t)
@@ -250,7 +250,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	}
 }
 
-// #43: the session a turn switched to is kept while asleep.
+// The session a turn switched to is kept while asleep.
 func TestAsleepShowsTheLatestSession(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -263,7 +263,7 @@ func TestAsleepShowsTheLatestSession(t *testing.T) {
 	}
 }
 
-// #46: status carries each Computer's active egress mode.
+// Status carries each Computer's active egress mode.
 func TestStatusEgressMode(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, func(f *fleet.Fleet) {

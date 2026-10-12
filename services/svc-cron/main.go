@@ -1,4 +1,4 @@
-// Command svc-cron is the reference cron Service (enhancements §5.8): it
+// Command svc-cron is the reference cron Service: it
 // enqueues on a schedule with the send grant the Fleet gives it. A slot's
 // idempotency key is <job>/<slot>, so a double fire enqueues once; a job's
 // replace becomes the replace key and its expires the deadline; on each fire

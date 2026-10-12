@@ -26,13 +26,12 @@ type State struct {
 	// BundleHosts are the sign-in hosts of each pinned bundle, by
 	// "kind@version", from its manifest.
 	BundleHosts map[string][]string `json:"bundleHosts,omitempty"`
-	// Services is each Service's persistent state, and Manifests the
-	// merged manifest each was admitted with (enhancements §5).
+	// Services is each Service's persistent state, and Manifests the merged manifest each was
+	// admitted with.
 	Services  map[string]*ServiceRecord         `json:"services,omitempty"`
 	Manifests map[string]*fleet.ServiceManifest `json:"manifests,omitempty"`
 }
 
-// Record is one Computer's persistent state.
 type Record struct {
 	// Generation is the generation staged on the substrate, and SpecHash
 	// the hash of its spec.
@@ -70,13 +69,12 @@ type Active struct {
 	// Unenforced is the Fleet's egress.enforcement: unenforced when this
 	// generation was staged.
 	Unenforced bool `json:"unenforced,omitempty"`
-	// Send is grants.send and Uses the resolved endpoints of uses
-	// (enhancements §5.3, §5.4): what the mTLS listener and the proxy allow.
+	// Send is grants.send and Uses the resolved endpoints of uses: what the mTLS listener and
+	// the proxy allow.
 	Send []string          `json:"send,omitempty"`
 	Uses []driver.Endpoint `json:"uses,omitempty"`
 }
 
-// pending reports whether a staged change waits for idle.
 func (r *Record) pending() bool { return r.StagedGeneration > r.Generation }
 
 func loadState(path string) (*State, error) {
@@ -155,7 +153,6 @@ func loadPreset(stateDir, sum string) []byte {
 	return data
 }
 
-// prunePresets removes stored presets the lock no longer pins.
 func prunePresets(stateDir string, keep map[string]string) {
 	want := map[string]bool{}
 	for _, sum := range keep {

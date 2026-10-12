@@ -11,7 +11,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-// Batch states.
 const (
 	BatchClaimed   = "claimed"   // rows claimed; the POST may or may not have reached computerd
 	BatchAccepted  = "accepted"  // computerd accepted it as Turn
@@ -19,11 +18,9 @@ const (
 	BatchReturned  = "returned"  // settled undispatched; rows back to pending (or expired/replaced)
 )
 
-// MaxAttempts is how many returns a Message survives before the inbox holds
-// undeliverable (§4.6).
 const MaxAttempts = 3
 
-// FenceGrace is the minimum time a claimed Batch has to be accepted (§4.11).
+// FenceGrace is the minimum time a claimed Batch has to be accepted.
 const FenceGrace = 10 * time.Second
 
 const batchSchema = `
@@ -49,7 +46,6 @@ CREATE TABLE IF NOT EXISTS clear_ops (
 CREATE INDEX IF NOT EXISTS messages_journal ON messages (computer, journaled) WHERE journaled = 0;
 `
 
-// Batch is a claimed Batch with its immutable Turn request.
 type Batch struct {
 	ID       string
 	Computer string
@@ -58,11 +54,10 @@ type Batch struct {
 	NotAfter *time.Time // the deadline fence; nil without expiring Messages
 	Turn     string
 	State    string
-	// Override is set when the Batch carries the one-shot session override.
+	// Override marks the one-shot session override, which Deliver consumes.
 	Override bool
 }
 
-// FencePassed reports whether the Batch may no longer be started.
 func (b *Batch) FencePassed(now time.Time) bool { return b.NotAfter != nil && now.After(*b.NotAfter) }
 
 func scanBatch(r scanner) (*Batch, error) {
@@ -86,7 +81,6 @@ func scanBatch(r scanner) (*Batch, error) {
 
 const batchCols = `id, computer, request, claimed_at, not_after, override, turn, state`
 
-// OpenBatches returns a Computer's Batches not yet settled, oldest first.
 func (s *Store) OpenBatches(ctx context.Context, computer string) ([]*Batch, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+batchCols+` FROM batches WHERE computer = ? AND state IN ('claimed', 'accepted') ORDER BY claimed_at, id`, computer)
 	if err != nil {
@@ -104,7 +98,6 @@ func (s *Store) OpenBatches(ctx context.Context, computer string) ([]*Batch, err
 	return out, rows.Err()
 }
 
-// BatchByTurn returns the Batch a Turn carries, if any.
 func (s *Store) BatchByTurn(ctx context.Context, turn string) (*Batch, error) {
 	b, err := scanBatch(s.db.QueryRowContext(ctx, `SELECT `+batchCols+` FROM batches WHERE turn = ?`, turn))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -113,7 +106,6 @@ func (s *Store) BatchByTurn(ctx context.Context, turn string) (*Batch, error) {
 	return b, err
 }
 
-// GetBatch returns a Batch by id.
 func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
 	b, err := scanBatch(s.db.QueryRowContext(ctx, `SELECT `+batchCols+` FROM batches WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -122,8 +114,6 @@ func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
 	return b, err
 }
 
-// buildRequest renders a Batch's immutable Turn request from its Messages
-// (no I/O), and returns the earliest expiry among them.
 func buildRequest(computer, id, session, intro string, now time.Time, msgs []*api.Message, pendingAfter int) (api.TurnRequest, *time.Time) {
 	var bms []BatchMessage
 	inbox := &api.TurnInbox{Batch: id, PendingAfter: pendingAfter}
@@ -145,10 +135,8 @@ func buildRequest(computer, id, session, intro string, now time.Time, msgs []*ap
 	return api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, intro, now, bms), Inbox: inbox}, earliest
 }
 
-// claimTx claims the next Batch of a Computer (§4.5 draining): expire due
-// Messages, take the pending snapshot up to the next fresh boundary, mark it
-// claimed, render it and store the immutable request. It returns nil when
-// nothing is claimable: an open Batch, a hold, or nothing pending.
+// claimTx expires due Messages before the snapshot so an expired one is never
+// delivered. At most one Batch per Computer is open at a time.
 func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, string, error) {
 	if _, err := expireTx(tx, computer, now); err != nil {
 		return nil, "", err
@@ -187,7 +175,7 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	if len(all) == 0 {
 		return nil, "", nil
 	}
-	// At most one fresh Message, and only first: stop before the next one.
+	// A fresh Message starts a new session, so it may only lead a Batch.
 	n := 1
 	for n < len(all) && !all[n].Fresh {
 		n++
@@ -232,7 +220,6 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	return b, "", nil
 }
 
-// Claim claims the next Batch of a Computer, or returns nil.
 func (s *Store) Claim(ctx context.Context, computer string) (*Batch, error) {
 	var b *Batch
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -243,9 +230,8 @@ func (s *Store) Claim(ctx context.Context, computer string) (*Batch, error) {
 	return b, err
 }
 
-// ClaimNow is the now-or-never hook's claim (§4.11): inside the enqueue
-// transaction, claim the Batch and require it to include m. It returns the
-// Batch or a not_idle refusal.
+// ClaimNow runs inside the enqueue transaction so a now-or-never Message is
+// either in this Batch or refused, never left queued.
 func (t *Tx) ClaimNow(m api.Message) (*Batch, *Error) {
 	b, reason, err := t.s.claimTx(t.tx, m.Computer, t.at)
 	if err != nil {
@@ -265,15 +251,13 @@ func (t *Tx) ClaimNow(m api.Message) (*Batch, *Error) {
 	return nil, NotIdle(m.Computer, "queue_ahead")
 }
 
-// Accept records the Turn computerd started for a Batch.
 func (s *Store) Accept(ctx context.Context, batch, turn string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE batches SET turn = ?, state = 'accepted' WHERE id = ? AND state IN ('claimed', 'accepted')`, turn, batch)
 	return err
 }
 
-// Deliver settles a Batch as delivered: the harness received it (§4.6). The
-// session override it carried is consumed. With hold set, the inbox holds
-// with that reason and diagnostic.
+// Deliver is called only once the harness received the Batch; settling twice
+// is a no-op.
 func (s *Store) Deliver(ctx context.Context, batch, turn, hold, diagnostic string) error {
 	var computer string
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -341,26 +325,20 @@ func holdTx(tx *sql.Tx, computer, reason, diagnostic, by string, now time.Time) 
 	return event(tx, computer, "", "held", now, by, map[string]any{"reason": reason, "diagnostic": diagnostic})
 }
 
-// ReturnOptions say how a Batch came back.
 type ReturnOptions struct {
 	// CountAttempt is false for a 409 busy or a lookup-only refusal.
-	CountAttempt bool
-	// Hold, when set, holds the inbox with this reason and diagnostic.
+	CountAttempt     bool
 	Hold, Diagnostic string
-	Reason           string // for the event: busy, failed, interrupted, refused
+	Reason           string // busy, failed, interrupted, refused
 }
 
-// ReturnResult is what the return routine did with each row.
 type ReturnResult struct {
 	Pending, Expired, Replaced []string
 	Held                       string
 }
 
-// Return is the one atomic return routine (§4.6, §4.11, §4.12): every row
-// of the Batch goes back to pending at its own seq, unless its deadline has
-// passed (expired) or a newer pending Message in its replace scope exists
-// (replaced, with the count carried over). A Message returned MaxAttempts
-// times holds the inbox undeliverable. The Batch id is retired.
+// Return is the one atomic return routine: rows go back to pending at their
+// own seq to keep order, unless expired, cleared or replaced meanwhile.
 func (s *Store) Return(ctx context.Context, batch string, o ReturnOptions) (*ReturnResult, error) {
 	res := &ReturnResult{}
 	var computer string
@@ -381,14 +359,13 @@ func (s *Store) Return(ctx context.Context, batch string, o ReturnOptions) (*Ret
 		if err != nil {
 			return err
 		}
-		// (1) Every overdue pending row expires first, so a returned row is
-		// never replaced by a newer one that is itself already past its
-		// deadline (and nothing is delivered).
+		// Expire overdue pending rows first, so a returned row is never
+		// replaced by a newer one that is itself already past its deadline.
 		if _, err := expireTx(tx, b.Computer, now); err != nil {
 			return err
 		}
 		// A wake --clear-inbox accepted while this Batch was claimed still
-		// covers its rows: they come back discarded, never redelivered (§4.7).
+		// covers its rows: they come back discarded, never redelivered.
 		var clearThrough sql.NullInt64
 		var clearID sql.NullString
 		if err := tx.QueryRow(`SELECT through_seq, request_id FROM clear_ops WHERE computer = ? AND at >= ? ORDER BY through_seq DESC LIMIT 1`,
@@ -466,7 +443,6 @@ func (s *Store) Return(ctx context.Context, batch string, o ReturnOptions) (*Ret
 	return res, err
 }
 
-// Held reports whether a Computer's inbox is held.
 func (s *Store) Held(ctx context.Context, computer string) (bool, string, error) {
 	var held bool
 	var reason string
@@ -477,15 +453,14 @@ func (s *Store) Held(ctx context.Context, computer string) (bool, string, error)
 	return held, reason, err
 }
 
-// HasPending reports whether a Computer has pending Messages.
 func (s *Store) HasPending(ctx context.Context, computer string) (bool, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE computer = ? AND state = 'pending'`, computer).Scan(&n)
 	return n > 0, err
 }
 
-// MessageSnapshot is a Message's state and its inbox's hold, read together
-// with the inbox_events cursor they correspond to (§4.9).
+// MessageSnapshot is read in one transaction with the inbox_events cursor, so
+// a follower resumes events from exactly this state.
 type MessageSnapshot struct {
 	Message    api.Message `json:"message"`
 	Held       bool        `json:"held"`
@@ -494,7 +469,7 @@ type MessageSnapshot struct {
 	Cursor     int64       `json:"-"`
 }
 
-// Snapshot returns a Message's snapshot (only via's own with via set).
+// Snapshot with via set only returns via's own Messages.
 func (s *Store) Snapshot(ctx context.Context, computer, id, via string) (*MessageSnapshot, error) {
 	var snap *MessageSnapshot
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -515,8 +490,8 @@ func (s *Store) Snapshot(ctx context.Context, computer, id, via string) (*Messag
 	return snap, err
 }
 
-// MessageEvents returns the events of one Message after id, plus the
-// inbox's hold and resume events, oldest first.
+// MessageEvents includes the inbox's hold and resume events, since they
+// affect every pending Message.
 func (s *Store) MessageEvents(ctx context.Context, computer, id string, after int64) ([]InboxEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, computer, message, type, at, principal, data FROM inbox_events
 		WHERE computer = ? AND id > ? AND (message = ? OR (message = '' AND type IN ('held', 'resumed'))) ORDER BY id LIMIT 1000`, computer, after, id)

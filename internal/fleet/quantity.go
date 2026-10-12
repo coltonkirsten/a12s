@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// Bytes is a size in bytes. In YAML and JSON it is written as a plain integer
-// or with a binary unit suffix: Ki, Mi, Gi or Ti (for example "10Gi").
+// Bytes is written as a plain integer or with a binary unit suffix: Ki, Mi, Gi or Ti.
 type Bytes int64
 
 var binaryUnits = []struct {
@@ -21,7 +20,6 @@ var binaryUnits = []struct {
 	{"Ki", 1 << 10},
 }
 
-// ParseBytes parses "10Gi", "512Mi", "1.5Gi" or "1048576".
 func ParseBytes(s string) (Bytes, error) {
 	s = strings.TrimSpace(s)
 	num, factor := s, int64(1)
@@ -51,7 +49,6 @@ func ParseBytes(s string) (Bytes, error) {
 	return Bytes(math.Round(v)), nil
 }
 
-// String formats b with the largest binary unit that divides it exactly.
 func (b Bytes) String() string {
 	for _, u := range binaryUnits {
 		if b != 0 && int64(b)%u.factor == 0 {
@@ -61,10 +58,8 @@ func (b Bytes) String() string {
 	return strconv.FormatInt(int64(b), 10)
 }
 
-// MarshalText implements encoding.TextMarshaler.
 func (b Bytes) MarshalText() ([]byte, error) { return []byte(b.String()), nil }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
 func (b *Bytes) UnmarshalText(text []byte) error {
 	v, err := ParseBytes(string(text))
 	if err != nil {
@@ -74,11 +69,9 @@ func (b *Bytes) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// CPU is a CPU quantity in millicores. In YAML and JSON it is written as a
-// number of cores ("1", "0.5") or in millicores ("500m").
+// CPU is stored in millicores and written as cores ("0.5") or millicores ("500m").
 type CPU int64
 
-// ParseCPU parses "2", "0.5" or "500m".
 func ParseCPU(s string) (CPU, error) {
 	s = strings.TrimSpace(s)
 	if m, ok := strings.CutSuffix(s, "m"); ok {
@@ -95,10 +88,8 @@ func ParseCPU(s string) (CPU, error) {
 	return CPU(math.Round(f * 1000)), nil
 }
 
-// Millis returns the quantity in millicores.
 func (c CPU) Millis() int64 { return int64(c) }
 
-// String formats c as whole cores when exact, else millicores.
 func (c CPU) String() string {
 	if c%1000 == 0 {
 		return strconv.FormatInt(int64(c)/1000, 10)
@@ -106,10 +97,8 @@ func (c CPU) String() string {
 	return strconv.FormatInt(int64(c), 10) + "m"
 }
 
-// MarshalText implements encoding.TextMarshaler.
 func (c CPU) MarshalText() ([]byte, error) { return []byte(c.String()), nil }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
 func (c *CPU) UnmarshalText(text []byte) error {
 	v, err := ParseCPU(string(text))
 	if err != nil {
@@ -119,13 +108,11 @@ func (c *CPU) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// UnmarshalJSON accepts a JSON number (cores) as well as a string, as YAML does.
 func (c *CPU) UnmarshalJSON(b []byte) error {
 	t := strings.Trim(string(b), `"`)
 	return c.UnmarshalText([]byte(t))
 }
 
-// UnmarshalJSON accepts a JSON number (bytes) as well as a string ("512Mi").
 func (b *Bytes) UnmarshalJSON(data []byte) error {
 	t := strings.Trim(string(data), `"`)
 	return b.UnmarshalText([]byte(t))

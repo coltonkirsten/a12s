@@ -31,13 +31,12 @@ export type AdapterEvent =
   | { type: 'resume.failed'; data: { sessionId: string; reason: string } }
   | { type: 'turn.finished'; data: { status: TurnStatus; usage: Record<string, unknown> | null; error?: string } }
   /**
-   * Evidence the harness received the prompt (enhancements §4.6): Claude's echo of the user message after the init
+   * Evidence the harness received the prompt: Claude's echo of the user message after the init
    * record passed the session check, Codex's turn/start response. Emitted at most once, before any model output.
    */
   | { type: 'turn.dispatched'; data: Record<string, never> };
 
 export interface RunningTurn {
-  /** The harness session this turn runs in. */
   sessionId: string;
   /** Ends after exactly one turn.finished. */
   events: AsyncIterable<AdapterEvent>;
@@ -51,7 +50,6 @@ export interface Adapter {
   stop(): Promise<void>;
   /** Checks a session can be resumed without running a model turn. Resolves null if fine, else a reason. */
   precheck(sessionId: string): Promise<string | null>;
-  /** Restarts the harness process (between turns). */
   restart(): Promise<void>;
   close(): Promise<void>;
 }

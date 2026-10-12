@@ -16,10 +16,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// runDown is `a12s down [--purge [--yes]]`. It removes the Fleet's
-// Computers, Controller, networks and Controller state, and keeps its drives.
-// --purge also destroys the drives, after a confirmation that lists them:
-// with `drive rm`, the only commands that destroy data.
+// runDown keeps drives; --purge destroys them only after a confirmation that
+// lists them. With `drive rm`, these are the only commands that destroy data.
 func runDown(g *globals, args []string) error {
 	fs := g.flags("down")
 	purge := fs.Bool("purge", false, "also destroy the Fleet's drives (asks first)")
@@ -76,8 +74,6 @@ func runDown(g *globals, args []string) error {
 	return derr
 }
 
-// inboxCounts summarizes the Fleet's inboxes from a running Controller, for
-// the purge confirmation; "" when it does not answer.
 func inboxCounts(fleetName string) string {
 	c, err := cli.Dial(fleetName)
 	if err != nil {
@@ -111,8 +107,6 @@ func inboxCounts(fleetName string) string {
 	return fmt.Sprintf("inbox: %d pending across %d Computers, %d held", pending, computers, held)
 }
 
-// confirmPurge lists the drives and the data volume and asks y/N, like
-// `a12s drive rm`.
 func confirmPurge(in io.Reader, out io.Writer, fleetName string, drives []cli.Drive, data []string, counts string) bool {
 	fmt.Fprintf(out, "a12s down --purge destroys the %d drive(s) of fleet %s and everything on them:\n", len(drives), fleetName)
 	for _, d := range drives {
@@ -132,7 +126,6 @@ func confirmPurge(in io.Reader, out io.Writer, fleetName string, drives []cli.Dr
 	return true
 }
 
-// confirmed reads one line and reports whether it is y or yes.
 func confirmed(in io.Reader) bool {
 	line, _ := bufio.NewReader(in).ReadString('\n')
 	a := strings.ToLower(strings.TrimSpace(line))

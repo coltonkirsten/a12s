@@ -22,7 +22,6 @@ import (
 // maxFleetBody bounds PUT /v1/fleet, which carries preset tars.
 const maxFleetBody = 64 << 20
 
-// httpError is an API error with its HTTP status.
 type httpError struct {
 	status int
 	body   api.Error
@@ -82,8 +81,7 @@ func decode(w http.ResponseWriter, r *http.Request, limit int64, v any) bool {
 	return true
 }
 
-// Handler is the owner API (PLAN "Controller API"), behind the owner
-// bearer token or a scoped token (enhancements §4.4).
+// Handler is the owner API, behind the owner bearer token or a scoped token.
 func (c *Controller) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /v1/fleet", allow("", "", c.handlePutFleet))
@@ -125,10 +123,8 @@ func (c *Controller) Handler() http.Handler {
 	return c.authenticate(mux)
 }
 
-// detached runs fn on the Controller's context so the work finishes even if
-// the caller disconnects, and waits for it while the caller is there. The
-// work is a background goroutine Wait waits for (review #58); once the
-// Controller is stopping, nothing new starts.
+// detached runs fn on the Controller's context so the work finishes even if the caller
+// disconnects; once the Controller is stopping, nothing new starts.
 func detached[T any](c *Controller, r *http.Request, fn func(ctx context.Context) (T, error)) (T, error, bool) {
 	type res struct {
 		v   T
@@ -229,8 +225,8 @@ func (c *Controller) awake(name string) (computerdClient, error) {
 func (c *Controller) handleStop(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("c")
 	if r.URL.Query().Get("hold") == "true" {
-		// stop --hold: the hold first, under the admission gate, then the
-		// interrupt, so no Batch slips in between (§4.7).
+		// stop --hold: the hold first, under the admission gate, then the interrupt, so no Batch
+		// slips in between.
 		if !callerOf(r).may(api.ActionInbox, name) {
 			writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: "stop --hold needs the inbox action", Fix: "use a token with inbox on " + name})
 			return
@@ -354,7 +350,6 @@ func (c *Controller) handleShell(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.ShellResponse{Container: c.containerName(name), User: user})
 }
 
-// Status is GET /v1/status.
 func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 	c.mu.Lock()
 	f := c.state.Fleet
@@ -501,8 +496,6 @@ func (c *Controller) handleDrives(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.DrivesResponse{Drives: drives})
 }
 
-// drives lists every drive of the Fleet as observed, with sizes and access
-// from the Fleet and orphans marked.
 func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -632,7 +625,6 @@ func (c *Controller) handleServiceLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleServiceShell audits `a12s shell <svc>` and names the container.
 func (c *Controller) handleServiceShell(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("s")
 	var req api.ShellRequest

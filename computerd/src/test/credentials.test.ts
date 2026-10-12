@@ -128,8 +128,8 @@ test('an injection that lands between the reclaim check and its commit wins', as
   assert.deepEqual(readdirSync(cfg.secretsDir).filter((f) => f.includes('a12s-tmp')), [], 'no temp left behind');
 });
 
-// #35: the reclaim's check and rename run under the `.lock` flock the Controller's injection takes around its rename.
-// Handshake, no timing (#63): the holder takes the lock, waits until the reclaim has staged its temp file (so it has
+// The reclaim's check and rename run under the `.lock` flock the Controller's injection takes around its rename.
+// Handshake, no timing: the holder takes the lock, waits until the reclaim has staged its temp file (so it has
 // already captured what it saw), then injects and releases. Needs flock(1) (Linux).
 const hasFlock = spawnSync('flock', ['--version']).status === 0;
 test('a reclaim waits for an injection holding the secrets lock', { skip: !hasFlock && 'no flock(1) here' }, async () => {

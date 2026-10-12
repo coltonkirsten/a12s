@@ -11,9 +11,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// EnsureDrive creates the drive's named volume if it does not exist. An
-// existing volume is never changed. A volume with the drive's name that a12s
-// does not own for this Fleet is an error.
+// EnsureDrive never changes an existing volume, and refuses one this Fleet does not own.
 func (d *Driver) EnsureDrive(ctx context.Context, spec driver.DriveSpec) (bool, error) {
 	if spec.ID == "" {
 		return false, fmt.Errorf("ensure drive: id is required")
@@ -33,8 +31,7 @@ func (d *Driver) EnsureDrive(ctx context.Context, spec driver.DriveSpec) (bool, 
 	return d.ensureVolume(ctx, name, labels, LabelDrive, spec.ID)
 }
 
-// ensureVolume creates a volume with labels unless it exists; an existing one
-// must carry this Fleet's label and labels[key] == want.
+// ensureVolume refuses an existing volume not labeled for this Fleet and labels[key] == want.
 func (d *Driver) ensureVolume(ctx context.Context, name string, labels map[string]string, key, want string) (bool, error) {
 	res, err := d.cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	if err == nil {
@@ -53,8 +50,7 @@ func (d *Driver) ensureVolume(ctx context.Context, name string, labels map[strin
 	return true, nil
 }
 
-// RemoveDrive deletes a drive's volume. It refuses while any container, a12s
-// or not, has the volume mounted. Removing a missing drive succeeds.
+// RemoveDrive refuses while any container, a12s or not, has the volume mounted.
 func (d *Driver) RemoveDrive(ctx context.Context, id string) error {
 	name := d.VolumeName(id)
 	res, err := d.cli.ContainerList(ctx, client.ContainerListOptions{

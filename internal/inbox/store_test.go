@@ -137,7 +137,7 @@ func TestValidation(t *testing.T) {
 	}
 }
 
-// Gate 8 (S1 part): 200 outstanding, the 201st is refused, a withdrawal frees a slot.
+// 200 outstanding, the 201st is refused, a withdrawal frees a slot.
 func TestLimitsMessages(t *testing.T) {
 	s, _ := newStore(t, nil)
 	var first string

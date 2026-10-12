@@ -20,8 +20,7 @@ func TestUpSummary(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 
-	// #44: failures are listed by name, sorted, and never summarised as
-	// "no changes".
+	// Failures are listed by name, sorted, and never summarised as "no changes".
 	r = &api.PutFleetResponse{Created: []string{"scout"}, Errors: map[string]string{"tester": "image a12s/browser:dev not found", "builder": "bundle missing"}}
 	if got := UpErrors(r); len(got) != 2 || !strings.HasPrefix(got[0], "builder: ") || !strings.HasPrefix(got[1], "tester: ") {
 		t.Errorf("UpErrors = %q", got)
@@ -57,8 +56,7 @@ func TestWriteStatus(t *testing.T) {
 		t.Fatalf("no row for %s:\n%s", name, out)
 		return ""
 	}
-	// #46: the markers and warnings an operator must see, per row; the
-	// layout is the human table's business (status --json is for scripts).
+	// Only the markers and warnings an operator must see; layout is free.
 	out := b.String()
 	if r := row(out, "builder"); !strings.Contains(r, "t_41") || !strings.Contains(r, "a12s-repo") {
 		t.Errorf("builder row %q", r)

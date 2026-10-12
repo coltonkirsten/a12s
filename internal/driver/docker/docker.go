@@ -1,7 +1,5 @@
-// Package docker implements driver.Driver on a Docker Engine: one container
-// and one isolated internal network per Computer, named volumes for drives,
-// and a read-only volume as the HarnessBundle cache (PLAN "Naming on Docker",
-// "Container").
+// Package docker implements driver.Driver with one container and one isolated
+// internal network per Computer.
 package docker
 
 import (
@@ -19,7 +17,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
 
-// Labels on every object a12s owns.
 const (
 	LabelFleet      = "a12s.fleet"
 	LabelComputer   = "a12s.computer"
@@ -27,47 +24,35 @@ const (
 	LabelRole       = "a12s.role"
 	LabelDrive      = "a12s.drive" // drive ID, on drive volumes
 	LabelSize       = "a12s.size"  // requested drive size in bytes (not enforced)
-	// LabelData marks the Fleet's data volume (fleet.db: inboxes, holds,
-	// tokens). Like a drive, it is kept by down and destroyed only by purge.
+	// LabelData's volume holds fleet.db; it survives down and only purge destroys it.
 	LabelData = "a12s.data"
 
 	RoleController = "controller"
 	RoleComputer   = "computer"
-	// RoleService marks a Service's container and network; RolePublish a
-	// Service's publish forwarder; RoleInit the a12s-init volume.
-	RoleService = "service"
-	RolePublish = "publish"
-	RoleInit    = "init"
-	RoleLogin   = "login"
-	// LabelService names the Service on its container, network and state drive.
-	LabelService = "a12s.service"
+	RoleService    = "service"
+	RolePublish    = "publish"
+	RoleInit       = "init"
+	RoleLogin      = "login"
+	LabelService   = "a12s.service"
 )
 
-// DefaultSubnetPool is where per-Computer /29 networks are allocated.
 var DefaultSubnetPool = netip.MustParsePrefix("10.213.0.0/16")
 
-// SubnetBits is the prefix length of each Computer network.
 const SubnetBits = 29
 
-// StopTimeout is how long `asleep` waits before killing (§7 "bounded flush").
+// StopTimeout bounds the harness's flush on sleep before Docker kills it.
 const StopTimeout = 25
 
-// Capabilities kept in Computers (PLAN "Container"); everything else is dropped.
+// capAdd is the full set of Linux capabilities kept in Computers; everything else is dropped.
 var capAdd = []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"}
 
-// Config configures a Driver.
 type Config struct {
-	Fleet string
-	// SubnetPool defaults to DefaultSubnetPool.
+	Fleet      string
 	SubnetPool netip.Prefix
-	// Client defaults to a client configured from the environment.
-	Client *client.Client
-	// InitBinary is the a12s binary copied into Services as a12s-init;
-	// default: the running executable.
+	Client     *client.Client
 	InitBinary string
 }
 
-// Driver is the Docker driver for one Fleet.
 type Driver struct {
 	cli   *client.Client
 	fleet string
@@ -83,7 +68,6 @@ type Driver struct {
 
 var _ driver.Driver = (*Driver)(nil)
 
-// New returns a Docker driver for cfg.Fleet.
 func New(cfg Config) (*Driver, error) {
 	if cfg.Fleet == "" {
 		return nil, errors.New("docker driver: fleet name is required")
@@ -105,24 +89,16 @@ func New(cfg Config) (*Driver, error) {
 	return &Driver{cli: cli, fleet: cfg.Fleet, pool: pool.Masked(), initPath: cfg.InitBinary}, nil
 }
 
-// Close releases the Docker client.
 func (d *Driver) Close() error { return d.cli.Close() }
 
-// Object names (PLAN "Naming on Docker").
-
-// ContainerName is the container, and network, of a Computer: a12s-F-C.
 func (d *Driver) ContainerName(computer string) string { return "a12s-" + d.fleet + "-" + computer }
 
-// NetworkName is the Computer's internal network: a12s-F-C.
 func (d *Driver) NetworkName(computer string) string { return d.ContainerName(computer) }
 
-// VolumeName is the volume of a drive ID: a12s-F-home-C or a12s-F-drive-D.
 func (d *Driver) VolumeName(driveID string) string { return "a12s-" + d.fleet + "-" + driveID }
 
-// BundleVolume is the read-only bundle cache: a12s-F-bundles.
 func (d *Driver) BundleVolume() string { return "a12s-" + d.fleet + "-bundles" }
 
-// ControllerName is the controller container: a12s-F-controller.
 func (d *Driver) ControllerName() string { return "a12s-" + d.fleet + "-controller" }
 
 func (d *Driver) fleetFilter() client.Filters {
@@ -133,7 +109,6 @@ func (d *Driver) computerFilter() client.Filters {
 	return d.fleetFilter().Add("label", LabelRole+"="+RoleComputer)
 }
 
-// Capabilities reports what this engine can enforce.
 func (d *Driver) Capabilities(ctx context.Context) (driver.Capabilities, error) {
 	info, err := d.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {

@@ -14,18 +14,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ManifestPath is where an a12s Service image carries its manifest.
 const ManifestPath = "/a12s/service.json"
 
-// Service manifest defaults (§5.6).
 const (
 	DefaultHealthInterval = 10 * time.Second
 	DefaultHealthStartup  = 60 * time.Second
 )
 
 // ServiceManifest is /a12s/service.json in a Service image, or the inline
-// services.<name>.manifest (§5.6). Every field is optional here; the merged
-// result is validated by Validate.
+// services.<name>.manifest. Every field is optional; only the merged result is validated.
 type ServiceManifest struct {
 	A12S        int                    `yaml:"a12s,omitempty" json:"a12s,omitempty"`
 	Name        string                 `yaml:"name,omitempty" json:"name,omitempty"`
@@ -40,14 +37,12 @@ type ServiceManifest struct {
 	Resources   *Resources             `yaml:"resources,omitempty" json:"resources,omitempty"`
 }
 
-// ServiceUser is the uid (and gid) the image's process runs as: a number,
-// or "uid:gid". Never 0.
+// ServiceUser is a number or "uid:gid". Never 0.
 type ServiceUser struct {
 	UID int `json:"uid"`
 	GID int `json:"gid"`
 }
 
-// String is "uid:gid".
 func (u ServiceUser) String() string { return strconv.Itoa(u.UID) + ":" + strconv.Itoa(u.GID) }
 
 func parseUser(s string) (ServiceUser, error) {
@@ -65,7 +60,6 @@ func parseUser(s string) (ServiceUser, error) {
 	return ServiceUser{UID: uid, GID: gid}, nil
 }
 
-// UnmarshalYAML accepts 999 or "999:999".
 func (u *ServiceUser) UnmarshalYAML(n *yaml.Node) error {
 	v, err := parseUser(n.Value)
 	if err != nil {
@@ -75,10 +69,8 @@ func (u *ServiceUser) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// MarshalYAML writes "uid:gid".
 func (u ServiceUser) MarshalYAML() (any, error) { return u.String(), nil }
 
-// UnmarshalJSON accepts 999, "999" or "999:999".
 func (u *ServiceUser) UnmarshalJSON(b []byte) error {
 	var n json.Number
 	if json.Unmarshal(b, &n) == nil {
@@ -101,10 +93,9 @@ func (u *ServiceUser) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON writes "uid:gid".
 func (u ServiceUser) MarshalJSON() ([]byte, error) { return json.Marshal(u.String()) }
 
-// ServiceHealth is the health check: exactly one of HTTP and Exec.
+// ServiceHealth sets exactly one of HTTP and Exec.
 type ServiceHealth struct {
 	HTTP     *HealthHTTP `yaml:"http,omitempty" json:"http,omitempty"`
 	Exec     []string    `yaml:"exec,omitempty" json:"exec,omitempty"`
@@ -112,13 +103,12 @@ type ServiceHealth struct {
 	Startup  string      `yaml:"startup,omitempty" json:"startup,omitempty"`
 }
 
-// HealthHTTP is an HTTP health check: a 2xx or 3xx answer passes.
+// HealthHTTP passes on a 2xx or 3xx answer.
 type HealthHTTP struct {
 	Port int    `yaml:"port" json:"port"`
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
 
-// IntervalDuration is the check interval (default 10s).
 func (h ServiceHealth) IntervalDuration() time.Duration {
 	if d, err := time.ParseDuration(h.Interval); err == nil && d > 0 {
 		return d
@@ -126,7 +116,6 @@ func (h ServiceHealth) IntervalDuration() time.Duration {
 	return DefaultHealthInterval
 }
 
-// StartupDuration is the startup grace (default 60s).
 func (h ServiceHealth) StartupDuration() time.Duration {
 	if d, err := time.ParseDuration(h.Startup); err == nil && d > 0 {
 		return d
@@ -134,20 +123,18 @@ func (h ServiceHealth) StartupDuration() time.Duration {
 	return DefaultHealthStartup
 }
 
-// Service port protocols.
 const (
 	ProtocolHTTP = "http"
 	ProtocolTCP  = "tcp"
 )
 
-// ServicePort is one declared port: the only ports the proxy routes to.
+// ServicePort lists the only ports the proxy routes to.
 type ServicePort struct {
 	Port     int      `yaml:"port" json:"port"`
 	Protocol string   `yaml:"protocol,omitempty" json:"protocol,omitempty"`
 	MCP      *PortMCP `yaml:"mcp,omitempty" json:"mcp,omitempty"`
 }
 
-// Proto is the port's protocol, http by default.
 func (p ServicePort) Proto() string {
 	if p.Protocol == "" {
 		return ProtocolHTTP
@@ -155,34 +142,28 @@ func (p ServicePort) Proto() string {
 	return p.Protocol
 }
 
-// PortMCP marks an HTTP port as an MCP endpoint at Path.
 type PortMCP struct {
 	Path string `yaml:"path" json:"path"`
 }
 
-// ManifestCredential is a credential the image expects.
 type ManifestCredential struct {
 	Name     string `yaml:"name" json:"name"`
 	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
 }
 
-// ServiceLogin is the interactive sign-in `a12s service login` runs.
 type ServiceLogin struct {
 	Command  []string `yaml:"command" json:"command"`
 	Produces string   `yaml:"produces" json:"produces"`
 }
 
-// ManifestState asks for a persistent, exclusive drive mounted at At.
 type ManifestState struct {
 	At   string `yaml:"at" json:"at"`
 	Size Bytes  `yaml:"size,omitempty" json:"size,omitzero"`
 }
 
-// DefaultStateSize is a state drive's size when nothing says otherwise.
 const DefaultStateSize = Bytes(1 << 30)
 
-// Merge returns the image manifest with the inline manifest's fields laid
-// over it, field by field (inline fields override the image's). Either may
+// MergeManifest lays inline fields over the image's, field by field. Either may
 // be nil; the result is nil only when both are.
 func MergeManifest(image, inline *ServiceManifest) *ServiceManifest {
 	if image == nil && inline == nil {
@@ -232,7 +213,6 @@ func MergeManifest(image, inline *ServiceManifest) *ServiceManifest {
 	return &out
 }
 
-// ParseManifest decodes service.json strictly.
 func ParseManifest(data []byte) (*ServiceManifest, error) {
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
@@ -245,8 +225,8 @@ func ParseManifest(data []byte) (*ServiceManifest, error) {
 
 var portNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
-// validatePartial checks what an inline manifest says on its own (the
-// merged manifest is checked again in full at admission).
+// validatePartial checks an inline manifest alone; the merged manifest is
+// checked again in full at admission.
 func (m *ServiceManifest) validatePartial(field string) []error {
 	var errs []error
 	bad := func(sub, fix, format string, args ...any) {
@@ -333,9 +313,7 @@ func (m *ServiceManifest) validatePartial(field string) []error {
 	return errs
 }
 
-// ValidateService checks the merged manifest of services.<name> against
-// the Service's Fleet entry and the image's declared volumes (§5.6, §6.2).
-// m may be nil: the image is then not an a12s Service.
+// ValidateService takes a nil m when the image is not an a12s Service.
 func ValidateService(name string, s Service, m *ServiceManifest, image string, volumes []string) error {
 	field := "services." + name
 	if m == nil {
@@ -389,10 +367,8 @@ func ValidateService(name string, s Service, m *ServiceManifest, image string, v
 	return errors.Join(errs...)
 }
 
-// coveredBy reports whether an image VOLUME is provided by a12s: it is the
-// state drive's mount point, or a tmpfs path or under one. (A VOLUME below
-// the state mount would get an anonymous Docker volume of its own, which
-// a12s neither tracks nor removes, so it is not covered.)
+// coveredBy excludes a VOLUME below the state mount: Docker would give it an
+// anonymous volume of its own that a12s neither tracks nor removes.
 func coveredBy(v string, m *ServiceManifest) bool {
 	under := func(p string) bool { return v == p || strings.HasPrefix(v, p+"/") }
 	if m.State != nil && v == m.State.At {
@@ -406,7 +382,6 @@ func coveredBy(v string, m *ServiceManifest) bool {
 	return false
 }
 
-// MCPPorts returns the manifest's MCP ports by name, sorted.
 func (m *ServiceManifest) MCPPorts() []string {
 	var out []string
 	for _, name := range sortedKeys(m.Ports) {

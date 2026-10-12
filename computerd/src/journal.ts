@@ -114,7 +114,7 @@ export class Journal {
   }
 
   /**
-   * Seals inbox Messages that ended without delivery as inbox.discarded, bodies included (enhancements §4.10).
+   * Seals inbox Messages that ended without delivery as inbox.discarded, bodies included.
    * Keyed by Message id: a retry never journals one twice. Returns the ids now sealed (new or already).
    */
   journalInbox(records: { id: string; [k: string]: unknown }[]): string[] {
@@ -140,7 +140,7 @@ export class Journal {
     return out;
   }
 
-  /** Tombstones a requestId a lookup-only replay did not find, journaling turn.refused (§4.11). */
+  /** Tombstones a requestId a lookup-only replay did not find, journaling turn.refused. */
   refuse(requestId: string): void {
     this.db.exec('BEGIN IMMEDIATE');
     let event: EventEnvelope;
@@ -176,7 +176,6 @@ export class Journal {
     return done ? null : { id: d.continuation, parentTurn: d.parentTurn ?? null };
   }
 
-  /** What settlement needs to know about one turn (§4.6). */
   turnSummary(turnId: string): Record<string, unknown> | undefined {
     const req = this.db.prepare('SELECT request_id FROM turns WHERE turn_id = ?').get(turnId) as { request_id: string } | undefined;
     if (!req) return undefined;
@@ -199,7 +198,6 @@ export class Journal {
     return row.m ?? 0;
   }
 
-  /** Events with seq > after, oldest first. */
   after(after: number, turn: string | null, limit: number): EventEnvelope[] {
     const rows = (
       turn

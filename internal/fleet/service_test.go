@@ -117,7 +117,6 @@ func TestServiceAdmissionErrors(t *testing.T) {
 			}
 		})
 	}
-	// egress.tcp is for Services only.
 	doc := strings.Replace(svcFleet, "    grants: { send: [scout] }\n", "    grants: { send: [scout] }\n    egress: { allow: [], tcp: [{ name: pg, host: db.example.com, port: 5432 }] }\n", 1)
 	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "computers.builder.egress.tcp: ") {
 		t.Fatalf("egress.tcp on a Computer: %v", err)
@@ -127,7 +126,7 @@ func TestServiceAdmissionErrors(t *testing.T) {
 	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "no Service ghost") || !strings.Contains(err.Error(), "computers.scout.uses") {
 		t.Fatalf("unknown use: %v", err)
 	}
-	// service:<name> in wakeOnMessage resolves against Services now.
+	// service:<name> in wakeOnMessage resolves against Services.
 	doc = strings.Replace(svcFleet, "    uses: [db, { name: pg, mcp: false }]\n", "    uses: [db]\n    power: { wakeOnMessage: { from: [service:clock] } }\n", 1)
 	if _, err := Parse([]byte(doc)); err != nil {
 		t.Fatalf("service principal: %v", err)

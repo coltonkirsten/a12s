@@ -11,11 +11,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/controller"
 )
 
-// runController is `a12s controller`: the Controller process, run inside
-// the container a12s-<fleet>-controller. It is configured by the
-// environment: A12S_FLEET, A12S_API_TOKEN, A12S_STATE_DIR (default
-// /var/lib/a12s), A12S_SUBNET_POOL (default 10.213.0.0/16) and optionally
-// A12S_API_ADDR.
+// runController is configured only by the environment: A12S_FLEET, A12S_API_TOKEN,
+// A12S_STATE_DIR, A12S_SUBNET_POOL and optionally A12S_API_ADDR.
 func runController(args []string) error {
 	fs := flag.NewFlagSet("controller", flag.ContinueOnError)
 	fs.Usage = func() {

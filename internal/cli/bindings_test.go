@@ -110,7 +110,6 @@ func TestBindingsErrors(t *testing.T) {
 		}
 	}
 
-	// Shape errors.
 	for name, content := range map[string]string{
 		"both":    "credentials:\n  a: { file: x, env: Y }\n",
 		"neither": "credentials:\n  a: {}\n",

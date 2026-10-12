@@ -1,5 +1,5 @@
 // Package computerd is the Controller's client for computerd's HTTP+SSE
-// contract (§5, PLAN "computerd HTTP"), spoken over mTLS on a channel the
+// contract, spoken over mTLS on a channel the
 // Driver opens into the Computer.
 package computerd
 
@@ -24,7 +24,6 @@ import (
 // driver.Connect(ctx, name, driver.ServiceComputerd).
 type Dialer func(ctx context.Context) (net.Conn, error)
 
-// Client talks to one Computer's computerd.
 type Client struct {
 	computer string
 	tr       *http.Transport
@@ -87,7 +86,7 @@ func (c *Client) StartTurn(ctx context.Context, req api.TurnRequest) (api.TurnRe
 }
 
 // TurnSummary is GET /v1/turns/{id}: dispatch and finish evidence for
-// settling a Batch (enhancements §4.6).
+// settling a Batch.
 func (c *Client) TurnSummary(ctx context.Context, turnID string) (api.TurnSummary, error) {
 	var s api.TurnSummary
 	err := c.do(ctx, http.MethodGet, "/v1/turns/"+url.PathEscape(turnID), nil, &s)
@@ -224,18 +223,15 @@ func (m Message) Decode() (api.Event, error) {
 	return ev, err
 }
 
-// Stream reads SSE messages.
 type Stream struct {
 	body io.ReadCloser
 	r    *sse.Reader
 }
 
-// NewStream parses an SSE body.
 func NewStream(body io.ReadCloser) *Stream {
 	return &Stream{body: body, r: sse.NewReader(body)}
 }
 
-// Close ends the stream.
 func (s *Stream) Close() error { return s.body.Close() }
 
 // Next returns the next complete message; comments (keepalives) are

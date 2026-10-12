@@ -8,7 +8,7 @@ export interface HarnessDeps {
   credentialEnv: () => Record<string, string>;
   /** MCP servers a long-lived harness (Codex) is spawned with before its first turn. */
   mcpServers: Record<string, McpServer>;
-  /** Service wiring: A12S_SERVICE_<SVC>_<PORT> addresses (enhancements §5.4). */
+  /** Service wiring: A12S_SERVICE_<SVC>_<PORT> addresses. */
   wiringEnv?: Record<string, string>;
 }
 

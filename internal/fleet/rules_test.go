@@ -7,7 +7,6 @@ import (
 
 func p[T any](v T) *T { return &v }
 
-// validateWith loads the lab Fleet, edits it and validates it.
 func validateWith(t *testing.T, edit func(f *Fleet)) (*Fleet, error) {
 	t.Helper()
 	f, err := Load("testdata/lab.yaml")
@@ -18,8 +17,7 @@ func validateWith(t *testing.T, edit func(f *Fleet)) (*Fleet, error) {
 	return f, f.Validate()
 }
 
-// refuses checks an error names the field and the offending value and
-// carries a fix (§6.3); the prose is not this test's business.
+// refuses checks the field, offending value and fix; the prose is not this test's business.
 func refuses(t *testing.T, err error, field, value string) {
 	t.Helper()
 	if err == nil || !strings.Contains(err.Error(), field+": ") || !strings.Contains(err.Error(), value) || !strings.Contains(err.Error(), "fix:") {
@@ -27,8 +25,6 @@ func refuses(t *testing.T, err error, field, value string) {
 	}
 }
 
-// Moved from the controller package (test pass #18): the inbox block's
-// bounds are the schema contract.
 func TestInboxValidation(t *testing.T) {
 	const field = "computers.builder.inbox."
 	for _, c := range []struct {
@@ -64,8 +60,6 @@ func TestInboxValidation(t *testing.T) {
 	}
 }
 
-// Moved from the controller package (test pass #18): power policy bounds
-// and wake principals that must exist.
 func TestPowerValidation(t *testing.T) {
 	const field = "computers.scout.power."
 	for _, c := range []struct {

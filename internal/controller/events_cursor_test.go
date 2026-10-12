@@ -81,7 +81,7 @@ func TestFollowEventsReopensAtMalformedEvent(t *testing.T) {
 	}
 }
 
-// #55: on a first subscription the cursor starts at the validated head, so
+// On a first subscription the cursor starts at the validated head, so
 // a malformed first live event is fetched again on reconnect.
 func TestFirstSubscriptionCursorStartsAtHead(t *testing.T) {
 	for name, tc := range map[string]struct{ body, want string }{

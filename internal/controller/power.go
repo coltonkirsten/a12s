@@ -10,12 +10,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// The power policy (enhancements §4.14): auto-sleep after a declared idle
-// time, and wake on a pending Message from a listed principal, rate-limited.
-// The Controller decides on the Computer's own policy; a sender gains no
-// power authority.
+// A wake is decided on the Computer's own power policy; a sender gains no power authority.
 
-// powerSettings returns a Computer's resolved policy, or ok false.
 func (c *Controller) powerSettings(name string) (fleet.PowerSettings, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -29,7 +25,6 @@ func (c *Controller) powerSettings(name string) (fleet.PowerSettings, bool) {
 	return f.ResolvePower(name), true
 }
 
-// scaled divides a policy duration by the test time scale (1 in production).
 func (c *Controller) scaled(d time.Duration) time.Duration {
 	if c.cfg.TimeScale > 1 {
 		return time.Duration(float64(d) / c.cfg.TimeScale)
@@ -47,8 +42,6 @@ func (c *Controller) timeScaleNote() string {
 	return fmt.Sprintf("A12S_TEST_TIME_SCALE=%g: power-policy durations run %gx fast (a test setting; unset it and run a12s down, then a12s up)", c.cfg.TimeScale, c.cfg.TimeScale)
 }
 
-// credsLoaded reports whether the Controller holds every credential the
-// Computer needs (it holds them in memory only, L1 §6).
 func (c *Controller) credsLoaded(name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -56,7 +49,6 @@ func (c *Controller) credsLoaded(name string) bool {
 	return len(missingCredentials(comp.Credentials, c.creds)) == 0
 }
 
-// syncPower records each Computer's policy in fleet.db (power_changed).
 func (c *Controller) syncPower(ctx context.Context, f *fleet.Fleet, by string) {
 	if c.inbox == nil {
 		return
@@ -69,9 +61,6 @@ func (c *Controller) syncPower(ctx context.Context, f *fleet.Fleet, by string) {
 	}
 }
 
-// powerLoop evaluates every Computer's policy on a tick: the idle clock and
-// auto-sleep for Ready ones, wake-on-message for Asleep ones (which also
-// covers a rate window reopening or credentials arriving).
 func (c *Controller) powerLoop(ctx context.Context) {
 	t := time.NewTicker(c.timing.PowerTick)
 	defer t.Stop()
@@ -139,7 +128,6 @@ func (c *Controller) spawnPower(name string, fn func()) {
 	}
 }
 
-// setIdle tracks the idle clock; it returns when the current idle run began.
 func (c *Controller) setIdle(name string, idle bool) time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -153,8 +141,7 @@ func (c *Controller) setIdle(name string, idle bool) time.Time {
 	return r.idleSince
 }
 
-// cheapIdle is the idle test from in-memory and fleet.db state (§4.14
-// "Idle, precisely"); autoSleep re-checks the rest under the lock.
+// cheapIdle uses in-memory and fleet.db state only; autoSleep re-checks the rest under the lock.
 func (c *Controller) cheapIdle(ctx context.Context, name string) bool {
 	c.mu.Lock()
 	r := c.rtLocked(name)
@@ -204,10 +191,8 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 		c.setIdle(name, false)
 		return
 	}
-	// Close admission, then look at the inbox one last time: a Message that
-	// committed during the checks above wins over the sleep; one that
-	// commits after this finds the Computer asleep and is judged by
-	// wakeOnMessage (§4.14).
+	// Close admission, then look at the inbox one last time: a Message that committed during the
+	// checks above wins over the sleep; one that commits after finds the Computer asleep.
 	c.closeAdmission(name)
 	if held, _, _ := c.inbox.Held(ctx, name); !held {
 		if pending, err := c.inbox.HasPending(ctx, name); err != nil || pending {
@@ -237,7 +222,6 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 	c.setIdle(name, false)
 }
 
-// wakeVerdict is why a Computer would or wouldn't wake for a Message now.
 type wakeVerdict struct {
 	wake      bool
 	state     string // api.AutoWake*
@@ -249,8 +233,6 @@ type wakeVerdict struct {
 	nextAt    *time.Time
 }
 
-// judgeWake evaluates the policy for an asleep Computer (§4.14 "When it
-// wakes"): held, manual sleep, credentials, paused, rate limit.
 func (c *Controller) judgeWake(ctx context.Context, name string, p fleet.PowerSettings) wakeVerdict {
 	v := wakeVerdict{state: api.AutoWakeOn}
 	if len(p.WakeFrom) == 0 {
@@ -354,7 +336,6 @@ func (c *Controller) autoWake(name string, p fleet.PowerSettings) {
 	cancel()
 }
 
-// powerStatus is the POWER part of a Computer's status.
 func (c *Controller) powerStatus(ctx context.Context, name string, phase api.Phase) *api.PowerStatus {
 	p, ok := c.powerSettings(name)
 	if !ok || !p.On() || c.inbox == nil {
