@@ -24,6 +24,9 @@ type Driver interface {
 	// EnsureImage pulls only if missing; ref may be a reference or an image ID.
 	EnsureImage(ctx context.Context, ref string) (imageID string, err error)
 
+	// InspectComputerImage reports what admission checks on a custom Computer image; imageID is local.
+	InspectComputerImage(ctx context.Context, imageID string) (ComputerImage, error)
+
 	// EnsureBundle exposes the bundle read-only to Computers at BundlePath.
 	EnsureBundle(ctx context.Context, imageRef string) (Bundle, error)
 
@@ -63,6 +66,17 @@ var (
 )
 
 const ServiceComputerd = "computerd"
+
+// ComputerdMain is computerd's entrypoint in every Computer image.
+const ComputerdMain = "/opt/a12s/computerd/dist/main.js"
+
+// LabelComputerdVersion is set on the a12s base images and inherited by every image built FROM them.
+const LabelComputerdVersion = "ai.a12s.computerd.version"
+
+type ComputerImage struct {
+	Labels    map[string]string
+	Computerd bool // ComputerdMain exists
+}
 
 const ComputerdPort = 7443
 

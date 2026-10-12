@@ -389,3 +389,37 @@ func TestFailingWakeDoesNotDelayOthers(t *testing.T) {
 		t.Fatalf("tester wake = %v, phase %s", err, h.phase("tester"))
 	}
 }
+
+func TestCustomComputerImageAdmission(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.d.setImage("me/plain:1", "sha256:plain")
+	h.d.setImage("me/nocomputerd:1", "sha256:nocd")
+	h.d.setImage("me/agent:1", "sha256:agent")
+	h.d.mu.Lock()
+	h.d.computerImages = map[string]driver.ComputerImage{
+		"sha256:plain": {Computerd: true},
+		"sha256:nocd":  {Labels: map[string]string{driver.LabelComputerdVersion: "v0.1.0"}},
+	}
+	h.d.mu.Unlock()
+	withImage := func(ref string) *fleet.Fleet {
+		return labFleet(t, func(f *fleet.Fleet) {
+			c := f.Computers["scout"]
+			c.Image = ref
+			f.Computers["scout"] = c
+		})
+	}
+	for ref, want := range map[string]string{
+		"me/plain:1":       "has no ai.a12s.computerd.version label",
+		"me/nocomputerd:1": "has no computerd at /opt/a12s/computerd/dist/main.js",
+	} {
+		_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: withImage(ref), Credentials: labCreds, Presets: labPresets(t)})
+		if err == nil || !strings.Contains(err.Error(), "computers.scout.image: "+ref+" "+want) || !strings.Contains(err.Error(), "fix: ") {
+			t.Errorf("%s: err = %v", ref, err)
+		}
+	}
+	res := h.up(withImage("me/agent:1"), nil, false)
+	if res.Lock.Images["me/agent:1"] != "sha256:agent" {
+		t.Fatalf("custom image not pinned: %v", res.Lock.Images)
+	}
+}

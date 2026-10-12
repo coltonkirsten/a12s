@@ -211,6 +211,10 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 			Env:         spec.Env(d.fleet),
 			StopTimeout: &stop,
 			Healthcheck: noHealthcheck, // a custom image's HEALTHCHECK would run image code as root
+			// A custom image's ENTRYPOINT or USER must not replace computerd, which starts as root and drops the
+			// harness to uid 1000 itself.
+			Entrypoint: []string{"node", driver.ComputerdMain},
+			User:       "0:0",
 			Labels: map[string]string{
 				LabelFleet:      d.fleet,
 				LabelComputer:   spec.Name,

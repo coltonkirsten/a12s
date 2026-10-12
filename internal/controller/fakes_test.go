@@ -32,10 +32,12 @@ type fakeDriver struct {
 	computers map[string]*fakeContainer
 	drives    map[string]bool
 	images    map[string]string // ref -> ID
-	bundles   map[string]driver.Bundle
-	calls     []string
-	events    chan driver.Event
-	cds       *fakeComputerds
+	// computerImages overrides what InspectComputerImage reports for an image ID.
+	computerImages map[string]driver.ComputerImage
+	bundles        map[string]driver.Bundle
+	calls          []string
+	events         chan driver.Event
+	cds            *fakeComputerds
 	// lostStages makes StageComputer report success without effect;
 	// ghostStarts makes Observe never show a container running (a start
 	// the substrate reported but that did not take).
@@ -193,6 +195,15 @@ func (d *fakeDriver) EnsureImage(_ context.Context, ref string) (string, error) 
 		}
 	}
 	return "", fmt.Errorf("no image %s", ref)
+}
+
+func (d *fakeDriver) InspectComputerImage(_ context.Context, id string) (driver.ComputerImage, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if img, ok := d.computerImages[id]; ok {
+		return img, nil
+	}
+	return driver.ComputerImage{Labels: map[string]string{driver.LabelComputerdVersion: "dev"}, Computerd: true}, nil
 }
 
 func (d *fakeDriver) EnsureBundle(_ context.Context, ref string) (driver.Bundle, error) {
