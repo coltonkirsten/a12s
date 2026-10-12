@@ -1,50 +1,39 @@
-# On demand only (Actions > ci > Run workflow). The merge gate is `make check`, run locally.
+# PR tests, kept light: only the fast need-to-haves, the same steps as `make check` (scripts/check.sh go sdk python).
+# Images, Services, bundles and computerd run locally with `make check-full` (CONTRIBUTING.md#checks).
+# Runs once per PR update (no push trigger), skips docs-only changes, and cancels superseded runs.
 name: ci
 
 on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # go build, gofmt, go vet, go test (go test includes the Go -> TS/Python API fixture drift check).
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
-      - run: go build ./...
-      - name: gofmt
-        run: |
-          out="$(gofmt -l .)"
-          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
-      - run: go vet ./...
-      - run: go test ./...
+          go-version-file: go.mod # caches the module and build caches by go.sum
+      - run: scripts/check.sh go
 
-  computerd:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: computerd
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: computerd/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run build
-      - run: npm test
-
+  # TypeScript SDK: lint, tests (build, browser bundle, node --test), gateway embeds this build.
   sdk:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: sdk/typescript
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -52,112 +41,16 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - name: the gateway embeds this build of the SDK
-        run: cmp dist/a12s.js ../../internal/gateway/web/a12s.js || { echo "::error::internal/gateway/web/a12s.js is stale; run make sdk-bundle"; exit 1; }
+      - run: scripts/check.sh sdk
 
+  # Python SDK: pytest and mypy --strict on the oldest and newest supported Python, in one job.
   python:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ["3.10", "3.14"]
-    defaults:
-      run:
-        working-directory: sdk/python
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
         with:
-          python-version: ${{ matrix.python }}
-      - run: uv run --extra dev pytest -q
-      - run: uv run --extra dev mypy --strict a12s
-
-  # Tier images. slim uses the buildx GHA cache; browser is built on the default
-  # builder so it can use the freshly loaded slim image as its base.
-  tiers:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - name: slim image
-        run: >-
-          docker buildx build --load -f images/slim/Dockerfile -t a12s/slim:dev
-          --cache-from type=gha,scope=slim --cache-to type=gha,scope=slim,mode=max .
-      - name: browser image
-        run: docker buildx build --builder default --load -f images/browser/Dockerfile -t a12s/browser:dev .
-      # Ubuntu 24.04 runners forbid unprivileged user namespaces via AppArmor;
-      # Chromium's sandbox needs them (that is what seccomp.json allows).
-      - name: allow unprivileged user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - name: Chromium sandbox (docs/images.md)
-        run: |
-          docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
-            --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp \
-            --tmpfs /home/agent:uid=1000,gid=1000 -e HOME=/home/agent -w /home/agent \
-            --network none -v "$PWD/images/browser/test:/test:ro" --entrypoint node \
-            a12s/browser:dev /test/render.mjs | tee render.out
-          grep -q 'hello from chromium' render.out
-          grep -q 'adequately sandboxed' render.out
-      # computerd hands the harness this NODE_PATH on the browser tier
-      # (adapters/spawn.ts); agent scripts must be able to require playwright.
-      - name: agent scripts can require playwright
-        run: |
-          docker run --rm --user 1000:1000 --network none --entrypoint node \
-            -e NODE_PATH=/opt/a12s/playwright-mcp/node_modules -w /tmp \
-            a12s/browser:dev -e "require('playwright'); console.log('playwright ok')" | grep -q 'playwright ok'
-      - name: Playwright MCP navigates (images/browser/test/mcp.mjs)
-        run: |
-          docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
-            --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp \
-            --tmpfs /home/agent:uid=1000,gid=1000 -e HOME=/home/agent -w /home/agent \
-            --network none -v "$PWD/images/browser/test:/test:ro" --entrypoint node \
-            a12s/browser:dev /test/mcp.mjs
-
-  controller:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - name: controller image
-        run: >-
-          docker buildx build --load -f images/controller/Dockerfile -t a12s/controller:dev
-          --cache-from type=gha,scope=controller --cache-to type=gha,scope=controller,mode=max .
-      - name: binary runs (expects a config error, not a loader error)
-        run: |
-          if docker run --rm a12s/controller:dev > out.txt 2>&1; then cat out.txt; echo "expected non-zero exit"; exit 1; fi
-          cat out.txt
-          grep -q 'A12S_' out.txt
-
-  services:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - name: svc-mcp against a stub MCP server
-        run: sh services/svc-mcp/test/run.sh
-      - name: reference Service images
-        run: make services
-      - name: manifests are in the images
-        run: |
-          for s in svc-cron svc-webhook svc-mcp svc-mcp-postgres; do
-            docker run --rm --entrypoint cat a12s/$s:0.1 /a12s/service.json | python3 -m json.tool > /dev/null
-          done
-          docker run --rm --entrypoint ls a12s/svc-mcp-postgres:0.1 /opt/mcp/bin/mcp-server-postgres
-
-  bundles:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - name: claude-code bundle
-        run: docker buildx build --load --build-arg VERSION=2.1.280 -t a12s/bundle-claude-code:2.1.280 images/bundles/claude-code
-      - name: codex bundle
-        run: docker buildx build --load --build-arg VERSION=0.154.0 -t a12s/bundle-codex:0.154.0 images/bundles/codex
-      - name: conformance
-        run: |
-          images/bundles/conformance.sh claude-code 2.1.280 a12s/bundle-claude-code:2.1.280
-          images/bundles/conformance.sh codex 0.154.0 a12s/bundle-codex:0.154.0
+          enable-cache: true
+          cache-dependency-glob: sdk/python/pyproject.toml
+      - run: scripts/check.sh python

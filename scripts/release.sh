@@ -110,7 +110,8 @@ done
 
 # --- tag, binaries and the Homebrew formula -------------------------------------------------------------------
 step "tag $tag"
-git tag -a "$tag" -m "$tag"
+# The marker tells .github/workflows/release.yml (which runs on v* tags) that this tag is released here already.
+git tag -a "$tag" -m "$tag" -m "released-by: make release"
 git push -q origin "$tag"
 step "goreleaser"
 goreleaser release --clean

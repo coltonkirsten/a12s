@@ -96,4 +96,4 @@ docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges
 ```
 
 `render.mjs` prints the page title and heading from a `data:` URL, a screenshot size, and `chrome://sandbox`, which
-should report the namespace and seccomp-BPF sandboxes as active. `make check` runs the same checks.
+should report the namespace and seccomp-BPF sandboxes as active. `make check-full` runs the same checks.

@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt sdk-bundle check check-code release
+.PHONY: build test vet fmt sdk-bundle check check-full release
 
 build:
 	$(GO) build ./...
@@ -20,13 +20,13 @@ sdk-bundle:
 	cd sdk/typescript && npm ci && npm run build
 	cp sdk/typescript/dist/a12s.js internal/gateway/web/a12s.js
 
-# The merge gate: Go, computerd, both SDKs, the API fixtures, images, Services and bundles (needs Docker).
+# The fast gate, the same steps PR CI runs (.github/workflows/ci.yml): Go, the API fixtures, both SDKs. No Docker.
 check:
-	scripts/check.sh
+	scripts/check.sh go sdk python
 
-# The same without Docker: go computerd sdk python.
-check-code:
-	scripts/check.sh go computerd sdk python
+# Everything: the above plus computerd, Services, images and bundles (needs Docker). Run before release-affecting changes.
+check-full:
+	scripts/check.sh
 
 # Cut a release from this machine: make release VERSION=x.y.z (see CONTRIBUTING.md#releasing).
 release:
