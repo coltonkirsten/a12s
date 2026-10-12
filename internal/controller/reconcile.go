@@ -63,7 +63,8 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 				"computers.%s: no material for credentials %s (check the bindings file)", name, strings.Join(missing, ", "))
 		}
 	}
-	lock, hosts, manifests, err := c.resolve(ctx, f, req.Lock, req.Presets, req.Refresh)
+	var admitWarnings []string
+	lock, hosts, manifests, err := c.resolve(ctx, f, req.Lock, req.Presets, req.Refresh, &admitWarnings)
 	if err != nil {
 		return api.PutFleetResponse{}, err
 	}
@@ -148,7 +149,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		_ = c.inbox.ClearPaused(ctx) // a12s up resumes an auto-wake paused by a failed wake
 	}
 
-	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: append(f.InboxWarnings(), f.GrantWarnings()...),
+	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()),
 		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -799,8 +800,8 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 // resolve checks the Fleet against the substrate and the lock, makes the
 // images and bundles available, and returns the lock with missing pins
 // added (an existing pin never changes) and each bundle's sign-in hosts.
-func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte, refresh []string) (*fleet.Lock, map[string][]string, map[string]*fleet.ServiceManifest, error) {
-	lock, hosts, caps, err := c.resolveComputers(ctx, f, in, presets)
+func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte, refresh []string, warnings *[]string) (*fleet.Lock, map[string][]string, map[string]*fleet.ServiceManifest, error) {
+	lock, hosts, caps, err := c.resolveComputers(ctx, f, in, presets, warnings)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -811,7 +812,7 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 	return lock, hosts, manifests, nil
 }
 
-func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte) (*fleet.Lock, map[string][]string, driver.Capabilities, error) {
+func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte, warnings *[]string) (*fleet.Lock, map[string][]string, driver.Capabilities, error) {
 	invalid := func(format string, args ...any) error {
 		return errorf(http.StatusBadRequest, api.ErrInvalid, format, args...)
 	}
@@ -846,8 +847,12 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 				return nil, nil, caps, fmt.Errorf("computers.%s.image: %w", name, err)
 			}
 			if comp.Tier() == fleet.TierCustom {
-				if err := c.admitComputerImage(ctx, comp.Image, id); err != nil {
+				warn, err := c.admitComputerImage(ctx, comp.Image, id)
+				if err != nil {
 					return nil, nil, caps, invalid("computers.%s.image: %v", name, err)
+				}
+				if warn != "" {
+					*warnings = append(*warnings, fmt.Sprintf("computers.%s.image: %s: %s", name, comp.Image, warn))
 				}
 			}
 			lock.PinImage(comp.Image, id)
@@ -1002,20 +1007,24 @@ func hashPresetTar(data []byte) (string, error) {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// admitComputerImage accepts a custom image only if it was built FROM an a12s base image: computerd is the
-// Computer's whole contract with the Controller, and the inherited label says which release it came from.
-func (c *Controller) admitComputerImage(ctx context.Context, ref, id string) error {
+// admitComputerImage accepts a custom image only if it was built FROM a compatible a12s base image: computerd is
+// the Computer's whole contract with the Controller, and the inherited label says which release it came from.
+func (c *Controller) admitComputerImage(ctx context.Context, ref, id string) (warning string, err error) {
 	img, err := c.drv.InspectComputerImage(ctx, id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	base := version.Image(fleet.TierSlim)
 	v := img.Labels[driver.LabelComputerdVersion]
 	switch {
 	case v == "":
-		return fmt.Errorf("%s has no %s label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM %s (or the browser tier)", ref, driver.LabelComputerdVersion, base)
+		return "", fmt.Errorf("%s has no %s label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM %s (or the browser tier)", ref, driver.LabelComputerdVersion, base)
 	case !img.Computerd:
-		return fmt.Errorf("%s has no computerd at %s  fix: build it FROM %s and keep /opt/a12s", ref, driver.ComputerdMain, base)
+		return "", fmt.Errorf("%s has no computerd at %s  fix: build it FROM %s and keep /opt/a12s", ref, driver.ComputerdMain, base)
 	}
-	return nil
+	warning, err = version.CheckComputerd(v)
+	if err != nil {
+		return "", fmt.Errorf("%s: %v  fix: rebuild it FROM %s (or the browser tier)", ref, err, base)
+	}
+	return warning, nil
 }

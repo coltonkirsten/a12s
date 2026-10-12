@@ -22,3 +22,30 @@ func TestRefsFollowTheRelease(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckComputerd(t *testing.T) {
+	defer func(v string) { Version = v }(Version)
+	for _, tc := range []struct {
+		controller, label string
+		ok, warn          bool
+	}{
+		{"v0.1.1", "v0.1.1", true, false},
+		{"v0.1.1", "v0.1.0", true, false},
+		{"v0.1.0", "v0.1.9-rc.1", true, false},
+		{"v0.1.1", "v0.2.0", false, false},
+		{"v0.2.0", "v0.1.0", false, false},
+		{"v1.4.0", "v1.0.2", true, false},
+		{"v1.4.0", "v2.0.0", false, false},
+		{"v1.0.0", "v0.9.0", false, false},
+		{"v0.1.1", "latest", false, false},
+		{"v0.1.1", "dev", true, true},
+		{"dev", "v0.1.0", true, true},
+		{"dev", "dev", true, false},
+	} {
+		Version = tc.controller
+		warn, err := CheckComputerd(tc.label)
+		if (err == nil) != tc.ok || (warn != "") != tc.warn {
+			t.Errorf("Controller %s, label %s: warn %q, err %v", tc.controller, tc.label, warn, err)
+		}
+	}
+}
