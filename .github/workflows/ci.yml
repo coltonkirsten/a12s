@@ -1,14 +1,16 @@
-# PR tests, kept light: only the fast need-to-haves, the same steps as `make check` (scripts/check.sh go sdk python).
-# Images, Services, bundles and computerd run locally with `make check-full` (CONTRIBUTING.md#checks).
-# Runs once per PR update (no push trigger), skips docs-only changes, and cancels superseded runs.
+# The merge gate: every check in scripts/check.sh (`make check-full`) runs here, one job per step, on linux/amd64.
+# A job runs only when its inputs changed (the `changes` job), so a docs-only PR runs nothing but `ci-ok`.
+# `ci-ok` is the one required status check on main: it passes when every job passed or was skipped.
+# Fork-safe: pull_request (not pull_request_target), read-only token, no secrets.
+# Pushes to main run the same filtered jobs only to refresh the caches PRs restore from (Go, npm, uv, Docker layers);
+# GitHub only lets a PR restore caches written on its own branch or on main.
 name: ci
 
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,11 +18,84 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter lists the PR's files through the API
+    outputs:
+      go: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.go == 'true' }}
+      sdk: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.sdk == 'true' }}
+      python: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.python == 'true' }}
+      computerd: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.computerd == 'true' }}
+      services: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.services == 'true' }}
+      tiers: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.tiers == 'true' }}
+      controller: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.controller == 'true' }}
+      bundles: ${{ github.event_name == 'workflow_dispatch' || steps.f.outputs.bundles == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'push'
+      # A manual run checks everything (see outputs above).
+      - uses: dorny/paths-filter@v4.0.3
+        if: github.event_name != 'workflow_dispatch'
+        id: f
+        with:
+          filters: |
+            shared: &shared
+              - .github/workflows/ci.yml
+              - scripts/check.sh
+              - .github/actions/**
+            go: &go
+              - *shared
+              - "**/*.go"
+              - go.mod
+              - go.sum
+              - cmd/**
+              - internal/**
+              - services/**
+              - examples/**
+              - sdk/fixtures/**
+              - sdk/typescript/test/api-fixtures.gen.ts
+            sdk:
+              - *shared
+              - sdk/typescript/**
+              - internal/gateway/web/**
+            python:
+              - *shared
+              - sdk/python/**
+              - sdk/fixtures/**
+            computerd:
+              - *shared
+              - computerd/**
+            services:
+              - *shared
+              - .dockerignore
+              - go.mod
+              - go.sum
+              - services/**
+            tiers:
+              - *shared
+              - .dockerignore
+              - computerd/**
+              - images/slim/**
+              - images/browser/**
+            controller:
+              - *go
+              - .dockerignore
+              - images/controller/**
+            bundles:
+              - *shared
+              - images/images.mk
+              - images/bundles/**
+
   # go build, gofmt, go vet, go test (go test includes the Go -> TS/Python API fixture drift check).
   go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -32,6 +107,8 @@ jobs:
 
   # TypeScript SDK: lint, tests (build, browser bundle, node --test), gateway embeds this build.
   sdk:
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -45,6 +122,8 @@ jobs:
 
   # Python SDK: pytest and mypy --strict on the oldest and newest supported Python, in one job.
   python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -54,3 +133,95 @@ jobs:
           enable-cache: true
           cache-dependency-glob: sdk/python/pyproject.toml
       - run: scripts/check.sh python
+
+  # computerd: type-check, build, node --test.
+  computerd:
+    needs: changes
+    if: needs.changes.outputs.computerd == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: computerd/package-lock.json
+      - run: scripts/check.sh computerd
+
+  # The Docker steps of scripts/check.sh, amd64 only (release.yml builds both architectures). Each image has its own
+  # GitHub Actions build-cache scope (.github/actions/docker, CHECK_DOCKER_CACHE=gha); the runner is thrown away, so
+  # no prune (CHECK_KEEP_CACHE=1).
+  # svc-mcp against a stub server, the reference Service images and their manifests.
+  services:
+    needs: changes
+    if: needs.changes.outputs.services == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CHECK_DOCKER_CACHE: gha
+      CHECK_KEEP_CACHE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: ./.github/actions/docker
+      - run: scripts/check.sh services
+
+  # slim and browser images, the Chromium sandbox and Playwright checks.
+  tiers:
+    needs: changes
+    if: needs.changes.outputs.tiers == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CHECK_DOCKER_CACHE: gha
+      CHECK_KEEP_CACHE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/docker
+      - run: scripts/check.sh tiers
+
+  # controller image; its binary starts and asks for its config.
+  controller:
+    needs: changes
+    if: needs.changes.outputs.controller == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CHECK_DOCKER_CACHE: gha
+      CHECK_KEEP_CACHE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/docker
+      - run: scripts/check.sh controller
+
+  # both default harness bundles and images/bundles/conformance.sh.
+  bundles:
+    needs: changes
+    if: needs.changes.outputs.bundles == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CHECK_DOCKER_CACHE: gha
+      CHECK_KEEP_CACHE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/docker
+      - run: scripts/check.sh bundles
+
+  # The single required check (branch protection on main). Skipped jobs count as passing; failed or cancelled do not.
+  ci-ok:
+    needs: [changes, go, sdk, python, computerd, services, tiers, controller, bundles]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "a required job ended '$r'"; exit 1 ;; esac
+          done
