@@ -79,8 +79,8 @@ a12s status                           # phase, inbox, power, warnings (--json fo
 a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
 a12s send <c> "…"                     # send and exit; works while busy or asleep
 a12s logs <c> --follow                # one Computer's events
-a12s gateway [--web dir] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2]
-                                      # http://127.0.0.1:7012: built-in dashboard, or your page + /a12s.js + /v1/
+a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2]
+                                      # http://127.0.0.1:7012: built-in dashboard, or your app + /a12s.js + /v1/
 a12s inbox <c> [--bodies]             # pending Messages; inbox resume <c> releases a hold
 a12s stop <c> | sleep <c> | wake <c>
 a12s token create <name> --actions send,events,status,inbox,power,stop --computers c1,c2|'*'
@@ -125,8 +125,14 @@ for ev in client.events():            # ev.type, ev.data (dict, camelCase keys),
 
 ## Browser
 
-`a12s gateway --web ./web` (run in the Fleet's directory, or with -F) serves ./web at http://127.0.0.1:7012, the SDK at /a12s.js and the API at /v1/ with a
-scoped token (default actions status,events,send,inbox; change with --allow, --computers). In the page:
+Frontend (React, Vite, Next.js, …): run the dev server through the gateway, so page and API share one origin:
+`a12s gateway -- npm run dev` (in the app's directory; -F ../fleet.yaml if fleet.yaml is elsewhere), then open
+http://127.0.0.1:7012, not the dev server's port. It starts the command, reads its port from the printed
+`http://localhost:<port>` (or --dev-port), and forwards everything but /v1/ and /a12s.js to it, websockets (hot
+reload) included. Already running: `a12s gateway --dev http://localhost:5173`. In the app,
+`import { connect } from "@coltonkirsten/a12s"; const a12s = await connect();` (no URL, no token).
+Static files: `a12s gateway --web ./dist`. The API at /v1/ uses a scoped token (default actions
+status,events,send,inbox; change with --allow, --computers). Without a bundler:
 
 ```html
 <script type="module">

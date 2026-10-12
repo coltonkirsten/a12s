@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+### Added
+- **`a12s gateway -- npm run dev`**: run your dev server (Vite, Next.js, …) behind the gateway. It starts the command,
+  finds its port in the URL it prints (or `--dev-port`), and forwards everything except `/v1/` and `/a12s.js` to it,
+  websockets included, so the page and the API share one origin and hot reload works. `--dev <url>` proxies a dev
+  server that is already running. See [Recipes: A web app](docs/recipes.md#a-web-app-react-vite-any-dev-server).
+
 ### Changed
 - `brew install coltonkirsten/tap/a12s` no longer needs `HOMEBREW_GITHUB_API_TOKEN`: the repo is public, so the formula
   downloads the release assets directly.
