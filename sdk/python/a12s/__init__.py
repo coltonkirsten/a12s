@@ -23,6 +23,7 @@ from ._types import (
     ServiceStatus,
     Status,
     Token,
+    ToolCall,
     Turn,
     TurnInboxMessage,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "ServiceStatus",
     "Status",
     "Token",
+    "ToolCall",
     "Turn",
     "TurnInboxMessage",
     "TurnStream",

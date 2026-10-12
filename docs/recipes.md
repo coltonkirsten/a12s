@@ -86,7 +86,7 @@ import { connect } from "a12s";
 const a12s = await connect();
 const turns = a12s.turns(["lead", "worker1", "worker2"]);
 await turns.ready();                                   // watch first, so nothing is missed
-await a12s.send("lead", process.argv[2] ?? "Two facts about octopuses: one about hearts, one about arms.");
+await a12s.send("lead", { body: process.argv[2] ?? "Two facts about octopuses: one about hearts, one about arms.", fresh: true });
 
 for await (const t of turns) {
   console.log(`[${t.computer}] ${t.text.trim()}`);
@@ -107,7 +107,7 @@ client = a12s.connect()
 task = sys.argv[1] if len(sys.argv) > 1 else "Two facts about octopuses: one about hearts, one about arms."
 
 with client.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits until it's watching
-    client.send("lead", task)
+    client.send("lead", task, fresh=True)
     for t in turns:
         print(f"[{t.computer}] {t.text.strip()}")
         if t.computer == "lead" and "FINAL ANSWER:" in t.text:
@@ -119,7 +119,12 @@ with client.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits u
 a12s up && npx tsx app.ts       # or: python app.py
 ```
 
+`fresh: true` starts lead on a new conversation for each task, so an earlier task's answer can't leak into this
+one; the workers' replies then continue that new conversation. Leave it out when a task should build on the last.
+
 To see who handed work to whom, look at `t.messages`: each has `via` (`computer:worker1`, `local`, …) and `sender`.
+What an agent sent is in `t.tools`: a worker's `send` is the call named `mcp__a12s__send`, and `input.body` is its
+result.
 
 ## A live dashboard in the browser
 

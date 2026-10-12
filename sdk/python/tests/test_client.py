@@ -329,6 +329,7 @@ def test_events_merge_every_computer_and_turns_fold_them(fake: Fake) -> None:
     with fake(merged_server).client().turns(reconnect=0.05) as turns:
         for t in turns:
             assert t.messages[0].via == "local"
+            assert [x.name for x in t.tools] == ["mcp__a12s__send"]
             got.append(f"{t.computer}:{t.status}:{t.text}")
             if len(got) == 2:
                 break
@@ -341,6 +342,7 @@ async def test_async_events_merge_every_computer_and_turns_fold_them(fake: Fake)
     async with fake(merged_server).aclient() as client, client.turns(reconnect=0.05) as turns:
         async for t in turns:
             assert t.messages[0].via == "local"
+            assert [x.name for x in t.tools] == ["mcp__a12s__send"]
             got.append(f"{t.computer}:{t.status}:{t.text}")
             if len(got) == 2:
                 break

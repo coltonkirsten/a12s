@@ -15,7 +15,7 @@ import httpx
 from ._errors import A12sError, A12sGapError, A12sStreamError
 from ._parse import from_json
 from ._sse import SSEFrame
-from ._types import EnqueueResponse, Event, PromptResult, Turn, TurnInboxMessage
+from ._types import EnqueueResponse, Event, PromptResult, ToolCall, Turn, TurnInboxMessage
 
 OnGap = Literal["yield", "throw"]
 
@@ -207,6 +207,7 @@ class _OpenTurn:
     text: str = ""
     after_tool: bool = False
     messages: list[TurnInboxMessage] = field(default_factory=list)
+    tools: dict[str, ToolCall] = field(default_factory=dict)
     started_at: str | None = None
 
 
@@ -229,6 +230,18 @@ class TurnBuilder:
             t.started_at = ev.ts or None
         elif ev.type == "tool.started":
             t.after_tool = True
+            tid = str(data.get("id", len(t.tools)))
+            t.tools[tid] = ToolCall(id=tid, name=str(data.get("name", "")), input=data.get("input"))
+        elif ev.type == "tool.finished":
+            tid = str(data.get("id", ""))
+            started = t.tools.get(tid)
+            t.tools[tid] = ToolCall(
+                id=tid,
+                name=str(data.get("name", started.name if started else "")),
+                input=started.input if started else None,
+                output=data.get("output"),
+                is_error=bool(data.get("isError")),
+            )
         elif ev.type == "text.delta":
             text = data.get("text")
             if isinstance(text, str):
@@ -247,6 +260,7 @@ class TurnBuilder:
                 text=t.text,
                 error=data.get("error") or None,
                 messages=t.messages,
+                tools=list(t.tools.values()),
                 usage=data.get("usage"),
                 started_at=t.started_at,
                 finished_at=ev.ts,

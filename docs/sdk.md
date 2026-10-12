@@ -96,8 +96,10 @@ for t in client.turns(["lead", "worker1"]):
 ```
 
 A Turn has `computer`, `id`, `status` (`completed`, `failed` or `interrupted`), `text` (everything the agent
-said), `error`, `messages` (the Messages it delivered, each with `id`, `sender` and `via`), `usage`, `startedAt` /
-`started_at` and `finishedAt` / `finished_at`.
+said), `error`, `messages` (the Messages it delivered, each with `id`, `sender` and `via`), `tools` (each tool call
+with `name`, `input`, `output`, `isError` / `is_error`), `usage`, `startedAt` / `started_at` and `finishedAt` /
+`finished_at`. What an agent sends to another Computer is in `tools`: a call named `mcp__a12s__send` whose `input`
+has `computer` and `body`.
 
 ### Events
 

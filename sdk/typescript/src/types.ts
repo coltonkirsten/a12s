@@ -361,6 +361,15 @@ export type A12sEvent =
 
 export type EventType = A12sEvent["type"];
 
+/** One tool call in a Turn. A `send` to another Computer is `mcp__a12s__send` with `input.body`. */
+export interface ToolCall {
+  id: string;
+  name: string;
+  input?: unknown;
+  output?: unknown;
+  isError: boolean;
+}
+
 /** A finished Turn: what `turns()` yields and `prompt()` returns. */
 export interface Turn {
   computer: string;
@@ -373,6 +382,8 @@ export interface Turn {
   error?: string;
   /** The Messages it delivered (who sent what): empty for a continuation, or if the stream joined mid-Turn. */
   messages: TurnInboxMessage[];
+  /** The tools it called, in order, with their input and output: what it `send`s to other Computers is here. */
+  tools: ToolCall[];
   usage: unknown;
   startedAt?: string;
   finishedAt: string;
