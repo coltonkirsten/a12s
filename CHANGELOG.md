@@ -13,6 +13,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   from the code and checked in CI, so it can no longer drift.
 
 ### Changed
+- Examples now live in [a12s-cookbook](https://github.com/coltonkirsten/a12s-cookbook), one folder per example in
+  TypeScript and Python. The `a12s-starter` template is archived. What to do: start from a cookbook example or
+  `a12s init`.
 - **`a12s gateway` is locked with a key made for each run**, like Jupyter: it opens `http://127.0.0.1:7012/?key=…` in
   your browser (`--no-open` only prints it), trades the key for an HttpOnly cookie and drops it from the URL. `/v1/`
   and `/a12s.js` need the cookie or `Authorization: Bearer <key>`, so other users and programs on the machine can't
