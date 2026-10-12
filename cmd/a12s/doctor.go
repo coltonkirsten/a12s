@@ -249,7 +249,7 @@ func fetchesAtStart(cfg map[string]any) bool {
 // fetchFix is the build target in a source build and a pull in a release, whose images come from the registry.
 func fetchFix(makeTarget, ref string) string {
 	if version.Release() {
-		return "docker login ghcr.io && docker pull " + ref
+		return "docker pull " + ref
 	}
 	return makeTarget
 }

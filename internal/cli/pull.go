@@ -40,8 +40,9 @@ func FleetImages(f *fleet.Fleet, controllerImage string) []string {
 	return refs
 }
 
-// PullMissing pulls absent images on the host with the docker CLI. The Controller's Engine API pull carries no
-// registry credentials, so a private registry (ghcr.io) only works through the user's own `docker login`.
+// PullMissing pulls absent images on the host with the docker CLI. The a12s images on ghcr.io are public; the
+// Controller's Engine API pull carries no registry credentials, so a private registry of the user's own only works
+// through their `docker login`.
 // Failures are reported and left for the Controller to turn into an admission error with the field name.
 func PullMissing(ctx context.Context, refs []string, log io.Writer) {
 	dc, err := client.New(client.FromEnv)
@@ -64,11 +65,7 @@ func PullMissing(ctx context.Context, refs []string, log io.Writer) {
 		cmd := exec.CommandContext(ctx, docker, "pull", "--quiet", ref)
 		cmd.Stdout, cmd.Stderr = io.Discard, log
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(log, "could not pull %s (%v)", ref, err)
-			if strings.HasPrefix(ref, "ghcr.io/") {
-				fmt.Fprint(log, "  fix: docker login ghcr.io with a token that has read:packages")
-			}
-			fmt.Fprintln(log)
+			fmt.Fprintf(log, "could not pull %s (%v)\n", ref, err)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 # On a v* tag: push every image of the release to ghcr.io/coltonkirsten/a12s/<name>:<version>, make sure the
-# default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDK.
+# default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDK (to npm).
 # Binaries go last so a released binary never points at images that are not there yet.
 name: release
 
@@ -107,19 +107,37 @@ jobs:
   sdk:
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
     defaults:
       run:
         working-directory: sdk/typescript
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - name: NPM_TOKEN is set
+        id: token
+        working-directory: .
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN is not set; skipping the npm publish of @coltonkirsten/a12s-client"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.token.outputs.ok == 'true'
+        uses: actions/checkout@v7
+      - if: steps.token.outputs.ok == 'true'
+        uses: actions/setup-node@v7
         with:
           node-version: 24
-          registry-url: https://npm.pkg.github.com
-          scope: "@coltonkirsten"
-      - run: npm ci
-      - run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
-      - run: npm run build && npm test
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          registry-url: https://registry.npmjs.org
+      - if: steps.token.outputs.ok == 'true'
+        run: npm ci
+      - if: steps.token.outputs.ok == 'true'
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+      - if: steps.token.outputs.ok == 'true'
+        run: npm run build && npm test
+      - if: steps.token.outputs.ok == 'true'
+        run: npm publish --provenance --access public

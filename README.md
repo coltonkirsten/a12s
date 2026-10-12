@@ -30,21 +30,20 @@ a12s down                    # remove Computers and Controller, keep drives
 ## Install
 
 a12s is a tool you install, like Docker. A project pins a release in its `fleet.lock`; it never vendors or edits
-a12s source. The repo, release assets and images are private, so installing needs a GitHub token with `repo` (to
-download the release) and `read:packages` (to pull images from ghcr.io):
+a12s source. The repo and release assets are private, so installing needs a GitHub token with `repo` (to download the
+release). The images on ghcr.io are public and pull without a login:
 
 ```sh
 export HOMEBREW_GITHUB_API_TOKEN=<token>          # brew downloads the private release asset with it
 brew tap coltonkirsten/tap https://github.com/coltonkirsten/homebrew-tap   # git needs access to the private tap
 brew install coltonkirsten/tap/a12s
-echo <token> | docker login ghcr.io -u <github-user> --password-stdin      # images are pulled on the host
 a12s version                                       # a12s v0.1.0 (images from ghcr.io/coltonkirsten/a12s)
 ```
 
 A released binary resolves every image by its own version: `slim` is `ghcr.io/coltonkirsten/a12s/slim:<version>`,
 the Controller is `…/controller:<version>`, and `a12s init` writes the reference Services as `…/svc-cron:<version>`.
-Harness bundles are versioned by the harness (`…/bundle-claude-code:2.1.280`). `a12s up` pulls missing images with
-your `docker login`. A source build (`make build`) is version `dev` and uses the local images from `make images`.
+Harness bundles are versioned by the harness (`…/bundle-claude-code:2.1.280`). `a12s up` pulls missing images on the
+host. A source build (`make build`) is version `dev` and uses the local images from `make images`.
 
 ```sh
 a12s init myproject && cd myproject   # fleet.yaml, fleet.lock (pins the a12s release), .gitignore, README
