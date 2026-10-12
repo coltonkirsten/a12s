@@ -97,8 +97,9 @@ type ComputerSpec struct {
 	Credentials   []string `json:"credentials,omitempty"`
 	ProxyURL      string   `json:"proxyUrl,omitempty"`
 	ControllerURL string   `json:"controllerUrl,omitempty"`
-	// Preset is a tar applied only once, before the first start on an empty home drive.
-	Preset []byte `json:"preset,omitempty"`
+	// Preset is a tar copied onto the home drive before the first start and again whenever PresetDigest changes.
+	Preset       []byte `json:"preset,omitempty"`
+	PresetDigest string `json:"presetDigest,omitempty"`
 	// Seccomp replaces the substrate default profile; the browser tier needs its own.
 	Seccomp string     `json:"seccomp,omitempty"`
 	Uses    []Endpoint `json:"uses,omitempty"`

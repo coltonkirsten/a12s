@@ -35,7 +35,7 @@ computers:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim
     credentials: [anthropic]
-    home: { preset: ./presets/scout }          # copied once, onto an empty home
+    home: { preset: ./presets/scout }          # copied onto the home drive; edit it and a12s up to update
     drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
     power:
@@ -99,7 +99,7 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `image` | `slim`, `browser`, or a custom image reference. See [Images](images.md). |
 | `resources` | `{cpu, memory}`, e.g. `{ cpu: 2, memory: 4Gi }`. Zero means no limit. |
 | `home.size` | Home drive size. |
-| `home.preset` | A directory, relative to the Fleet file, copied once onto an empty home (skills, `CLAUDE.md`, settings). Its content hash is pinned in `fleet.lock`. |
+| `home.preset` | A directory, relative to the Fleet file, copied onto the home drive (`CLAUDE.md`, skills, settings). Edit it and run `a12s up`: the new files are copied at the Computer's next idle boundary and the session continues. Files the agent wrote elsewhere on the home drive are kept; a preset file the agent edited is overwritten. |
 | `autonomy` | `full` (default) or `restricted`. See [Permissions](concepts.md#permissions). |
 | `credentials` | Credential names, resolved through the bindings file. See [Credentials](credentials.md). |
 | `drives` | `[{name, at, readOnly?}]`: work drives and their absolute mount paths. |
@@ -144,8 +144,9 @@ upgrade: install that version, or change the line to the new version and run `a1
 upgrade, also delete the `slim`/`browser` entries under `images:` (they pin the old release's tiers) and rebuild any
 custom image FROM the new base under a new tag.
 
-`a12s up` resolves and appends missing entries and never changes an existing one. Moving a version forward is
-explicit: change the version or ref in `fleet.yaml` (a new key), or run `a12s lock update services/<svc>` to re-pin
+`a12s up` resolves and appends missing entries and never changes an existing image, bundle or Service pin.
+Presets are your own source, so their entries follow the directory: `up` updates them when a preset changes. Moving a
+version forward is explicit: change the version or ref in `fleet.yaml` (a new key), or run `a12s lock update services/<svc>` to re-pin
 an unchanged Service ref.
 
 ## Validation

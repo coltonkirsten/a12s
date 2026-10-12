@@ -79,15 +79,16 @@ func TestPresetsPinAndRefuseChange(t *testing.T) {
 	if got := addedPins(lock, cloneLock(lock)); len(got) != 0 {
 		t.Errorf("addedPins of a clone = %v", got)
 	}
-	// Same content: fine. Changed content: the pin is not silently moved.
-	if _, err := g.presets(f, lock); err != nil {
-		t.Fatal(err)
-	}
+	// Changed content moves the pin: the preset is the project's own source.
+	before := lock.Presets["./presets/scout"]
 	if err := os.WriteFile(filepath.Join(dir, "presets/scout/CLAUDE.md"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.presets(f, lock); err == nil || !strings.Contains(err.Error(), "changed since fleet.lock pinned it") {
-		t.Errorf("err = %v", err)
+	if _, err := g.presets(f, lock); err != nil {
+		t.Fatal(err)
+	}
+	if after := lock.Presets["./presets/scout"]; after == before {
+		t.Errorf("pin not moved: %s", after)
 	}
 }
 

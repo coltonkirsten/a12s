@@ -97,7 +97,7 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 		return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
 	}
 	if len(spec.Preset) > 0 {
-		if err := d.applyPreset(ctx, created.ID, spec.Preset); err != nil {
+		if err := d.applyPreset(ctx, created.ID, spec); err != nil {
 			// Without the container, a retry stages (and copies) again.
 			return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
 		}
@@ -124,20 +124,7 @@ func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driv
 	if err != nil {
 		return false, fmt.Errorf("preset: %w", err)
 	}
-	switch state {
-	case "applied":
-		return true, nil
-	case "": // no marker: finished only if the home was already initialized
-		_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: agentHome})
-		if isNotFound(err) {
-			return false, nil
-		}
-		if err != nil {
-			return false, fmt.Errorf("preset: stat %s: %w", agentHome, err)
-		}
-		return true, nil
-	}
-	return false, nil // "pending": the copy did not finish
+	return state == appliedMarker(spec.PresetDigest), nil
 }
 
 // mountPointRE excludes ',' and ':', which A12S_DRIVES uses as separators.
@@ -258,36 +245,31 @@ func (d *Driver) checkBundle(ctx context.Context, containerID string, spec drive
 	return nil
 }
 
-// applyPreset runs once per home drive; the marker reads "pending" during the
-// copy and "applied" only after success, so an interrupted copy is retried.
-func (d *Driver) applyPreset(ctx context.Context, containerID string, preset []byte) error {
+// appliedMarker names the preset a home drive holds. The marker reads "pending" during a copy, so an interrupted copy
+// is retried.
+func appliedMarker(digest string) string { return "applied " + digest }
+
+// applyPreset copies the preset onto the home drive unless this digest is already there. It overwrites the preset's
+// own files and leaves everything else the agent wrote.
+func (d *Driver) applyPreset(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
 	state, err := d.readFile(ctx, containerID, presetMarker)
 	if err != nil {
 		return fmt.Errorf("preset: %w", err)
 	}
-	switch state {
-	case "applied":
+	if state == appliedMarker(spec.PresetDigest) {
 		return nil
-	case "": // no marker: apply only onto an empty home
-		_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: agentHome})
-		if err == nil {
-			return nil // home initialized without a preset
-		}
-		if !isNotFound(err) {
-			return fmt.Errorf("preset: stat %s: %w", agentHome, err)
-		}
 	}
 	if err := d.writeMarker(ctx, containerID, "pending"); err != nil {
 		return err
 	}
 	var buf bytes.Buffer
-	if err := rebasePresetTar(bytes.NewReader(preset), &buf, path.Base(agentHome)); err != nil {
+	if err := rebasePresetTar(bytes.NewReader(spec.Preset), &buf, path.Base(agentHome)); err != nil {
 		return err
 	}
 	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: homeMount, Content: &buf}); err != nil {
 		return fmt.Errorf("preset: copy: %w", err)
 	}
-	return d.writeMarker(ctx, containerID, "applied")
+	return d.writeMarker(ctx, containerID, appliedMarker(spec.PresetDigest))
 }
 
 func (d *Driver) writeMarker(ctx context.Context, containerID, state string) error {

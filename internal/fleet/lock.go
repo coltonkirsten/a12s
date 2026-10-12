@@ -103,6 +103,14 @@ func (l *Lock) PinBundle(kind, version, digest string) bool {
 
 func (l *Lock) PinPreset(path, digest string) bool { return pin(&l.Presets, path, digest) }
 
+// SetPreset records a preset's current digest, replacing an older one.
+func (l *Lock) SetPreset(path, digest string) {
+	if l.Presets == nil {
+		l.Presets = map[string]string{}
+	}
+	l.Presets[path] = digest
+}
+
 func (l *Lock) PinService(name, ref, digest string) bool {
 	return pin(&l.Services, ServiceKey(name, ref), digest)
 }

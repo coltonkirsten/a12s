@@ -18,7 +18,7 @@ computers:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim
     credentials: [anthropic]
-    home: { preset: ./presets/scout }          # copied once, onto an empty home
+    home: { preset: ./presets/scout }          # edit it and a12s up to update scout
     drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
 
