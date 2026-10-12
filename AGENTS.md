@@ -35,4 +35,5 @@ Most code here is written and reviewed by agents. These rules apply to every cha
   `CHANGELOG.md`: user-visible changes per release, breaking ones with what to do.
 - `docs/`: concepts, recipes, SDK, HTTP API, Fleet file, CLI, inbox and power policy, Services, credentials,
   security, architecture, images.
-- Before finishing: `make build test vet`, and for computerd changes `cd computerd && npm run lint && npm test`.
+- Before finishing: `make check-code` while iterating; `make check` green locally before merge (it is the merge
+  gate: nothing runs on GitHub automatically). Paste its tail in the PR.
