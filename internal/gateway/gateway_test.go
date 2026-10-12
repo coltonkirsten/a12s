@@ -89,6 +89,9 @@ func TestRefusesNonLoopbackHostsAndCrossOriginWrites(t *testing.T) {
 	if s := do("POST", "evil.example:7012", ""); s != http.StatusForbidden {
 		t.Errorf("rebinding host: %d", s)
 	}
+	if s := do("GET", "192.168.1.20:7012", ""); s != http.StatusForbidden {
+		t.Errorf("LAN address: %d", s)
+	}
 	if s := do("POST", "", "http://evil.example"); s != http.StatusForbidden {
 		t.Errorf("cross-origin write: %d", s)
 	}

@@ -19,6 +19,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   by a killed gateway are removed when the next one starts, and a running gateway's token is never touched. Several
   gateways can serve one Fleet. What to do: Messages from the page now arrive `via` `token:gateway-<port>`; match on
   that prefix if your code checked for `token:gateway`.
+- `a12s gateway --addr host:port` listens on another loopback address; a non-loopback `--addr` (`0.0.0.0`) or a
+  request for a non-loopback host name is refused with how to serve other people instead
+  ([SDK: Serve other people](docs/sdk.md#serve-other-people)).
 - `brew install coltonkirsten/tap/a12s` no longer needs `HOMEBREW_GITHUB_API_TOKEN`: the repo is public, so the formula
   downloads the release assets directly.
 

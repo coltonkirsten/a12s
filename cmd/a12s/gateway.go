@@ -24,6 +24,7 @@ import (
 func runGateway(g *globals, args []string) error {
 	flags := g.flags("gateway")
 	port := flags.Int("port", 7012, "port on 127.0.0.1")
+	addr := flags.String("addr", "", "loopback address to listen on, host:port (default 127.0.0.1:<port>)")
 	web := flags.String("web", "", "directory of your web app to serve (default: the built-in dashboard)")
 	dev := flags.String("dev", "", "URL of a running dev server to proxy everything but /v1/ and /a12s.js to")
 	devPort := flags.Int("dev-port", 0, "the port of the dev server started after --, when it doesn't print its URL")
@@ -39,6 +40,18 @@ func runGateway(g *globals, args []string) error {
 	}
 	if *devPort != 0 && len(pos) == 0 {
 		return usageError("--dev-port is the port of the dev server command after --")
+	}
+	host := "127.0.0.1"
+	if *addr != "" {
+		h, p, err := net.SplitHostPort(*addr)
+		n, perr := strconv.Atoi(p)
+		if err != nil || perr != nil || n <= 0 || n > 65535 {
+			return usageError("--addr " + *addr + " is not host:port, like 127.0.0.1:7012")
+		}
+		if !gateway.LoopbackHost(h) {
+			return fmt.Errorf("the gateway listens only on this machine (127.0.0.1, ::1, localhost), not %s. %s", h, gateway.ServeOthers)
+		}
+		host, *port = h, n
 	}
 	var devURL *url.URL
 	if *dev != "" {
@@ -64,7 +77,7 @@ func runGateway(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(*port)))
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(*port)))
 	if err != nil {
 		return fmt.Errorf("%w (pick another with --port)", err)
 	}
@@ -112,7 +125,7 @@ func runGateway(g *globals, args []string) error {
 	}
 	key := rand.Text()
 	srv := &http.Server{Handler: gateway.Handler(gateway.Config{Controller: base, Token: tok.Secret, Key: key, Web: site, Dev: devURL}), ReadHeaderTimeout: 10 * time.Second}
-	link := fmt.Sprintf("http://127.0.0.1:%d/?key=%s", *port, key)
+	link := "http://" + net.JoinHostPort(host, strconv.Itoa(*port)) + "/?key=" + key
 	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s and /a12s.js; API as token:%s (%s on %s); Ctrl-C to stop\n",
 		f.Metadata.Name, link, serving, tokenName, strings.Join(tok.Actions, ","), strings.Join(tok.Computers, ","))
 	if !*noOpen {
