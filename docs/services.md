@@ -2,7 +2,11 @@
 
 A **Service** is a non-agent container the Controller runs from the same Fleet file as your Computers: a clock, a
 database, an MCP server that holds a login, a webhook bridge. It has no harness, no session and no inbox. What it may
-do is written in the Fleet as grants, on the side that acts (design: `docs/a12s-layer1-enhancements-design.md` §5).
+do is written in the Fleet as grants, on the side that acts.
+
+A Service holds a capability so agents don't have to: Computers that `uses:` it reach it over a port and never see
+its credential. A Service with `grants.send` can enqueue into inboxes, which is all a clock, a webhook bridge or a
+fan-out needs.
 
 ```yaml
 services:

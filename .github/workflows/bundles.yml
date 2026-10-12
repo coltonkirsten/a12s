@@ -1,4 +1,4 @@
-# Auto-build HarnessBundles when upstream releases land (design §5): discover the
+# Auto-build HarnessBundles when upstream releases land (docs/images.md): discover the
 # latest Claude Code and Codex versions, and for each one not yet in ghcr, build
 # linux/amd64 + linux/arm64, run the conformance check on both, then push.
 # The fetch stage runs on the build platform, so the build needs no emulation;
