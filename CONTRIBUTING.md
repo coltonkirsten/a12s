@@ -1,11 +1,28 @@
 # Contributing
 
+## Quick start
+
+GitHub Actions is the merge gate: every check runs on each pull request, forks included, and `main` only takes a PR
+whose `ci-ok` check passed. Locally you only need fast feedback, on macOS or Linux:
+
+```sh
+git clone https://github.com/coltonkirsten/a12s.git && cd a12s
+make check                     # Go, both SDKs, API fixtures: about 1.5 minutes, no Docker
+scripts/check.sh tiers         # optional: one Docker step, if you changed what it covers
+```
+
+Push a branch (or a fork) and open a PR against `main`; CI does the rest. Nothing depends on a particular machine.
+
 ## Requirements
 
 - Go 1.26+
 - Node 24 and npm (for computerd)
-- Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images, `make check-full` and end-to-end runs
-- uv for the Python SDK; jq for the bundle conformance check; GoReleaser (`brew install goreleaser`) only to release
+- uv for the Python SDK (it fetches Python 3.10 and 3.14 itself)
+- Optional: Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images, the Docker steps of
+  `make check-full` and end-to-end runs; jq for the bundle conformance check; GoReleaser only for the local release
+  fallback
+
+`scripts/check.sh` runs with any bash (including macOS's bash 3.2) and names any missing tool before it starts a step.
 
 ## Run from source (macOS)
 
@@ -58,8 +75,8 @@ make services     # the reference Services: svc-cron, svc-webhook, svc-mcp, svc-
 ## Checks: `make check` and `make check-full`
 
 ```sh
-make check        # what PR CI runs: go, sdk, python (about 1.5 minutes, no Docker)
-make check-full   # everything; stops at the first failure (about 15 minutes cold, needs Docker)
+make check        # fast local feedback: go, sdk, python (about 1.5 minutes, no Docker)
+make check-full   # everything CI runs, in one go; stops at the first failure (needs Docker; about 15 minutes cold)
 scripts/check.sh go sdk    # any subset of: go computerd sdk python services tiers controller bundles
 ```
 
@@ -73,11 +90,23 @@ images, the slim, browser and controller images with the Chromium sandbox and Pl
 harness bundles with `images/bundles/conformance.sh`. Afterwards it prunes dangling images and the build cache
 (`CHECK_KEEP_CACHE=1` keeps them).
 
-**PR CI is light on purpose.** `.github/workflows/ci.yml` runs the `make check` steps (one job each for go, sdk and
-python) on every pull request to main, once per update, cancelling superseded runs and skipping docs-only changes
-(`**/*.md`, `docs/**`). Nothing Docker-heavy runs on GitHub for a PR: run `make check-full` locally before any
-release-affecting change (images and Dockerfiles, computerd, Services, bundles, `scripts/release.sh`,
-`.goreleaser.yaml`) and paste its tail in the PR.
+### CI: the gate
+
+`.github/workflows/ci.yml` runs every `scripts/check.sh` step as its own job (go, sdk, python, computerd, services,
+tiers, controller, bundles) on each pull request to `main`, on linux/amd64:
+
+- **Only what changed.** A `changes` job (dorny/paths-filter) maps the PR's files to the steps whose inputs they touch;
+  the rest are skipped. A docs-only PR runs no test job. Editing `ci.yml`, `scripts/check.sh` or `.github/actions/`
+  runs everything; so does a manual run (Actions > ci > Run workflow).
+- **Cached.** Go, npm and uv caches come from the setup actions; image builds read and write the GitHub Actions
+  build cache, one scope per image (`CHECK_DOCKER_CACHE=gha`, `.github/actions/docker`). Pushes to `main` run the same
+  filtered jobs only to refresh those caches, since a PR can restore caches from `main` but not from another PR.
+- **One run per PR update.** A new push cancels the PR's previous run.
+- **Fork-safe.** Plain `pull_request` with a read-only token and no secrets, so a fork's PR gets the same checks.
+- **`ci-ok`** waits for every job and passes when each one passed or was skipped. It is the only required check on
+  `main` (with no force pushes and no deletion; admins can still bypass).
+
+The end-to-end scripts (`hack/`) are not in CI: they make real model calls with real credentials.
 
 ## Releasing
 
@@ -90,7 +119,7 @@ git tag -a v0.5.0 -m v0.5.0 origin/main && git push origin v0.5.0
 It pushes the images (linux/amd64 and linux/arm64), publishes the default harness bundles if missing, runs
 GoReleaser (binaries and the Homebrew formula), attaches the SDK `a12s-*.tgz` and `a12s-*.whl` to the GitHub release
 and publishes `a12s` to npm and PyPI. For an existing tag, start it by hand (Actions > release > Run workflow).
-`make check-full` should be green on that commit first.
+Tag a commit of `main`; `ci-ok` already passed on it.
 
 ### npm and PyPI: trusted publishing
 
@@ -110,7 +139,8 @@ first, then the `NPM_TOKEN` / `PYPI_TOKEN` repository secret if one is set, and 
 
 ### Local fallback: `make release`
 
-From a Mac or Linux machine with Docker, on an up-to-date main that passed `make check-full`:
+For emergencies only (Actions unavailable); the release workflow above is the way to release. From a Mac or Linux
+machine with Docker, on an up-to-date main whose CI passed:
 
 ```sh
 make release VERSION=0.5.0
@@ -201,6 +231,6 @@ power-policy checks run in seconds; never set it in production (the Controller l
 ## Pull requests
 
 - Keep changes small and focused, with tests for behavior changes.
-- PR CI (go, sdk, python) green before merge; `make check` runs the same locally. For release-affecting changes also
-  run `make check-full` and paste the tail of its output in the PR.
+- `ci-ok` green before merge (required on `main`). `make check` is the quick local loop; the Docker steps
+  (`scripts/check.sh services tiers controller bundles`) run locally too if you want them before CI.
 - Update the docs in `docs/` when behavior changes: they describe the current state of the code.

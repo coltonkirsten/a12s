@@ -20,15 +20,15 @@ sdk-bundle:
 	cd sdk/typescript && npm ci && npm run build
 	cp sdk/typescript/dist/a12s.js internal/gateway/web/a12s.js
 
-# The fast gate, the same steps PR CI runs (.github/workflows/ci.yml): Go, the API fixtures, both SDKs. No Docker.
+# Fast local feedback: Go, the API fixtures, both SDKs. No Docker. PR CI (.github/workflows/ci.yml) is the gate.
 check:
 	scripts/check.sh go sdk python
 
-# Everything: the above plus computerd, Services, images and bundles (needs Docker). Run before release-affecting changes.
+# Everything PR CI can run: the above plus computerd, Services, images and bundles (needs Docker).
 check-full:
 	scripts/check.sh
 
-# Cut a release from this machine: make release VERSION=x.y.z (see CONTRIBUTING.md#releasing).
+# Emergency fallback: releases normally come from a v* tag (release.yml). make release VERSION=x.y.z, see CONTRIBUTING.md.
 release:
 	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z" >&2; exit 1; }
 	scripts/release.sh $(VERSION)

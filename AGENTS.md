@@ -35,6 +35,6 @@ Most code here is written and reviewed by agents. These rules apply to every cha
   `CHANGELOG.md`: user-visible changes per release, breaking ones with what to do.
 - `docs/`: concepts, recipes, SDK, HTTP API, Fleet file, CLI, inbox and power policy, Services, credentials,
   security, architecture, images.
-- Before finishing: `make check` (Go, both SDKs, API fixtures; the same steps PR CI runs on GitHub). Run
-  `make check-full` (adds computerd, Services, images, bundles; needs Docker) before release-affecting changes:
-  images, Dockerfiles, computerd, Services, bundles, `scripts/release.sh`, `.goreleaser.yaml`. CI skips docs-only PRs.
+- Before finishing: `make check` (Go, both SDKs, API fixtures; no Docker). PR CI on GitHub is the gate: it runs every
+  `scripts/check.sh` step whose inputs the PR touches (computerd, Services, images, bundles included), and `main`
+  requires its `ci-ok` check. `scripts/check.sh <step>` runs one step locally (Docker steps need Docker).
