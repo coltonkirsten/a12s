@@ -6,6 +6,8 @@ export interface McpServer {
   env?: Record<string, string>;
   /** Codex honours this; Claude starts MCP servers in the turn's cwd (/home/agent by default). */
   cwd?: string;
+  /** Claude Code: list its tools up front instead of behind tool search, so the agent never has to look them up. */
+  alwaysLoad?: boolean;
 }
 
 export interface TurnInput {
