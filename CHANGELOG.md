@@ -2,7 +2,7 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.2.0 (2026-10-12)
 
 ### Added
 - SDK Turns carry `tools`: every tool call with its input and output, so what an agent `send`s to another Computer
