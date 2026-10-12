@@ -86,4 +86,5 @@ func parseRelease(v string) ([2]int, bool) {
 	}
 	return [2]int{out[0], out[1]}, true
 }
+
 // warm CI timing probe; do not merge
