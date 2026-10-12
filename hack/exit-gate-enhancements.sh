@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The enhancements exit gate (docs/a12s-layer1-enhancements-design.md §9), against the local Docker
+# The enhancements end-to-end check (see CONTRIBUTING.md), against the local Docker
 # engine with examples/services (renamed fleet "gate"). Usage:
 #   hack/exit-gate-enhancements.sh <workdir> <logfile> [sections...]
 # Needs: bin/a12s, a12s/{controller,slim}:dev, the claude-code 2.1.280 bundle, `make services`, and

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The §8 exit gate, run against the local Docker engine with the examples/lab Fleet.
+# The Layer 1 end-to-end check (see CONTRIBUTING.md), run against the local Docker engine with the examples/lab Fleet.
 # Usage: hack/exit-gate.sh <logfile>. Requires: built bin/a12s and a12s/* images,
 # examples/lab/a12s.bindings.yaml, and GH_TOKEN for the builder's github credential.
 set -uo pipefail

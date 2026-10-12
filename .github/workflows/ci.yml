@@ -57,7 +57,7 @@ jobs:
       # Chromium's sandbox needs them (that is what seccomp.json allows).
       - name: allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - name: Chromium sandbox (images/browser/README.md)
+      - name: Chromium sandbox (docs/images.md)
         run: |
           docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
             --security-opt seccomp=images/browser/seccomp.json --read-only --tmpfs /tmp \
