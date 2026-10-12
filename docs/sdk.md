@@ -182,7 +182,8 @@ the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-
 ```
 
 The page may use `status`, `events`, `send` and `inbox` on every Computer; narrow that with
-`--allow status,events` and `--computers lead,worker1`. Each gateway has its own token, `gateway-<port>`, so Messages
+`--allow status,events` and `--computers lead,worker1`. The gateway prints the scope in one line when it starts:
+`the page may read status, follow events, send Messages, read and manage inboxes, on every Computer`. Each gateway has its own token, `gateway-<port>`, so Messages
 from the page arrive `via` `token:gateway-7012`. It is revoked when the gateway stops; one left by a killed gateway is
 removed when the next gateway starts. Several gateways can serve one Fleet on different `--port`s.
 

@@ -22,6 +22,7 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - `a12s gateway --addr host:port` listens on another loopback address; a non-loopback `--addr` (`0.0.0.0`) or a
   request for a non-loopback host name is refused with how to serve other people instead
   ([SDK: Serve other people](docs/sdk.md#serve-other-people)).
+- `a12s gateway` prints what the page may do in one line when it starts (its token's actions and Computers).
 - `brew install coltonkirsten/tap/a12s` no longer needs `HOMEBREW_GITHUB_API_TOKEN`: the repo is public, so the formula
   downloads the release assets directly.
 

@@ -275,3 +275,11 @@ func TestStaleGatewayTokensSparesLiveSiblings(t *testing.T) {
 		t.Fatalf("stale = %v", got)
 	}
 }
+
+func TestPageMaySaysTheScopeInOneLine(t *testing.T) {
+	got := pageMay(api.Token{Name: "gateway-7012", Actions: []string{"status", "send"}, Computers: []string{"lead", "worker1"}})
+	want := "the page may read status, send Messages, on Computers lead, worker1 (token:gateway-7012; change with --allow, --computers)"
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}

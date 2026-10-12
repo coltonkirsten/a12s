@@ -126,8 +126,8 @@ func runGateway(g *globals, args []string) error {
 	key := rand.Text()
 	srv := &http.Server{Handler: gateway.Handler(gateway.Config{Controller: base, Token: tok.Secret, Key: key, Web: site, Dev: devURL}), ReadHeaderTimeout: 10 * time.Second}
 	link := "http://" + net.JoinHostPort(host, strconv.Itoa(*port)) + "/?key=" + key
-	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s and /a12s.js; API as token:%s (%s on %s); Ctrl-C to stop\n",
-		f.Metadata.Name, link, serving, tokenName, strings.Join(tok.Actions, ","), strings.Join(tok.Computers, ","))
+	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s and /a12s.js; Ctrl-C to stop\n  %s\n",
+		f.Metadata.Name, link, serving, pageMay(tok))
 	if !*noOpen {
 		openBrowser(link)
 	}
@@ -141,6 +141,32 @@ func runGateway(g *globals, args []string) error {
 		return err
 	}
 	return devExited
+}
+
+var actionWords = map[string]string{
+	api.ActionStatus: "read status",
+	api.ActionEvents: "follow events",
+	api.ActionSend:   "send Messages",
+	api.ActionInbox:  "read and manage inboxes",
+	api.ActionPower:  "sleep and wake",
+	api.ActionStop:   "stop Turns",
+}
+
+// pageMay is the token's scope in one line.
+func pageMay(tok api.Token) string {
+	var can []string
+	for _, a := range tok.Actions {
+		if w, ok := actionWords[a]; ok {
+			can = append(can, w)
+		} else {
+			can = append(can, a)
+		}
+	}
+	on := "every Computer"
+	if len(tok.Computers) != 1 || tok.Computers[0] != "*" {
+		on = "Computers " + strings.Join(tok.Computers, ", ")
+	}
+	return fmt.Sprintf("the page may %s, on %s (token:%s; change with --allow, --computers)", strings.Join(can, ", "), on, tok.Name)
 }
 
 const gatewayTokenPrefix = "gateway-"
