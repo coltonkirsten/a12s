@@ -2,6 +2,13 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Changed
+- **The npm package is `@coltonkirsten/a12s`** (npm refused the bare name `a12s`). `npm install @coltonkirsten/a12s` and
+  `import { connect } from "@coltonkirsten/a12s"`; the API is unchanged. 0.2.0 is on npm under this name. The Python
+  package stays `a12s` on PyPI. The release's npm tarball is now `coltonkirsten-a12s-<version>.tgz`.
+
 ## v0.2.0 (2026-10-12)
 
 ### Added

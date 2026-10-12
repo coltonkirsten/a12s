@@ -177,13 +177,13 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           v="${TAG#v}"
-          if [ "$(npm view "a12s@$v" version 2> /dev/null)" = "$v" ]; then echo "a12s@$v is already on npm"; exit 0; fi
+          if [ "$(npm view "@coltonkirsten/a12s@$v" version 2> /dev/null)" = "$v" ]; then echo "@coltonkirsten/a12s@$v is already on npm"; exit 0; fi
           if npm publish --access public; then echo "published with trusted publishing"; exit 0; fi
           if [ -n "$NPM_TOKEN" ]; then
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$RUNNER_TEMP/npmrc"
             if NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc" npm publish --access public; then echo "published with NPM_TOKEN"; exit 0; fi
           fi
-          echo "::warning::npm publish of a12s@$v skipped: no trusted publisher on npm and no working NPM_TOKEN (CONTRIBUTING.md#releasing)"
+          echo "::warning::npm publish of @coltonkirsten/a12s@$v skipped: no trusted publisher on npm and no working NPM_TOKEN (CONTRIBUTING.md#releasing)"
 
   # PyPI: trusted publishing (OIDC) first, then the PYPI_TOKEN secret if set, else skip with a warning.
   pypi:
@@ -215,7 +215,7 @@ jobs:
           echo "::warning::PyPI publish of a12s ${TAG#v} skipped: no trusted publisher on PyPI and no working PYPI_TOKEN (CONTRIBUTING.md#releasing)"
 
   # Both SDK packages on the GitHub release, so they install before (or without) npm and PyPI:
-  # gh release download -R coltonkirsten/a12s -p 'a12s-*'
+  # gh release download -R coltonkirsten/a12s -p '*a12s-*'
   sdk-assets:
     needs: binaries
     runs-on: ubuntu-latest
@@ -244,4 +244,4 @@ jobs:
       - name: attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" "$RUNNER_TEMP"/a12s-*.tgz "$RUNNER_TEMP"/a12s-*.whl --clobber
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/coltonkirsten-a12s-*.tgz "$RUNNER_TEMP"/a12s-*.whl --clobber

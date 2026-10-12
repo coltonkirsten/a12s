@@ -1,5 +1,5 @@
 {
-  "name": "a12s",
+  "name": "@coltonkirsten/a12s",
   "version": "0.0.0-dev",
   "description": "TypeScript client for a12s: send work to agent Computers, stream their events and Turns, in Node or the browser",
   "license": "MIT",

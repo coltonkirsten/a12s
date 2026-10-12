@@ -51,7 +51,7 @@ gh_user=$(gh api user -q .login)
 git fetch -q origin main --tags
 git rev-parse -q --verify "refs/tags/$tag" > /dev/null && die "$tag already exists"
 gh release view "$tag" -R "$REPO" > /dev/null 2>&1 && die "a GitHub release $tag already exists"
-[ -n "${NPM_TOKEN:-}" ]  || echo "warning: NPM_TOKEN is not set; the npm publish of a12s will be skipped"
+[ -n "${NPM_TOKEN:-}" ]  || echo "warning: NPM_TOKEN is not set; the npm publish of @coltonkirsten/a12s will be skipped"
 [ -n "${PYPI_TOKEN:-}" ] || echo "warning: PYPI_TOKEN is not set; the PyPI publish of a12s will be skipped"
 
 # Build from a clean checkout of origin/main, never the working tree.
@@ -125,7 +125,7 @@ step "npm package"
 step "Python wheel"
 (cd sdk/python && perl -pi -e "s/^version = .*/version = \"$version\"/" pyproject.toml && uv build --wheel --out-dir "$out")
 step "attach SDK packages to the release"
-gh release upload "$tag" -R "$REPO" "$out"/a12s-*.tgz "$out"/a12s-*.whl --clobber
+gh release upload "$tag" -R "$REPO" "$out"/coltonkirsten-a12s-*.tgz "$out"/a12s-*.whl --clobber
 
 # --- registries (optional) -----------------------------------------------------------------------------------
 if [ -n "${NPM_TOKEN:-}" ]; then
@@ -133,7 +133,7 @@ if [ -n "${NPM_TOKEN:-}" ]; then
   printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$work/npmrc"
   (cd sdk/typescript && npm test && NPM_CONFIG_USERCONFIG="$work/npmrc" npm publish --access public)
 else
-  echo "warning: NPM_TOKEN is not set; skipped the npm publish of a12s"
+  echo "warning: NPM_TOKEN is not set; skipped the npm publish of @coltonkirsten/a12s"
 fi
 if [ -n "${PYPI_TOKEN:-}" ]; then
   step "PyPI publish"

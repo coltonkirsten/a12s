@@ -1,5 +1,5 @@
-// The default entry (browsers, Deno, workers): no node: imports. Node resolves "a12s" to ./node.ts instead, through
-// the "node" export condition, so `import { connect } from "a12s"` works everywhere.
+// The default entry (browsers, Deno, workers): no node: imports. Node resolves "@coltonkirsten/a12s" to ./node.ts instead, through
+// the "node" export condition, so `import { connect } from "@coltonkirsten/a12s"` works everywhere.
 import { A12sClient, type A12sClientOptions } from "./client.js";
 
 export * from "./client.js";

@@ -7,7 +7,7 @@ customizes goes through four surfaces:
 |---|---|---|
 | The Fleet file | Computers, harness versions and models, credentials, drives, egress, grants, Services | your `fleet.yaml` |
 | Images | Agent images built FROM an a12s base; any image as a Service | your Dockerfiles and registry |
-| The SDK | Apps that send work, read inboxes and stream events | `a12s` on npm ([SDK](sdk.md)) |
+| The SDK | Apps that send work, read inboxes and stream events | `@coltonkirsten/a12s` on npm, `a12s` on PyPI ([SDK](sdk.md)) |
 | `svckit` | Custom Services written in Go | `github.com/coltonkirsten/a12s/services/svckit` |
 
 a12s holds no app policy. Who talks to whom, what a task means, and how results combine belong in your app and
@@ -215,5 +215,5 @@ a warning on every status line. Services reach external TCP hosts with `egress.t
 
 ## Apps: the SDK
 
-Apps send work to Computers and follow what they do through the SDK (`npm install a12s`) or the HTTP API. See
+Apps send work to Computers and follow what they do through the SDK (`npm install @coltonkirsten/a12s`) or the HTTP API. See
 [SDK](sdk.md) and [HTTP API](api.md).

@@ -1,21 +1,21 @@
 # SDK
 
 The SDK is how a program talks to a running Fleet: send work to Computers, follow what they do, read the result.
-There is one for TypeScript and one for Python, both named `a12s`, with the same methods.
+There is one for TypeScript (`@coltonkirsten/a12s` on npm) and one for Python (`a12s` on PyPI), with the same methods.
 
 ```sh
-npm install a12s          # Node 20+, Bun, Deno, browsers
-pip install a12s          # Python 3.10+ (uv add a12s)
+npm install @coltonkirsten/a12s   # Node 20+, Bun, Deno, browsers
+pip install a12s                # Python 3.10+ (uv add a12s)
 ```
 
-Until the packages are on npm and PyPI, install them from the GitHub release:
-`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-0.2.0.tgz` and
-`pip install ./a12s-0.2.0-py3-none-any.whl` (or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
+Until the Python package is on PyPI, install the wheel from the GitHub release:
+`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*.whl'`, then `pip install ./a12s-0.2.0-py3-none-any.whl`
+(or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
 
 ## Connect
 
 ```ts
-import { connect } from "a12s";
+import { connect } from "@coltonkirsten/a12s";
 const a12s = await connect();
 ```
 
@@ -179,7 +179,7 @@ answers only `127.0.0.1` and `localhost` and refuses writes from other origins, 
 browser can't use it. It is for this machine: to serve a page to other people, put your own server and
 authentication in front of a scoped token.
 
-With a bundler, `npm install a12s` and `import { connect } from "a12s"` work the same way.
+With a bundler, `npm install @coltonkirsten/a12s` and `import { connect } from "@coltonkirsten/a12s"` work the same way.
 
 ## Everything else
 

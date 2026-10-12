@@ -2,7 +2,7 @@
 
 > a12s runs AI coding agents (Claude Code, Codex) as durable, isolated "Computers" on Docker. A project declares
 > them in fleet.yaml, `a12s up` starts them, and apps send them work (Messages) and follow their Turns and events
-> through the TypeScript SDK (`a12s` on npm), the Python SDK (`a12s` on PyPI), a browser gateway, or an HTTP API.
+> through the TypeScript SDK (`@coltonkirsten/a12s` on npm), the Python SDK (`a12s` on PyPI), a browser gateway, or an HTTP API.
 
 This file is for coding agents building ON a12s. Everything here is exact; copy it. You never edit or vendor a12s
 itself: a project changes only its own fleet.yaml, presets, images, Services and app code.
@@ -89,10 +89,10 @@ a12s doctor                           # every check, with its fix
 a12s down                             # stop all, keep disks;  down --purge deletes them (asks)
 ```
 
-## TypeScript SDK (npm install a12s; Node 20+, browsers via the gateway)
+## TypeScript SDK (npm install @coltonkirsten/a12s; Node 20+, browsers via the gateway)
 
 ```ts
-import { connect, A12sError } from "a12s";
+import { connect, A12sError } from "@coltonkirsten/a12s";
 const a12s = await connect();         // nearest fleet.yaml's Fleet, else the only running one; or connect({ fleet }),
                                       // connect({ url, token }), env A12S_URL + A12S_TOKEN; in a browser: same origin
 const r = await a12s.prompt("hello", "…");          // Turn & {message}: r.text, r.status, r.id, r.messages
