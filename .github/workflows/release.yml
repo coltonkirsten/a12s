@@ -1,5 +1,6 @@
 # On a v* tag: push every image of the release to ghcr.io/coltonkirsten/a12s/<name>:<version>, make sure the
-# default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDK (to npm).
+# default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDKs (to npm
+# and PyPI).
 # Binaries go last so a released binary never points at images that are not there yet.
 name: release
 
@@ -141,3 +142,67 @@ jobs:
         run: npm run build && npm test
       - if: steps.token.outputs.ok == 'true'
         run: npm publish --provenance --access public
+
+  pypi:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: sdk/python
+    env:
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+    steps:
+      - name: PYPI_TOKEN is set
+        id: token
+        working-directory: .
+        run: |
+          if [ -z "$PYPI_TOKEN" ]; then
+            echo "::warning::PYPI_TOKEN is not set; skipping the PyPI publish of a12s"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.token.outputs.ok == 'true'
+        uses: actions/checkout@v7
+      - if: steps.token.outputs.ok == 'true'
+        uses: astral-sh/setup-uv@v10.3.0
+      - if: steps.token.outputs.ok == 'true'
+        run: sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
+      - if: steps.token.outputs.ok == 'true'
+        run: uv run --extra dev pytest -q && uv run --extra dev mypy --strict a12s
+      - if: steps.token.outputs.ok == 'true'
+        run: uv build
+      - if: steps.token.outputs.ok == 'true'
+        run: uv publish --token "$PYPI_TOKEN"
+
+  # Both SDK packages on the GitHub release, so they install before (or without) npm and PyPI:
+  # gh release download -R coltonkirsten/a12s -p 'a12s-*'
+  sdk-assets:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: npm package
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+          npm run build
+          npm pack --pack-destination "$RUNNER_TEMP"
+      - name: Python wheel
+        working-directory: sdk/python
+        run: |
+          sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
+          uv build --wheel --out-dir "$RUNNER_TEMP"
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/a12s-*.tgz "$RUNNER_TEMP"/a12s-*.whl --clobber

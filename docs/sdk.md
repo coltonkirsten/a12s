@@ -1,112 +1,161 @@
 # SDK
 
 The SDK is how a program talks to a running Fleet: send work to Computers, follow what they do, read the result.
+There is one for TypeScript and one for Python, both named `a12s`, with the same methods.
 
 ```sh
-npm install a12s
+npm install a12s          # Node 20+, Bun, Deno, browsers
+pip install a12s          # Python 3.10+ (uv add a12s)
 ```
+
+Until the packages are on npm and PyPI, install them from the GitHub release:
+`gh release download -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-<version>.tgz` or
+`pip install ./a12s-<version>-py3-none-any.whl`.
 
 ## Connect
 
 ```ts
 import { connect } from "a12s";
-
 const a12s = await connect();
 ```
 
+```python
+import a12s
+client = a12s.connect()
+```
+
 `connect()` finds the running Fleet the way the CLI does: the `fleet.yaml` in the current directory or a parent
-(or `$A12S_FLEET`), else the only Fleet running on this machine. It connects as the owner, using the
+(or `$A12S_FLEET`), else the only Fleet running on this machine. It connects as the owner, with the
 `~/.a12s/<fleet>/controller.json` that `a12s up` writes. Other ways in:
 
-| You have | Use |
-|---|---|
-| Several Fleets running | `connect({ fleet: "myproject" })` |
-| A scoped token, or a Controller elsewhere | `connect({ url, token })`, or `$A12S_URL` and `$A12S_TOKEN` |
-| A web page | `a12s gateway --web <dir>` serves it; in the page, `connect()` (see [In the browser](#in-the-browser)) |
+| You have | TypeScript | Python |
+|---|---|---|
+| Several Fleets running | `connect({ fleet: "myproject" })` | `a12s.connect(fleet="myproject")` |
+| A scoped token or another URL | `connect({ url, token })` | `a12s.connect(url=…, token=…)` |
+| Environment | `$A12S_URL` and `$A12S_TOKEN` | the same |
+| A web page | `a12s gateway --web <dir>`, then `connect()` in the page ([In the browser](#in-the-browser)) | |
 
-The same `import { connect } from "a12s"` works in Node, Bun, Deno and browsers; in a browser, `connect()` talks to
-the page's own origin.
+In Python, `a12s.connect_async()` returns an `AsyncClient` with the same methods: `await` them, and use
+`async for` and `async with` for streams.
 
 ## Send work, get the answer
 
 ```ts
 const r = await a12s.prompt("analyst", "Summarize the open issues in three bullets.");
-console.log(r.status, r.text);   // "completed", what the agent said
+console.log(r.status, r.text);
 ```
 
-`prompt()` puts a Message in the Computer's inbox, waits until a Turn delivers it, follows that Turn and resolves
-when it ends. If the Computer is busy, the Message waits its turn.
+```python
+r = client.prompt("analyst", "Summarize the open issues in three bullets.")
+print(r.status, r.text)
+```
+
+`prompt()` puts a Message in the Computer's inbox, waits until a Turn delivers it, follows that Turn and returns
+when it ends. If the Computer is busy, the Message waits its turn. The result is a [Turn](#turns) plus `message`.
 
 `send()` only puts the Message in the inbox and returns. Use it to hand off work and move on, or when the answer
-arrives some other way (for example from another Computer):
+arrives some other way (from another Computer, say):
 
 ```ts
-const msg = await a12s.send("analyst", "Run the nightly audit.");
-const msg2 = await a12s.send("analyst", { body: "…", sender: "billing", metadata: { ticket: "T-42" }, expires: 3600 });
+await a12s.send("analyst", "Run the nightly audit.");
+await a12s.send("analyst", { body: "…", sender: "billing", metadata: { ticket: "T-42" }, expires: 3600 });
 ```
 
-| Field | Meaning |
+```python
+client.send("analyst", "Run the nightly audit.")
+client.send("analyst", "…", sender="billing", metadata={"ticket": "T-42"}, expires=3600)
+```
+
+| Option (TS / Python) | Meaning |
 |---|---|
-| `body` | The text, at most 64 KiB. The agent sees it as untrusted data from the sender. |
 | `sender` | Your label for the sender, shown to the agent as `from`. Who really sent it is recorded as `via`. |
 | `metadata` | Up to 16 string pairs, shown to the agent. |
 | `fresh` | Start a new session (conversation) with this Message. |
 | `expires` | Seconds to wait for delivery; `0` means now or never. |
-| `replaceKey` | Replace your pending Message with the same key, if it hasn't been delivered yet. |
-| `idempotencyKey` | Retries with the same key return the original Message. The SDK always sets one. |
+| `replaceKey` / `replace_key` | Replace your pending Message with the same key, if it hasn't been delivered yet. |
+| `idempotencyKey` / `idempotency_key` | Retries with the same key return the original Message. Set for you if you don't. |
+
+Bodies are at most 64 KiB. The agent treats them as data from the sender, not as instructions that override its
+role: put instructions in its preset's `CLAUDE.md`.
 
 ## Follow what happens
 
-`turns()` yields each Turn as it finishes, from one Computer, several, or all of them:
+### Turns
+
+`turns()` yields each Turn as it finishes, from one Computer, several, or (no argument) all of them:
 
 ```ts
-for await (const turn of a12s.turns(["lead", "worker1", "worker2"])) {
-  const from = turn.messages.map((m) => m.via).join(", ");   // e.g. "computer:worker1"
-  console.log(`${turn.computer} (${from}): ${turn.status}\n${turn.text}`);
+for await (const t of a12s.turns(["lead", "worker1"])) {
+  console.log(t.computer, t.status, t.messages.map((m) => m.via), t.text);
 }
 ```
 
-A `Turn` has `computer`, `id`, `status` (`completed`, `failed` or `interrupted`), `text` (everything the agent
-said), `error`, `messages` (the Messages it delivered: `id`, `sender`, `via`, …), `usage`, `startedAt` and
-`finishedAt`.
+```python
+for t in client.turns(["lead", "worker1"]):
+    print(t.computer, t.status, [m.via for m in t.messages], t.text)
+```
 
-`events()` is the same stream before it's folded into Turns: every event, as it happens.
+A Turn has `computer`, `id`, `status` (`completed`, `failed` or `interrupted`), `text` (everything the agent
+said), `error`, `messages` (the Messages it delivered, each with `id`, `sender` and `via`), `usage`, `startedAt` /
+`started_at` and `finishedAt` / `finished_at`.
+
+### Events
+
+`events()` is the same stream before it's folded into Turns: every event as it happens.
 
 ```ts
-for await (const ev of a12s.events()) {           // no argument: every Computer in the Fleet
+for await (const ev of a12s.events()) {
   if (ev.type === "text.delta") process.stdout.write(ev.data.text);
   if (ev.type === "tool.started") console.log(`\n[${ev.computer}] ${ev.data.name}`);
 }
 ```
 
-Events are typed: narrow on `ev.type` and `ev.data` has the right shape. The event types are in
-[Concepts](concepts.md#event-journal).
+```python
+for ev in client.events():
+    if ev.type == "text.delta":
+        print(ev.data["text"], end="", flush=True)
+    if ev.type == "tool.started":
+        print(f"\n[{ev.computer}] {ev.data['name']}")
+```
 
-**Don't miss the start.** Streams start live. To see everything a piece of work causes, start watching first, wait
-until the stream is connected, then send:
+In TypeScript, events are a typed union: narrow on `ev.type` and `ev.data` has the right shape. In Python,
+`ev.data` is the event's JSON as a dict. The types and their data are in [Concepts](concepts.md#event-journal).
+
+### Don't miss the start
+
+Streams start live. To see everything a piece of work causes, start watching, wait until the stream is connected,
+then send:
 
 ```ts
 const turns = a12s.turns(["lead", "worker1", "worker2"]);
-await turns.ready();                     // every stream is connected
+await turns.ready();
 await a12s.send("lead", "Plan the launch.");
-for await (const turn of turns) { … }    // nothing that happened after ready() is missed
+for await (const t of turns) { /* … */ }
 ```
 
-A Computer that is asleep counts as ready; its events start when it wakes. To end a stream, `break` out of the loop
-or call `close()`; an `AbortSignal` (`{ signal }`) works too.
+```python
+with client.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits until it's connected
+    client.send("lead", "Plan the launch.")
+    for t in turns:
+        ...
+```
 
-Streams reconnect by themselves after a network drop, and resume exactly where they were. If the Controller can't
+A Computer that is asleep counts as connected; its events start when it wakes. To end a stream, `break`, or call
+`close()` (Python: leaving the `with` block). TypeScript also takes `{ signal }`.
+
+Streams reconnect by themselves after a network drop and resume exactly where they were. If the Controller can't
 resume (the Computer's journal was reset), the stream yields one `gap` event and carries on live; pass
-`onGap: "throw"` to get an `A12sGapError` instead. Events were lost either way: resync with `status()`.
+`onGap: "throw"` (`on_gap="throw"`) to raise `A12sGapError` instead. Events were lost either way: resync with
+`status()`.
 
-To replay one Turn from its start: `a12s.events("analyst", { turn: r.id })`. To resume a stream you saved:
-`a12s.events("analyst", { after: lastSeq })`.
+To replay one Turn from its start: `events("analyst", { turn: r.id })` (`turn=r.id`). To resume a stream you
+saved: `{ after: lastSeq }` (`after=last_seq`).
 
 ## In the browser
 
 The Controller listens on loopback with the owner token, so a web page can't call it directly. `a12s gateway` sits
-in between: it serves your page, serves this SDK at `/a12s.js`, and forwards `/v1/` to the Controller with a scoped
-token the page never sees.
+in between: it serves your page, serves the TypeScript SDK at `/a12s.js`, and forwards `/v1/` to the Controller
+with a scoped token the page never sees.
 
 ```sh
 a12s gateway                 # the built-in dashboard: every Computer, live events, a send box
@@ -121,7 +170,7 @@ a12s gateway --web ./web     # your own app instead, at http://127.0.0.1:7012
 </script>
 ```
 
-The page may use `status`, `events`, `send` and `inbox` on every Computer; change that with
+The page may use `status`, `events`, `send` and `inbox` on every Computer; narrow that with
 `--allow status,events` and `--computers lead,worker1`. Messages it sends arrive `via` `token:gateway`. The gateway
 answers only `127.0.0.1` and `localhost` and refuses writes from other origins, so other sites open in the same
 browser can't use it. It is for this machine: to serve a page to other people, put your own server and
@@ -131,34 +180,38 @@ With a bundler, `npm install a12s` and `import { connect } from "a12s"` work the
 
 ## Everything else
 
-| Method | What it does |
-|---|---|
-| `status()` | Every Computer and Service: `phase`, `session`, `activeTurn`, `inbox`, `power`, warnings. |
-| `computer(name)` | One Computer's status. |
-| `inbox(name, { state, bodies })` | Pending Messages (`state: "all"` includes ended ones; `bodies: true` includes the text). |
-| `message(name, id)`, `withdraw(name, id)` | One Message; take back a pending one. |
-| `stop(name, turn?)` | Interrupt a Turn (default: the active one). |
-| `sleep(name)`, `wake(name)` | Stop a Computer and keep its disks and session; start it again. |
-| `services()`, `service(name)` | Service status. |
-| `createToken({ name, actions, computers })` | A scoped token for another program (owner only). |
-| `putFleet(req)` | What `a12s up` sends. Most apps leave this to the CLI. |
+| TypeScript | Python | What it does |
+|---|---|---|
+| `status()` | `status()` | Every Computer and Service: `phase`, `session`, `activeTurn`, `inbox`, `power`, warnings. |
+| `computer(name)` | `computer(name)` | One Computer's status. |
+| `inbox(name, { state, bodies })` | `inbox(name, state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
+| `message(name, id)`, `withdraw(name, id)` | the same | One Message; take back a pending one. |
+| `stop(name, turn?)` | `stop(name, turn=None)` | Interrupt a Turn (default: the active one). |
+| `sleep(name)`, `wake(name)` | the same | Stop a Computer and keep its disks and session; start it again. |
+| `services()`, `service(name)` | the same | Service status. |
+| `createToken({ name, actions, computers })` | `create_token(name, actions, computers)` | A scoped token for another program (owner only). |
+| `putFleet(req)` | `put_fleet(req)` | What `a12s up` sends. Most apps leave this to the CLI. |
 
 ## Errors
 
-A refused call throws `A12sError` with the HTTP `status`, a stable `code` and usually a `fix` line, which is also in
-the message:
+A refused call raises `A12sError` with the HTTP `status`, a stable `code` and usually a `fix` line, which is also in
+the message.
 
 ```ts
-try {
-  await a12s.send("lead", "…");
-} catch (err) {
-  if (err instanceof A12sError && err.code === "inbox_full") { /* back off */ }
-  throw err;
-}
+try { await a12s.send("lead", "…"); }
+catch (err) { if (err instanceof A12sError && err.code === "inbox_full") { /* back off */ } else throw err; }
 ```
 
-The codes are listed in [HTTP API](api.md#errors). Event streams also throw `A12sStreamError` for a malformed
-event and, with `onGap: "throw"`, `A12sGapError`.
+```python
+try:
+    client.send("lead", "…")
+except a12s.A12sError as err:
+    if err.code != "inbox_full":
+        raise
+```
+
+The codes are listed in [HTTP API](api.md#errors). Streams also raise `A12sStreamError` for a malformed event and,
+with `onGap: "throw"`, `A12sGapError`.
 
 ## Least privilege
 
@@ -168,8 +221,5 @@ The owner token can do anything. Give another program a scoped token instead:
 a12s token create dashboard --actions status,events --computers '*'
 ```
 
-```ts
-const a12s = await connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
-```
-
-Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. A token with `send` sees only its own Messages.
+Then `connect({ url, token })` / `a12s.connect(url=…, token=…)`. Actions: `send`, `inbox`, `status`, `events`,
+`power`, `stop`. A token with `send` sees only its own Messages.

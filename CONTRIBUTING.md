@@ -26,6 +26,9 @@ step with `internal/api`, `go test ./internal/api` renders every API type into `
 and fails if the file is stale. After changing an API type, run `go test ./internal/api -run TestSDKFixtures -update`
 and fix `src/types.ts` until the SDK's `npm run lint` passes.
 
+The Python SDK in `sdk/python` parses the same fixtures strictly into its dataclasses:
+`cd sdk/python && uv run --extra dev pytest -q && uv run --extra dev mypy --strict a12s`.
+
 Images:
 
 ```sh
@@ -44,11 +47,12 @@ Push a `v*` tag. `.github/workflows/release.yml` pushes the slim, browser, contr
 `ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the default harness bundles if
 missing, then runs GoReleaser (`.goreleaser.yaml`): binaries for darwin and linux on amd64 and arm64, built with the
 release version and registry, and the formula in `coltonkirsten/homebrew-tap`. Last it publishes
-the `a12s` package to npm (with provenance), if the `NPM_TOKEN` secret is set.
+the `a12s` package to npm (with provenance), if the `NPM_TOKEN` secret is set, and to PyPI, if `PYPI_TOKEN` is set.
 
 It needs the secret `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to the tap repo.
 `NPM_TOKEN` (an npm automation token that can publish the `@coltonkirsten` scope) is optional: without it the SDK
-job skips with a warning instead of failing the release.
+job skips with a warning instead of failing the release. `PYPI_TOKEN` (a PyPI API token for the `a12s` project) is
+optional the same way: without it the PyPI job skips with a warning.
 
 ## Repository layout
 
@@ -66,6 +70,7 @@ internal/computerd/        Go client for computerd's HTTP+SSE API
 internal/serviceinit/      a12s-init: the Service entrypoint, privilege drop and TCP forwarders
 internal/sse/              SSE reader and writer
 sdk/typescript/            the `a12s` npm package: the TypeScript client apps use
+sdk/python/                the `a12s` PyPI package: the Python client, sync and asyncio
 computerd/                 TypeScript daemon inside every Computer: server, journal, adapters, system tools, MCP bridge
 images/slim, images/browser, images/controller   container images
 images/bundles/            HarnessBundle images and conformance.sh

@@ -58,6 +58,22 @@ jobs:
       - name: the gateway embeds this build of the SDK
         run: cmp dist/a12s.js ../../internal/gateway/web/a12s.js || { echo "::error::internal/gateway/web/a12s.js is stale; run make sdk-bundle"; exit 1; }
 
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.14"]
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv run --extra dev pytest -q
+      - run: uv run --extra dev mypy --strict a12s
+
   # Tier images. slim uses the buildx GHA cache; browser is built on the default
   # builder so it can use the freshly loaded slim image as its base.
   tiers:
