@@ -4,7 +4,8 @@
 
 - Go 1.26+
 - Node 24 and npm (for computerd)
-- Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images and end-to-end runs
+- Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images, `make check` and end-to-end runs
+- uv for the Python SDK; jq for the bundle conformance check; GoReleaser (`brew install goreleaser`) only to release
 
 ## Run from source (macOS)
 
@@ -54,21 +55,50 @@ make bundles      # a12s/bundle-claude-code:<v>, a12s/bundle-codex:<v>
 make services     # the reference Services: svc-cron, svc-webhook, svc-mcp, svc-mcp-postgres
 ```
 
-CI (`.github/workflows/ci.yml`) runs `go build`, `gofmt`, `go vet`, `go test`, computerd's lint, build and tests,
-and builds the slim and browser images and checks the Chromium sandbox. It needs no secrets.
+## The merge gate: `make check`
+
+```sh
+make check        # everything below; stops at the first failure (about 15 minutes cold, needs Docker)
+make check-code   # the same without Docker: go, computerd, sdk, python (about 2 minutes)
+scripts/check.sh go sdk    # any subset of: go computerd sdk python services tiers controller bundles
+```
+
+It runs `go build`, `gofmt`, `go vet` and `go test` (which includes the Go to TypeScript/Python API fixture drift
+check), computerd's lint, build and tests, the TypeScript SDK's lint and tests and the check that
+`internal/gateway/web/a12s.js` matches its build, the Python SDK's tests and `mypy --strict` on Python 3.10 and 3.14
+(`CHECK_PYTHONS` overrides), svc-mcp against a stub server, the reference Service images, the slim, browser and
+controller images with the Chromium sandbox and Playwright checks, and both default harness bundles with
+`images/bundles/conformance.sh`. Afterwards it prunes dangling images and the build cache (`CHECK_KEEP_CACHE=1`
+keeps them). A change merges only when `make check` is green locally.
+
+Nothing in `.github/workflows` runs automatically. `ci.yml` is the same check on GitHub's runners, and runs only
+when started by hand (Actions > ci > Run workflow).
 
 ## Releasing
 
-Push a `v*` tag. `.github/workflows/release.yml` pushes the slim, browser, controller and reference Service images to
-`ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the default harness bundles if
-missing, then runs GoReleaser (`.goreleaser.yaml`): binaries for darwin and linux on amd64 and arm64, built with the
-release version and registry, and the formula in `coltonkirsten/homebrew-tap`. Last it publishes
-the `a12s` package to npm (with provenance), if the `NPM_TOKEN` secret is set, and to PyPI, if `PYPI_TOKEN` is set.
+From a Mac or Linux machine with Docker, on an up-to-date main that passed `make check`:
 
-It needs the secret `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to the tap repo.
-`NPM_TOKEN` (an npm automation token that can publish the `@coltonkirsten` scope) is optional: without it the SDK
-job skips with a warning instead of failing the release. `PYPI_TOKEN` (a PyPI API token for the `a12s` project) is
-optional the same way: without it the PyPI job skips with a warning.
+```sh
+make release VERSION=0.5.0
+```
+
+`scripts/release.sh` builds from a clean checkout of `origin/main`. It pushes the slim, browser, controller and
+reference Service images to `ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the
+default harness bundles if missing, tags `v<version>` and pushes the tag, then runs GoReleaser (`.goreleaser.yaml`):
+binaries for darwin and linux on amd64 and arm64, built with the release version and registry, and the formula in
+`coltonkirsten/homebrew-tap`. It attaches the SDK `a12s-*.tgz` and `a12s-*.whl` to the GitHub release, and publishes
+the `a12s` package to npm if `NPM_TOKEN` is set and to PyPI if `PYPI_TOKEN` is set; without them it skips with a
+warning.
+
+It checks everything it needs before touching anything and lists what is missing:
+
+- `gh` logged in with a token that can push packages. If it says the token cannot push to ghcr.io:
+  `gh auth refresh -s write:packages,read:packages`.
+- `goreleaser` on the PATH.
+- `HOMEBREW_TAP_DEPLOY_KEY`: a path to (or the contents of) an SSH key with write access to the tap. Defaults to
+  `~/.ssh/id_ed25519` or `~/.ssh/id_rsa`; it must have no passphrase, since GoReleaser reads it directly.
+
+`.github/workflows/release.yml` does the same on GitHub's runners, for an existing tag, when started by hand.
 
 ## Repository layout
 
@@ -136,5 +166,5 @@ power-policy checks run in seconds; never set it in production (the Controller l
 ## Pull requests
 
 - Keep changes small and focused, with tests for behavior changes.
-- Run `make build test vet` and, for computerd changes, `npm run lint && npm test`.
+- `make check` green locally before merge. There is no automatic CI; paste the tail of its output in the PR.
 - Update the docs in `docs/` when behavior changes: they describe the current state of the code.

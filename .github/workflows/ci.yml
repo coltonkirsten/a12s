@@ -1,8 +1,8 @@
+# On demand only (Actions > ci > Run workflow). The merge gate is `make check`, run locally.
 name: ci
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

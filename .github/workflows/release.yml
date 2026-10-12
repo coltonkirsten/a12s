@@ -1,30 +1,37 @@
-# On a v* tag: push every image of the release to ghcr.io/coltonkirsten/a12s/<name>:<version>, make sure the
+# On demand only; `make release VERSION=x.y.z` does the same from a workstation (CONTRIBUTING.md#releasing).
+# For an existing v* tag: push every image of the release to ghcr.io/coltonkirsten/a12s/<name>:<version>, make sure the
 # default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDKs (to npm
 # and PyPI).
 # Binaries go last so a released binary never points at images that are not there yet.
 name: release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, e.g. v0.4.0
+        required: true
 
 permissions:
   contents: write
   packages: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io/coltonkirsten/a12s
   SOURCE: https://github.com/${{ github.repository }}
+  TAG: ${{ inputs.tag }}
 
 jobs:
   images:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -37,7 +44,7 @@ jobs:
       - name: build and push
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           build() { # name dockerfile context [build-args...]
             local name="$1" file="$2" ctx="$3"; shift 3
             local args=()
@@ -47,25 +54,27 @@ jobs:
               --label "org.opencontainers.image.version=$tag" \
               "${args[@]}" -f "$file" -t "$REGISTRY/$name:$tag" "$ctx"
           }
-          build slim images/slim/Dockerfile . "A12S_VERSION=$GITHUB_REF_NAME"
+          build slim images/slim/Dockerfile . "A12S_VERSION=$TAG"
           build browser images/browser/Dockerfile . "SLIM_IMAGE=$REGISTRY/slim:$tag"
-          build controller images/controller/Dockerfile . "A12S_VERSION=$GITHUB_REF_NAME" "A12S_REGISTRY=$REGISTRY"
+          build controller images/controller/Dockerfile . "A12S_VERSION=$TAG" "A12S_REGISTRY=$REGISTRY"
           build svc-cron services/go.Dockerfile . SERVICE=svc-cron
           build svc-webhook services/go.Dockerfile . SERVICE=svc-webhook
           build svc-mcp services/svc-mcp/Dockerfile .
           build svc-mcp-postgres services/svc-mcp/postgres.Dockerfile services/svc-mcp "SVC_MCP_IMAGE=$REGISTRY/svc-mcp:$tag"
       - name: computer images carry the computerd label
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           for img in slim browser; do
             got=$(docker buildx imagetools inspect "$REGISTRY/$img:$tag" --format '{{ json .Image }}' | jq -r '.["linux/amd64"].config.Labels["ai.a12s.computerd.version"]')
-            echo "$img: $got"; test "$got" = "$GITHUB_REF_NAME"
+            echo "$img: $got"; test "$got" = "$TAG"
           done
 
   bundles:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -92,6 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag }}
           fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
@@ -129,6 +139,8 @@ jobs:
           fi
       - if: steps.token.outputs.ok == 'true'
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
       - if: steps.token.outputs.ok == 'true'
         uses: actions/setup-node@v7
         with:
@@ -137,7 +149,7 @@ jobs:
       - if: steps.token.outputs.ok == 'true'
         run: npm ci
       - if: steps.token.outputs.ok == 'true'
-        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+        run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
       - if: steps.token.outputs.ok == 'true'
         run: npm run build && npm test
       - if: steps.token.outputs.ok == 'true'
@@ -166,10 +178,12 @@ jobs:
           fi
       - if: steps.token.outputs.ok == 'true'
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
       - if: steps.token.outputs.ok == 'true'
         uses: astral-sh/setup-uv@v10.3.0
       - if: steps.token.outputs.ok == 'true'
-        run: sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
+        run: sed -i "s/^version = .*/version = \"${TAG#v}\"/" pyproject.toml
       - if: steps.token.outputs.ok == 'true'
         run: uv run --extra dev pytest -q && uv run --extra dev mypy --strict a12s
       - if: steps.token.outputs.ok == 'true'
@@ -186,6 +200,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -194,15 +210,15 @@ jobs:
         working-directory: sdk/typescript
         run: |
           npm ci
-          npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+          npm version --no-git-tag-version --allow-same-version "${TAG#v}"
           npm run build
           npm pack --pack-destination "$RUNNER_TEMP"
       - name: Python wheel
         working-directory: sdk/python
         run: |
-          sed -i "s/^version = .*/version = \"${GITHUB_REF_NAME#v}\"/" pyproject.toml
+          sed -i "s/^version = .*/version = \"${TAG#v}\"/" pyproject.toml
           uv build --wheel --out-dir "$RUNNER_TEMP"
       - name: attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/a12s-*.tgz "$RUNNER_TEMP"/a12s-*.whl --clobber
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/a12s-*.tgz "$RUNNER_TEMP"/a12s-*.whl --clobber

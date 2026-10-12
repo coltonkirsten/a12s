@@ -1,4 +1,4 @@
-# Release binaries and the Homebrew formula. Images are built by the images job in .github/workflows/release.yml.
+# Release binaries and the Homebrew formula. Run by scripts/release.sh after it pushes the images.
 version: 2
 project_name: a12s
 
