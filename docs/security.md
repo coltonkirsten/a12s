@@ -41,6 +41,8 @@ Every Computer's and Service's only route out is the Controller's validating egr
   container stops.
 - The Controller talks to computerd over mutual TLS.
 - The owner API listens on `127.0.0.1` with a random bearer token in `~/.a12s/<fleet>/controller.json` (0600).
+- `a12s gateway` listens on `127.0.0.1`, answers only loopback host names, and needs a key made for each run (a
+  cookie after the printed link is opened, or a bearer token) before it forwards `/v1/` with its scoped token.
   Scoped tokens carry an allowlist of actions and Computers.
 - Inside the Fleet, Services and Computers call the Controller with their certificates and can do only what their
   `grants` say. Messages carry `via`, the authenticated principal, which no caller can set.
