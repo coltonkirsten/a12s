@@ -538,7 +538,7 @@ export const tokenMinimal: T.Token = {
   "createdAt": "2026-10-12T12:00:00Z"
 };
 
-export const event: T.A12sEvent = {
+export const event: T.EventEnvelope = {
   "v": 1,
   "computer": "computer",
   "session": "session",
@@ -549,7 +549,7 @@ export const event: T.A12sEvent = {
   "data": {}
 };
 
-export const eventMinimal: T.A12sEvent = {
+export const eventMinimal: T.EventEnvelope = {
   "v": 1,
   "computer": "computer",
   "session": "session",
@@ -557,6 +557,46 @@ export const eventMinimal: T.A12sEvent = {
   "seq": 1,
   "ts": "2026-10-12T12:00:00Z",
   "type": "text.delta"
+};
+
+export const turnStartedData: T.TurnStartedData = {
+  "harness": {
+    "kind": "kind",
+    "version": "version",
+    "model": "model"
+  },
+  "model": "model",
+  "resumed": true,
+  "prompt": "prompt",
+  "cwd": "cwd",
+  "requestId": "requestId",
+  "inbox": {
+    "batch": "batch",
+    "pendingAfter": 1,
+    "messages": [
+      {
+        "id": "id",
+        "seq": 1,
+        "sender": "sender",
+        "via": "via",
+        "createdAt": "2026-10-12T12:00:00Z",
+        "bytes": 1,
+        "key": "key",
+        "superseded": 1
+      }
+    ]
+  },
+  "continuation": "continuation"
+};
+
+export const turnStartedDataMinimal: T.TurnStartedData = {
+  "harness": {
+    "kind": "kind",
+    "version": "version"
+  },
+  "resumed": true,
+  "prompt": "prompt",
+  "cwd": "cwd"
 };
 
 export const turnFinishedData: T.TurnFinishedData = {
@@ -568,6 +608,36 @@ export const turnFinishedData: T.TurnFinishedData = {
 export const turnFinishedDataMinimal: T.TurnFinishedData = {
   "status": "completed",
   "usage": {}
+};
+
+export const textDeltaData: T.TextDeltaEvent["data"] = {
+  "text": "text"
+};
+
+export const textDeltaDataMinimal: T.TextDeltaEvent["data"] = {
+  "text": "text"
+};
+
+export const diagnosticData: T.DiagnosticData = {
+  "message": "message",
+  "data": {},
+  "source": "source"
+};
+
+export const diagnosticDataMinimal: T.DiagnosticData = {
+  "message": "message"
+};
+
+export const resumeFailedData: T.ResumeFailedData = {
+  "sessionId": "sessionId",
+  "reason": "reason",
+  "at": "at"
+};
+
+export const resumeFailedDataMinimal: T.ResumeFailedData = {
+  "sessionId": "sessionId",
+  "reason": "reason",
+  "at": "at"
 };
 
 export const error: T.ApiErrorBody = {

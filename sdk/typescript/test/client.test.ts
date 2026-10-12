@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { A12sClient, A12sError, A12sGapError, A12sStreamError } from "../src/index.js";
-import { fromFleet } from "../src/node.js";
+import { connect, fleetName } from "../src/node.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
@@ -64,7 +64,7 @@ test("prompt: enqueue, wait for delivery, stream the turn across a reconnect", a
   try {
     const seen: string[] = [];
     const r = await client.prompt("lead", "split this", { onEvent: (e) => seen.push(e.type) });
-    assert.deepEqual([r.turn, r.status, r.text], ["t_9", "completed", "hello"]);
+    assert.deepEqual([r.id, r.status, r.text, r.message.id], ["t_9", "completed", "hello", "m_1"]);
     assert.deepEqual(seen, ["text.delta", "text.delta", "turn.finished"]);
   } finally {
     close();
@@ -184,11 +184,103 @@ test("events: a non-network fetch failure is rethrown", async () => {
   await assert.rejects(collect(client.events("lead"), 1), RangeError);
 });
 
-test("node entry: fromFleet reads controller.json", async () => {
+test("connect: url, fleet name, nearest fleet.yaml, the only running Fleet", async () => {
   const home = await mkdtemp(join(tmpdir(), "a12s-"));
-  await mkdir(join(home, ".a12s", "proj"), { recursive: true });
-  await writeFile(join(home, ".a12s", "proj", "controller.json"), JSON.stringify({ port: 52011, token: "tk" }));
-  const c = await fromFleet("proj", { home });
-  assert.equal(c.url, "http://127.0.0.1:52011");
-  await assert.rejects(fromFleet("nope", { home }), /run a12s up first/);
+  const write = async (fleet: string, port: number) => {
+    await mkdir(join(home, ".a12s", fleet), { recursive: true });
+    await writeFile(join(home, ".a12s", fleet, "controller.json"), JSON.stringify({ port, token: "tk" }));
+  };
+  const nowhere = await mkdtemp(join(tmpdir(), "a12s-cwd-"));
+  await assert.rejects(connect({ home, cwd: nowhere }), /no running Fleet found/);
+  await write("proj", 52011);
+  assert.equal((await connect({ home, cwd: nowhere })).url, "http://127.0.0.1:52011", "the only running Fleet");
+  await write("other", 52012);
+  await assert.rejects(connect({ home, cwd: nowhere }), /several Fleets are running \(other, proj\)/);
+  assert.equal((await connect({ home, fleet: "other" })).url, "http://127.0.0.1:52012");
+
+  const project = join(nowhere, "app", "src");
+  await mkdir(project, { recursive: true });
+  await writeFile(join(nowhere, "fleet.yaml"), "apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata: { name: proj }\n");
+  assert.equal((await connect({ home, cwd: project })).url, "http://127.0.0.1:52011", "nearest fleet.yaml upward");
+  await assert.rejects(connect({ home, fleet: "nope" }), /Fleet nope isn't running/);
+  assert.equal((await connect({ url: "http://h:1/", token: "x" })).url, "http://h:1");
+});
+
+test("fleetName reads flow and block metadata", () => {
+  assert.equal(fleetName("metadata: { name: starter }\n"), "starter");
+  assert.equal(fleetName("kind: Fleet\nmetadata:\n  labels: {}\n  name: \"lab\"\n"), "lab");
+  assert.equal(fleetName("kind: Fleet\n"), undefined);
+});
+
+test("events: every Computer merged, ready() after each stream is live, then turns() folds them", async () => {
+  const { client, close } = await fake((req, res) => {
+    if (req.url === "/v1/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ fleet: "f", computers: [{ name: "lead" }, { name: "w1" }, { name: "w2" }] }));
+      return;
+    }
+    if (req.url === "/v1/computers/w2/events") {
+      res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ code: "asleep", message: "asleep" }));
+      return;
+    }
+    const name = req.url!.split("/")[3]!;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(`event: head\ndata: {"seq":5}\n\n`);
+    const e = (seq: number, type: string, data: unknown) =>
+      `id: ${seq}\ndata: ${JSON.stringify({ v: 1, computer: name, session: "s", turn: `t_${name}`, seq, ts: "", type, data })}\n\n`;
+    setTimeout(() => {
+      res.write(e(6, "turn.started", { inbox: { batch: "b", pendingAfter: 0, messages: [{ id: "m", via: "local", sender: "app" }] } }));
+      res.write(e(7, "text.delta", { text: `hi from ${name}` }));
+      res.write(e(8, "turn.finished", { status: "completed", usage: null }));
+    }, 30);
+  });
+  try {
+    const turns = client.turns(undefined, { reconnectMs: 50 });
+    await turns.ready();
+    const got: string[] = [];
+    for await (const t of turns) {
+      assert.equal(t.messages[0]!.via, "local");
+      got.push(`${t.computer}:${t.status}:${t.text}`);
+      if (got.length === 2) break;
+    }
+    assert.deepEqual(got.sort(), ["lead:completed:hi from lead", "w1:completed:hi from w1"]);
+  } finally {
+    close();
+  }
+});
+
+test("events: a reconnect resumes from the head even when no event arrived", async () => {
+  let calls = 0;
+  const { client, close } = await fake((req, res) => {
+    calls++;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    if (calls === 1) {
+      res.write(`event: head\ndata: {"seq":41}\n\n`);
+      setTimeout(() => res.destroy(), 20);
+      return;
+    }
+    assert.equal(req.headers["last-event-id"], "41");
+    res.write(ev(42, "diagnostic", "", { message: "after the drop" }));
+  });
+  try {
+    const [e] = await collect(client.events("lead", { reconnectMs: 10 }), 1);
+    assert.equal(e!.seq, 42);
+  } finally {
+    close();
+  }
+});
+
+test("events: ready() rejects when a Computer doesn't exist", async () => {
+  const { client, close } = await fake((_req, res) => {
+    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ code: "not_found", message: "no Computer x" }));
+  });
+  try {
+    await assert.rejects(client.events("x").ready(), (e: unknown) => e instanceof A12sError && e.code === "not_found");
+  } finally {
+    close();
+  }
+});
+
+test("events: turn and after need one Computer", () => {
+  assert.throws(() => new A12sClient({ url: "http://x" }).events(["a", "b"], { after: 1 }), TypeError);
 });

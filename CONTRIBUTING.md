@@ -44,7 +44,7 @@ Push a `v*` tag. `.github/workflows/release.yml` pushes the slim, browser, contr
 `ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the default harness bundles if
 missing, then runs GoReleaser (`.goreleaser.yaml`): binaries for darwin and linux on amd64 and arm64, built with the
 release version and registry, and the formula in `coltonkirsten/homebrew-tap`. Last it publishes
-`@coltonkirsten/a12s-client` to npm (with provenance), if the `NPM_TOKEN` secret is set.
+the `a12s` package to npm (with provenance), if the `NPM_TOKEN` secret is set.
 
 It needs the secret `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to the tap repo.
 `NPM_TOKEN` (an npm automation token that can publish the `@coltonkirsten` scope) is optional: without it the SDK
@@ -65,7 +65,7 @@ internal/cli/              CLI helpers: client, bindings, creds, SSE, output for
 internal/computerd/        Go client for computerd's HTTP+SSE API
 internal/serviceinit/      a12s-init: the Service entrypoint, privilege drop and TCP forwarders
 internal/sse/              SSE reader and writer
-sdk/typescript/            @coltonkirsten/a12s-client, the typed client apps use
+sdk/typescript/            the `a12s` npm package: the TypeScript client apps use
 computerd/                 TypeScript daemon inside every Computer: server, journal, adapters, system tools, MCP bridge
 images/slim, images/browser, images/controller   container images
 images/bundles/            HarnessBundle images and conformance.sh

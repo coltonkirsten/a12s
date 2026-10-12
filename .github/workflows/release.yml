@@ -121,7 +121,7 @@ jobs:
         working-directory: .
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN is not set; skipping the npm publish of @coltonkirsten/a12s-client"
+            echo "::warning::NPM_TOKEN is not set; skipping the npm publish of a12s"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
