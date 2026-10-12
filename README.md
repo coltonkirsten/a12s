@@ -52,7 +52,7 @@ make demo                          # bind credentials, a12s up, run one task end
 Or add the SDK to your own app:
 
 ```ts
-import { connect } from "a12s";                      // npm install a12s
+import { connect } from "@coltonkirsten/a12s";       // npm install @coltonkirsten/a12s
 
 const a12s = await connect();                        // finds the running Fleet
 const turn = await a12s.prompt("hello", "Name three prime numbers.");
@@ -67,9 +67,9 @@ turn = client.prompt("hello", "Name three prime numbers.")
 print(turn.text)
 ```
 
-Until the packages are on npm and PyPI, install them from the release:
-`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-0.2.0.tgz` and
-`pip install ./a12s-0.2.0-py3-none-any.whl` (or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
+Until the Python package is on PyPI, install the wheel from the release:
+`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*.whl'`, then `pip install ./a12s-0.2.0-py3-none-any.whl`
+(or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
 
 ## Learn it
 

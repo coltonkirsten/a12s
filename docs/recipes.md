@@ -81,7 +81,7 @@ The app starts watching, sends the task, and stops at lead's final answer:
 
 ```ts
 // app.ts — npx tsx app.ts "your task"   (or node app.ts on Node 24+)
-import { connect } from "a12s";
+import { connect } from "@coltonkirsten/a12s";
 
 const a12s = await connect();
 const turns = a12s.turns(["lead", "worker1", "worker2"]);

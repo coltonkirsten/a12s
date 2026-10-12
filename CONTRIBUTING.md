@@ -117,8 +117,8 @@ git tag -a v0.5.0 -m v0.5.0 origin/main && git push origin v0.5.0
 ```
 
 It pushes the images (linux/amd64 and linux/arm64), publishes the default harness bundles if missing, runs
-GoReleaser (binaries and the Homebrew formula), attaches the SDK `a12s-*.tgz` and `a12s-*.whl` to the GitHub release
-and publishes `a12s` to npm and PyPI. For an existing tag, start it by hand (Actions > release > Run workflow).
+GoReleaser (binaries and the Homebrew formula), attaches the SDK `coltonkirsten-a12s-*.tgz` and `a12s-*.whl` to the GitHub release
+and publishes `@coltonkirsten/a12s` to npm and `a12s` to PyPI. For an existing tag, start it by hand (Actions > release > Run workflow).
 Tag a commit of `main`; `ci-ok` already passed on it.
 
 ### npm and PyPI: trusted publishing
@@ -131,9 +131,9 @@ first, then the `NPM_TOKEN` / `PYPI_TOKEN` repository secret if one is set, and 
 - PyPI: pypi.org > Your account > Publishing (https://pypi.org/manage/account/publishing/) > add a pending GitHub
   publisher for the project name `a12s`. The first release creates the project. A pending publisher does not reserve
   the name until that first publish.
-- npm: a trusted publisher can only be added to a package that exists, so publish once by hand, then configure it:
-  `gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*.tgz' && npm login && npm publish a12s-0.2.0.tgz
-  --access public`, then npmjs.com > package `a12s` > Settings > Trusted Publisher > GitHub Actions. Optionally also
+- npm: the package is `@coltonkirsten/a12s` (npm refused the bare name `a12s` as too similar to existing packages). A trusted
+  publisher can only be added to a package that exists, so 0.2.0 was published once by hand; then npmjs.com > package
+  `@coltonkirsten/a12s` > Settings > Trusted Publisher > GitHub Actions. Optionally also
   set "Require two-factor authentication and disallow tokens" there afterwards. Needs npm 11.5.1+ in the workflow
   (it upgrades npm when the runner's is older).
 
@@ -150,8 +150,8 @@ make release VERSION=0.5.0
 reference Service images to `ghcr.io/coltonkirsten/a12s/<name>:<version>` (linux/amd64 and linux/arm64), publishes the
 default harness bundles if missing, tags `v<version>` and pushes the tag, then runs GoReleaser (`.goreleaser.yaml`):
 binaries for darwin and linux on amd64 and arm64, built with the release version and registry, and the formula in
-`coltonkirsten/homebrew-tap`. It attaches the SDK `a12s-*.tgz` and `a12s-*.whl` to the GitHub release, and publishes
-the `a12s` package to npm if `NPM_TOKEN` is set and to PyPI if `PYPI_TOKEN` is set; without them it skips with a
+`coltonkirsten/homebrew-tap`. It attaches the SDK `coltonkirsten-a12s-*.tgz` and `a12s-*.whl` to the GitHub release, and publishes
+`@coltonkirsten/a12s` to npm if `NPM_TOKEN` is set and `a12s` to PyPI if `PYPI_TOKEN` is set; without them it skips with a
 warning.
 
 It checks everything it needs before touching anything and lists what is missing:
@@ -180,7 +180,7 @@ internal/cli/              CLI helpers: client, bindings, creds, SSE, output for
 internal/computerd/        Go client for computerd's HTTP+SSE API
 internal/serviceinit/      a12s-init: the Service entrypoint, privilege drop and TCP forwarders
 internal/sse/              SSE reader and writer
-sdk/typescript/            the `a12s` npm package: the TypeScript client apps use
+sdk/typescript/            the `@coltonkirsten/a12s` npm package: the TypeScript client apps use
 sdk/python/                the `a12s` PyPI package: the Python client, sync and asyncio
 computerd/                 TypeScript daemon inside every Computer: server, journal, adapters, system tools, MCP bridge
 images/slim, images/browser, images/controller   container images
