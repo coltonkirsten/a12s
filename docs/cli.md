@@ -33,6 +33,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | `a12s send <name> "…" [flags]` | Enqueue a Message and exit; works while the Computer is busy or asleep. `-` reads the body from stdin. Flags: `--from`, `--fresh`, `--meta k=v`, `--key`, `--expires`, `--replace` (see [Inbox](inbox.md#message-options)). |
 | `a12s stop <name> [--hold]` | Interrupt the active Turn. `--hold` holds the inbox first, so nothing else is delivered. |
 | `a12s logs <name> [--follow] [--since <seq>]` | Replay the Computer's journal, and follow it. |
+| `a12s gateway [--web dir] [--port 7012] [--allow actions] [--computers c,d]` | Serve a web app (default: a built-in dashboard) on `127.0.0.1`, with the browser SDK at `/a12s.js` and the API at `/v1/` under a scoped token the page never sees. See [SDK: In the browser](sdk.md#in-the-browser). |
 | `a12s shell <name> [--root] [-- command...]` | An audited terminal inside a Computer or Service, outside the harness. Counts as activity for the power policy. |
 
 ## Inbox

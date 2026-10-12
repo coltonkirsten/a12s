@@ -8,6 +8,8 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - **SDK (`npm install a12s`)**: `connect()` finds the running Fleet (nearest `fleet.yaml`, `$A12S_FLEET`, or the only
   running Fleet); `events()` and the new `turns()` follow one Computer, several, or the whole Fleet, merged, with
   `ready()` so you can start watching before you send; events are a typed union (narrow on `type`).
+- **`a12s gateway`**: a web page can reach the Fleet. It serves your `--web` directory (or a built-in live
+  dashboard), the browser SDK at `/a12s.js`, and the API under a scoped token the page never sees.
 - `docs/sdk.md` and `docs/api.md` (the HTTP API: routes, JSON, SSE framing, error codes).
 
 ### Changed

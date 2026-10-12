@@ -13,6 +13,8 @@ The SDKs wrap this API; use it directly from any other language. It is JSON over
 
 The base URL is `http://127.0.0.1:<port>`. Send the token on every request as `Authorization: Bearer <token>`. It
 is the owner token; `a12s token create` makes scoped ones (see [Inbox: scoped tokens](inbox.md#scoped-tokens)).
+`a12s gateway` serves the same routes to a web page on its own origin, without a token
+([SDK: In the browser](sdk.md#in-the-browser)).
 
 ## Routes
 

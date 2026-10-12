@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>a12s</title>
+<style>
+  :root { color-scheme: light dark; --dim: #8a8a8a; --line: #8884; font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; }
+  body { margin: 0; display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+  aside { border-right: 1px solid var(--line); padding: 16px; overflow: auto; }
+  main { display: flex; flex-direction: column; min-width: 0; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  .computer { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .computer b { font-weight: 600; }
+  .phase { float: right; color: var(--dim); }
+  .meta { color: var(--dim); font-size: 12px; }
+  #log { flex: 1; overflow: auto; padding: 12px 16px; font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+  .ev { margin: 0 0 6px; }
+  .who { font-weight: 600; }
+  .dim { color: var(--dim); }
+  .err { color: #d33; }
+  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+  form input { flex: 1; font: inherit; padding: 6px 8px; }
+  select, button { font: inherit; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<aside>
+  <h1 id="fleet">a12s</h1>
+  <div id="computers"></div>
+</aside>
+<main>
+  <div id="log"></div>
+  <form id="send">
+    <select id="to"></select>
+    <input id="body" placeholder="Send a message…" autocomplete="off">
+    <button>Send</button>
+  </form>
+</main>
+<script type="module">
+  import { connect } from "/a12s.js";
+
+  const a12s = await connect();
+  const $ = (id) => document.getElementById(id);
+  const log = $("log");
+  const open = new Map(); // computer/turn -> the element its text streams into
+
+  function line(computer, html, cls = "") {
+    const div = document.createElement("div");
+    div.className = `ev ${cls}`;
+    div.innerHTML = `<span class="who">${esc(computer)}</span> ${html}`;
+    const follow = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+    log.append(div);
+    if (follow) log.scrollTop = log.scrollHeight;
+    return div;
+  }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  async function refresh() {
+    const st = await a12s.status();
+    $("fleet").textContent = st.fleet;
+    $("computers").innerHTML = st.computers.map((c) => `
+      <div class="computer"><b>${esc(c.name)}</b><span class="phase">${esc(c.phase)}</span>
+      <div class="meta">${esc(c.harness.kind)} ${esc(c.harness.model ?? "")} · inbox ${c.inbox?.pending ?? 0}</div></div>`).join("");
+    const to = $("to");
+    if (to.options.length !== st.computers.length) {
+      to.innerHTML = st.computers.map((c) => `<option>${esc(c.name)}</option>`).join("");
+    }
+  }
+  await refresh();
+  setInterval(() => refresh().catch(() => {}), 3000);
+
+  $("send").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = $("body").value.trim();
+    if (!body) return;
+    $("body").value = "";
+    try {
+      await a12s.send($("to").value, { body, sender: "dashboard" });
+    } catch (err) {
+      line($("to").value, esc(err.message), "err");
+    }
+  });
+
+  for await (const ev of a12s.events()) {
+    const key = `${ev.computer}/${ev.turn}`;
+    switch (ev.type) {
+      case "turn.started": {
+        const from = (ev.data.inbox?.messages ?? []).map((m) => m.via).join(", ");
+        line(ev.computer, `<span class="dim">turn started${from ? ` · from ${esc(from)}` : ""}</span>`);
+        break;
+      }
+      case "text.delta": {
+        let el = open.get(key);
+        if (!el) open.set(key, (el = line(ev.computer, "").appendChild(document.createElement("span"))));
+        el.textContent += ev.data.text;
+        break;
+      }
+      case "tool.started":
+        open.delete(key);
+        line(ev.computer, `<span class="dim">→ ${esc(ev.data.name)}</span>`);
+        break;
+      case "turn.finished":
+        open.delete(key);
+        line(ev.computer, `<span class="${ev.data.status === "completed" ? "dim" : "err"}">turn ${esc(ev.data.status)}${ev.data.error ? `: ${esc(ev.data.error)}` : ""}</span>`);
+        break;
+      case "resume.failed":
+      case "gap":
+        line(ev.computer, `<span class="err">${esc(ev.type)} ${esc(JSON.stringify(ev.data))}</span>`);
+        break;
+    }
+  }
+</script>
+</body>
+</html>

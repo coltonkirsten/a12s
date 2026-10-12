@@ -55,6 +55,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - name: the gateway embeds this build of the SDK
+        run: cmp dist/a12s.js ../../internal/gateway/web/a12s.js || { echo "::error::internal/gateway/web/a12s.js is stale; run make sdk-bundle"; exit 1; }
 
   # Tier images. slim uses the buildx GHA cache; browser is built on the default
   # builder so it can use the freshly loaded slim image as its base.

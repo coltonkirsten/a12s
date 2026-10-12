@@ -68,7 +68,7 @@ func allow(action, computerParam string, h http.HandlerFunc) http.HandlerFunc {
 			computer = r.PathValue(computerParam)
 		}
 		if action == "" && !k.owner() || action != "" && !k.may(action, computer) {
-			what := "this call"
+			what := "make this call: it is owner-only"
 			if action != "" {
 				what = action
 				if computer != "" {

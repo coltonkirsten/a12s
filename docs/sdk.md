@@ -22,6 +22,7 @@ const a12s = await connect();
 |---|---|
 | Several Fleets running | `connect({ fleet: "myproject" })` |
 | A scoped token, or a Controller elsewhere | `connect({ url, token })`, or `$A12S_URL` and `$A12S_TOKEN` |
+| A web page | `a12s gateway --web <dir>` serves it; in the page, `connect()` (see [In the browser](#in-the-browser)) |
 
 The same `import { connect } from "a12s"` works in Node, Bun, Deno and browsers; in a browser, `connect()` talks to
 the page's own origin.
@@ -100,6 +101,33 @@ resume (the Computer's journal was reset), the stream yields one `gap` event and
 
 To replay one Turn from its start: `a12s.events("analyst", { turn: r.id })`. To resume a stream you saved:
 `a12s.events("analyst", { after: lastSeq })`.
+
+## In the browser
+
+The Controller listens on loopback with the owner token, so a web page can't call it directly. `a12s gateway` sits
+in between: it serves your page, serves this SDK at `/a12s.js`, and forwards `/v1/` to the Controller with a scoped
+token the page never sees.
+
+```sh
+a12s gateway                 # the built-in dashboard: every Computer, live events, a send box
+a12s gateway --web ./web     # your own app instead, at http://127.0.0.1:7012
+```
+
+```html
+<script type="module">
+  import { connect } from "/a12s.js";
+  const a12s = await connect();                       // same origin, no token
+  for await (const ev of a12s.events()) console.log(ev.computer, ev.type);
+</script>
+```
+
+The page may use `status`, `events`, `send` and `inbox` on every Computer; change that with
+`--allow status,events` and `--computers lead,worker1`. Messages it sends arrive `via` `token:gateway`. The gateway
+answers only `127.0.0.1` and `localhost` and refuses writes from other origins, so other sites open in the same
+browser can't use it. It is for this machine: to serve a page to other people, put your own server and
+authentication in front of a scoped token.
+
+With a bundler, `npm install a12s` and `import { connect } from "a12s"` work the same way.
 
 ## Everything else
 
