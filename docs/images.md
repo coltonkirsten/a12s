@@ -22,8 +22,9 @@ the docker CLI. The a12s images are public; a private registry of your own works
 
 Toolchain-heavy images should be derived from a tier rather than a new tier: `FROM ghcr.io/coltonkirsten/a12s/slim:<release>`
 (or `a12s/slim:dev` in a source build), then add your tools. Admission accepts a custom image only if it carries the
-`ai.a12s.computerd.version` label (set on the tiers and inherited by every image built FROM them) and has computerd
-at `/opt/a12s/computerd/dist/main.js`; otherwise `a12s up` changes nothing and says how to fix it. a12s starts
+`ai.a12s.computerd.version` label (set on the tiers and inherited by every image built FROM them) from a compatible
+release (same major, and same minor while 0.x; a `dev` build on either side only warns) and has computerd at
+`/opt/a12s/computerd/dist/main.js`; otherwise `a12s up` changes nothing and says how to fix it. a12s starts
 computerd as root itself, so an image's `ENTRYPOINT`, `CMD`, `USER` and `HEALTHCHECK` are ignored. A worked example
 is in [Extending a12s](extending.md#a-custom-agent-image).
 

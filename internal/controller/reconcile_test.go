@@ -12,6 +12,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/fleet"
+	"github.com/coltonkirsten/a12s/internal/version"
 )
 
 var lab4 = []string{"builder", "reviewer", "scout", "tester"}
@@ -396,10 +397,14 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 	h.d.setImage("me/plain:1", "sha256:plain")
 	h.d.setImage("me/nocomputerd:1", "sha256:nocd")
 	h.d.setImage("me/agent:1", "sha256:agent")
+	h.d.setImage("me/old:1", "sha256:old")
+	h.d.setImage("me/rel:1", "sha256:rel")
 	h.d.mu.Lock()
 	h.d.computerImages = map[string]driver.ComputerImage{
 		"sha256:plain": {Computerd: true},
 		"sha256:nocd":  {Labels: map[string]string{driver.LabelComputerdVersion: "v0.1.0"}},
+		"sha256:old":   {Labels: map[string]string{driver.LabelComputerdVersion: "v0.1.0"}, Computerd: true},
+		"sha256:rel":   {Labels: map[string]string{driver.LabelComputerdVersion: "v0.2.3"}, Computerd: true},
 	}
 	h.d.mu.Unlock()
 	withImage := func(ref string) *fleet.Fleet {
@@ -421,5 +426,20 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 	res := h.up(withImage("me/agent:1"), nil, false)
 	if res.Lock.Images["me/agent:1"] != "sha256:agent" {
 		t.Fatalf("custom image not pinned: %v", res.Lock.Images)
+	}
+	if res = h.up(withImage("me/rel:1"), nil, false); !slices.ContainsFunc(res.Warnings, func(w string) bool {
+		return strings.Contains(w, "computers.scout.image: me/rel:1: computerd is from a12s v0.2.3") &&
+			strings.Contains(w, "dev build")
+	}) {
+		t.Fatalf("a dev Controller admits a release image with a warning; warnings = %q", res.Warnings)
+	}
+
+	defer func(v string) { version.Version = v }(version.Version)
+	version.Version = "v0.2.0"
+	h.d.setImage(version.Image(fleet.TierSlim), "sha256:slim020")
+	h.d.setImage(version.Image(fleet.TierBrowser), "sha256:browser020")
+	_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: withImage("me/old:1"), Credentials: labCreds, Presets: labPresets(t)})
+	if err == nil || !strings.Contains(err.Error(), "computers.scout.image: me/old:1: its computerd is from a12s v0.1.0, which this Controller (v0.2.0) cannot drive  fix: rebuild it FROM") {
+		t.Fatalf("an older-minor 0.x image is refused: err = %v", err)
 	}
 }

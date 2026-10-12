@@ -46,7 +46,10 @@ and checks it at admission:
 
 - it carries the `ai.a12s.computerd.version` label, which the base images set and every image built FROM them
   inherits;
-- computerd is at `/opt/a12s/computerd/dist/main.js`.
+- computerd is at `/opt/a12s/computerd/dist/main.js`;
+- the label's release is compatible with the Controller's: the same major version, and while a12s is 0.x the same
+  minor (a v0.2 Controller refuses an image built FROM v0.1). If either side is a `dev` build, `up` admits the image
+  and prints a warning instead.
 
 Otherwise nothing changes and `up` says why:
 
@@ -57,8 +60,8 @@ computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version labe
 What a custom image can't change: a12s always starts computerd as root (your `ENTRYPOINT`, `CMD`, `USER` and
 `HEALTHCHECK` are ignored), the root filesystem is read-only, the harness runs as uid 1000, and the home drive is
 mounted over `/home`. Install tools system-wide (under `/usr` or `/opt`), not into `/home/agent`. To pick up a new
-image, change its tag in `fleet.yaml`: a pinned ref keeps running the pinned ID. When you upgrade a12s, rebuild FROM
-the new base.
+image, change its tag in `fleet.yaml`: a pinned ref keeps running the pinned ID. When you upgrade a12s to a new minor
+(or, from 1.0, a new major), rebuild FROM the new base; admission refuses the old image until you do.
 
 ## A custom Service
 
