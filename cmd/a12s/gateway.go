@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +30,7 @@ func runGateway(g *globals, args []string) error {
 	devPort := flags.Int("dev-port", 0, "the port of the dev server started after --, when it doesn't print its URL")
 	allow := flags.String("allow", "status,events,send,inbox", "API actions the page may use ("+strings.Join(api.TokenActions, ",")+")")
 	computers := flags.String("computers", "*", "Computers the page may reach, comma-separated")
+	noOpen := flags.Bool("no-open", false, "don't open the browser")
 	pos, err := parse(flags, args)
 	if err != nil {
 		return err
@@ -100,9 +104,14 @@ func runGateway(g *globals, args []string) error {
 	if devURL != nil {
 		serving = "the dev server at " + devURL.String()
 	}
-	srv := &http.Server{Handler: gateway.Handler(gateway.Config{Controller: base, Token: tok.Secret, Web: site, Dev: devURL}), ReadHeaderTimeout: 10 * time.Second}
-	fmt.Printf("a12s gateway for Fleet %s: http://127.0.0.1:%d\n  serving %s and /a12s.js; API as token:%s (%s on %s); Ctrl-C to stop\n",
-		f.Metadata.Name, *port, serving, gatewayToken, strings.Join(tok.Actions, ","), strings.Join(tok.Computers, ","))
+	key := rand.Text()
+	srv := &http.Server{Handler: gateway.Handler(gateway.Config{Controller: base, Token: tok.Secret, Key: key, Web: site, Dev: devURL}), ReadHeaderTimeout: 10 * time.Second}
+	link := fmt.Sprintf("http://127.0.0.1:%d/?key=%s", *port, key)
+	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s and /a12s.js; API as token:%s (%s on %s); Ctrl-C to stop\n",
+		f.Metadata.Name, link, serving, gatewayToken, strings.Join(tok.Actions, ","), strings.Join(tok.Computers, ","))
+	if !*noOpen {
+		openBrowser(link)
+	}
 	go func() {
 		<-ctx.Done()
 		shut, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -113,6 +122,24 @@ func runGateway(g *globals, args []string) error {
 		return err
 	}
 	return devExited
+}
+
+// openBrowser is best effort: the link is printed either way.
+func openBrowser(link string) {
+	name := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		name = "open"
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return
+	}
+	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		return
+	}
+	cmd := exec.Command(name, link)
+	if cmd.Start() == nil {
+		go func() { _ = cmd.Wait() }()
+	}
 }
 
 func list(s string) []string {

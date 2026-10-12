@@ -163,7 +163,13 @@ a12s gateway --dev http://localhost:5173   # a dev server that is already runnin
 a12s gateway --web ./dist        # a built app (a directory of files)
 ```
 
-Everything is at http://127.0.0.1:7012. With a dev server, the gateway forwards every request except `/v1/` and
+Each run makes a new key and opens `http://127.0.0.1:7012/?key=…` in your browser (`--no-open` just prints it). The
+gateway trades the key for an HttpOnly, SameSite=Strict cookie and drops it from the address bar; `/v1/` and
+`/a12s.js` need that cookie, so another user or program on the machine can't use the Fleet through the gateway. A
+script or test passes the key as a bearer token instead: `connect({ url: "http://127.0.0.1:7012", token: key })`.
+Opened without the key, the gateway shows a page that says to use the printed link.
+
+With a dev server, the gateway forwards every request except `/v1/` and
 `/a12s.js` to it, websockets included, so the page and the API share one origin. It finds the dev server's port in
 the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-web-app-react-vite-any-dev-server).
 
@@ -177,8 +183,8 @@ the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-
 
 The page may use `status`, `events`, `send` and `inbox` on every Computer; narrow that with
 `--allow status,events` and `--computers lead,worker1`. Messages it sends arrive `via` `token:gateway`. The gateway
-answers only `127.0.0.1` and `localhost` and refuses writes from other origins, so other sites open in the same
-browser can't use it. It is for this machine: to serve a page to other people, put your own server and
+answers only `127.0.0.1` and `localhost`, needs its key, and refuses writes from other origins, so other sites open in
+the same browser can't use it. It is for this machine: to serve a page to other people, put your own server and
 authentication in front of a scoped token.
 
 With a bundler, `npm install @coltonkirsten/a12s` and `import { connect } from "@coltonkirsten/a12s"` work the same way:

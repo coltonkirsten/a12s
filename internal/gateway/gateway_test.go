@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -27,7 +28,7 @@ func newGateway(t *testing.T, web fstest.MapFS) (*httptest.Server, *[]*http.Requ
 	}))
 	t.Cleanup(ctl.Close)
 	u, _ := url.Parse(ctl.URL)
-	cfg := Config{Controller: u, Token: "scoped"}
+	cfg := Config{Controller: u, Token: "scoped", Key: "k"}
 	if web != nil {
 		cfg.Web = web
 	}
@@ -39,8 +40,7 @@ func newGateway(t *testing.T, web fstest.MapFS) (*httptest.Server, *[]*http.Requ
 func TestProxyAddsTheScopedTokenAndDropsBrowserCredentials(t *testing.T) {
 	gw, seen := newGateway(t, nil)
 	req, _ := http.NewRequest("GET", gw.URL+"/v1/status", nil)
-	req.Header.Set("Authorization", "Bearer from-the-page")
-	req.Header.Set("Cookie", "session=x")
+	req.Header.Set("Cookie", "session=x; "+keyCookie(gw))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestProxyAddsTheScopedTokenAndDropsBrowserCredentials(t *testing.T) {
 
 func TestEventStreamsAreFlushed(t *testing.T) {
 	gw, _ := newGateway(t, nil)
-	res, err := http.Get(gw.URL + "/v1/computers/lead/events")
+	res, err := authed(gw).Get(gw.URL + "/v1/computers/lead/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +78,7 @@ func TestRefusesNonLoopbackHostsAndCrossOriginWrites(t *testing.T) {
 		if origin != "" {
 			req.Header.Set("Origin", origin)
 		}
+		req.Header.Set("Authorization", "Bearer k")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -104,7 +105,7 @@ func TestRefusesNonLoopbackHostsAndCrossOriginWrites(t *testing.T) {
 
 func TestServesTheSDKAndTheApp(t *testing.T) {
 	get := func(gw *httptest.Server, path string) string {
-		res, err := http.Get(gw.URL + path)
+		res, err := authed(gw).Get(gw.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,5 +123,96 @@ func TestServesTheSDKAndTheApp(t *testing.T) {
 	app, _ := newGateway(t, fstest.MapFS{"index.html": {Data: []byte("my app")}})
 	if get(app, "/") != "my app" || !strings.Contains(get(app, "/a12s.js"), "A12sClient = class") {
 		t.Error("--web does not serve the app next to /a12s.js")
+	}
+}
+
+func keyCookie(gw *httptest.Server) string {
+	u, _ := url.Parse(gw.URL)
+	return "a12s-gateway-" + u.Port() + "=k"
+}
+
+// authed is a browser that opened the link the gateway printed.
+func authed(gw *httptest.Server) *http.Client {
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	res, err := c.Get(gw.URL + "/?key=k")
+	if err != nil {
+		panic(err)
+	}
+	res.Body.Close()
+	return c
+}
+
+func TestTheKeyBecomesACookieAndLeavesTheURL(t *testing.T) {
+	gw, seen := newGateway(t, nil)
+	jar, _ := cookiejar.New(nil)
+	var redirects []string
+	c := &http.Client{Jar: jar, CheckRedirect: func(r *http.Request, _ []*http.Request) error {
+		redirects = append(redirects, r.URL.RequestURI())
+		return nil
+	}}
+	res, err := c.Get(gw.URL + "/?key=k&tab=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(redirects) != 1 || redirects[0] != "/?tab=2" {
+		t.Fatalf("redirects = %v", redirects)
+	}
+	u, _ := url.Parse(gw.URL)
+	cookies := jar.Cookies(u)
+	if len(cookies) != 1 || cookies[0].Name != "a12s-gateway-"+u.Port() {
+		t.Fatalf("cookies = %v", cookies)
+	}
+	set := res.Request.Response.Header.Get("Set-Cookie")
+	if !strings.Contains(set, "HttpOnly") || !strings.Contains(set, "SameSite=Strict") {
+		t.Fatalf("Set-Cookie = %q", set)
+	}
+	res, err = c.Get(gw.URL + "/v1/status")
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("with the cookie: %v %v", res.StatusCode, err)
+	}
+	res.Body.Close()
+	if len(*seen) != 1 || (*seen)[0].Header.Get("Cookie") != "" {
+		t.Fatal("the cookie reached the Controller")
+	}
+}
+
+func TestWithoutTheKeyTheAPIAndSDKAreLocked(t *testing.T) {
+	gw, seen := newGateway(t, nil)
+	status := func(path string, h ...string) int {
+		req, _ := http.NewRequest("GET", gw.URL+path, nil)
+		for i := 0; i < len(h); i += 2 {
+			req.Header.Set(h[i], h[i+1])
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	for _, p := range []string{"/v1/status", "/a12s.js"} {
+		if s := status(p); s != http.StatusUnauthorized {
+			t.Errorf("%s without key: %d", p, s)
+		}
+		if s := status(p, "Authorization", "Bearer wrong"); s != http.StatusUnauthorized {
+			t.Errorf("%s with a wrong key: %d", p, s)
+		}
+		if s := status(p, "Cookie", "a12s-gateway-1=k"); s != http.StatusUnauthorized {
+			t.Errorf("%s with another port's cookie: %d", p, s)
+		}
+		if s := status(p, "Authorization", "Bearer k"); s != http.StatusOK {
+			t.Errorf("%s with the key as a bearer token: %d", p, s)
+		}
+	}
+	if s := status("/?key=wrong"); s != http.StatusForbidden {
+		t.Errorf("wrong ?key=: %d", s)
+	}
+	if s := status("/", "Sec-Fetch-Mode", "navigate"); s != http.StatusUnauthorized {
+		t.Errorf("opening the page without the key: %d", s)
+	}
+	if len(*seen) != 1 {
+		t.Fatalf("the Controller saw %d requests, want only the keyed one", len(*seen))
 	}
 }

@@ -33,7 +33,7 @@ a12s prompt hello "Reply with the single word pong."
 `prompt` prints `turn … started`, `pong`, `turn … completed`. Then:
 
 ```sh
-a12s gateway                       # open http://127.0.0.1:7012: every Computer, live, with a send box
+a12s gateway                       # opens your browser: every Computer, live, with a send box
 a12s down                          # stop everything; disks and conversations are kept
 ```
 

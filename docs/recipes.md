@@ -135,7 +135,7 @@ one origin, so the page needs no token, no CORS setup and no proxy config, and h
 ```sh
 npm create vite@latest web -- --template react-ts && cd web
 npm install && npm install @coltonkirsten/a12s
-a12s gateway -F ../fleet.yaml -- npm run dev    # open http://127.0.0.1:7012, not the dev server's own port
+a12s gateway -F ../fleet.yaml -- npm run dev    # opens http://127.0.0.1:7012/?key=…, not the dev server's own port
 ```
 
 ```tsx
@@ -170,7 +170,7 @@ For production, `npm run build` and serve the output with `a12s gateway --web di
 
 ## A live dashboard in the browser
 
-No code: `a12s gateway` serves a built-in dashboard at http://127.0.0.1:7012 with every Computer, their events as
+No code: `a12s gateway` opens a built-in dashboard at http://127.0.0.1:7012 with every Computer, their events as
 they stream, and a box to send a Message.
 
 Your own page: put it in a directory and serve that instead. The gateway also serves the SDK at `/a12s.js`, and
@@ -197,7 +197,7 @@ the page needs no token or build step.
 ```
 
 ```sh
-a12s gateway --web web          # http://127.0.0.1:7012
+a12s gateway --web web          # opens http://127.0.0.1:7012/?key=…
 ```
 
 To show whole answers instead of events, use `a12s.turns()` the same way. The page can send work with

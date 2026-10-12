@@ -75,11 +75,12 @@ func TestDevProxyForwardsAllButTheAPIIncludingWebsockets(t *testing.T) {
 	defer ctl.Close()
 	cu, _ := url.Parse(ctl.URL)
 	du, _ := url.Parse(dev.URL)
-	gw := httptest.NewServer(Handler(Config{Controller: cu, Token: "scoped", Dev: du}))
+	gw := httptest.NewServer(Handler(Config{Controller: cu, Token: "scoped", Key: "k", Dev: du}))
 	defer gw.Close()
 
+	browser := authed(gw)
 	get := func(path string) string {
-		res, err := http.Get(gw.URL + path)
+		res, err := browser.Get(gw.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}

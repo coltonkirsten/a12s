@@ -11,6 +11,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   server that is already running. See [Recipes: A web app](docs/recipes.md#a-web-app-react-vite-any-dev-server).
 
 ### Changed
+- **`a12s gateway` is locked with a key made for each run**, like Jupyter: it opens `http://127.0.0.1:7012/?key=…` in
+  your browser (`--no-open` only prints it), trades the key for an HttpOnly cookie and drops it from the URL. `/v1/`
+  and `/a12s.js` need the cookie or `Authorization: Bearer <key>`, so other users and programs on the machine can't
+  use the Fleet through it. What to do: open the printed link instead of typing `http://127.0.0.1:7012`.
 - `brew install coltonkirsten/tap/a12s` no longer needs `HOMEBREW_GITHUB_API_TOKEN`: the repo is public, so the formula
   downloads the release assets directly.
 
