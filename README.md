@@ -68,8 +68,8 @@ print(turn.text)
 ```
 
 Until the packages are on npm and PyPI, install them from the release:
-`gh release download -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-<version>.tgz` or
-`pip install ./a12s-<version>-py3-none-any.whl`.
+`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-0.2.0.tgz` and
+`pip install ./a12s-0.2.0-py3-none-any.whl` (or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
 
 ## Learn it
 

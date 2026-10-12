@@ -9,8 +9,8 @@ pip install a12s          # Python 3.10+ (uv add a12s)
 ```
 
 Until the packages are on npm and PyPI, install them from the GitHub release:
-`gh release download -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-<version>.tgz` or
-`pip install ./a12s-<version>-py3-none-any.whl`.
+`gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*'`, then `npm install ./a12s-0.2.0.tgz` and
+`pip install ./a12s-0.2.0-py3-none-any.whl` (or, without installing: `uv run --with ./a12s-0.2.0-py3-none-any.whl app.py`).
 
 ## Connect
 
@@ -98,7 +98,8 @@ for t in client.turns(["lead", "worker1"]):
 A Turn has `computer`, `id`, `status` (`completed`, `failed` or `interrupted`), `text` (everything the agent
 said), `error`, `messages` (the Messages it delivered, each with `id`, `sender` and `via`), `tools` (each tool call
 with `name`, `input`, `output`, `isError` / `is_error`), `usage`, `startedAt` / `started_at` and `finishedAt` /
-`finished_at`. What an agent sends to another Computer is in `tools`: a call named `mcp__a12s__send` whose `input`
+`finished_at`. `error` is a string; `input`, `output` and `usage` are the harness's JSON as is (a dict in Python).
+What an agent sends to another Computer is in `tools`: a call named `mcp__a12s__send` whose `input`
 has `computer` and `body`.
 
 ### Events

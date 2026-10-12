@@ -120,12 +120,13 @@ with client.turns(["lead", "worker1"]) as turns:   # entering waits until connec
 for ev in client.events():            # ev.type, ev.data (dict, camelCase keys), ev.computer
     pass
 # async: client = await a12s.connect_async(); same methods with await / async for / async with
+# t.error is a str; tool input/output and usage are plain JSON (dicts)
 # errors: a12s.A12sError (status, code, fix), A12sStreamError, A12sGapError
 ```
 
 ## Browser
 
-`a12s gateway --web ./web` serves ./web at http://127.0.0.1:7012, the SDK at /a12s.js and the API at /v1/ with a
+`a12s gateway --web ./web` (run in the Fleet's directory, or with -F) serves ./web at http://127.0.0.1:7012, the SDK at /a12s.js and the API at /v1/ with a
 scoped token (default actions status,events,send,inbox; change with --allow, --computers). In the page:
 
 ```html
