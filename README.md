@@ -113,7 +113,9 @@ a12s doctor                               # one line per check, with the fix
 - [Security model](docs/security.md): isolation, egress, identity and honest limits
 - [Architecture](docs/architecture.md): the Controller, the Docker driver, computerd, the APIs and the journal
 - [Images and harness bundles](docs/images.md): the slim and browser tiers, bundles, the Chromium sandbox
-- [Extending a12s](docs/extending.md): custom Services and agent images, the client SDK, without forking
+- [SDK](docs/sdk.md): send work and follow Computers from your app
+- [HTTP API](docs/api.md): routes, JSON, event streams and error codes, for any language
+- [Extending a12s](docs/extending.md): custom Services and agent images, without forking
 
 ## Status
 
