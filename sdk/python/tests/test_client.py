@@ -319,7 +319,9 @@ def merged_server(req: Req, res: Res) -> None:
     started = {"inbox": {"batch": "b", "pendingAfter": 0, "messages": [{"id": "m", "via": "local", "sender": "app"}]}}
     res.write(ev(6, "turn.started", f"t_{name}", started, computer=name))
     res.write(ev(7, "text.delta", f"t_{name}", {"text": f"hi from {name}"}, computer=name))
-    res.write(ev(8, "turn.finished", f"t_{name}", {"status": "completed", "usage": None}, computer=name))
+    res.write(ev(8, "tool.started", f"t_{name}", {"id": "u", "name": "mcp__a12s__send"}, computer=name))
+    res.write(ev(9, "text.delta", f"t_{name}", {"text": "SENT"}, computer=name))
+    res.write(ev(10, "turn.finished", f"t_{name}", {"status": "completed", "usage": None}, computer=name))
 
 
 def test_events_merge_every_computer_and_turns_fold_them(fake: Fake) -> None:
@@ -330,7 +332,7 @@ def test_events_merge_every_computer_and_turns_fold_them(fake: Fake) -> None:
             got.append(f"{t.computer}:{t.status}:{t.text}")
             if len(got) == 2:
                 break
-    assert sorted(got) == ["lead:completed:hi from lead", "w1:completed:hi from w1"]
+    assert sorted(got) == ["lead:completed:hi from lead\nSENT", "w1:completed:hi from w1\nSENT"]
 
 
 @pytest.mark.anyio
@@ -342,7 +344,7 @@ async def test_async_events_merge_every_computer_and_turns_fold_them(fake: Fake)
             got.append(f"{t.computer}:{t.status}:{t.text}")
             if len(got) == 2:
                 break
-    assert sorted(got) == ["lead:completed:hi from lead", "w1:completed:hi from w1"]
+    assert sorted(got) == ["lead:completed:hi from lead\nSENT", "w1:completed:hi from w1\nSENT"]
 
 
 def head_server() -> Handler:

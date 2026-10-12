@@ -508,19 +508,25 @@ export class TurnStream implements AsyncIterableIterator<Turn> {
 
 /** Folds a Computer's events into Turns. */
 class TurnBuilder {
-  private readonly open = new Map<string, { text: string; messages: TurnInboxMessage[]; startedAt?: string }>();
+  private readonly open = new Map<string, { text: string; afterTool: boolean; messages: TurnInboxMessage[]; startedAt?: string }>();
 
   add(ev: A12sEvent): Turn | undefined {
     if (!ev.turn) return undefined;
     const key = `${ev.computer}\u0000${ev.turn}`;
     let t = this.open.get(key);
-    if (!t) this.open.set(key, (t = { text: "", messages: [] }));
+    if (!t) this.open.set(key, (t = { text: "", afterTool: false, messages: [] }));
     switch (ev.type) {
       case "turn.started":
         t.messages = ev.data.inbox?.messages ?? [];
         t.startedAt = ev.ts;
         return undefined;
+      case "tool.started":
+        t.afterTool = true;
+        return undefined;
       case "text.delta":
+        // Text before and after a tool call are separate messages: keep them on separate lines.
+        if (t.afterTool && t.text && !t.text.endsWith("\n")) t.text += "\n";
+        t.afterTool = false;
         t.text += ev.data.text;
         return undefined;
       case "turn.finished":
