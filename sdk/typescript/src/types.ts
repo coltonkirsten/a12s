@@ -229,6 +229,8 @@ export type EventType =
   | "continuation.abandoned"
   | "turn.refused"
   | "inbox.discarded"
+  /** Client-side, from the SDK's event stream: events were lost (see GapEvent). Never in the journal. */
+  | "gap"
   | (string & {});
 
 /** One journal event of a Computer (or, on a Message stream, one state change of the Message). */

@@ -222,9 +222,9 @@ prompt, inbox list/get/withdraw, the event stream and Services. It's published p
 ```
 
 ```ts
-import { A12sClient } from "@coltonkirsten/a12s-client";
+import { fromFleet } from "@coltonkirsten/a12s-client/node";
 
-const a12s = await A12sClient.fromFleet("myproject");   // reads ~/.a12s/myproject/controller.json
+const a12s = await fromFleet("myproject");   // reads ~/.a12s/myproject/controller.json
 await a12s.send("analyst", { body: "Summarize the open issues.", sender: "app" });
 for await (const ev of a12s.events("analyst")) {
   if (ev.type === "text.delta") process.stdout.write(ev.data.text);
@@ -234,18 +234,31 @@ for await (const ev of a12s.events("analyst")) {
 
 | Method | API |
 |---|---|
-| `A12sClient.fromFleet(name)` / `new A12sClient({url, token})` | owner token from `~/.a12s/<fleet>/controller.json`, or a scoped token |
+| `fromFleet(name)` (from `/node`) / `new A12sClient({url, token})` | owner token from `~/.a12s/<fleet>/controller.json`, or a scoped token |
 | `putFleet(req)` | `PUT /v1/fleet` (what `a12s up` sends) |
 | `status()`, `computer(name)` | `GET /v1/status` |
 | `send(name, msg)` / `enqueue` | `POST /v1/computers/{c}/inbox`; always sends an idempotency key |
 | `prompt(name, body, {onEvent})` | enqueue, wait for delivery, stream the Turn; resolves with its text and status |
 | `inbox(name, {state, bodies, after})`, `message(name, id)`, `withdraw(name, id)` | the inbox endpoints |
-| `events(name, {turn, after, signal})` | the journal as SSE, reconnecting with `Last-Event-ID` |
+| `events(name, {turn, after, signal, onGap})` | the journal as SSE, reconnecting with `Last-Event-ID` |
 | `messageEvents(name, id)`, `waitForTurn(name, id)` | one Message's state changes; the Turn that delivered it |
 | `services()`, `service(name)` | `GET /v1/services` |
 | `createToken(req)`, `stop(name, turn)` | scoped tokens; interrupt a Turn |
 
 Errors are `A12sError` with `status`, `code` and the Controller's `fix` line.
+
+**Entry points.** `@coltonkirsten/a12s-client` has no `node:` imports and bundles for browsers, Deno and Bun (CI
+checks it with esbuild `--platform=browser`). `@coltonkirsten/a12s-client/node` re-exports it and adds `fromFleet`,
+which reads `~/.a12s`. A browser can't use the owner token or reach the Controller's loopback port directly: put a
+small host-side gateway in front that holds the token and proxies the calls your page needs; a12s doesn't include
+one.
+
+**Event streams.** `events()` reconnects after a network drop with `Last-Event-ID`, so nothing is missed or repeated.
+If the Controller no longer has the cursor (the Computer's journal was reset), it yields one event of type `"gap"`
+(`data.after` is the lost cursor) and carries on live; pass `onGap: "throw"` to get an `A12sGapError` instead.
+Events were lost either way: resync from `status()` and `inbox()`. `prompt()` always throws on a gap rather than
+return partial text. A malformed event throws `A12sStreamError`, and an API error other than 502/503 throws
+`A12sError`; neither is retried.
 
 Give an app the least it needs with a scoped token instead of the owner token:
 `a12s token create app --actions send,events --computers analyst`, then `new A12sClient({ url, token })`.
