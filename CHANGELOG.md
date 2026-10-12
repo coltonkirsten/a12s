@@ -2,6 +2,12 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Changed
+- `brew install coltonkirsten/tap/a12s` no longer needs `HOMEBREW_GITHUB_API_TOKEN`: the repo is public, so the formula
+  downloads the release assets directly.
+
 ## v0.2.1 (2026-10-12)
 
 ### Changed

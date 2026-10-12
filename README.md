@@ -18,11 +18,9 @@ browser, curl)
 
 ## Quickstart (5 minutes)
 
-Needs Docker running and a Claude subscription or API access. The repo is private, so brew needs a GitHub token
-with `repo` scope:
+Needs Docker running and a Claude subscription or API access.
 
 ```sh
-export HOMEBREW_GITHUB_API_TOKEN=<token>
 brew install coltonkirsten/tap/a12s
 
 a12s init hello && cd hello        # fleet.yaml with one Computer, "hello"
@@ -66,10 +64,6 @@ client = a12s.connect()
 turn = client.prompt("hello", "Name three prime numbers.")
 print(turn.text)
 ```
-
-Until the Python package is on PyPI, install the wheel from the release:
-`gh release download v0.2.1 -R coltonkirsten/a12s -p 'a12s-*.whl'`, then `pip install ./a12s-0.2.1-py3-none-any.whl`
-(or, without installing: `uv run --with ./a12s-0.2.1-py3-none-any.whl app.py`).
 
 ## Learn it
 

@@ -38,9 +38,6 @@ brews:
     homepage: https://github.com/coltonkirsten/a12s
     description: Agent computers on Docker, declared in one Fleet file
     license: MIT
-    # The release assets are in a private repo: the strategy in the tap downloads them with HOMEBREW_GITHUB_API_TOKEN.
-    download_strategy: GitHubPrivateRepositoryReleaseDownloadStrategy
-    custom_require: "../lib/private_strategy"
     install: |
       bin.install "a12s"
     test: |
