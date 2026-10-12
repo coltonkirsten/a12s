@@ -4,7 +4,7 @@
 
 - Go 1.26+
 - Node 24 and npm (for computerd)
-- Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images, `make check` and end-to-end runs
+- Docker (Docker Desktop on macOS, or Docker Engine on Linux) for images, `make check-full` and end-to-end runs
 - uv for the Python SDK; jq for the bundle conformance check; GoReleaser (`brew install goreleaser`) only to release
 
 ## Run from source (macOS)
@@ -55,28 +55,62 @@ make bundles      # a12s/bundle-claude-code:<v>, a12s/bundle-codex:<v>
 make services     # the reference Services: svc-cron, svc-webhook, svc-mcp, svc-mcp-postgres
 ```
 
-## The merge gate: `make check`
+## Checks: `make check` and `make check-full`
 
 ```sh
-make check        # everything below; stops at the first failure (about 15 minutes cold, needs Docker)
-make check-code   # the same without Docker: go, computerd, sdk, python (about 2 minutes)
+make check        # what PR CI runs: go, sdk, python (about 1.5 minutes, no Docker)
+make check-full   # everything; stops at the first failure (about 15 minutes cold, needs Docker)
 scripts/check.sh go sdk    # any subset of: go computerd sdk python services tiers controller bundles
 ```
 
-It runs `go build`, `gofmt`, `go vet` and `go test` (which includes the Go to TypeScript/Python API fixture drift
-check), computerd's lint, build and tests, the TypeScript SDK's lint and tests and the check that
-`internal/gateway/web/a12s.js` matches its build, the Python SDK's tests and `mypy --strict` on Python 3.10 and 3.14
-(`CHECK_PYTHONS` overrides), svc-mcp against a stub server, the reference Service images, the slim, browser and
-controller images with the Chromium sandbox and Playwright checks, and both default harness bundles with
-`images/bundles/conformance.sh`. Afterwards it prunes dangling images and the build cache (`CHECK_KEEP_CACHE=1`
-keeps them). A change merges only when `make check` is green locally.
+`make check` runs `go build`, `gofmt`, `go vet` and `go test` (which includes the Go to TypeScript/Python API fixture
+drift check), the TypeScript SDK's lint and tests (including the browser bundle) and the check that
+`internal/gateway/web/a12s.js` matches its build, and the Python SDK's tests and `mypy --strict` on Python 3.10 and
+3.14 (`CHECK_PYTHONS` overrides).
 
-Nothing in `.github/workflows` runs automatically. `ci.yml` is the same check on GitHub's runners, and runs only
-when started by hand (Actions > ci > Run workflow).
+`make check-full` adds computerd's lint, build and tests, svc-mcp against a stub server, the reference Service
+images, the slim, browser and controller images with the Chromium sandbox and Playwright checks, and both default
+harness bundles with `images/bundles/conformance.sh`. Afterwards it prunes dangling images and the build cache
+(`CHECK_KEEP_CACHE=1` keeps them).
+
+**PR CI is light on purpose.** `.github/workflows/ci.yml` runs the `make check` steps (one job each for go, sdk and
+python) on every pull request to main, once per update, cancelling superseded runs and skipping docs-only changes
+(`**/*.md`, `docs/**`). Nothing Docker-heavy runs on GitHub for a PR: run `make check-full` locally before any
+release-affecting change (images and Dockerfiles, computerd, Services, bundles, `scripts/release.sh`,
+`.goreleaser.yaml`) and paste its tail in the PR.
 
 ## Releasing
 
-From a Mac or Linux machine with Docker, on an up-to-date main that passed `make check`:
+Push a tag; `.github/workflows/release.yml` does the rest on GitHub's runners:
+
+```sh
+git tag -a v0.5.0 -m v0.5.0 origin/main && git push origin v0.5.0
+```
+
+It pushes the images (linux/amd64 and linux/arm64), publishes the default harness bundles if missing, runs
+GoReleaser (binaries and the Homebrew formula), attaches the SDK `a12s-*.tgz` and `a12s-*.whl` to the GitHub release
+and publishes `a12s` to npm and PyPI. For an existing tag, start it by hand (Actions > release > Run workflow).
+`make check-full` should be green on that commit first.
+
+### npm and PyPI: trusted publishing
+
+The workflow publishes with trusted publishing (OIDC; no long-lived token in the repo). It tries trusted publishing
+first, then the `NPM_TOKEN` / `PYPI_TOKEN` repository secret if one is set, and otherwise skips that registry with a
+`::warning::` (the rest of the release still succeeds). One-time setup, each with owner `coltonkirsten`, repository
+`a12s`, workflow `release.yml`, no environment:
+
+- PyPI: pypi.org > Your account > Publishing (https://pypi.org/manage/account/publishing/) > add a pending GitHub
+  publisher for the project name `a12s`. The first release creates the project. A pending publisher does not reserve
+  the name until that first publish.
+- npm: a trusted publisher can only be added to a package that exists, so publish once by hand, then configure it:
+  `gh release download v0.2.0 -R coltonkirsten/a12s -p 'a12s-*.tgz' && npm login && npm publish a12s-0.2.0.tgz
+  --access public`, then npmjs.com > package `a12s` > Settings > Trusted Publisher > GitHub Actions. Optionally also
+  set "Require two-factor authentication and disallow tokens" there afterwards. Needs npm 11.5.1+ in the workflow
+  (it upgrades npm when the runner's is older).
+
+### Local fallback: `make release`
+
+From a Mac or Linux machine with Docker, on an up-to-date main that passed `make check-full`:
 
 ```sh
 make release VERSION=0.5.0
@@ -98,7 +132,8 @@ It checks everything it needs before touching anything and lists what is missing
 - `HOMEBREW_TAP_DEPLOY_KEY`: a path to (or the contents of) an SSH key with write access to the tap. Defaults to
   `~/.ssh/id_ed25519` or `~/.ssh/id_rsa`; it must have no passphrase, since GoReleaser reads it directly.
 
-`.github/workflows/release.yml` does the same on GitHub's runners, for an existing tag, when started by hand.
+Its tag carries the line `released-by: make release`, so the tag push does not start a second release on GitHub.
+Trusted publishing works only from the workflow, so locally npm and PyPI need `NPM_TOKEN` / `PYPI_TOKEN`.
 
 ## Repository layout
 
@@ -166,5 +201,6 @@ power-policy checks run in seconds; never set it in production (the Controller l
 ## Pull requests
 
 - Keep changes small and focused, with tests for behavior changes.
-- `make check` green locally before merge. There is no automatic CI; paste the tail of its output in the PR.
+- PR CI (go, sdk, python) green before merge; `make check` runs the same locally. For release-affecting changes also
+  run `make check-full` and paste the tail of its output in the PR.
 - Update the docs in `docs/` when behavior changes: they describe the current state of the code.

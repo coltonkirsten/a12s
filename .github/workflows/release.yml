@@ -1,11 +1,13 @@
-# On demand only; `make release VERSION=x.y.z` does the same from a workstation (CONTRIBUTING.md#releasing).
-# For an existing v* tag: push every image of the release to ghcr.io/coltonkirsten/a12s/<name>:<version>, make sure the
-# default harness bundles are published, then publish the binaries, the Homebrew formula and the client SDKs (to npm
-# and PyPI).
+# Runs when a v* tag is pushed (or by hand for an existing tag): pushes every image of the release to
+# ghcr.io/coltonkirsten/a12s/<name>:<version>, makes sure the default harness bundles are published, then publishes the
+# binaries, the Homebrew formula and the client SDKs (npm and PyPI via trusted publishing; CONTRIBUTING.md#releasing).
 # Binaries go last so a released binary never points at images that are not there yet.
+# `make release VERSION=x.y.z` is the local fallback; it marks its tag so this workflow does not release it twice.
 name: release
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -17,21 +19,49 @@ permissions:
   packages: write
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io/coltonkirsten/a12s
   SOURCE: https://github.com/${{ github.repository }}
-  TAG: ${{ inputs.tag }}
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
+  # A tag pushed by scripts/release.sh is released by that script already: skip it here.
+  guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          msg=""
+          if [ "$(jq -r .object.type <<< "$ref")" = tag ]; then
+            msg=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$(jq -r .object.sha <<< "$ref")" -q .message)
+          fi
+          if [ "$EVENT" = push ] && grep -q 'released-by: make release' <<< "$msg"; then
+            echo "::notice::$TAG was released locally by make release; nothing to do"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   images:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -70,11 +100,13 @@ jobs:
           done
 
   bundles:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -101,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
           fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
@@ -115,81 +147,72 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
 
+  # npm: trusted publishing (OIDC, no stored token) first, then the NPM_TOKEN secret if set, else skip with a warning.
+  # Trusted publishing needs npm >= 11.5.1 and a trusted publisher on the npm package (CONTRIBUTING.md#releasing).
   sdk:
     needs: binaries
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # trusted publishing and provenance
     defaults:
       run:
         working-directory: sdk/typescript
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - name: NPM_TOKEN is set
-        id: token
-        working-directory: .
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN is not set; skipping the npm publish of a12s"
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.token.outputs.ok == 'true'
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
-      - if: steps.token.outputs.ok == 'true'
-        uses: actions/setup-node@v7
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
-      - if: steps.token.outputs.ok == 'true'
-        run: npm ci
-      - if: steps.token.outputs.ok == 'true'
-        run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
-      - if: steps.token.outputs.ok == 'true'
-        run: npm run build && npm test
-      - if: steps.token.outputs.ok == 'true'
-        run: npm publish --provenance --access public
+      - name: npm >= 11.5.1 (trusted publishing)
+        run: |
+          npx -y semver -r '>=11.5.1' "$(npm -v)" > /dev/null || npm install -g npm@11
+          npm -v
+      - run: npm ci
+      - run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
+      - run: npm run build && npm test
+      - name: publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          v="${TAG#v}"
+          if [ "$(npm view "a12s@$v" version 2> /dev/null)" = "$v" ]; then echo "a12s@$v is already on npm"; exit 0; fi
+          if npm publish --access public; then echo "published with trusted publishing"; exit 0; fi
+          if [ -n "$NPM_TOKEN" ]; then
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$RUNNER_TEMP/npmrc"
+            if NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc" npm publish --access public; then echo "published with NPM_TOKEN"; exit 0; fi
+          fi
+          echo "::warning::npm publish of a12s@$v skipped: no trusted publisher on npm and no working NPM_TOKEN (CONTRIBUTING.md#releasing)"
 
+  # PyPI: trusted publishing (OIDC) first, then the PYPI_TOKEN secret if set, else skip with a warning.
   pypi:
     needs: binaries
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write # trusted publishing
     defaults:
       run:
         working-directory: sdk/python
-    env:
-      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
     steps:
-      - name: PYPI_TOKEN is set
-        id: token
-        working-directory: .
-        run: |
-          if [ -z "$PYPI_TOKEN" ]; then
-            echo "::warning::PYPI_TOKEN is not set; skipping the PyPI publish of a12s"
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.token.outputs.ok == 'true'
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
-      - if: steps.token.outputs.ok == 'true'
-        uses: astral-sh/setup-uv@v10.3.0
-      - if: steps.token.outputs.ok == 'true'
-        run: sed -i "s/^version = .*/version = \"${TAG#v}\"/" pyproject.toml
-      - if: steps.token.outputs.ok == 'true'
-        run: uv run --extra dev pytest -q && uv run --extra dev mypy --strict a12s
-      - if: steps.token.outputs.ok == 'true'
-        run: uv build
-      - if: steps.token.outputs.ok == 'true'
-        run: uv publish --token "$PYPI_TOKEN"
+          ref: ${{ env.TAG }}
+      - uses: astral-sh/setup-uv@v10.3.0
+      - run: sed -i "s/^version = .*/version = \"${TAG#v}\"/" pyproject.toml
+      - run: uv run --extra dev pytest -q && uv run --extra dev mypy --strict a12s
+      - run: uv build
+      - name: publish
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          # --check-url skips files already on PyPI, so a re-run is safe.
+          if uv publish --trusted-publishing always --check-url https://pypi.org/simple/; then echo "published with trusted publishing"; exit 0; fi
+          if [ -n "$PYPI_TOKEN" ] && uv publish --trusted-publishing never --token "$PYPI_TOKEN" --check-url https://pypi.org/simple/; then
+            echo "published with PYPI_TOKEN"; exit 0
+          fi
+          echo "::warning::PyPI publish of a12s ${TAG#v} skipped: no trusted publisher on PyPI and no working PYPI_TOKEN (CONTRIBUTING.md#releasing)"
 
   # Both SDK packages on the GitHub release, so they install before (or without) npm and PyPI:
   # gh release download -R coltonkirsten/a12s -p 'a12s-*'
@@ -201,7 +224,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24

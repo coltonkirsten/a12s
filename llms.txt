@@ -167,3 +167,5 @@ live; `event: gap` = events lost); errors {code, message, fix}. Full: docs/api.m
 - docs/sdk.md: TypeScript and Python
 - docs/api.md: HTTP API, SSE, error codes
 - docs/fleet-file.md, docs/cli.md, docs/inbox.md, docs/services.md, docs/credentials.md, docs/extending.md
+- CONTRIBUTING.md: changing a12s itself. PRs run light CI (Go, both SDKs, API fixtures; `make check` locally is the
+  same); run `make check-full` (images, Services, bundles; needs Docker) before release-affecting changes

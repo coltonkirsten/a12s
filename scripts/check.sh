@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Everything that must pass before a merge, run locally: `make check` (all) or
+# Local checks: `make check` (go sdk python: what PR CI runs), `make check-full` (all steps, needs Docker) or
 # `scripts/check.sh <step>...` with steps go computerd sdk python services tiers controller bundles.
 # Stops at the first failure. The Docker steps prune dangling images and build cache when they finish.
 set -euo pipefail
@@ -31,7 +31,7 @@ cleanup() {
     echo "FAIL  ${current:-check} (exit $rc)"
   else
     echo
-    echo "PASS  make check: ${steps[*]} ($((SECONDS - started))s)"
+    echo "PASS  check: ${steps[*]} ($((SECONDS - started))s)"
   fi
 }
 trap cleanup EXIT
