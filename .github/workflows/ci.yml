@@ -40,6 +40,22 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  sdk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
   # Tier images. slim uses the buildx GHA cache; browser is built on the default
   # builder so it can use the freshly loaded slim image as its base.
   tiers:

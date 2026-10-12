@@ -8,3 +8,4 @@ node_modules/
 .DS_Store
 examples/lab/fleet.lock
 examples/quickstart/fleet.lock
+sdk/typescript/dist/

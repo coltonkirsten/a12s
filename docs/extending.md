@@ -232,5 +232,20 @@ for await (const ev of a12s.events("analyst")) {
 }
 ```
 
+| Method | API |
+|---|---|
+| `A12sClient.fromFleet(name)` / `new A12sClient({url, token})` | owner token from `~/.a12s/<fleet>/controller.json`, or a scoped token |
+| `putFleet(req)` | `PUT /v1/fleet` (what `a12s up` sends) |
+| `status()`, `computer(name)` | `GET /v1/status` |
+| `send(name, msg)` / `enqueue` | `POST /v1/computers/{c}/inbox`; always sends an idempotency key |
+| `prompt(name, body, {onEvent})` | enqueue, wait for delivery, stream the Turn; resolves with its text and status |
+| `inbox(name, {state, bodies, after})`, `message(name, id)`, `withdraw(name, id)` | the inbox endpoints |
+| `events(name, {turn, after, signal})` | the journal as SSE, reconnecting with `Last-Event-ID` |
+| `messageEvents(name, id)`, `waitForTurn(name, id)` | one Message's state changes; the Turn that delivered it |
+| `services()`, `service(name)` | `GET /v1/services` |
+| `createToken(req)`, `stop(name, turn)` | scoped tokens; interrupt a Turn |
+
+Errors are `A12sError` with `status`, `code` and the Controller's `fix` line.
+
 Give an app the least it needs with a scoped token instead of the owner token:
 `a12s token create app --actions send,events --computers analyst`, then `new A12sClient({ url, token })`.
