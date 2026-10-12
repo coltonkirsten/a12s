@@ -14,13 +14,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/gateway"
 )
-
-const gatewayToken = "gateway"
 
 func runGateway(g *globals, args []string) error {
 	flags := g.flags("gateway")
@@ -61,18 +60,6 @@ func runGateway(g *globals, args []string) error {
 	ctx, cancel := interruptible()
 	defer cancel()
 
-	// The page gets a scoped token, never the owner's: the Controller enforces --allow and --computers.
-	_ = c.Do(ctx, "DELETE", "/v1/tokens/"+gatewayToken, nil, nil)
-	var tok api.Token
-	if err := c.Do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: gatewayToken, Actions: list(*allow), Computers: list(*computers)}, &tok); err != nil {
-		return fmt.Errorf("create the gateway's token: %w", err)
-	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = c.Do(ctx, "DELETE", "/v1/tokens/"+gatewayToken, nil, nil)
-	}()
-
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
 		return err
@@ -81,6 +68,25 @@ func runGateway(g *globals, args []string) error {
 	if err != nil {
 		return fmt.Errorf("%w (pick another with --port)", err)
 	}
+
+	// The page gets a scoped token of its own, never the owner's: the Controller enforces --allow and --computers.
+	// One per gateway, named for its port, so gateways on the same Fleet never revoke each other's.
+	tokenName := gatewayTokenPrefix + strconv.Itoa(*port)
+	var existing api.TokensResponse
+	if err := c.Do(ctx, "GET", "/v1/tokens", nil, &existing); err == nil {
+		for _, name := range staleGatewayTokens(existing.Tokens, *port, portInUse) {
+			_ = c.Do(ctx, "DELETE", "/v1/tokens/"+name, nil, nil)
+		}
+	}
+	var tok api.Token
+	if err := c.Do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: tokenName, Actions: list(*allow), Computers: list(*computers)}, &tok); err != nil {
+		return fmt.Errorf("create the gateway's token: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.Do(ctx, "DELETE", "/v1/tokens/"+tokenName, nil, nil)
+	}()
 	serving := "the built-in dashboard"
 	if *web != "" {
 		serving = *web
@@ -108,7 +114,7 @@ func runGateway(g *globals, args []string) error {
 	srv := &http.Server{Handler: gateway.Handler(gateway.Config{Controller: base, Token: tok.Secret, Key: key, Web: site, Dev: devURL}), ReadHeaderTimeout: 10 * time.Second}
 	link := fmt.Sprintf("http://127.0.0.1:%d/?key=%s", *port, key)
 	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s and /a12s.js; API as token:%s (%s on %s); Ctrl-C to stop\n",
-		f.Metadata.Name, link, serving, gatewayToken, strings.Join(tok.Actions, ","), strings.Join(tok.Computers, ","))
+		f.Metadata.Name, link, serving, tokenName, strings.Join(tok.Actions, ","), strings.Join(tok.Computers, ","))
 	if !*noOpen {
 		openBrowser(link)
 	}
@@ -122,6 +128,37 @@ func runGateway(g *globals, args []string) error {
 		return err
 	}
 	return devExited
+}
+
+const gatewayTokenPrefix = "gateway-"
+
+// staleGatewayTokens are the gateway tokens whose gateway is gone: a gateway holds its port while it runs, so a free
+// port (or our own, which we hold now) means its token was left behind by a crash or kill.
+func staleGatewayTokens(tokens []api.Token, own int, inUse func(port int) bool) []string {
+	var stale []string
+	for _, t := range tokens {
+		p, err := strconv.Atoi(strings.TrimPrefix(t.Name, gatewayTokenPrefix))
+		if !strings.HasPrefix(t.Name, gatewayTokenPrefix) || err != nil || p <= 0 || p > 65535 {
+			continue
+		}
+		if p == own || !inUse(p) {
+			stale = append(stale, t.Name)
+		}
+	}
+	return stale
+}
+
+func portInUse(port int) bool {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return true
+		}
+		if err == nil {
+			_ = ln.Close()
+		}
+	}
+	return false
 }
 
 // openBrowser is best effort: the link is printed either way.

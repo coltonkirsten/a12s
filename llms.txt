@@ -132,7 +132,7 @@ the printed http://127.0.0.1:7012/?key=… link (it opens the browser; --no-open
 reload) included. Already running: `a12s gateway --dev http://localhost:5173`. In the app,
 `import { connect } from "@coltonkirsten/a12s"; const a12s = await connect();` (no URL, no token). The key (new each
 run) becomes a cookie; /v1/ and /a12s.js need it. Scripts and tests: connect({ url: "http://127.0.0.1:7012", token: key }).
-Static files: `a12s gateway --web ./dist`. The API at /v1/ uses a scoped token (default actions
+Static files: `a12s gateway --web ./dist`. The API at /v1/ uses the gateway's own scoped token gateway-<port> (Messages arrive via token:gateway-7012; default actions
 status,events,send,inbox; change with --allow, --computers). Without a bundler:
 
 ```html

@@ -15,6 +15,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   your browser (`--no-open` only prints it), trades the key for an HttpOnly cookie and drops it from the URL. `/v1/`
   and `/a12s.js` need the cookie or `Authorization: Bearer <key>`, so other users and programs on the machine can't
   use the Fleet through it. What to do: open the printed link instead of typing `http://127.0.0.1:7012`.
+- Each gateway has its own scoped token, `gateway-<port>` (was `gateway`, shared), revoked when it stops; tokens left
+  by a killed gateway are removed when the next one starts, and a running gateway's token is never touched. Several
+  gateways can serve one Fleet. What to do: Messages from the page now arrive `via` `token:gateway-<port>`; match on
+  that prefix if your code checked for `token:gateway`.
 - `brew install coltonkirsten/tap/a12s` no longer needs `HOMEBREW_GITHUB_API_TOKEN`: the repo is public, so the formula
   downloads the release assets directly.
 

@@ -182,7 +182,9 @@ the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-
 ```
 
 The page may use `status`, `events`, `send` and `inbox` on every Computer; narrow that with
-`--allow status,events` and `--computers lead,worker1`. Messages it sends arrive `via` `token:gateway`. The gateway
+`--allow status,events` and `--computers lead,worker1`. Each gateway has its own token, `gateway-<port>`, so Messages from the page arrive `via` `token:gateway-7012`. It
+is revoked when the gateway stops; one left by a killed gateway is removed when the next gateway starts. Several
+gateways can serve one Fleet on different `--port`s. The gateway
 answers only `127.0.0.1` and `localhost`, needs its key, and refuses writes from other origins, so other sites open in
 the same browser can't use it. It is for this machine: to serve a page to other people, put your own server and
 authentication in front of a scoped token.
