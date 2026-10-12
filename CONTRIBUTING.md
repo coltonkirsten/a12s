@@ -60,6 +60,11 @@ step with `internal/api`, `go test ./internal/api` renders every API type into `
 and fails if the file is stale. After changing an API type, run `go test ./internal/api -run TestSDKFixtures -update`
 and fix `src/types.ts` until the SDK's `npm run lint` passes.
 
+`llms.txt` has a generated "API surface" block: every route in the Controller's `Handler` with the action a scoped
+token needs, and every public method of both SDKs' clients. `go test ./internal/controller` fails when it is stale;
+after adding or renaming a route or SDK method, run `go test ./internal/controller -run TestLLMsTxtSurface -update`
+and describe the change in llms.txt's prose too.
+
 The Python SDK in `sdk/python` parses the same fixtures strictly into its dataclasses:
 `cd sdk/python && uv run --extra dev pytest -q && uv run --extra dev mypy --strict a12s`.
 

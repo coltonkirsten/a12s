@@ -9,6 +9,8 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   finds its port in the URL it prints (or `--dev-port`), and forwards everything except `/v1/` and `/a12s.js` to it,
   websockets included, so the page and the API share one origin and hot reload works. `--dev <url>` proxies a dev
   server that is already running. See [Recipes: A web app](docs/recipes.md#a-web-app-react-vite-any-dev-server).
+- `llms.txt` lists every HTTP route (with the action a scoped token needs) and every SDK client method, generated
+  from the code and checked in CI, so it can no longer drift.
 
 ### Changed
 - **`a12s gateway` is locked with a key made for each run**, like Jupyter: it opens `http://127.0.0.1:7012/?key=…` in
