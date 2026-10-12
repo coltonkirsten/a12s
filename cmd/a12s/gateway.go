@@ -85,7 +85,6 @@ func runGateway(g *globals, args []string) error {
 	return nil
 }
 
-
 func list(s string) []string {
 	var out []string
 	for _, p := range strings.Split(s, ",") {
