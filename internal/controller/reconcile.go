@@ -845,6 +845,11 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 			if err != nil {
 				return nil, nil, caps, fmt.Errorf("computers.%s.image: %w", name, err)
 			}
+			if comp.Tier() == fleet.TierCustom {
+				if err := c.admitComputerImage(ctx, comp.Image, id); err != nil {
+					return nil, nil, caps, invalid("computers.%s.image: %v", name, err)
+				}
+			}
 			lock.PinImage(comp.Image, id)
 		}
 		if key := comp.Harness.BundleKey(); hosts[key] == nil {
@@ -995,4 +1000,22 @@ func hashPresetTar(data []byte) (string, error) {
 		}
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// admitComputerImage accepts a custom image only if it was built FROM an a12s base image: computerd is the
+// Computer's whole contract with the Controller, and the inherited label says which release it came from.
+func (c *Controller) admitComputerImage(ctx context.Context, ref, id string) error {
+	img, err := c.drv.InspectComputerImage(ctx, id)
+	if err != nil {
+		return err
+	}
+	base := version.Image(fleet.TierSlim)
+	v := img.Labels[driver.LabelComputerdVersion]
+	switch {
+	case v == "":
+		return fmt.Errorf("%s has no %s label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM %s (or the browser tier)", ref, driver.LabelComputerdVersion, base)
+	case !img.Computerd:
+		return fmt.Errorf("%s has no computerd at %s  fix: build it FROM %s and keep /opt/a12s", ref, driver.ComputerdMain, base)
+	}
+	return nil
 }

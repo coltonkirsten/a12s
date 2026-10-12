@@ -20,8 +20,12 @@ the docker CLI, so a private registry works through your `docker login`.
 
 ## Custom images
 
-Toolchain-heavy images should be derived from a tier rather than a new tier. A custom image needs computerd at
-`/opt/a12s/computerd` and should ship `flock(1)` (util-linux), which secret injection uses.
+Toolchain-heavy images should be derived from a tier rather than a new tier: `FROM ghcr.io/coltonkirsten/a12s/slim:<release>`
+(or `a12s/slim:dev` in a source build), then add your tools. Admission accepts a custom image only if it carries the
+`ai.a12s.computerd.version` label (set on the tiers and inherited by every image built FROM them) and has computerd
+at `/opt/a12s/computerd/dist/main.js`; otherwise `a12s up` changes nothing and says how to fix it. a12s starts
+computerd as root itself, so an image's `ENTRYPOINT`, `CMD`, `USER` and `HEALTHCHECK` are ignored. A worked example
+is in [Extending a12s](extending.md#a-custom-agent-image).
 
 Build them with `make images` (slim, browser and controller).
 
