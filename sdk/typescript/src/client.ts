@@ -17,6 +17,7 @@ import type {
   StatusResponse,
   Token,
   TokenRequest,
+  ToolCall,
   Turn,
   TurnInboxMessage,
 } from "./types.js";
@@ -508,13 +509,13 @@ export class TurnStream implements AsyncIterableIterator<Turn> {
 
 /** Folds a Computer's events into Turns. */
 class TurnBuilder {
-  private readonly open = new Map<string, { text: string; afterTool: boolean; messages: TurnInboxMessage[]; startedAt?: string }>();
+  private readonly open = new Map<string, { text: string; afterTool: boolean; messages: TurnInboxMessage[]; tools: Map<string, ToolCall>; startedAt?: string }>();
 
   add(ev: A12sEvent): Turn | undefined {
     if (!ev.turn) return undefined;
     const key = `${ev.computer}\u0000${ev.turn}`;
     let t = this.open.get(key);
-    if (!t) this.open.set(key, (t = { text: "", afterTool: false, messages: [] }));
+    if (!t) this.open.set(key, (t = { text: "", afterTool: false, messages: [], tools: new Map() }));
     switch (ev.type) {
       case "turn.started":
         t.messages = ev.data.inbox?.messages ?? [];
@@ -522,7 +523,13 @@ class TurnBuilder {
         return undefined;
       case "tool.started":
         t.afterTool = true;
+        t.tools.set(ev.data.id, { id: ev.data.id, name: ev.data.name, input: ev.data.input, isError: false });
         return undefined;
+      case "tool.finished": {
+        const started = t.tools.get(ev.data.id);
+        t.tools.set(ev.data.id, { id: ev.data.id, name: ev.data.name, input: started?.input, output: ev.data.output, isError: ev.data.isError });
+        return undefined;
+      }
       case "text.delta":
         // Text before and after a tool call are separate messages: keep them on separate lines.
         if (t.afterTool && t.text && !t.text.endsWith("\n")) t.text += "\n";
@@ -539,6 +546,7 @@ class TurnBuilder {
           text: t.text,
           ...(ev.data.error ? { error: ev.data.error } : {}),
           messages: t.messages,
+          tools: [...t.tools.values()],
           usage: ev.data.usage,
           ...(t.startedAt ? { startedAt: t.startedAt } : {}),
           finishedAt: ev.ts,

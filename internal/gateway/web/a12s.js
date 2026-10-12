@@ -431,7 +431,7 @@ var TurnBuilder = class {
     if (!ev.turn) return void 0;
     const key = `${ev.computer}\0${ev.turn}`;
     let t = this.open.get(key);
-    if (!t) this.open.set(key, t = { text: "", afterTool: false, messages: [] });
+    if (!t) this.open.set(key, t = { text: "", afterTool: false, messages: [], tools: /* @__PURE__ */ new Map() });
     switch (ev.type) {
       case "turn.started":
         t.messages = ev.data.inbox?.messages ?? [];
@@ -439,7 +439,13 @@ var TurnBuilder = class {
         return void 0;
       case "tool.started":
         t.afterTool = true;
+        t.tools.set(ev.data.id, { id: ev.data.id, name: ev.data.name, input: ev.data.input, isError: false });
         return void 0;
+      case "tool.finished": {
+        const started = t.tools.get(ev.data.id);
+        t.tools.set(ev.data.id, { id: ev.data.id, name: ev.data.name, input: started?.input, output: ev.data.output, isError: ev.data.isError });
+        return void 0;
+      }
       case "text.delta":
         if (t.afterTool && t.text && !t.text.endsWith("\n")) t.text += "\n";
         t.afterTool = false;
@@ -455,6 +461,7 @@ var TurnBuilder = class {
           text: t.text,
           ...ev.data.error ? { error: ev.data.error } : {},
           messages: t.messages,
+          tools: [...t.tools.values()],
           usage: ev.data.usage,
           ...t.startedAt ? { startedAt: t.startedAt } : {},
           finishedAt: ev.ts

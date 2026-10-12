@@ -5,6 +5,8 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 ## Unreleased
 
 ### Added
+- SDK Turns carry `tools`: every tool call with its input and output, so what an agent `send`s to another Computer
+  is on the Turn.
 - Docs built for skimming: a 5-minute quickstart, [Concepts](docs/concepts.md) led by the five ideas you need,
   [Recipes](docs/recipes.md), and [`llms.txt`](llms.txt), the whole surface on one page for coding agents.
 - `a12s --version` (and `-v`).

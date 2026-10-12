@@ -242,6 +242,7 @@ test("events: every Computer merged, ready() after each stream is live, then tur
     const got: string[] = [];
     for await (const t of turns) {
       assert.equal(t.messages[0]!.via, "local");
+      assert.deepEqual(t.tools.map((x) => x.name), ["mcp__a12s__send"]);
       got.push(`${t.computer}:${t.status}:${t.text}`);
       if (got.length === 2) break;
     }

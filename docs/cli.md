@@ -68,7 +68,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 
 | Command | What it does |
 |---|---|
-| `a12s creds set <name>` | Read a value from stdin (not echoed), store it at `~/.a12s/<fleet>/<name>` (0600) and bind it. |
+| `a12s creds set <name>` | Read a value from stdin (not echoed), store it at `~/.a12s/<fleet>/<name>` (0600) and bind it in the Fleet's bindings file. Run it in the Fleet's directory (or with `-F`). `down --purge` keeps these files. |
 | `a12s token create <name> --actions a,b --computers c,d` | Create a scoped API token; it's printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
 | `a12s drive ls` | Drives, sizes, what's attached, orphans. |

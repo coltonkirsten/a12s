@@ -232,6 +232,17 @@ class TurnInboxMessage:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ToolCall:
+    """One tool call in a Turn. ``send`` to another Computer is ``mcp__a12s__send`` with ``input["body"]``."""
+
+    id: str
+    name: str
+    input: Any = None
+    output: Any = None
+    is_error: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Turn:
     """A finished Turn: who sent the work (``messages``), what the agent said (``text``) and how it ended.
 
@@ -245,6 +256,7 @@ class Turn:
     text: str
     error: str | None = None
     messages: list[TurnInboxMessage]
+    tools: list[ToolCall]
     usage: Any
     started_at: str | None = None
     finished_at: str

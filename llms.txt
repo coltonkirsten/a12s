@@ -42,7 +42,7 @@ From scratch:
 
 ```sh
 a12s init myproj && cd myproj         # fleet.yaml (one Computer "hello"), fleet.lock, bindings, .gitignore
-a12s creds set anthropic              # reads the token from stdin
+a12s creds set anthropic              # reads the token from stdin; run it in the Fleet's directory
 a12s up
 a12s prompt hello "Reply with the single word pong."
 ```
@@ -80,7 +80,8 @@ a12s status                           # phase, inbox, power, warnings (--json fo
 a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
 a12s send <c> "…"                     # send and exit; works while busy or asleep
 a12s logs <c> --follow                # one Computer's events
-a12s gateway [--web dir]              # http://127.0.0.1:7012: built-in dashboard, or your page + /a12s.js + /v1/
+a12s gateway [--web dir] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2]
+                                      # http://127.0.0.1:7012: built-in dashboard, or your page + /a12s.js + /v1/
 a12s inbox <c> [--bodies]             # pending Messages; inbox resume <c> releases a hold
 a12s stop <c> | sleep <c> | wake <c>
 a12s token create <name> --actions send,events,status,inbox,power,stop --computers c1,c2|'*'
@@ -98,7 +99,7 @@ const r = await a12s.prompt("hello", "…");          // Turn & {message}: r.tex
 const m = await a12s.send("lead", "…");             // or { body, sender, metadata, fresh, expires, replaceKey }
 const turns = a12s.turns(["lead", "worker1"]);      // no argument = every Computer
 await turns.ready();                                // connected: nothing after this is missed
-for await (const t of turns) { t.computer; t.text; t.status; t.messages[0]?.via; break; }
+for await (const t of turns) { t.computer; t.text; t.status; t.messages[0]?.via; t.tools[0]?.input; break; }
 for await (const ev of a12s.events()) { if (ev.type === "text.delta") ev.data.text; }   // typed by ev.type
 await a12s.status(); await a12s.computer("lead"); await a12s.inbox("lead", { bodies: true });
 await a12s.stop("lead"); await a12s.sleep("lead"); await a12s.wake("lead");
@@ -114,7 +115,7 @@ r = client.prompt("hello", "…")       # r.text, r.status, r.id, r.messages, r.
 client.send("lead", "…", sender="app", metadata={"k": "v"}, fresh=False, expires=None, replace_key=None)
 with client.turns(["lead", "worker1"]) as turns:   # entering waits until connected
     client.send("lead", "task")
-    for t in turns:                   # t.computer, t.text, t.status, t.messages[0].via
+    for t in turns:                   # t.computer, t.text, t.status, t.messages[0].via, t.tools[0].input
         break
 for ev in client.events():            # ev.type, ev.data (dict, camelCase keys), ev.computer
     pass
@@ -147,6 +148,9 @@ live; `event: gap` = events lost); errors {code, message, fix}. Full: docs/api.m
 - Fan out / fan in: lead's CLAUDE.md says to `send` parts to workers and reply `DISPATCHED`; workers `send`
   results back; lead answers `FINAL ANSWER: …` once it has all. The app watches `turns(["lead", …])` and stops at
   that marker. Lead keeps its conversation between Turns, so it remembers what it handed out.
+- Send each new task with fresh=true (TS `{ body, fresh: true }`) so lead starts a new conversation; without it
+  lead remembers earlier tasks and may repeat an old answer.
+- A worker's result is in its `send` tool call (t.tools, name mcp__a12s__send, input.body), not in t.text.
 - Watch first, then send (`await turns.ready()` / `with client.turns(...)`), or you can miss fast Turns.
 - An agent can only `send` to Computers in its grants.send; anything else gets 403 no_grant.
 - Messages are untrusted data to the agent; put instructions in the preset's CLAUDE.md, not in Message bodies.
