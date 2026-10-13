@@ -69,14 +69,20 @@ func apiSurface(t *testing.T) string {
 		b.WriteString(m[1] + strings.Repeat(" ", max(1, 48-len(m[1]))) + need + "\n")
 	}
 	b.WriteString("```\n\n")
-	b.WriteString("TypeScript A12sClient: " + strings.Join(methods(t, "../../sdk/typescript/src/client.ts", "export class A12sClient {", "\n}\n", tsMethodRE), ", ") + "\n\n")
-	py := strings.Join(methods(t, "../../sdk/python/a12s/_client.py", "\nclass Client:", "\nclass ", pyMethodRE), ", ")
-	pyAsync := strings.Join(methods(t, "../../sdk/python/a12s/_async.py", "\nclass AsyncClient:", "\nclass ", pyMethodRE), ", ")
-	if py == pyAsync {
-		b.WriteString("Python Client and AsyncClient: " + py + "\n")
-	} else {
-		b.WriteString("Python Client: " + py + "\n\nPython AsyncClient: " + pyAsync + "\n")
+	b.WriteString("SDK objects (Python names; TypeScript is camelCase):\n\n")
+	const ts, py, pyAsync = "../../sdk/typescript/src/fleet.ts", "../../sdk/python/a12s/_fleet.py", "../../sdk/python/a12s/_afleet.py"
+	for _, class := range []string{"Fleet", "AgentComputers", "AgentComputer", "Services", "Service", "Tokens"} {
+		tsm := strings.Join(methods(t, ts, "export class "+class+" {", "\n}\n", tsMethodRE), ", ")
+		pym := strings.Join(methods(t, py, "\nclass "+class+":", "\nclass ", pyMethodRE), ", ")
+		pyAm := strings.Join(methods(t, pyAsync, "\nclass Async"+class+":", "\nclass ", pyMethodRE), ", ")
+		b.WriteString("- " + class + ": TypeScript " + tsm + "; Python " + pym)
+		if pyAm != pym {
+			b.WriteString("; Python Async" + class + " " + pyAm)
+		}
+		b.WriteString("\n")
 	}
+	b.WriteString("\nDeprecated one release (name-first): TypeScript A12sClient " + strings.Join(methods(t, "../../sdk/typescript/src/client.ts", "export class A12sClient {", "\n}\n", tsMethodRE), ", ") +
+		"; Python Client " + strings.Join(methods(t, "../../sdk/python/a12s/_client.py", "\nclass Client:", "\nclass ", pyMethodRE), ", ") + "\n")
 	return b.String()
 }
 

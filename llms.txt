@@ -481,11 +481,16 @@ GET /v1/tokens                                  owner
 DELETE /v1/tokens/{name}                        owner
 ```
 
-TypeScript A12sClient: status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, createToken, putFleet
+SDK objects (Python names; TypeScript is camelCase):
 
-Python Client: close, status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, create_token, put_fleet
+- Fleet: TypeScript get, replace, events, turns, status; Python close, status, events, turns, get, replace; Python AsyncFleet aclose, status, events, turns, get, replace
+- AgentComputers: TypeScript create, get, list; Python create, get, list
+- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, update, sleep, wake, stop, inbox, message, withdraw, remove
+- Services: TypeScript create, get, list; Python create, get, list
+- Service: TypeScript reload, update, remove, sleep, wake; Python reload, update, sleep, wake, remove
+- Tokens: TypeScript create, list, remove; Python create, list, remove
 
-Python AsyncClient: aclose, status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, create_token, put_fleet
+Deprecated one release (name-first): TypeScript A12sClient status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, createToken, putFleet; Python Client close, status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, create_token, put_fleet
 <!-- /api-surface -->
 
 ## Patterns and gotchas
