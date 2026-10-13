@@ -164,8 +164,9 @@ agent_computers:
   agent computer only if its `via` is listed. Once awake, the first Batch delivers everything pending.
 - **Manual sleep wins.** After `a12s sleep <name>`, no Message wakes the agent computer until a manual `a12s wake`.
   `a12s sleep <name> --allow-wake` sleeps it and leaves the policy in charge.
-- **Credentials.** The Controller holds credentials only in memory. After a Controller restart, auto-wake pauses
-  until `a12s up` sends them again.
+- **Credentials.** A Controller started with `a12s up --memory-only-credentials` holds credentials only in memory.
+  After it restarts, auto-wake pauses until `a12s up` sends them again. By default the Controller stores them, so
+  auto-wake carries on after a restart.
 - A failed automatic wake pauses auto-wake for that agent computer until a manual `a12s wake` or `a12s up`.
 - `--expires 0` never wakes anything: a wake takes seconds. Send a window (`--expires 60s`) instead.
 

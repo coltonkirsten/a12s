@@ -99,12 +99,10 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if err := f.Validate(); err != nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
 	}
-	creds := o.creds
 	c.mu.Lock()
-	if len(creds) == 0 {
-		creds = c.creds
-	}
+	creds := maps.Clone(c.creds)
 	c.mu.Unlock()
+	maps.Copy(creds, o.creds)
 	for _, name := range f.ComputerNames() {
 		if !o.touches(name) {
 			continue
@@ -180,7 +178,10 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		}
 	}
 	if len(o.creds) > 0 {
-		c.creds = maps.Clone(creds)
+		if err := c.setCredsLocked(o.creds); err != nil {
+			c.mu.Unlock()
+			return api.PutFleetResponse{}, err
+		}
 	}
 	for _, name := range f.ComputerNames() {
 		rec := c.state.Computers[name]
@@ -869,7 +870,7 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 		_, inFleet = c.state.Fleet.Computers[name]
 	}
 	if inFleet && req.State == api.PowerAwake {
-		maps.Copy(c.creds, req.Credentials)
+		_ = c.setCredsLocked(req.Credentials)
 		rec.DesiredPower = driver.PowerAwake
 		rec.Restarts = 0
 		_ = c.saveLocked()

@@ -23,6 +23,8 @@ var reservedPaths = []string{"/home", "/opt/a12s", "/run", "/tmp", "/proc", "/sy
 
 func ValidName(s string) bool { return nameRE.MatchString(s) }
 
+func ValidCredential(s string) bool { return credentialRE.MatchString(s) }
+
 func (f *Fleet) Validate() error {
 	var errs []error
 	bad := func(field, format string, args ...any) {

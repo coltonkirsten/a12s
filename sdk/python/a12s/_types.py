@@ -303,3 +303,17 @@ class FleetResponse:
     version: int
     fleet: dict[str, Any]
     drift: list[Change]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CredentialInfo:
+    """A credential's name, whether it has a value, and who uses it. Values are never read back."""
+
+    name: str
+    set: bool
+    used_by: list[str] | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CredentialsResponse:
+    credentials: list[CredentialInfo]

@@ -71,7 +71,7 @@ func apiSurface(t *testing.T) string {
 	b.WriteString("```\n\n")
 	b.WriteString("SDK objects (Python names; TypeScript is camelCase):\n\n")
 	const ts, py, pyAsync = "../../sdk/typescript/src/fleet.ts", "../../sdk/python/a12s/_fleet.py", "../../sdk/python/a12s/_afleet.py"
-	for _, class := range []string{"Fleet", "AgentComputers", "AgentComputer", "Services", "Service", "Tokens"} {
+	for _, class := range []string{"Fleet", "AgentComputers", "AgentComputer", "Services", "Service", "Tokens", "Credentials"} {
 		tsm := strings.Join(methods(t, ts, "export class "+class+" {", "\n}\n", tsMethodRE), ", ")
 		pym := strings.Join(methods(t, py, "\nclass "+class+":", "\nclass ", pyMethodRE), ", ")
 		pyAm := strings.Join(methods(t, pyAsync, "\nclass Async"+class+":", "\nclass ", pyMethodRE), ", ")

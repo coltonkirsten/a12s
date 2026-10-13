@@ -17,6 +17,7 @@ from ._parse import from_json
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
     ComputerStatus,
+    CredentialInfo,
     EnqueueResponse,
     Event,
     InboxList,
@@ -242,6 +243,26 @@ class AsyncTokens:
         await self._fleet._client._request("DELETE", f"/v1/tokens/{core.enc(name)}")
 
 
+class AsyncCredentials:
+    """Credentials by name: set once, then name them in a spec's ``credentials``."""
+
+    def __init__(self, fleet: AsyncFleet) -> None:
+        self._fleet = fleet
+
+    async def set(self, name: str, value: str) -> CredentialInfo:
+        """Stores the value on the Controller; agent computers that use it get the new value at once."""
+        path = f"/v1/credentials/{core.enc(name)}"
+        return from_json(CredentialInfo, await self._fleet._client._request("PUT", path, {"value": value}))
+
+    async def list(self) -> builtins.list[CredentialInfo]:
+        res = await self._fleet._client._request("GET", "/v1/credentials")
+        return [from_json(CredentialInfo, c) for c in (res or {}).get("credentials") or []]
+
+    async def remove(self, name: str) -> None:
+        """Raises A12sError ``in_use`` while an agent computer or Service uses it."""
+        await self._fleet._client._request("DELETE", f"/v1/credentials/{core.enc(name)}")
+
+
 class AsyncFleet:
     """A running AsyncFleet. It connects like ``connect()``: ``url`` and ``token``, else ``$A12S_URL`` and
     ``$A12S_TOKEN``, else the nearest fleet.yaml's AsyncFleet (or ``fleet=``), else the only running Controller.
@@ -265,6 +286,7 @@ class AsyncFleet:
         self.agent_computers = AsyncAgentComputers(self)
         self.services = AsyncServices(self)
         self.tokens = AsyncTokens(self)
+        self.credentials = AsyncCredentials(self)
 
     async def aclose(self) -> None:
         await self._client.aclose()

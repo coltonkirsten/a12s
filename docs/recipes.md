@@ -33,7 +33,7 @@ defaults:
   egress: { allow: [github.com, api.github.com] }
 
 agent_computers:
-  triage:                                 # a long-lived one; it also makes a12s up send the credential
+  triage:                                 # a long-lived one
     instructions: Sort incoming issues by area and urgency.
 ```
 

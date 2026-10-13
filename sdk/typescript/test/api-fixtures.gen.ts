@@ -761,6 +761,27 @@ export const agentComputersResponseMinimal: T.AgentComputersResponse = {
   ]
 };
 
+export const credentialsResponse: T.CredentialsResponse = {
+  "credentials": [
+    {
+      "name": "name",
+      "set": true,
+      "usedBy": [
+        "usedBy"
+      ]
+    }
+  ]
+};
+
+export const credentialsResponseMinimal: T.CredentialsResponse = {
+  "credentials": [
+    {
+      "name": "name",
+      "set": true
+    }
+  ]
+};
+
 export const enqueueRequest: T.EnqueueRequest = {
   "body": "body",
   "sender": "sender",

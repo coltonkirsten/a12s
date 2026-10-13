@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -15,10 +18,19 @@ import (
 	"github.com/coltonkirsten/a12s/internal/version"
 )
 
+type upOptions struct {
+	asleep, force, memoryOnly bool
+	image                     string
+	refresh                   []string
+}
+
 func runUp(g *globals, args []string) error {
 	fs := g.flags("up")
-	asleep := fs.Bool("asleep", false, "create new Computers asleep")
-	image := fs.String("controller-image", cli.DefaultControllerImage, "Controller image")
+	var o upOptions
+	fs.BoolVar(&o.asleep, "asleep", false, "create new agent computers asleep")
+	fs.BoolVar(&o.force, "force", false, "overwrite changes made through the API since the last up without asking")
+	fs.BoolVar(&o.memoryOnly, "memory-only-credentials", false, "a new Controller keeps credential values in memory only")
+	fs.StringVar(&o.image, "controller-image", cli.DefaultControllerImage, "Controller image")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -26,7 +38,7 @@ func runUp(g *globals, args []string) error {
 	if len(pos) > 0 {
 		return usageError("up takes no arguments")
 	}
-	return g.up(*asleep, *image, nil)
+	return g.up(o)
 }
 
 // runLock is the only way to move a Service's pin on an unchanged ref.
@@ -55,23 +67,33 @@ func runLock(g *globals, args []string) error {
 		}
 		refresh = append(refresh, name)
 	}
-	return g.up(false, *image, refresh)
+	return g.up(upOptions{image: *image, refresh: refresh})
 }
 
-func (g *globals) up(asleep bool, image string, refresh []string) error {
+// loadSpec reads the Fleet file as the API takes it: presets and seccomp profiles inline.
+func (g *globals) loadSpec() (*fleet.Spec, *fleet.Fleet, error) {
 	spec, err := fleet.LoadSpec(g.fleetPath)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := g.inline(spec); err != nil {
-		return err
+		return nil, nil, err
 	}
 	f, err := spec.Resolve()
 	if err != nil {
-		return fmt.Errorf("%s: %w", g.fleetPath, err)
+		return nil, nil, fmt.Errorf("%s: %w", g.fleetPath, err)
 	}
 	if spec.LegacyKey {
 		fmt.Fprintf(os.Stderr, "hint: %s uses computers:, the old name of agent_computers: (it still works in this release)\n", g.fleetPath)
+	}
+	return spec, f, nil
+}
+
+func (g *globals) up(o upOptions) error {
+	asleep, image, refresh := o.asleep, o.image, o.refresh
+	spec, f, err := g.loadSpec()
+	if err != nil {
+		return err
 	}
 	onDisk, err := fleet.LoadLock(g.lockPath())
 	if err != nil {
@@ -88,23 +110,21 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 	if err != nil {
 		return err
 	}
-	creds, err := b.Resolve(cli.Needed(f))
+	// Every bound credential goes, so agent computers created from code can name it too; unbound names may already be
+	// in the Controller's store, and it refuses what is set nowhere.
+	creds, err := b.ResolveBound(cli.AllBound(b, f))
 	if err != nil {
 		return err
 	}
-	svcCreds, err := b.ResolveBound(cli.NeededByServices(f))
-	if err != nil {
-		return err
-	}
-	maps.Copy(creds, svcCreds)
 
 	ctx, cancel := interruptible()
 	defer cancel()
 	cli.PullMissing(ctx, cli.FleetImages(f, image), os.Stderr)
 	c, err := cli.EnsureController(ctx, cli.StartOptions{
-		Fleet: f.Metadata.Name,
-		Image: image,
-		Log:   func(s string) { fmt.Fprintln(os.Stderr, s) },
+		Fleet:                 f.Metadata.Name,
+		Image:                 image,
+		Log:                   func(s string) { fmt.Fprintln(os.Stderr, s) },
+		MemoryOnlyCredentials: o.memoryOnly,
 	})
 	if err != nil {
 		return err
@@ -113,8 +133,15 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 		delete(lock.Services, fleet.ServiceKey(name, f.Services[name].Image))
 	}
 	req := api.PutFleetRequest{Fleet: spec, Lock: lock, Credentials: creds, Asleep: asleep, Refresh: refresh, File: true}
+	version, err := g.checkDrift(ctx, c, req, o.force)
+	if err != nil {
+		return err
+	}
 	var resp api.PutFleetResponse
-	if err := c.Do(ctx, "PUT", "/v1/fleet", req, &resp); err != nil {
+	if err := c.DoHeaders(ctx, "PUT", "/v1/fleet", map[string]string{"If-Match": fmt.Sprintf("%q", fmt.Sprint(version))}, req, &resp); err != nil {
+		if cli.HasCode(err, api.ErrVersionMismatch) {
+			return fmt.Errorf("%w\n  the Fleet changed while a12s up ran; run it again", err)
+		}
 		return err
 	}
 	if err := g.finishUp(onDisk, lock, &resp, asleep, os.Stdout, os.Stderr); err != nil {
@@ -126,6 +153,52 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 		}
 	}
 	return nil
+}
+
+// checkDrift finds what this up would undo of the changes made through the API since the last up, and asks before
+// overwriting them: y/N in a terminal, a failure elsewhere unless force. It returns the version the write is
+// conditional on.
+func (g *globals) checkDrift(ctx context.Context, c *cli.Client, req api.PutFleetRequest, force bool) (int64, error) {
+	var live api.FleetResponse
+	if err := c.Do(ctx, "GET", "/v1/fleet", nil, &live); err != nil {
+		return 0, err
+	}
+	if len(live.Drift) == 0 {
+		return live.Version, nil
+	}
+	var dry api.PutFleetResponse
+	if err := c.Do(ctx, "PUT", "/v1/fleet?dryRun=true", req, &dry); err != nil {
+		return 0, err
+	}
+	drifted := map[string]bool{}
+	for _, d := range live.Drift {
+		drifted[d.Kind+"/"+d.Name] = true
+	}
+	var undo []api.Change
+	for _, ch := range dry.Changes {
+		if drifted[ch.Kind+"/"+ch.Name] {
+			undo = append(undo, ch)
+		}
+	}
+	if len(undo) == 0 {
+		return live.Version, nil
+	}
+	fmt.Fprintf(os.Stderr, "the live Fleet changed since the last a12s up; this up undoes:\n")
+	for _, line := range cli.ChangeLines(undo) {
+		fmt.Fprintln(os.Stderr, "  "+line)
+	}
+	switch {
+	case force:
+		return live.Version, nil
+	case isTerminal(os.Stdin) && isTerminal(os.Stderr) && os.Getenv("CI") == "":
+		fmt.Fprint(os.Stderr, "apply anyway? [y/N] ")
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(answer)); a == "y" || a == "yes" {
+			return live.Version, nil
+		}
+		return 0, errors.New("nothing applied")
+	}
+	return 0, errors.New("nothing applied: the live Fleet has changes this up would undo\n  fix: a12s export to keep them in the file, or a12s up --force to overwrite them")
 }
 
 // finishUp keeps what converged applied and pinned; any failure still fails the command.
@@ -167,6 +240,7 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 // inline turns what only a Fleet file can say into what the API takes: each home.preset directory becomes files and
 // each security.seccomp path the profile itself.
 func (g *globals) inline(spec *fleet.Spec) error {
+	var defaultKind string
 	one := func(field string, raw json.RawMessage) (json.RawMessage, error) {
 		if len(raw) == 0 {
 			return raw, nil
@@ -175,10 +249,23 @@ func (g *globals) inline(spec *fleet.Spec) error {
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("%s: %w", field, err)
 		}
+		kind := c.Harness.Kind
+		if kind == "" {
+			kind = defaultKind
+		}
 		if p := c.Home.Preset; p != "" {
 			files, err := fleet.InlineFiles(g.presetDir(p))
 			if err != nil {
 				return nil, fmt.Errorf("%s.home.preset: %w", field, err)
+			}
+			// The preset's instructions file is the instructions, so a preset and inline instructions read the same.
+			name := fleet.InstructionsFile(kind)
+			if body, ok := files[name]; ok {
+				if c.Instructions != "" {
+					return nil, fmt.Errorf("%s.instructions: the preset %s also has %s; keep one", field, p, name)
+				}
+				c.Instructions = body
+				delete(files, name)
 			}
 			for path, body := range files {
 				if _, dup := c.Files[path]; dup {
@@ -202,6 +289,9 @@ func (g *globals) inline(spec *fleet.Spec) error {
 			if err := c.Security.Seccomp.UnmarshalJSON(data); err != nil {
 				return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
 			}
+		}
+		if field == "defaults" {
+			defaultKind = c.Harness.Kind
 		}
 		return fleet.SpecOf(c), nil
 	}

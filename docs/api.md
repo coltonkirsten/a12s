@@ -38,8 +38,11 @@ is the owner token; `a12s token create` makes scoped ones (see [Inbox: scoped to
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written |
 | `PUT`, `PATCH`, `DELETE /v1/services/{s}` | create or replace, change, remove a Service, like an agent computer (owner only) |
 | `POST /v1/tokens`, `GET /v1/tokens`, `DELETE /v1/tokens/{name}` | scoped tokens (owner only) |
+| `GET /v1/credentials` | → `{credentials: [{name, set, usedBy}]}`: every credential the Fleet names or the Controller stores, never a value (owner only) |
+| `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy}`: store it; agent computers and Services that use it get it at once (owner only) |
+| `DELETE /v1/credentials/{name}` | → 204; `409 in_use` while one uses it, `404` if none is stored (owner only) |
 | `GET /v1/fleet` | → `{version, fleet, drift}` with `ETag: "<version>"` (owner only) |
-| `PUT /v1/fleet` | `{fleet, lock?, credentials?, asleep?, refresh?}` → replace the whole Fleet (owner only); `a12s up` sends this |
+| `PUT /v1/fleet` | `{fleet, lock?, credentials?, asleep?, refresh?, file?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
 The paths of earlier releases, `/v1/computers/...`, are still served as `/v1/agent-computers/...` for one release.
 `GET /v1/status` also still carries `computers`, the same list as `agentComputers`, for one release.
@@ -74,7 +77,9 @@ Content-Type: application/json
 - The same three verbs work on `/v1/services/{s}`, with the Service fields.
 
 **The whole Fleet.** `GET /v1/fleet` returns `{version, fleet, drift}` and the version as the `ETag`. `drift` lists
-what changed through the API since the last `a12s up`, which undoes it. `PUT /v1/fleet` replaces everything:
+what changed since the last `PUT /v1/fleet` with `"file": true` (what `a12s up` sends), as a change list; a later
+whole-Fleet write without it counts as drift too. `a12s up` undoes drift, after asking. `PUT /v1/fleet` replaces
+everything:
 
 ```http
 PUT /v1/fleet
@@ -86,9 +91,10 @@ Content-Type: application/json
 ```
 
 With `If-Match`, a Fleet that changed since you read it answers `412 version_mismatch`: read it again and retry.
-Without it, the write is unconditional. The version goes up by one with every write that changes something. Only
-the Fleet file can hold paths: a `home.preset` or a `security.seccomp` path in the body is refused (`a12s up` sends
-the preset as `files` and the profile as JSON).
+Without it, the write is unconditional. `credentials` (`{name: value}`, values base64 in JSON) are merged into the
+Controller's store: names it leaves out keep their values. The version goes up by one with every write that changes
+something. Only the Fleet file can hold paths: a `home.preset` or a `security.seccomp` path in the body is refused
+(`a12s up` sends the preset as `files` and the profile as JSON).
 
 **Every write** takes `?dryRun=true`: it checks the write and lists what it would change, and changes nothing. Every
 write answers:
@@ -157,12 +163,13 @@ Every error is JSON with a stable `code`, a `message`, and usually a `fix` line 
 |---|---|---|
 | `invalid`, `bad_metadata`, `bad_expires` | 400 | The request or the Fleet is wrong; the message names the field. |
 | `missing_field` | 400 | A required field (harness, image) is set neither on the agent computer nor in `defaults`. |
-| `missing_credential` | 400 | The agent computer names a credential the Controller holds no value for; `a12s creds set` it, name it in the Fleet file and run `a12s up`. |
+| `missing_credential` | 400 | The agent computer names a credential the Controller holds no value for; set it with `PUT /v1/credentials/{name}`, or `a12s creds set` it and run `a12s up`. |
 | `unauthorized` | 401 | Missing or unknown token. |
 | `forbidden`, `no_grant` | 403 | The token or the sender lacks that action, agent computer or grant. |
 | `not_found`, `unknown_request` | 404 | No such agent computer, Service, Message or Turn. |
 | `busy`, `conflict`, `not_idle`, `idempotency_conflict` | 409 | The agent computer is busy, or the request conflicts with an earlier one. |
 | `exists` | 409 | A create-only write (`If-None-Match: *`) named an agent computer or Service that exists. |
+| `in_use` | 409 | Removing a credential that an agent computer or Service still names; the message lists them. |
 | `withdrawn`, `discarded`, `expired`, `replaced`, `already_claimed`, `already_delivered` | 409 | The Message already ended or was taken. |
 | `gone` | 410 | It existed and is gone. |
 | `version_mismatch` | 412 | `If-Match` names an old Fleet version: someone wrote in between. Read and retry. |

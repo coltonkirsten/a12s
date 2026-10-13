@@ -82,7 +82,7 @@ func TestUpInlinesPresetsAndSeccomp(t *testing.T) {
 		t.Fatal(err)
 	}
 	scout := f.Computers["scout"]
-	if scout.Home.Preset != "" || scout.Files["CLAUDE.md"] != "hi\n" || scout.Files[".claude/skills/x/SKILL.md"] != "skill\n" || string(scout.Security.Seccomp.Profile) != `{"defaultAction":"SCMP_ACT_ALLOW"}` {
+	if scout.Home.Preset != "" || scout.Instructions != "hi\n" || len(scout.Files) != 1 || scout.Files[".claude/skills/x/SKILL.md"] != "skill\n" || string(scout.Security.Seccomp.Profile) != `{"defaultAction":"SCMP_ACT_ALLOW"}` {
 		t.Fatalf("scout = %+v", scout)
 	}
 
@@ -91,10 +91,7 @@ func TestUpInlinesPresetsAndSeccomp(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec, _ = fleet.LoadSpec(g.fleetPath)
-	if err := g.inline(spec); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := spec.Resolve(); err == nil || !strings.Contains(err.Error(), "instructions: also set") {
+	if err := g.inline(spec); err == nil || !strings.Contains(err.Error(), "also has CLAUDE.md") {
 		t.Fatalf("instructions and a preset CLAUDE.md = %v", err)
 	}
 }

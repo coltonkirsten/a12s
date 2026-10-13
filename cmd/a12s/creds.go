@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
+	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
@@ -69,11 +71,32 @@ func runCreds(g *globals, args []string) error {
 	if err := cli.BindFile(g.bindings(), name, path); err != nil {
 		return err
 	}
+	uploaded := uploadCredential(f.Metadata.Name, name, value)
 	if g.json {
-		return printJSON(map[string]string{"credential": name, "file": path, "bindings": g.bindings()})
+		return printJSON(map[string]any{"credential": name, "file": path, "bindings": g.bindings(), "uploaded": uploaded})
+	}
+	if uploaded {
+		fmt.Printf("%s saved to %s (0600), bound in %s and set on the running Controller\n", name, path, g.bindings())
+		return nil
 	}
 	fmt.Printf("%s saved to %s (0600) and bound in %s; a12s up sends it\n", name, path, g.bindings())
 	return nil
+}
+
+// uploadCredential sets the value on the Fleet's Controller when one runs; agent computers that use it get it at
+// once.
+func uploadCredential(fleetName, name string, value []byte) bool {
+	c, err := cli.Dial(fleetName)
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := c.Do(ctx, "PUT", "/v1/credentials/"+name, api.CredentialRequest{Value: string(value)}, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: the running Controller did not take %s (%v); a12s up sends it\n", name, err)
+		return false
+	}
+	return true
 }
 
 // serviceLogin runs the login in a memory-only container so the credential

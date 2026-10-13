@@ -29,7 +29,9 @@ type command struct {
 func commands() []command {
 	return []command{
 		{"init", "[dir] [--harness claude-code|codex]", "scaffold fleet.yaml, bindings and .gitignore", runInit},
-		{"up", "[--asleep] [--controller-image ref]", "apply the Fleet file: create, update or stage Computers", runUp},
+		{"up", "[--asleep] [--force] [--memory-only-credentials]", "apply the Fleet file: create, update or stage agent computers", runUp},
+		{"diff", "", "the Fleet file against the live Fleet; exit 2 when they differ", runDiff},
+		{"export", "[--force]", "write the live Fleet back to the Fleet file and presets", runExport},
 		{"apply", "--interrupt [--grace 30s]", "force a staged change onto a busy Computer", runApply},
 		{"status", "[<name>]", "state, session, active turn, harness version, warnings", runStatus},
 		{"prompt", "<name> [--new] \"…\"", "send a turn and stream its events", runPrompt},

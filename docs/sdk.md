@@ -86,8 +86,8 @@ coder = fleet.agent_computers.create(
 - `security.seccomp` is the profile's JSON object itself (in the Fleet file it is a path).
 - A name that is taken fails with `A12sError` code `exists`; pass `replace: true` (`replace=True`) to overwrite it.
 - A field that neither the spec nor `defaults` sets (harness, image) fails with `missing_field`. A credential the
-  Controller holds no value for fails with `missing_credential`: `a12s up` sends the credentials that the Fleet
-  file's agent computers name, so keep one there that names each credential your code uses.
+  Controller holds no value for fails with `missing_credential`. `a12s up` sends every credential bound in the
+  bindings file, and [`fleet.credentials.set`](#services-tokens-and-credentials) sets one from code.
 - A grant may name an agent computer that doesn't exist yet (the write warns), so two that send to each other can be
   created one after the other.
 
@@ -122,7 +122,9 @@ coder.remove()
 
 The Fleet file and your code share one Fleet. `a12s up` makes the Fleet match the file again: it removes agent
 computers your code created and undoes changes it made ([`fleet.get()`](#the-whole-fleet) lists them as `drift`).
-Keep long-lived roles in `fleet.yaml` and create the short-lived ones (one per task, user or branch) from code.
+It lists those changes and asks before undoing them, and fails without a terminal unless `--force`; `a12s export`
+writes them to the file instead ([CLI](cli.md#changes-made-through-the-api)). Keep long-lived roles in `fleet.yaml`
+and create the short-lived ones (one per task, user or branch) from code.
 
 ## Send work, get the answer
 
@@ -248,7 +250,8 @@ To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`
 ## The whole Fleet
 
 `fleet.get()` returns the Fleet as written (`spec`, a `FleetSpec` with `defaults`, `agent_computers`, `services`,
-`drives`), its `version`, and `drift`: what changed through the API since the last `a12s up`. `fleet.replace(fn)`
+`drives`), its `version`, and `drift`: what changed through the API since the last `a12s up`, `fleet.replace`
+writes included. `fleet.replace(fn)`
 reads it, lets `fn` change it (in place, or by returning a new one) and writes it back only if nobody wrote in
 between; otherwise it reads again and retries, up to 5 times.
 
@@ -274,7 +277,7 @@ fleet.replace(edit)
 Every change adds one to the version. The HTTP API also checks a write without making it (`?dryRun=true`); see
 [HTTP API](api.md#changing-the-fleet).
 
-## Services and tokens
+## Services, tokens and credentials
 
 `fleet.services` has `create`, `get` and `list`; a `Service` has `reload`, `update`, `sleep`, `wake` and `remove`,
 like an agent computer. `create` takes the [Service fields](services.md) of the Fleet file.
@@ -288,6 +291,22 @@ const tok = await fleet.tokens.create("dashboard", { actions: ["status", "events
 
 ```python
 tok = fleet.tokens.create("dashboard", actions=["status", "events"], agent_computers=["lead"])
+```
+
+`fleet.credentials` stores credential values in the Controller by name (owner only). `set(name, value)` stores one;
+agent computers and Services that name it get the new value at once. `list()` returns a `CredentialInfo` per
+credential the Fleet names or the Controller stores: `name`, `set` and `usedBy` (`used_by`), never the value.
+`remove(name)` fails with `in_use` while an agent computer or Service names it. See
+[Credentials](credentials.md#from-code-and-the-api).
+
+```ts
+await fleet.credentials.set("stripe-test", key);
+const coder = await fleet.agentComputers.create("coder", { credentials: ["anthropic", "stripe-test"] });
+```
+
+```python
+fleet.credentials.set("stripe-test", key)
+coder = fleet.agent_computers.create("coder", credentials=["anthropic", "stripe-test"])
 ```
 
 ## In the browser

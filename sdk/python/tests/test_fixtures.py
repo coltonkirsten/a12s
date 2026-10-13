@@ -26,7 +26,7 @@ from a12s import (
 )
 from a12s._core import TurnBuilder
 from a12s._parse import _fields, from_json
-from a12s._types import AgentComputersResponse, FleetResponse
+from a12s._types import AgentComputersResponse, CredentialsResponse, FleetResponse
 
 FIXTURES: dict[str, Any] = json.loads((Path(__file__).parents[2] / "fixtures" / "api.json").read_text())
 
@@ -42,6 +42,7 @@ PARSED: dict[str, tuple[type, Callable[[Any], Any]]] = {
     "turnStartedData": (TurnInboxMessage, lambda f: f["inbox"]["messages"][0] if "inbox" in f else None),
     "fleetResponse": (FleetResponse, lambda f: f),
     "agentComputersResponse": (AgentComputersResponse, lambda f: f),
+    "credentialsResponse": (CredentialsResponse, lambda f: f),
 }
 # Requests the client builds from keyword arguments, and responses it passes through as dicts.
 REQUESTS = {"enqueueRequest", "tokenRequest"}

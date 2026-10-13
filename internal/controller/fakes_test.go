@@ -711,6 +711,10 @@ type harness struct {
 // so a test need not wait out a real window.
 func (h *harness) advance(d time.Duration) { h.skew.Add(int64(d)) }
 
+// persistCreds names the state dirs whose harness keeps credentials on disk; the rest run memory-only, so their
+// restarts forget credentials.
+var persistCreds = map[string]bool{}
+
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	dir := t.TempDir()
@@ -736,7 +740,7 @@ func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale}, d, ca)
+	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale, MemoryOnlyCredentials: !persistCreds[dir]}, d, ca)
 	if err != nil {
 		t.Fatal(err)
 	}

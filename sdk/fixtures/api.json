@@ -105,6 +105,25 @@
       }
     ]
   },
+  "credentialsResponse": {
+    "credentials": [
+      {
+        "name": "name",
+        "set": true,
+        "usedBy": [
+          "usedBy"
+        ]
+      }
+    ]
+  },
+  "credentialsResponseMinimal": {
+    "credentials": [
+      {
+        "name": "name",
+        "set": true
+      }
+    ]
+  },
   "diagnosticData": {
     "message": "message",
     "data": {},

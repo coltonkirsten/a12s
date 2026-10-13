@@ -51,6 +51,8 @@ type StartOptions struct {
 	// Wait of zero means 60s.
 	Wait time.Duration
 	Log  func(string)
+	// MemoryOnlyCredentials starts a new Controller that never writes credential values to its state volume.
+	MemoryOnlyCredentials bool
 }
 
 func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
@@ -110,6 +112,18 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 		}
 		if token == "" {
 			return nil, fmt.Errorf("container %s has no API token; remove it (docker rm -f %s) and run a12s up again", n.Container, n.Container)
+		}
+		if res.Container.Config.Image != o.Image {
+			// Another release's Controller: replace it. Its volumes, so the Fleet's state, stay, and the agent
+			// computers keep running while it restarts.
+			if _, err := dc.ContainerRemove(ctx, n.Container, client.ContainerRemoveOptions{Force: true}); err != nil {
+				return nil, fmt.Errorf("replace %s: %w", n.Container, err)
+			}
+			if err := createController(ctx, dc, n, o, labels, token); err != nil {
+				return nil, err
+			}
+			logf("replaced controller %s (%s -> %s)", n.Container, res.Container.Config.Image, o.Image)
+			break
 		}
 		if res.Container.State == nil || !res.Container.State.Running {
 			if _, err := dc.ContainerStart(ctx, n.Container, client.ContainerStartOptions{}); err != nil {
@@ -222,6 +236,9 @@ func createController(ctx context.Context, dc *client.Client, n ControllerNames,
 	// Lets tests run power-policy timers faster than real time.
 	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
 		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
+	}
+	if o.MemoryOnlyCredentials {
+		opts.Config.Env = append(opts.Config.Env, "A12S_MEMORY_ONLY_CREDENTIALS=1")
 	}
 	_, err := dc.ContainerCreate(ctx, opts)
 	if cerrdefs.IsNotFound(err) {

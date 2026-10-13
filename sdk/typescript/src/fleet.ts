@@ -15,6 +15,8 @@ import type {
   AgentComputerSpec,
   Change,
   ComputerStatus,
+  CredentialInfo,
+  CredentialsResponse,
   EnqueueRequest,
   EnqueueResponse,
   FleetResponse,
@@ -63,6 +65,7 @@ export class Fleet {
   readonly agentComputers: AgentComputers;
   readonly services: Services;
   readonly tokens: Tokens;
+  readonly credentials: Credentials;
 
   /** No discovery: `url` and `token` as given, by default the page's own origin. */
   constructor(opts: A12sClientOptions = {}) {
@@ -70,6 +73,7 @@ export class Fleet {
     this.agentComputers = new AgentComputers(this.client);
     this.services = new Services(this.client);
     this.tokens = new Tokens(this.client);
+    this.credentials = new Credentials(this.client);
   }
 
   /**
@@ -335,5 +339,24 @@ export class Tokens {
 
   async remove(name: string): Promise<void> {
     await this.client.request("DELETE", `/v1/tokens/${enc(name)}`);
+  }
+}
+
+/** Credentials by name: set once, then name them in a spec's `credentials`. Values are never read back. */
+export class Credentials {
+  constructor(private readonly client: A12sClient) {}
+
+  /** Stores the value on the Controller; agent computers that use it get the new value at once. */
+  set(name: string, value: string): Promise<CredentialInfo> {
+    return this.client.request<CredentialInfo>("PUT", `/v1/credentials/${enc(name)}`, { value });
+  }
+
+  async list(): Promise<CredentialInfo[]> {
+    return (await this.client.request<CredentialsResponse>("GET", "/v1/credentials")).credentials ?? [];
+  }
+
+  /** Fails with A12sError code `in_use` while an agent computer or Service uses it. */
+  async remove(name: string): Promise<void> {
+    await this.client.request("DELETE", `/v1/credentials/${enc(name)}`);
   }
 }

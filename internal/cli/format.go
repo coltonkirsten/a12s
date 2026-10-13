@@ -19,6 +19,31 @@ import (
 //	updated tester
 //	staged reviewer (applies when idle; a12s apply --interrupt to force)
 //	removed old (drives kept)
+//
+// ChangeLines prints a change list: + create, ~ update (with its fields), - remove.
+func ChangeLines(changes []api.Change) []string {
+	var out []string
+	for _, ch := range changes {
+		what := "agent computer"
+		if ch.Kind == api.KindService {
+			what = "Service"
+		}
+		switch ch.Op {
+		case api.ChangeCreate:
+			out = append(out, fmt.Sprintf("+ create %s %s", what, ch.Name))
+		case api.ChangeRemove:
+			out = append(out, fmt.Sprintf("- remove %s %s", what, ch.Name))
+		default:
+			line := fmt.Sprintf("~ update %s %s: %s", what, ch.Name, strings.Join(ch.Fields, ", "))
+			if ch.When == api.WhenIdle {
+				line += " (at idle)"
+			}
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	var lines []string
 	if len(r.Created) > 0 {
