@@ -307,10 +307,12 @@ export interface InboxListOptions {
   after?: number;
 }
 
-/** The fields every journal event has. `seq` is the Computer's journal position and the SSE id. */
+/** The fields every event has. `seq` is the agent computer's journal position (0 for the Controller's own events). */
 export interface EventEnvelope {
   v: number;
-  /** The Computer that journaled it. */
+  /** The agent computer it is about; absent on `fleet.changed` and in journals older than the field. */
+  agentComputer?: string;
+  /** `agentComputer` under its old name, for one release. */
   computer: string;
   session: string;
   /** The Turn it belongs to; "" for events outside a Turn. */
@@ -360,7 +362,37 @@ export interface TurnFinishedData {
   status: "completed" | "failed" | "interrupted";
   /** The harness's own usage object (tokens, cost), or null. */
   usage: unknown;
+  /** The same usage, normalized across harnesses, when the harness reported it. */
+  tokens?: TokenUsage;
   error?: string;
+}
+
+/** A Turn's token usage, the same for every harness. `input` excludes cached input. */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** The egress proxy refused a connection. */
+export interface EgressDeniedData {
+  host: string;
+  port: number;
+  reason?: string;
+}
+
+/** The Fleet's version moved; `names` are the agent computers and Services the write changed. */
+export interface FleetChangedData {
+  version: number;
+  /** Who wrote it. */
+  by: string;
+  names: string[];
+}
+
+export interface PhaseData {
+  phase: Phase;
+  error?: Failure;
 }
 
 export interface ToolStartedData {
@@ -414,10 +446,15 @@ export type ContinuationAbandonedEvent = Ev<"continuation.abandoned", { continua
 export type TurnRefusedEvent = Ev<"turn.refused", { requestId: string }>;
 /** A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included. */
 export type InboxDiscardedEvent = Ev<"inbox.discarded", Record<string, unknown>>;
+export type EgressDeniedEvent = Ev<"egress.denied", EgressDeniedData>;
+/** Made by the Controller, on the fleet-wide stream only. */
+export type FleetChangedEvent = Ev<"fleet.changed", FleetChangedData>;
+/** Made by the Controller, on the fleet-wide stream only. */
+export type PhaseEvent = Ev<"agent_computer.phase", PhaseData>;
 /** Made by the SDK, never journaled: the stream could not resume from its cursor and events were lost. */
 export type GapEvent = Ev<"gap", GapData>;
 
-/** One event of a Computer's journal. Narrow on `type` to get typed `data`. */
+/** One event of an agent computer's journal, or the Controller's own on the fleet-wide stream. Narrow on `type` to get typed `data`. */
 export type A12sEvent =
   | TurnStartedEvent
   | TurnDispatchedEvent
@@ -434,6 +471,9 @@ export type A12sEvent =
   | ContinuationAbandonedEvent
   | TurnRefusedEvent
   | InboxDiscardedEvent
+  | EgressDeniedEvent
+  | FleetChangedEvent
+  | PhaseEvent
   | GapEvent;
 
 export type EventType = A12sEvent["type"];
@@ -449,6 +489,8 @@ export interface ToolCall {
 
 /** A finished Turn: what `turns()` yields and `prompt()` returns. */
 export interface Turn {
+  agentComputer: string;
+  /** `agentComputer` under its old name, for one release. */
   computer: string;
   /** The Turn id. */
   id: string;
@@ -462,8 +504,14 @@ export interface Turn {
   /** The tools it called, in order, with their input and output: what it `send`s to other Computers is here. */
   tools: ToolCall[];
   usage: unknown;
+  tokens?: TokenUsage;
   startedAt?: string;
   finishedAt: string;
+}
+
+/** Past Turns, newest first, as GET /v1/agent-computers/{name}/turns sends them. */
+export interface TurnsResponse {
+  turns: Array<Omit<Turn, "computer" | "tools"> & { tools: Array<Omit<ToolCall, "isError"> & { isError?: boolean }> }>;
 }
 
 export interface ApiErrorBody {

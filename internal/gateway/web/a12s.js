@@ -82,6 +82,7 @@ var A12sClient = class {
   url;
   token;
   fetchImpl;
+  shared;
   constructor(opts = {}) {
     this.url = (opts.url ?? "").replace(/\/+$/, "");
     this.token = opts.token;
@@ -147,6 +148,25 @@ var A12sClient = class {
       const q = opts.turn ? `?turn=${enc(opts.turn)}` : "";
       return this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
     }, names ?? (async () => (await this.status()).agentComputers.map((c) => c.name)), opts.signal);
+  }
+  /**
+   * @internal Events of the named agent computers (all if none), and the Controller's own about them, read from this
+   * client's one GET /v1/events connection.
+   */
+  sharedEvents(names, opts = {}) {
+    this.shared ??= new SharedEvents(
+      (cursor, signal) => this.fetchImpl(this.url + "/v1/events", {
+        headers: this.headers({ accept: "text/event-stream", ...cursor !== void 0 ? { "last-event-id": cursor } : {} }),
+        signal
+      })
+    );
+    const shared = this.shared;
+    const wanted2 = names && new Set(names);
+    return new EventStream(
+      (_name, live, signal) => shared.subscribe({ wanted: wanted2, live, onGap: opts.onGap, reconnectMs: opts.reconnectMs }, signal),
+      [""],
+      opts.signal
+    );
   }
   /**
    * Finished Turns of one Computer, several or all, as they end: who sent the work (`messages`), what the agent said
@@ -300,6 +320,157 @@ var A12sClient = class {
     }
   }
 };
+var SharedEvents = class {
+  constructor(open) {
+    this.open = open;
+  }
+  subs = /* @__PURE__ */ new Set();
+  conn;
+  live = false;
+  async *subscribe(sub, signal) {
+    const queue = [];
+    let failure;
+    let wake;
+    const notify = () => {
+      const w = wake;
+      wake = void 0;
+      w?.();
+    };
+    const s = {
+      ...sub,
+      push: (ev) => {
+        queue.push(ev);
+        notify();
+      },
+      fail: (error) => {
+        failure ??= { error };
+        notify();
+      }
+    };
+    signal.addEventListener("abort", notify, { once: true });
+    this.add(s);
+    try {
+      for (; ; ) {
+        if (queue.length) {
+          yield queue.shift();
+          continue;
+        }
+        if (failure) throw failure.error;
+        if (signal.aborted) return;
+        await new Promise((r) => wake = r);
+      }
+    } finally {
+      signal.removeEventListener("abort", notify);
+      this.remove(s);
+    }
+  }
+  add(s) {
+    this.subs.add(s);
+    if (!this.conn) {
+      const conn = new AbortController();
+      this.conn = conn;
+      this.live = false;
+      void this.run(conn);
+    } else if (this.live) {
+      s.live();
+    }
+  }
+  remove(s) {
+    this.subs.delete(s);
+    if (this.subs.size === 0) this.stop();
+  }
+  stop() {
+    this.conn?.abort();
+    this.conn = void 0;
+    this.live = false;
+  }
+  async run(conn) {
+    const { signal } = conn;
+    let cursor;
+    try {
+      while (!signal.aborted) {
+        let res;
+        try {
+          res = await this.open(cursor, signal);
+        } catch (err) {
+          if (signal.aborted) return;
+          if (!isNetworkError(err)) throw err;
+        }
+        if (res && !res.ok) {
+          const err = apiError(res.status, parseError(res.status, await res.text()));
+          if (res.status !== 502 && res.status !== 503) throw err;
+          res = void 0;
+        }
+        if (res) {
+          if (!res.body) throw new A12sStreamError("GET /v1/events: response has no body");
+          const frames = readSSE(res.body);
+          try {
+            for (; ; ) {
+              let r;
+              try {
+                r = await frames.next();
+              } catch {
+                break;
+              }
+              if (r.done) break;
+              cursor = this.frame(r.value, cursor);
+            }
+          } finally {
+            await frames.return(void 0);
+            res.body.cancel().catch(() => {
+            });
+          }
+        }
+        await sleep(this.reconnectMs(), signal);
+      }
+    } catch (err) {
+      if (signal.aborted) return;
+      const subs = [...this.subs];
+      if (this.conn === conn) this.stop();
+      for (const s of subs) s.fail(err);
+    }
+  }
+  /** Delivers one frame and returns the cursor to resume after. */
+  frame(f, cursor) {
+    if (f.event === "head") {
+      const id = parseJSON(f.data)?.id;
+      this.live = true;
+      for (const s of this.subs) s.live();
+      return typeof id === "string" && id ? id : cursor;
+    }
+    if (f.event === "gap") {
+      const data = cursor !== void 0 ? { lastEventId: cursor } : {};
+      const gap = { v: 1, computer: "", session: "", turn: "", seq: 0, ts: (/* @__PURE__ */ new Date()).toISOString(), type: "gap", data };
+      for (const s of this.subs) {
+        if (s.onGap === "throw") s.fail(new A12sGapError(data));
+        else s.push(gap);
+      }
+      return cursor;
+    }
+    if (f.event || !f.data) return cursor;
+    let ev;
+    try {
+      ev = JSON.parse(f.data);
+    } catch (err) {
+      throw new A12sStreamError(`malformed event after ${cursor ?? "(start)"}: ${f.data.slice(0, 120)}`, { cause: err });
+    }
+    for (const s of this.subs) if (wanted(s.wanted, ev)) s.push(ev);
+    return f.id ?? cursor;
+  }
+  reconnectMs() {
+    let ms = 1e3;
+    for (const s of this.subs) if (s.reconnectMs !== void 0) ms = Math.min(ms, s.reconnectMs);
+    return ms;
+  }
+};
+function agentComputerOf(ev) {
+  return ev.agentComputer || ev.computer;
+}
+function wanted(names, ev) {
+  if (!names) return true;
+  if (ev.type === "fleet.changed") return (ev.data?.names ?? []).some((n) => names.has(n));
+  return names.has(agentComputerOf(ev));
+}
 var EventStream = class {
   constructor(source, names, signal) {
     this.source = source;
@@ -439,7 +610,8 @@ var TurnBuilder = class {
   open = /* @__PURE__ */ new Map();
   add(ev) {
     if (!ev.turn) return void 0;
-    const key = `${ev.computer}\0${ev.turn}`;
+    const name = agentComputerOf(ev);
+    const key = `${name}\0${ev.turn}`;
     let t = this.open.get(key);
     if (!t) this.open.set(key, t = { text: "", afterTool: false, messages: [], tools: /* @__PURE__ */ new Map() });
     switch (ev.type) {
@@ -464,7 +636,8 @@ var TurnBuilder = class {
       case "turn.finished":
         this.open.delete(key);
         return {
-          computer: ev.computer,
+          agentComputer: name,
+          computer: name,
           id: ev.turn,
           session: ev.session,
           status: ev.data.status,
@@ -473,6 +646,7 @@ var TurnBuilder = class {
           messages: t.messages,
           tools: [...t.tools.values()],
           usage: ev.data.usage,
+          ...ev.data.tokens ? { tokens: ev.data.tokens } : {},
           ...t.startedAt ? { startedAt: t.startedAt } : {},
           finishedAt: ev.ts
         };
@@ -564,19 +738,28 @@ var Fleet = class _Fleet {
       return this.get();
     }
   }
-  /** Live events of the named agent computers, or (no argument) all of them, merged. See {@link A12sClient.events}. */
+  /**
+   * Live events of the named agent computers, or (no argument) all of them, and the Fleet's own (`fleet.changed`,
+   * `agent_computer.phase`). Every stream of this Fleet shares one connection, which reconnects without losing
+   * events. `await stream.ready()` before sending work you want to see from the start; `close()` (or `break`) ends it.
+   * `turn` or `after` (one agent computer) replays from its journal instead.
+   */
   events(agentComputers, opts = {}) {
-    return this.client.events(agentComputers, opts);
+    if (opts.turn !== void 0 || opts.after !== void 0) return this.client.events(agentComputers, opts);
+    return this.client.sharedEvents(namesOf(agentComputers), opts);
   }
   /** Finished Turns of the named agent computers, or all of them, as they end. */
   turns(agentComputers, opts = {}) {
-    return this.client.turns(agentComputers, opts);
+    return new TurnStream(this.client.sharedEvents(namesOf(agentComputers), opts));
   }
   /** Every agent computer and Service: phase, session, active Turn, inbox, power. */
   status() {
     return this.client.status();
   }
 };
+function namesOf(names) {
+  return typeof names === "string" ? [names] : names;
+}
 function emptySpec() {
   return { apiVersion: "a12s.ai/v1alpha1", kind: "Fleet", metadata: { name: "" }, agent_computers: {} };
 }
@@ -644,11 +827,23 @@ var AgentComputer = class {
   send(text, opts = {}) {
     return this.client.send(this.name, { ...opts, body: text });
   }
+  /** Its events, live, from the Fleet's shared connection; `turn` replays one Turn from its start instead. */
   events(opts = {}) {
-    return this.client.events(this.name, opts);
+    if (opts.turn !== void 0 || opts.after !== void 0) return this.client.events(this.name, opts);
+    return this.client.sharedEvents([this.name], opts);
   }
   turns(opts = {}) {
-    return this.client.turns(this.name, opts);
+    const { limit, ...rest } = opts;
+    if (limit !== void 0) return this.pastTurns(limit);
+    return new TurnStream(this.client.sharedEvents([this.name], rest));
+  }
+  async pastTurns(limit) {
+    const r = await this.client.request("GET", `${this.path}/turns?limit=${limit}`);
+    return (r.turns ?? []).map((t) => ({
+      ...t,
+      computer: t.agentComputer,
+      tools: t.tools.map((tc) => ({ ...tc, isError: tc.isError ?? false }))
+    }));
   }
   /** Stops its processes and keeps its disks, session and inbox. */
   sleep() {

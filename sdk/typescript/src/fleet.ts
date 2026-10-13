@@ -4,10 +4,11 @@ import {
   A12sError,
   type A12sClientOptions,
   type EventsOptions,
+  TurnStream,
   type EventStream,
   type PromptOptions,
   type PromptResult,
-  type TurnStream,
+  type SharedEventsOptions,
 } from "./client.js";
 import type {
   AgentComputerData,
@@ -30,6 +31,8 @@ import type {
   StatusResponse,
   Token,
   TokenAction,
+  Turn,
+  TurnsResponse,
 } from "./types.js";
 
 const enc = encodeURIComponent;
@@ -114,20 +117,30 @@ export class Fleet {
     }
   }
 
-  /** Live events of the named agent computers, or (no argument) all of them, merged. See {@link A12sClient.events}. */
+  /**
+   * Live events of the named agent computers, or (no argument) all of them, and the Fleet's own (`fleet.changed`,
+   * `agent_computer.phase`). Every stream of this Fleet shares one connection, which reconnects without losing
+   * events. `await stream.ready()` before sending work you want to see from the start; `close()` (or `break`) ends it.
+   * `turn` or `after` (one agent computer) replays from its journal instead.
+   */
   events(agentComputers?: string | string[], opts: EventsOptions = {}): EventStream {
-    return this.client.events(agentComputers, opts);
+    if (opts.turn !== undefined || opts.after !== undefined) return this.client.events(agentComputers, opts);
+    return this.client.sharedEvents(namesOf(agentComputers), opts);
   }
 
   /** Finished Turns of the named agent computers, or all of them, as they end. */
-  turns(agentComputers?: string | string[], opts: Omit<EventsOptions, "turn" | "after"> = {}): TurnStream {
-    return this.client.turns(agentComputers, opts);
+  turns(agentComputers?: string | string[], opts: SharedEventsOptions = {}): TurnStream {
+    return new TurnStream(this.client.sharedEvents(namesOf(agentComputers), opts));
   }
 
   /** Every agent computer and Service: phase, session, active Turn, inbox, power. */
   status(): Promise<StatusResponse> {
     return this.client.status();
   }
+}
+
+function namesOf(names?: string | string[]): string[] | undefined {
+  return typeof names === "string" ? [names] : names;
 }
 
 function emptySpec(): FleetSpec {
@@ -213,12 +226,29 @@ export class AgentComputer {
     return this.client.send(this.name, { ...opts, body: text });
   }
 
+  /** Its events, live, from the Fleet's shared connection; `turn` replays one Turn from its start instead. */
   events(opts: EventsOptions = {}): EventStream {
-    return this.client.events(this.name, opts);
+    if (opts.turn !== undefined || opts.after !== undefined) return this.client.events(this.name, opts);
+    return this.client.sharedEvents([this.name], opts);
   }
 
-  turns(opts: Omit<EventsOptions, "turn" | "after"> = {}): TurnStream {
-    return this.client.turns(this.name, opts);
+  /** Its last `limit` finished Turns, newest first. */
+  turns(opts: { limit: number }): Promise<Turn[]>;
+  /** Its Turns as they end, from the Fleet's shared connection. */
+  turns(opts?: SharedEventsOptions & { limit?: undefined }): TurnStream;
+  turns(opts: SharedEventsOptions & { limit?: number } = {}): TurnStream | Promise<Turn[]> {
+    const { limit, ...rest } = opts;
+    if (limit !== undefined) return this.pastTurns(limit);
+    return new TurnStream(this.client.sharedEvents([this.name], rest));
+  }
+
+  private async pastTurns(limit: number): Promise<Turn[]> {
+    const r = await this.client.request<TurnsResponse>("GET", `${this.path}/turns?limit=${limit}`);
+    return (r.turns ?? []).map((t) => ({
+      ...t,
+      computer: t.agentComputer,
+      tools: t.tools.map((tc) => ({ ...tc, isError: tc.isError ?? false })),
+    }));
   }
 
   /** Stops its processes and keeps its disks, session and inbox. */

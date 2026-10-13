@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 
 import { A12sError, Fleet, NotFound } from "../src/node.js";
+import * as fx from "./api-fixtures.gen.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; body: string };
@@ -139,6 +140,83 @@ test("north star: create, prompt, remove", async () => {
       "DELETE /v1/agent-computers/hello",
     ]);
     assert.ok(seen.every((s) => s.headers.authorization === "Bearer tok"));
+  } finally {
+    close();
+  }
+});
+
+const fev = (id: string, agentComputer: string, type: string, data: unknown, turn = "") =>
+  `id: ${id}\ndata: ${JSON.stringify({ v: 1, agentComputer, computer: agentComputer, session: "s", turn, seq: 1, ts: "", type, data })}\n\n`;
+
+async function take<T>(it: AsyncIterator<T>, n: number): Promise<T[]> {
+  const out: T[] = [];
+  while (out.length < n) out.push((await it.next()).value as T);
+  return out;
+}
+
+test("agent computers' and the Fleet's streams share one /v1/events connection, each filtered", async () => {
+  const conns: ServerResponse[] = [];
+  const { fleet, seen, close } = await fake((req, res) => {
+    if (req.url !== "/v1/events") return json(res, 200, view(req.url!.split("/").pop()!));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('event: head\ndata: {"id":"b-0"}\n\n');
+    conns.push(res);
+  });
+  try {
+    const [a, b] = await Promise.all([fleet.agentComputers.get("a"), fleet.agentComputers.get("b")]);
+    const ea = a.events();
+    const eb = b.events();
+    const all = fleet.events();
+    const turns = fleet.turns(["b"]);
+    await Promise.all([ea.ready(), eb.ready(), all.ready(), turns.ready()]);
+    conns[0]!.write(fev("b-1", "a", "text.delta", { text: "from a" }, "t_a"));
+    conns[0]!.write(fev("b-2", "b", "egress.denied", { host: "evil.com", port: 443 }));
+    conns[0]!.write(fev("b-3", "", "fleet.changed", { version: 2, by: "owner", names: ["a"] }));
+    conns[0]!.write(
+      fev("b-4", "b", "turn.finished", { status: "completed", usage: null, tokens: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } }, "t_b"),
+    );
+    assert.deepEqual((await take(ea, 2)).map((e) => e.type), ["text.delta", "fleet.changed"]);
+    assert.deepEqual((await take(eb, 2)).map((e) => e.type), ["egress.denied", "turn.finished"]);
+    assert.deepEqual((await take(all, 4)).map((e) => e.type), ["text.delta", "egress.denied", "fleet.changed", "turn.finished"]);
+    const [turn] = await take(turns, 1);
+    assert.deepEqual([turn!.agentComputer, turn!.computer, turn!.id, turn!.tokens?.output], ["b", "b", "t_b", 2]);
+    for (const s of [ea, eb, all, turns]) s.close();
+    assert.equal(seen.filter((s) => s.url === "/v1/events").length, 1);
+  } finally {
+    close();
+  }
+});
+
+test("the shared stream reconnects with Last-Event-ID", async () => {
+  const { fleet, seen, close } = await fake((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    if (req.headers["last-event-id"] === undefined) {
+      res.write('event: head\ndata: {"id":"b-0"}\n\n');
+      res.end(fev("b-1", "a", "text.delta", { text: "one" }));
+      return;
+    }
+    res.write(fev("b-2", "a", "text.delta", { text: "two" }));
+  });
+  try {
+    const events = fleet.events("a", { reconnectMs: 10 });
+    const got = await take(events, 2);
+    events.close();
+    assert.deepEqual(got.map((e) => (e.type === "text.delta" ? e.data.text : "")), ["one", "two"]);
+    assert.deepEqual(seen.map((s) => s.headers["last-event-id"]), [undefined, "b-1"]);
+  } finally {
+    close();
+  }
+});
+
+test("turns({ limit }) reads past Turns", async () => {
+  const { fleet, seen, close } = await fake((req, res) =>
+    req.url!.includes("/turns") ? json(res, 200, fx.turnsResponseMinimal) : json(res, 200, view("a")),
+  );
+  try {
+    const a = await fleet.agentComputers.get("a");
+    const [turn] = await a.turns({ limit: 5 });
+    assert.equal(seen[1]!.url, "/v1/agent-computers/a/turns?limit=5");
+    assert.deepEqual([turn!.agentComputer, turn!.computer, turn!.tools[0]!.isError], ["agentComputer", "agentComputer", false]);
   } finally {
     close();
   }
