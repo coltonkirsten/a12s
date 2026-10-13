@@ -2,6 +2,14 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Fixed
+- **A seccomp profile with an unknown architecture is refused at the write** (`400 invalid`, naming the field), not
+  accepted and then failed by runc at start, which left the agent computer in Error and `prompt()` waiting.
+- **`a12s token create` prints the secret alone on stdout** (the header goes to stderr), so
+  `TOKEN=$(a12s token create web --prefix web-)` captures exactly the secret.
+
 ## v0.4.2 (2026-10-12)
 
 What nine apps written by fresh agents with only llms.txt tripped over: inbox holds and wake-friendly sleep in the

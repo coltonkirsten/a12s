@@ -14,12 +14,28 @@ import (
 // seccompProfile is the subset of Docker's seccomp profile format a12s accepts. Unknown fields are refused rather
 // than passed through, so a typo cannot silently drop a rule.
 type seccompProfile struct {
-	DefaultAction   string            `json:"defaultAction"`
-	DefaultErrnoRet *uint             `json:"defaultErrnoRet,omitempty"`
-	Architectures   []string          `json:"architectures,omitempty"`
-	ArchMap         []json.RawMessage `json:"archMap,omitempty"`
-	Syscalls        []seccompSyscall  `json:"syscalls,omitempty"`
-	Flags           []string          `json:"flags,omitempty"`
+	DefaultAction   string           `json:"defaultAction"`
+	DefaultErrnoRet *uint            `json:"defaultErrnoRet,omitempty"`
+	Architectures   []string         `json:"architectures,omitempty"`
+	ArchMap         []seccompArch    `json:"archMap,omitempty"`
+	Syscalls        []seccompSyscall `json:"syscalls,omitempty"`
+	Flags           []string         `json:"flags,omitempty"`
+}
+
+type seccompArch struct {
+	Architecture     string   `json:"architecture"`
+	SubArchitectures []string `json:"subArchitectures,omitempty"`
+}
+
+// seccompArches are the names runc's libseccomp accepts; any other name makes the container fail to start, long after
+// the write was accepted.
+var seccompArches = map[string]bool{
+	"SCMP_ARCH_X86": true, "SCMP_ARCH_X86_64": true, "SCMP_ARCH_X32": true, "SCMP_ARCH_ARM": true,
+	"SCMP_ARCH_AARCH64": true, "SCMP_ARCH_MIPS": true, "SCMP_ARCH_MIPS64": true, "SCMP_ARCH_MIPS64N32": true,
+	"SCMP_ARCH_MIPSEL": true, "SCMP_ARCH_MIPSEL64": true, "SCMP_ARCH_MIPSEL64N32": true, "SCMP_ARCH_PPC": true,
+	"SCMP_ARCH_PPC64": true, "SCMP_ARCH_PPC64LE": true, "SCMP_ARCH_S390": true, "SCMP_ARCH_S390X": true,
+	"SCMP_ARCH_PARISC": true, "SCMP_ARCH_PARISC64": true, "SCMP_ARCH_RISCV64": true, "SCMP_ARCH_LOONGARCH64": true,
+	"SCMP_ARCH_M68K": true, "SCMP_ARCH_SH": true, "SCMP_ARCH_SHEB": true,
 }
 
 type seccompSyscall struct {
@@ -53,6 +69,27 @@ func ValidateSeccomp(data []byte) (allowByDefault bool, err error) {
 	}
 	if !seccompActions[p.DefaultAction] {
 		return false, fmt.Errorf("defaultAction %q is not a seccomp action (SCMP_ACT_ERRNO, SCMP_ACT_ALLOW, ...)", p.DefaultAction)
+	}
+	arch := func(field, a string) error {
+		if !seccompArches[a] {
+			return fmt.Errorf("%s %q is not a seccomp architecture (SCMP_ARCH_X86_64, SCMP_ARCH_AARCH64, SCMP_ARCH_ARM, ...)", field, a)
+		}
+		return nil
+	}
+	for i, a := range p.Architectures {
+		if err := arch(fmt.Sprintf("architectures[%d]", i), a); err != nil {
+			return false, err
+		}
+	}
+	for i, m := range p.ArchMap {
+		if err := arch(fmt.Sprintf("archMap[%d].architecture", i), m.Architecture); err != nil {
+			return false, err
+		}
+		for j, a := range m.SubArchitectures {
+			if err := arch(fmt.Sprintf("archMap[%d].subArchitectures[%d]", i, j), a); err != nil {
+				return false, err
+			}
+		}
 	}
 	if len(p.Syscalls) == 0 && p.DefaultAction != "SCMP_ACT_ALLOW" {
 		return false, errors.New("the profile lists no syscalls, so nothing could run")

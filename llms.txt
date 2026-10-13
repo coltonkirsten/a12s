@@ -173,7 +173,8 @@ computer one owner: the file or your code.
 a12s up                               # apply fleet.yaml (start the Controller if needed)
 a12s up --force                       # also undo changes made through the API without asking (CI)
 a12s up --memory-only-credentials     # a new Controller keeps credential values in memory only
-a12s diff                             # fleet.yaml vs the live Fleet, changes nothing; exit 2 if they differ
+a12s diff                             # fleet.yaml vs the live Fleet, changes nothing; exit 0 same, 2 differ, 1 failed
+                                      #   (in make/set -e, exit 2 aborts: `a12s diff; test $$? -eq 2` expects drift)
 a12s export [--force]                 # write the live Fleet back to fleet.yaml, presets/ and profiles/
 a12s status                           # phase, inbox, power, warnings (--json for machines)
 a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
@@ -184,11 +185,13 @@ a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow sta
 a12s ui [--port 7013] [--no-open]     # the web console (npx a12s-console; Node.js 20+); args go to the console
 a12s inbox <c> [--bodies]             # pending Messages (human table; --json for machines)
 a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Messages still queue), release, withdraw
-a12s stop <c> | sleep <c> [--allow-wake] | wake <c> [--clear-inbox]
+a12s stop <c> | sleep <c> [--allow-wake] | wake <c> [--clear-inbox]   # plain sleep: no Message wakes it until wake;
+                                      #   --allow-wake: a sender listed in wakeOnMessage wakes it
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
-a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix; prints the secret (a12st_…)
-                                      #   once, on its own line: owner powers on biz-* names, nothing outside
+a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names,
+                                      #   nothing outside. Prints the secret (a12st_…) once, alone on stdout:
+                                      #   TOKEN=$(a12s token create bizapp --prefix biz-); with --json it is .secret
 a12s token create <name> --actions send,events,status,inbox,power,stop --agent-computers c1,c2|'*'   # narrow
 a12s creds set <name>                 # see Setup
 a12s doctor                           # every check, with its fix
@@ -250,7 +253,9 @@ const box = await lead.inbox({ bodies: true });     // {computer, held, holdReas
                                                     //   [{id, seq, state, sender, via, body?, replaceKey?, …}], …}
 await lead.message(m.id); await lead.withdraw(m.id); // withdraw: a pending Message is removed, never delivered
 await lead.hold({ reason: "triage" }); await lead.resume();   // hold delivery (sends still queue); release it
-await lead.stop(); await lead.sleep(); await lead.wake();     // sleep({ allowWake: true }), wake({ clearInbox: true })
+await lead.stop(); await lead.wake();               // wake({ clearInbox: true }) discards pending Messages first
+await lead.sleep();                                 // asleep until wake(): NO Message wakes it, wakeOnMessage or not
+await lead.sleep({ allowWake: true });              // asleep, and a sender listed in wakeOnMessage wakes it
 await coder.remove();                               // stops and removes it; its drives are kept
 await fleet.status();                               // every agent computer and Service: phase, inbox, power
 
@@ -313,7 +318,9 @@ lead.update(instructions="…")         # changes only these fields; applies at 
 box = lead.inbox(bodies=True)         # box.held, box.pending, box.messages[i].id/.body/.state/.via
 lead.message(m.id); lead.withdraw(m.id)   # withdraw: a pending Message is removed, never delivered
 lead.hold(reason="triage"); lead.resume() # hold delivery (sends still queue); release it
-lead.stop(); lead.sleep(); lead.wake()    # sleep(allow_wake=True): wakeOnMessage may wake it; wake(clear_inbox=True)
+lead.stop(); lead.wake()                  # wake(clear_inbox=True) discards pending Messages first
+lead.sleep()                              # asleep until wake(): NO Message wakes it, wakeOnMessage or not
+lead.sleep(allow_wake=True)               # asleep, and a sender listed in wakeOnMessage wakes it
 coder.remove()                        # stops and removes it; its drives are kept
 fleet.status().agent_computers        # every agent computer: phase, inbox, power
 fleet.services.get("clock").sleep()   # Service: reload, update, sleep, wake, remove
@@ -325,7 +332,8 @@ fleet.credentials.set("stripe", key)  # agent computers using it get it at once;
 fleet.credentials.list()              # [CredentialInfo(name, set, used_by)]; remove(name) raises in_use while used
 fleet.replace(lambda f: f.defaults.update(power={"sleepAfterIdle": "15m"}))   # If-Match, retried on conflict
 fleet.close()                         # or: with a12s.Fleet() as fleet:
-# async: fleet = a12s.AsyncFleet(); the same objects with await / async for / async with; await fleet.aclose()
+# async: fleet = a12s.AsyncFleet(); the same objects with await / async for / async with. Close it with
+# `await fleet.aclose()` (AsyncFleet has no close()), or use `async with a12s.AsyncFleet() as fleet:`
 # errors: a12s.A12sError (status, code, fix; a12s.NotFound is one), a12s.A12sStreamError, a12s.A12sGapError;
 # a failed Turn is returned with status "failed", not raised. A write's warnings arrive as warnings.warn(A12sWarning).
 # lead.events(turn=r.id) replays one Turn and ends after its turn.finished
@@ -435,7 +443,8 @@ go get github.com/coltonkirsten/a12s/services/svckit@v0.4.2
 
 svckit is a package inside the module github.com/coltonkirsten/a12s (there is no separate svckit module or tag): go get
 writes `require github.com/coltonkirsten/a12s v0.4.2` to go.mod and fills go.sum. Don't hand-write either; run
-`go mod tidy` after writing main.go. The Dockerfile below copies both.
+`go mod tidy` after writing main.go. The Dockerfile below copies both, so a build script runs, in this order:
+`(cd clock && go mod tidy) && docker build -t my-clock:1 clock`.
 
 ```go
 // main.go
@@ -680,6 +689,13 @@ Deprecated one release (name-first): TypeScript A12sClient status, computer, sen
 
 - Watch first, then send (`await turns.ready()` / `with fleet.turns(...)`), or you can miss fast Turns. Or use
   prompt(), which follows the Turn of its own Message.
+- A plain `sleep()` / `a12s sleep <c>` keeps it asleep until `wake()`: a Message queues and wakeOnMessage does NOT
+  wake it. To sleep it and let a listed sender's Message wake it (e.g. to test wakeOnMessage), use
+  `sleep(allow_wake=True)` (Python), `sleep({ allowWake: true })` (TypeScript) or `a12s sleep <c> --allow-wake`.
+  After a send, reload() and check `status.phase` until it is Busy or Ready; an old Ready event proves nothing.
+- A seccomp profile's archMap/architectures take libseccomp names only (SCMP_ARCH_X86_64, SCMP_ARCH_X86,
+  SCMP_ARCH_X32, SCMP_ARCH_AARCH64, SCMP_ARCH_ARM, …); the simplest valid profile that runs everything is
+  `{"defaultAction": "SCMP_ACT_ALLOW"}` (a12s warns that it allows every syscall).
 - Agent computers made from code are for work that comes and goes (one per task, user or branch): create, prompt,
   remove. Keep long-lived roles in fleet.yaml; `a12s up` removes what the file doesn't list.
 - `spec`, `effective` and `status` on an AgentComputer are a snapshot: `reload()` before reading the phase again.

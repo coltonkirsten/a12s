@@ -369,7 +369,9 @@ func runToken(g *globals, args []string) error {
 		if t.Prefix != "" {
 			scope = "everything on names starting " + t.Prefix
 		}
-		fmt.Printf("token %s (%s); shown once, store it now:\n%s\n", t.Name, scope, t.Secret)
+		// The secret alone on stdout, so TOKEN=$(a12s token create …) captures exactly it.
+		fmt.Fprintf(os.Stderr, "token %s (%s); shown once, store it now:\n", t.Name, scope)
+		fmt.Println(t.Secret)
 	case "ls":
 		var res api.TokensResponse
 		if err := c.Do(ctx, "GET", "/v1/tokens", nil, &res); err != nil {
