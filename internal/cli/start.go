@@ -113,6 +113,18 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 		if token == "" {
 			return nil, fmt.Errorf("container %s has no API token; remove it (docker rm -f %s) and run a12s up again", n.Container, n.Container)
 		}
+		if res.Container.Config.Image != o.Image {
+			// Another release's Controller: replace it. Its volumes, so the Fleet's state, stay, and the agent
+			// computers keep running while it restarts.
+			if _, err := dc.ContainerRemove(ctx, n.Container, client.ContainerRemoveOptions{Force: true}); err != nil {
+				return nil, fmt.Errorf("replace %s: %w", n.Container, err)
+			}
+			if err := createController(ctx, dc, n, o, labels, token); err != nil {
+				return nil, err
+			}
+			logf("replaced controller %s (%s -> %s)", n.Container, res.Container.Config.Image, o.Image)
+			break
+		}
 		if res.Container.State == nil || !res.Container.State.Running {
 			if _, err := dc.ContainerStart(ctx, n.Container, client.ContainerStartOptions{}); err != nil {
 				return nil, fmt.Errorf("start %s: %w", n.Container, err)

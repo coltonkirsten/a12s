@@ -431,6 +431,25 @@ next:
 	return netip.Prefix{}, fmt.Errorf("subnet pool %s is exhausted", pool)
 }
 
+// ReattachController connects the controller container to every agent computer's and Service's network: a
+// Controller container that was replaced (an upgrade) starts attached to the Fleet bridge only.
+func (d *Driver) ReattachController(ctx context.Context) error {
+	f := make(client.Filters).Add("label", LabelFleet+"="+d.fleet)
+	list, err := d.cli.NetworkList(ctx, client.NetworkListOptions{Filters: f})
+	if err != nil {
+		return fmt.Errorf("list networks: %w", err)
+	}
+	for _, n := range list.Items {
+		if role := n.Labels[LabelRole]; role != RoleComputer && role != RoleService {
+			continue
+		}
+		if err := d.ConnectController(ctx, n.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ConnectController is a no-op when no controller container exists yet.
 func (d *Driver) ConnectController(ctx context.Context, networkName string) error {
 	res, err := d.cli.ContainerInspect(ctx, d.ControllerName(), client.ContainerInspectOptions{})

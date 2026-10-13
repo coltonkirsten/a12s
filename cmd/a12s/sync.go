@@ -207,11 +207,11 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 	}
 	doc := yamlMap()
 	add := func(k string, v any) error {
-		var n yaml.Node
-		if err := n.Encode(v); err != nil {
+		n, err := yamlOf(v)
+		if err != nil {
 			return err
 		}
-		doc.Content = append(doc.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: k}, &n)
+		doc.Content = append(doc.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: k}, n)
 		return nil
 	}
 	if err := add("apiVersion", spec.APIVersion); err != nil {
@@ -239,11 +239,11 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("agent_computers.%s: %w", name, err)
 		}
-		var n yaml.Node
-		if err := n.Encode(c); err != nil {
+		n, err := yamlOf(c)
+		if err != nil {
 			return nil, err
 		}
-		acs.Content = append(acs.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, &n)
+		acs.Content = append(acs.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, n)
 	}
 	doc.Content = append(doc.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "agent_computers"}, acs)
 	if len(spec.Services) > 0 {
@@ -260,6 +260,79 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 }
 
 func yamlMap() *yaml.Node { return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"} }
+
+// yamlOf goes through v's JSON, which keeps field order and an explicit empty list (an override of the defaults'
+// list) where the YAML tags would drop it.
+func yamlOf(v any) (*yaml.Node, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	return yamlValue(dec)
+}
+
+func yamlValue(dec *json.Decoder) (*yaml.Node, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch t := tok.(type) {
+	case json.Delim:
+		n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		if t == '{' {
+			n = yamlMap()
+		}
+		for dec.More() {
+			if t == '{' {
+				k, err := dec.Token()
+				if err != nil {
+					return nil, err
+				}
+				n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k.(string)})
+			}
+			child, err := yamlValue(dec)
+			if err != nil {
+				return nil, err
+			}
+			n.Content = append(n.Content, child)
+		}
+		if _, err := dec.Token(); err != nil {
+			return nil, err
+		}
+		if len(n.Content) == 0 || n.Kind == yaml.SequenceNode && len(n.Content) <= 8 && allScalars(n.Content) {
+			n.Style = yaml.FlowStyle
+		}
+		return n, nil
+	case json.Number:
+		tag := "!!int"
+		if strings.ContainsAny(t.String(), ".eE") {
+			tag = "!!float"
+		}
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: t.String()}, nil
+	case bool:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: fmt.Sprint(t)}, nil
+	case nil:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, nil
+	case string:
+		n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: t}
+		if strings.Contains(t, "\n") {
+			n.Style = yaml.LiteralStyle
+		}
+		return n, nil
+	}
+	return nil, fmt.Errorf("unexpected JSON token %v", tok)
+}
+
+func allScalars(ns []*yaml.Node) bool {
+	for _, n := range ns {
+		if n.Kind != yaml.ScalarNode {
+			return false
+		}
+	}
+	return true
+}
 
 // stalePresetFiles are files in a preset directory export owns that the live Fleet does not have: left there, the
 // next up would send them again.

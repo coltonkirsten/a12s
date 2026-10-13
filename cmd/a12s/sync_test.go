@@ -15,7 +15,7 @@ func TestExportRoundTrips(t *testing.T) {
 	long := strings.Repeat("Be thorough. ", 200)
 	live := &fleet.Spec{
 		APIVersion: fleet.APIVersion, Kind: fleet.Kind, Metadata: fleet.Metadata{Name: "t"},
-		Defaults: json.RawMessage(`{"harness":{"kind":"codex","version":"0.154.0"},"image":"slim","credentials":["openai"]}`),
+		Defaults: json.RawMessage(`{"harness":{"kind":"codex","version":"0.154.0"},"image":"slim","credentials":["openai"],"egress":{"allow":[]}}`),
 		AgentComputers: map[string]json.RawMessage{
 			"short": json.RawMessage(`{"instructions":"Be brief."}`),
 			"long":  json.RawMessage(`{"instructions":` + strings.TrimSpace(mustJSON(long)) + `,"files":{"skills/x/SKILL.md":"skill","bin/run":"#!/bin/sh\necho hi\n"}}`),

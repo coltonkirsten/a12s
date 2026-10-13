@@ -395,6 +395,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	c.selfAddrs = drv.ControllerAddrs
+	if err := drv.ReattachController(ctx); err != nil {
+		return err
+	}
 
 	apiAddr := cfg.APIAddr
 	if apiAddr == "" {

@@ -190,7 +190,7 @@ func (g *globals) checkDrift(ctx context.Context, c *cli.Client, req api.PutFlee
 	switch {
 	case force:
 		return live.Version, nil
-	case isTerminal(os.Stdin):
+	case isTerminal(os.Stdin) && isTerminal(os.Stderr) && os.Getenv("CI") == "":
 		fmt.Fprint(os.Stderr, "apply anyway? [y/N] ")
 		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		if a := strings.ToLower(strings.TrimSpace(answer)); a == "y" || a == "yes" {
