@@ -2,9 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
@@ -70,7 +76,7 @@ func (g *globals) up(o upOptions) error {
 		return err
 	}
 	if !g.json {
-		for _, line := range cli.SeccompLines(f) {
+		for _, line := range slices.Concat(cli.SeccompLines(f), cli.AttachLines(f)) {
 			fmt.Fprintln(os.Stdout, line)
 		}
 	}
@@ -104,7 +110,7 @@ func (g *globals) finishUp(resp *api.PutFleetResponse, stdout, stderr io.Writer)
 }
 
 // inline turns what only a Fleet file can say into what the API takes: each security.seccomp path becomes the
-// profile itself.
+// profile itself, and each attach host the folder's absolute path.
 func (g *globals) inline(spec *fleet.Spec) error {
 	one := func(field string, raw json.RawMessage) (json.RawMessage, error) {
 		if len(raw) == 0 {
@@ -114,9 +120,21 @@ func (g *globals) inline(spec *fleet.Spec) error {
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("%s: %w", field, err)
 		}
+		for _, an := range slices.Sorted(maps.Keys(c.Attach)) {
+			if field == "defaults" {
+				break // refused by validation, with a clearer message than a path error
+			}
+			a := c.Attach[an]
+			host, err := g.resolveHost(a.Host)
+			if err != nil {
+				return nil, fmt.Errorf("%s.attach.%s.host: %v", field, an, err)
+			}
+			a.Host = host
+			c.Attach[an] = a
+		}
 		p := c.Security.Seccomp.Path
 		if p == "" {
-			return raw, nil
+			return fleet.SpecOf(c), nil
 		}
 		data, err := os.ReadFile(g.fleetRel(p))
 		if err != nil {
@@ -140,4 +158,40 @@ func (g *globals) inline(spec *fleet.Spec) error {
 		}
 	}
 	return nil
+}
+
+// resolveHost turns an attach host as written in the Fleet file (relative to the file, ~/…, or absolute) into the
+// folder's real absolute path, and checks that it is a folder on this machine.
+func (g *globals) resolveHost(host string) (string, error) {
+	p := host
+	switch {
+	case host == "":
+		return "", nil
+	case host == "~" || strings.HasPrefix(host, "~/"):
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		p = filepath.Join(home, strings.TrimPrefix(host, "~"))
+	case !filepath.IsAbs(host):
+		p = g.fleetRel(host)
+	}
+	p, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	// Docker binds the target of a symlink; checking that target keeps the Controller's checks honest.
+	real, err := filepath.EvalSymlinks(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s does not exist (fix: create the folder, or correct the path; relative paths start at the Fleet file's directory)", p)
+	}
+	if err != nil {
+		return "", err
+	}
+	if fi, err := os.Stat(real); err != nil {
+		return "", err
+	} else if !fi.IsDir() {
+		return "", fmt.Errorf("%s is not a folder", real)
+	}
+	return real, nil
 }
