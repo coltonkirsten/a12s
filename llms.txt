@@ -617,7 +617,7 @@ SDK objects (Python names; TypeScript is camelCase):
 
 - Fleet: TypeScript get, replace, events, turns, status; Python close, status, events, turns, get, replace; Python AsyncFleet aclose, status, events, turns, get, replace
 - AgentComputers: TypeScript create, get, list; Python create, get, list
-- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, turns, turns, update, sleep, wake, stop, inbox, message, withdraw, remove
+- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, update, sleep, wake, stop, inbox, message, withdraw, remove
 - Services: TypeScript create, get, list; Python create, get, list
 - Service: TypeScript reload, update, remove, sleep, wake; Python reload, update, sleep, wake, remove
 - Tokens: TypeScript create, list, remove; Python create, list, remove
