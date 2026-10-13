@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable, Sequence
+import dataclasses
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -15,7 +16,7 @@ import httpx
 from ._errors import A12sError, A12sGapError, A12sStreamError, NotFound
 from ._parse import from_json
 from ._sse import SSEFrame
-from ._types import EnqueueResponse, Event, PromptResult, ToolCall, Turn, TurnInboxMessage
+from ._types import EnqueueResponse, Event, PromptResult, TokenUsage, ToolCall, Turn, TurnInboxMessage
 
 OnGap = Literal["yield", "throw"]
 
@@ -163,7 +164,9 @@ class StreamState:
             if self.on_gap == "throw":
                 raise A12sGapError(data)
             ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-            return Event(v=1, computer=self.computer, session="", turn="", seq=0, ts=ts, type="gap", data=data)
+            return Event(
+                v=1, agent_computer=self.computer, computer=self.computer, session="", turn="", seq=0, ts=ts, type="gap", data=data
+            )
         if f.event or not f.data:
             return None
         try:
@@ -221,7 +224,7 @@ class TurnBuilder:
     def add(self, ev: Event) -> Turn | None:
         if not ev.turn:
             return None
-        key = (ev.computer, ev.turn)
+        key = (ev.agent_computer or ev.computer, ev.turn)
         t = self._open.setdefault(key, _OpenTurn())
         data = ev.data if isinstance(ev.data, dict) else {}
         if ev.type == "turn.started":
@@ -253,8 +256,10 @@ class TurnBuilder:
                 t.text += text
         elif ev.type == "turn.finished":
             del self._open[key]
+            tokens = data.get("tokens")
             return Turn(
-                computer=ev.computer,
+                agent_computer=ev.agent_computer or ev.computer,
+                computer=ev.agent_computer or ev.computer,
                 id=ev.turn,
                 session=ev.session,
                 status=str(data.get("status", "")),
@@ -263,6 +268,7 @@ class TurnBuilder:
                 messages=t.messages,
                 tools=list(t.tools.values()),
                 usage=data.get("usage"),
+                tokens=from_json(TokenUsage, tokens) if isinstance(tokens, dict) else None,
                 started_at=t.started_at,
                 finished_at=ev.ts,
             )
@@ -278,3 +284,10 @@ def _parse_json(text: str) -> Any:
         return json.loads(text) if text else None
     except ValueError:
         return text
+
+
+def turn_of(data: Any) -> Turn:
+    """A Turn from the history (GET .../turns): the same shape turns() yields."""
+    t = from_json(Turn, data)
+    name = data.get("agentComputer", "") if isinstance(data, dict) else ""
+    return dataclasses.replace(t, agent_computer=name, computer=name)

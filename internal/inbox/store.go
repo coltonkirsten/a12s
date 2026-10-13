@@ -152,7 +152,7 @@ func Open(path string) (*Store, error) {
 	// One connection: transactions are serialized in-process, which claim
 	// ordering relies on, and SQLite never returns SQLITE_BUSY.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + batchSchema + powerSchema + serviceSchema + registrySchema); err != nil {
+	if _, err := db.Exec(schema + batchSchema + powerSchema + serviceSchema + registrySchema + turnsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("fleet.db schema: %w", err)
 	}

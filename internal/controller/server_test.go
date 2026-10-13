@@ -126,7 +126,7 @@ func TestEgressDenialIsJournaled(t *testing.T) {
 	}
 	h.c.denied("scout", "evil.example", 443, "host is not in the egress allowlist")
 	d := h.cds.get("scout").diagnostics
-	if len(d) != 1 || !strings.HasPrefix(d[0], "egress denied ") || !strings.Contains(d[0], `"host":"evil.example"`) {
+	if len(d) != 1 || !strings.HasPrefix(d[0], "egress.denied ") || !strings.Contains(d[0], `"host":"evil.example"`) {
 		t.Fatalf("diagnostics = %v", d)
 	}
 }

@@ -39,6 +39,16 @@ Agent computers and Services can be created, changed and removed while the Fleet
   in the file.
 
 ### Added
+- **One event stream for the whole Fleet**: `GET /v1/events` (`?agentComputers=a,b` filters, `Last-Event-ID`
+  resumes) carries every agent computer's events plus `fleet.changed {version, by, names}` and
+  `agent_computer.phase {phase, error?}`, filtered to what the token may see. In both SDKs every `events()` and
+  `turns()` of one Fleet object share this one connection.
+- **Turn history**: the Controller keeps each agent computer's last 200 finished Turns, in the shape `turns()`
+  yields: `GET /v1/agent-computers/{c}/turns?limit=20`, `agent.turns(limit=20)` / `agent.turns({ limit: 20 })`.
+- **`egress.denied {host, port, reason}`** is its own event (it was a `diagnostic` "egress denied" line).
+- **Normalized token usage**: `turn.finished` carries `tokens {input, output, cacheRead, cacheWrite}` for both
+  harnesses, and a Turn has `tokens` (`TokenUsage`).
+- Events and Turns carry `agentComputer` (`agent_computer` in Python); `computer` stays for one release.
 - **The object SDK.** `Fleet.connect()` (TypeScript) and `a12s.Fleet()` / `a12s.AsyncFleet()` (Python) find the
   running Fleet like `connect()` did. `fleet.agentComputers` / `fleet.agent_computers` has `create(name, spec)`,
   `get(name)` (raises `NotFound`) and `list()`; an `AgentComputer` has `name`, `spec`, `effective` and `status`, and

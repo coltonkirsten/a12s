@@ -692,6 +692,17 @@ func (f *fakeComputerd) Diagnostic(_ context.Context, message string, data any) 
 	return nil
 }
 
+func (f *fakeComputerd) EgressDenied(_ context.Context, d api.EgressDeniedData) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.up {
+		return errDown
+	}
+	b, _ := json.Marshal(d)
+	f.diagnostics = append(f.diagnostics, "egress.denied "+string(b))
+	return nil
+}
+
 func (f *fakeComputerd) CloseIdleConnections() {}
 
 // harness is a Controller over the fake driver.

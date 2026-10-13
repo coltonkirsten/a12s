@@ -7,10 +7,13 @@ import (
 
 const EventVersion = 1
 
-// Event.Seq is both the SSE id and the journal sequence; Session and Turn are
+// Event.Seq is the agent computer's journal sequence (0 for events the Controller makes); Session and Turn are
 // empty for events outside a turn.
 type Event struct {
-	V        int             `json:"v"`
+	V int `json:"v"`
+	// AgentComputer is empty only in journals written before it existed, and on fleet.changed.
+	AgentComputer string `json:"agentComputer,omitempty"`
+	// Computer is AgentComputer under its old name, for one release.
 	Computer string          `json:"computer"`
 	Session  string          `json:"session"`
 	Turn     string          `json:"turn"`
@@ -38,7 +41,32 @@ const (
 	EventContinuationAbandoned EventType = "continuation.abandoned"
 	EventTurnRefused           EventType = "turn.refused"
 	EventInboxDiscarded        EventType = "inbox.discarded"
+	EventEgressDenied          EventType = "egress.denied"
+
+	// Made by the Controller, on GET /v1/events only.
+	EventFleetChanged EventType = "fleet.changed"
+	EventPhase        EventType = "agent_computer.phase"
 )
+
+// EgressDeniedData: the egress proxy refused a connection.
+type EgressDeniedData struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// FleetChangedData: the Fleet's version moved; Names are what the write changed.
+type FleetChangedData struct {
+	Version int64    `json:"version"`
+	By      string   `json:"by"`
+	Names   []string `json:"names"`
+}
+
+// PhaseData: an agent computer's phase changed.
+type PhaseData struct {
+	Phase Phase    `json:"phase"`
+	Error *Failure `json:"error,omitempty"`
+}
 
 // SSEGap is sent instead of events when Last-Event-ID is unknown or ahead of
 // the journal.
@@ -106,11 +134,50 @@ const (
 	TurnInterrupted = "interrupted"
 )
 
-// TurnFinishedData.Usage is the harness's own usage object, or null.
+// TurnFinishedData.Usage is the harness's own usage object, or null; Tokens is the same, normalized.
 type TurnFinishedData struct {
 	Status string          `json:"status"`
 	Usage  json.RawMessage `json:"usage"`
+	Tokens *Tokens         `json:"tokens,omitempty"`
 	Error  string          `json:"error,omitempty"`
+}
+
+// Tokens is a Turn's token usage for every harness. Input excludes cached input.
+type Tokens struct {
+	Input      int64 `json:"input"`
+	Output     int64 `json:"output"`
+	CacheRead  int64 `json:"cacheRead"`
+	CacheWrite int64 `json:"cacheWrite"`
+}
+
+// Turn is a finished Turn folded from its events: GET /v1/agent-computers/{c}/turns, and what the SDKs' turns()
+// yields.
+type Turn struct {
+	AgentComputer string         `json:"agentComputer"`
+	ID            string         `json:"id"`
+	Session       string         `json:"session"`
+	Status        string         `json:"status"`
+	Text          string         `json:"text"`
+	Error         string         `json:"error,omitempty"`
+	Messages      []TurnInboxMsg `json:"messages"`
+	Tools         []ToolCall     `json:"tools"`
+	// Usage is the harness's own, Tokens the normalized one.
+	Usage      json.RawMessage `json:"usage"`
+	Tokens     *Tokens         `json:"tokens,omitempty"`
+	StartedAt  *time.Time      `json:"startedAt,omitempty"`
+	FinishedAt time.Time       `json:"finishedAt"`
+}
+
+type ToolCall struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	Output  json.RawMessage `json:"output,omitempty"`
+	IsError bool            `json:"isError,omitempty"`
+}
+
+type TurnsResponse struct {
+	Turns []Turn `json:"turns"`
 }
 
 // DiagnosticData is also the body of computerd's POST /v1/diagnostics, which

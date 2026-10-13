@@ -212,7 +212,8 @@ class Event:
     """
 
     v: int
-    computer: str
+    agent_computer: str | None = None
+    computer: str  # agent_computer under its old name, for one release
     session: str
     turn: str
     seq: int
@@ -247,13 +248,24 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class TokenUsage:
+    """A Turn's token usage, the same for every harness. ``input`` excludes cached input."""
+
+    input: int
+    output: int
+    cache_read: int
+    cache_write: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Turn:
     """A finished Turn: who sent the work (``messages``), what the agent said (``text``) and how it ended.
 
     ``messages`` is empty for a continuation, or when the stream joined mid-Turn.
     """
 
-    computer: str
+    agent_computer: str
+    computer: str = ""  # agent_computer under its old name, for one release
     id: str
     session: str
     status: str
@@ -262,6 +274,7 @@ class Turn:
     messages: list[TurnInboxMessage]
     tools: list[ToolCall]
     usage: Any
+    tokens: TokenUsage | None = None
     started_at: str | None = None
     finished_at: str
 
@@ -318,3 +331,8 @@ class CredentialInfo:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CredentialsResponse:
     credentials: list[CredentialInfo]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TurnsResponse:
+    turns: list[Turn]

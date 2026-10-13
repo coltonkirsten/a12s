@@ -16,7 +16,7 @@ test('journal appends with increasing seq, filters by turn, and survives reopen'
   j.append('turn.finished', { status: 'completed', usage: null }, { turn: 't_1', session: 's1' });
   assert.deepEqual([a.seq, b.seq, c.seq], [1, 2, 3]);
   assert.deepEqual(seen, [1, 2, 3, 4]);
-  assert.deepEqual(b, { v: 1, computer: 'scout', session: 's1', turn: 't_1', seq: 2, ts: b.ts, type: 'turn.started', data: { resumed: false } });
+  assert.deepEqual(b, { v: 1, agentComputer: 'scout', computer: 'scout', session: 's1', turn: 't_1', seq: 2, ts: b.ts, type: 'turn.started', data: { resumed: false } });
   assert.deepEqual(j.after(0, 't_1', 10).map((e) => e.type), ['turn.started', 'text.delta', 'turn.finished']);
   assert.deepEqual(j.after(2, null, 1).map((e) => e.seq), [3]);
   assert.deepEqual(j.findRequest('r1'), { turnId: 't_1', bodyHash: 'h1' });
@@ -43,4 +43,11 @@ test('inbox.discarded is journaled once per Message id', async () => {
   const evs = j.after(0, null, 100).filter((e) => e.type === 'inbox.discarded');
   assert.equal(evs.length, 2);
   assert.equal(evs[0]?.data.body, 'hello');
+});
+
+test('tokensOf normalizes both harnesses', async () => {
+  const { tokensOf } = await import('../computer.js');
+  assert.deepEqual(tokensOf({ inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 100, cacheCreationInputTokens: 7 }), { input: 10, output: 5, cacheRead: 100, cacheWrite: 7 });
+  assert.deepEqual(tokensOf({ thread: {}, last: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 9 } }), { input: 20, output: 9, cacheRead: 100, cacheWrite: 0 });
+  assert.equal(tokensOf(null), null);
 });

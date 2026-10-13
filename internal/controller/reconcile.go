@@ -938,6 +938,11 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	delete(c.clients, name)
 	err := c.saveLocked()
 	c.mu.Unlock()
+	if c.inbox != nil {
+		if err := c.inbox.DeleteTurns(ctx, name); err != nil {
+			c.logf("%s: turn history: %v", name, err)
+		}
+	}
 	c.logf("%s: removed (drives kept)", name)
 	c.kickPending(name)
 	return err

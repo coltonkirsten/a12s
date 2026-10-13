@@ -97,6 +97,8 @@ export interface EventsOptions {
   onGap?: "yield" | "throw";
 }
 
+export type SharedEventsOptions = Omit<EventsOptions, "turn" | "after">;
+
 export interface PromptOptions extends Omit<EnqueueRequest, "body"> {
   signal?: AbortSignal;
   /** Every event of the Turn, as it streams. */
@@ -118,6 +120,7 @@ export class A12sClient {
   readonly url: string;
   private readonly token?: string;
   private readonly fetchImpl: typeof fetch;
+  private shared?: SharedEvents;
 
   constructor(opts: A12sClientOptions = {}) {
     this.url = (opts.url ?? "").replace(/\/+$/, "");
@@ -197,6 +200,26 @@ export class A12sClient {
       const q = opts.turn ? `?turn=${enc(opts.turn)}` : "";
       return this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
     }, names ?? (async () => (await this.status()).agentComputers.map((c) => c.name)), opts.signal);
+  }
+
+  /**
+   * @internal Events of the named agent computers (all if none), and the Controller's own about them, read from this
+   * client's one GET /v1/events connection.
+   */
+  sharedEvents(names: string[] | undefined, opts: SharedEventsOptions = {}): EventStream {
+    this.shared ??= new SharedEvents((cursor, signal) =>
+      this.fetchImpl(this.url + "/v1/events", {
+        headers: this.headers({ accept: "text/event-stream", ...(cursor !== undefined ? { "last-event-id": cursor } : {}) }),
+        signal,
+      }),
+    );
+    const shared = this.shared;
+    const wanted = names && new Set(names);
+    return new EventStream(
+      (_name, live, signal) => shared.subscribe({ wanted, live, onGap: opts.onGap, reconnectMs: opts.reconnectMs }, signal),
+      [""],
+      opts.signal,
+    );
   }
 
   /**
@@ -373,6 +396,175 @@ export class A12sClient {
   }
 }
 
+interface Subscriber {
+  wanted?: Set<string>;
+  onGap?: "yield" | "throw";
+  reconnectMs?: number;
+  live: () => void;
+  push: (ev: A12sEvent) => void;
+  fail: (err: unknown) => void;
+}
+
+/** One GET /v1/events connection, open while anything subscribes: watching fifty agent computers takes one. */
+class SharedEvents {
+  private readonly subs = new Set<Subscriber>();
+  private conn?: AbortController;
+  private live = false;
+
+  constructor(private readonly open: (cursor: string | undefined, signal: AbortSignal) => Promise<Response>) {}
+
+  async *subscribe(sub: Omit<Subscriber, "push" | "fail">, signal: AbortSignal): AsyncGenerator<A12sEvent> {
+    const queue: A12sEvent[] = [];
+    let failure: { error: unknown } | undefined;
+    let wake: (() => void) | undefined;
+    const notify = () => {
+      const w = wake;
+      wake = undefined;
+      w?.();
+    };
+    const s: Subscriber = {
+      ...sub,
+      push: (ev) => {
+        queue.push(ev);
+        notify();
+      },
+      fail: (error) => {
+        failure ??= { error };
+        notify();
+      },
+    };
+    signal.addEventListener("abort", notify, { once: true });
+    this.add(s);
+    try {
+      for (;;) {
+        if (queue.length) {
+          yield queue.shift()!;
+          continue;
+        }
+        if (failure) throw failure.error;
+        if (signal.aborted) return;
+        await new Promise<void>((r) => (wake = r));
+      }
+    } finally {
+      signal.removeEventListener("abort", notify);
+      this.remove(s);
+    }
+  }
+
+  private add(s: Subscriber): void {
+    this.subs.add(s);
+    if (!this.conn) {
+      const conn = new AbortController();
+      this.conn = conn;
+      this.live = false;
+      void this.run(conn);
+    } else if (this.live) {
+      s.live();
+    }
+  }
+
+  private remove(s: Subscriber): void {
+    this.subs.delete(s);
+    if (this.subs.size === 0) this.stop();
+  }
+
+  private stop(): void {
+    this.conn?.abort();
+    this.conn = undefined;
+    this.live = false;
+  }
+
+  private async run(conn: AbortController): Promise<void> {
+    const { signal } = conn;
+    let cursor: string | undefined;
+    try {
+      while (!signal.aborted) {
+        let res: Response | undefined;
+        try {
+          res = await this.open(cursor, signal);
+        } catch (err) {
+          if (signal.aborted) return;
+          if (!isNetworkError(err)) throw err;
+        }
+        if (res && !res.ok) {
+          const err = apiError(res.status, parseError(res.status, await res.text()));
+          if (res.status !== 502 && res.status !== 503) throw err;
+          res = undefined;
+        }
+        if (res) {
+          if (!res.body) throw new A12sStreamError("GET /v1/events: response has no body");
+          const frames = readSSE(res.body);
+          try {
+            for (;;) {
+              let r: IteratorResult<{ id?: string; event?: string; data: string }>;
+              try {
+                r = await frames.next();
+              } catch {
+                break;
+              }
+              if (r.done) break;
+              cursor = this.frame(r.value, cursor);
+            }
+          } finally {
+            await frames.return(undefined);
+            res.body.cancel().catch(() => {});
+          }
+        }
+        await sleep(this.reconnectMs(), signal);
+      }
+    } catch (err) {
+      if (signal.aborted) return;
+      const subs = [...this.subs];
+      if (this.conn === conn) this.stop();
+      for (const s of subs) s.fail(err);
+    }
+  }
+
+  /** Delivers one frame and returns the cursor to resume after. */
+  private frame(f: { id?: string; event?: string; data: string }, cursor: string | undefined): string | undefined {
+    if (f.event === "head") {
+      const id = (parseJSON(f.data) as { id?: unknown } | undefined)?.id;
+      this.live = true;
+      for (const s of this.subs) s.live();
+      return typeof id === "string" && id ? id : cursor;
+    }
+    if (f.event === "gap") {
+      const data: GapData = cursor !== undefined ? { lastEventId: cursor } : {};
+      const gap: GapEvent = { v: 1, computer: "", session: "", turn: "", seq: 0, ts: new Date().toISOString(), type: "gap", data };
+      for (const s of this.subs) {
+        if (s.onGap === "throw") s.fail(new A12sGapError(data));
+        else s.push(gap);
+      }
+      return cursor;
+    }
+    if (f.event || !f.data) return cursor;
+    let ev: A12sEvent;
+    try {
+      ev = JSON.parse(f.data) as A12sEvent;
+    } catch (err) {
+      throw new A12sStreamError(`malformed event after ${cursor ?? "(start)"}: ${f.data.slice(0, 120)}`, { cause: err });
+    }
+    for (const s of this.subs) if (wanted(s.wanted, ev)) s.push(ev);
+    return f.id ?? cursor;
+  }
+
+  private reconnectMs(): number {
+    let ms = 1000;
+    for (const s of this.subs) if (s.reconnectMs !== undefined) ms = Math.min(ms, s.reconnectMs);
+    return ms;
+  }
+}
+
+function agentComputerOf(ev: A12sEvent): string {
+  return ev.agentComputer || ev.computer;
+}
+
+function wanted(names: Set<string> | undefined, ev: A12sEvent): boolean {
+  if (!names) return true;
+  if (ev.type === "fleet.changed") return (ev.data?.names ?? []).some((n) => names.has(n));
+  return names.has(agentComputerOf(ev));
+}
+
 type Source = (computer: string, live: () => void, signal: AbortSignal) => AsyncGenerator<A12sEvent>;
 
 /** Events of one or more Computers, merged in arrival order. Iterate it with `for await`. */
@@ -535,7 +727,8 @@ class TurnBuilder {
 
   add(ev: A12sEvent): Turn | undefined {
     if (!ev.turn) return undefined;
-    const key = `${ev.computer}\u0000${ev.turn}`;
+    const name = agentComputerOf(ev);
+    const key = `${name}\u0000${ev.turn}`;
     let t = this.open.get(key);
     if (!t) this.open.set(key, (t = { text: "", afterTool: false, messages: [], tools: new Map() }));
     switch (ev.type) {
@@ -561,7 +754,8 @@ class TurnBuilder {
       case "turn.finished":
         this.open.delete(key);
         return {
-          computer: ev.computer,
+          agentComputer: name,
+          computer: name,
           id: ev.turn,
           session: ev.session,
           status: ev.data.status,
@@ -570,6 +764,7 @@ class TurnBuilder {
           messages: t.messages,
           tools: [...t.tools.values()],
           usage: ev.data.usage,
+          ...(ev.data.tokens ? { tokens: ev.data.tokens } : {}),
           ...(t.startedAt ? { startedAt: t.startedAt } : {}),
           finishedAt: ev.ts,
         };

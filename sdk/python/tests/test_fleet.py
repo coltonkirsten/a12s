@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+import threading
 from typing import Any
 
 import httpx
@@ -103,3 +105,44 @@ async def test_async_fleet_has_the_same_shape() -> None:
     await hello.remove()
     assert fake.seen[-1][:2] == ("DELETE", "/v1/agent-computers/hello")
     await fleet.aclose()
+
+
+def fleet_event(n: int, name: str, typ: str, turn: str = "t_1", data: dict[str, Any] | None = None) -> str:
+    ev = {"v": 1, "agentComputer": name, "computer": name, "session": "s", "turn": turn, "seq": n, "ts": "t", "type": typ}
+    return f"id: b-{n}\ndata: {json.dumps({**ev, 'data': data or {}})}\n\n"
+
+
+def test_events_share_one_connection_and_filter(fake: Any) -> None:
+    opened: list[str | None] = []
+    sent = threading.Event()
+
+    def handler(req: Any, res: Any) -> None:
+        if req.url == "/v1/agent-computers/a/turns?limit=2":
+            turn = {"agentComputer": "a", "id": "t_0", "session": "s", "status": "completed", "text": "old",
+                    "messages": [], "tools": [], "usage": None, "tokens": {"input": 1, "output": 2, "cacheRead": 0, "cacheWrite": 0},
+                    "finishedAt": "t"}
+            res.json(200, {"turns": [turn]})
+            return
+        assert req.url == "/v1/events"
+        opened.append(req.headers.get("last-event-id"))
+        res.write_head(200)
+        res.write('event: head\ndata: {"id":"b-0"}\n\n')
+        sent.wait(5)
+        res.write(fleet_event(1, "a", "turn.started"))
+        res.write(fleet_event(2, "b", "turn.started", "t_2"))
+        res.write(fleet_event(3, "a", "text.delta", data={"text": "hi"}))
+        res.write(fleet_event(4, "a", "turn.finished", data={"status": "completed", "tokens": {"input": 3, "output": 1, "cacheRead": 0, "cacheWrite": 0}}))
+
+    server = fake(handler)
+    fleet = a12s.Fleet(server.url, "tok")
+    a = a12s.AgentComputer(fleet, {"name": "a", "status": {"name": "a"}})
+    with a.events() as mine, fleet.events() as everything, a.turns() as turns:
+        sent.set()
+        assert [e.seq for e in itertools.islice(mine, 3)] == [1, 3, 4]
+        assert [e.agent_computer for e in itertools.islice(everything, 4)] == ["a", "b", "a", "a"]
+        t = next(turns)
+        assert (t.agent_computer, t.text, t.tokens) == ("a", "hi", a12s.TokenUsage(input=3, output=1, cache_read=0, cache_write=0))
+    assert opened == [None], "one connection for all three streams"
+    past = a.turns(limit=2)
+    assert [(p.agent_computer, p.text, p.tokens and p.tokens.output) for p in past] == [("a", "old", 2)]
+    fleet.close()

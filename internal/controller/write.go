@@ -395,4 +395,6 @@ func (c *Controller) fleetChanged(version int64, by string, changes []api.Change
 		by = api.PrincipalLocal
 	}
 	c.logf("fleet v%d by %s: %s", version, by, strings.Join(names, ", "))
+	d := api.FleetChangedData{Version: version, By: by, Names: names}
+	c.publishControllerEvent("", api.EventFleetChanged, d, names, &d)
 }

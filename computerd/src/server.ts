@@ -123,6 +123,11 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
       const body = await readJson(req);
       return send(res, 200, { seq: computer.diagnostic(str(body, 'message'), body.data ?? null) });
     }
+    if (path === '/v1/egress-denied' && method === 'POST') {
+      const body = await readJson(req);
+      const port = typeof body.port === 'number' ? body.port : 0;
+      return send(res, 200, { seq: computer.egressDenied(str(body, 'host'), port, typeof body.reason === 'string' ? body.reason : '') });
+    }
     throw new HttpError(404, 'not found');
   });
 }

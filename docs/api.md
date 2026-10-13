@@ -31,7 +31,9 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/agent-computers/{c}/inbox/{id}` | → Message |
 | `DELETE /v1/agent-computers/{c}/inbox/{id}` | withdraw a pending Message → Message (`409` if it is too late) |
 | `GET /v1/agent-computers/{c}/inbox/{id}/events` | SSE: a `snapshot`, then the Message's state changes (`claimed`, `delivered` with its `turn`, …) |
+| `GET /v1/events` | SSE: every agent computer's events and the Fleet's own on one connection (below); `?agentComputers=a,b` filters |
 | `GET /v1/agent-computers/{c}/events` | SSE: the agent computer's journal (below) |
+| `GET /v1/agent-computers/{c}/turns` | `?limit=20` (1 to 200) → `{turns: [Turn]}`: its last finished Turns, newest first |
 | `POST /v1/agent-computers/{c}/turns/{turn}/stop` | `{}` → interrupt the Turn |
 | `POST /v1/agent-computers/{c}/power` | `{"state": "asleep"\|"awake"}` |
 | `POST /v1/agent-computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
@@ -151,11 +153,21 @@ The response's `state` is `pending` until a Turn takes it, then `claimed` and `d
 
 ## Event streams (SSE)
 
-`GET /v1/agent-computers/{c}/events` is a `text/event-stream`. Each journal event is one frame whose `id` is its `seq`:
+`GET /v1/events` is the whole Fleet on one connection: every agent computer's events, plus `fleet.changed`
+`{version, by, names}` and `agent_computer.phase` `{phase, error?}`, filtered to what the token may watch (a prefix
+token sees only its prefix) and to `?agentComputers=a,b`. A browser opens at most six connections per origin, so
+one stream per agent computer would stall a page that watches more than a few.
+
+- Frame ids are opaque strings. `Last-Event-ID` replays what came after it if the Controller still holds it (the last
+  4096 events, while the same Controller runs), then goes live; otherwise the stream sends `event: gap` first.
+- `event: head` (`data: {"id": …}`) comes once the replay is done: from here the stream is live.
+- `event: gap` (`data: {}`) means events were lost: resync from `/v1/status` and the turn history, and carry on.
+
+`GET /v1/agent-computers/{c}/events` is one agent computer's journal. Each event is one frame whose `id` is its `seq`:
 
 ```text
 id: 42
-data: {"v":1,"computer":"analyst","session":"…","turn":"t_9","seq":42,"ts":"…","type":"text.delta","data":{"text":"Hel"}}
+data: {"v":1,"agentComputer":"analyst","computer":"analyst","session":"…","turn":"t_9","seq":42,"ts":"…","type":"text.delta","data":{"text":"Hel"}}
 ```
 
 - **Where it starts.** With no cursor, the stream starts live. With `Last-Event-ID: <seq>` it replays everything
