@@ -4,6 +4,15 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.8.0 (2026-10-13)
+
+Agent computers can now work on a folder of this machine in place (`attach`), and Claude Code background work
+survives the end of a Turn.
+
+Upgrading: install the new release, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.8.0` under new
+tags (its computerd hands kept drives to the agent), and `a12s up`. Scripts that read `a12s stop --json` read `turns`
+instead of `turn`.
+
 - Added: `attach` mounts a folder of this machine into an agent computer at `/home/agent/<name>`
   (`attach: { project: { host: ../myapp, readOnly: false, keep: [node_modules] } }`), so an agent works on your
   project in place. `keep` paths live on drives of their own (`keep-…` in `a12s drive ls`) and never reach the
