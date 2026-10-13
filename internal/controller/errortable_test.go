@@ -42,7 +42,6 @@ func TestErrorTable(t *testing.T) {
 		{"maxBytes above the ceiling", func() string { return parse(head + "    inbox: { maxBytes: 2Mi }\n") }},
 		{"maxBytes below the floor", func() string { return parse(head + "    inbox: { maxBytes: 4Ki }\n") }},
 		{"maxBytes not a size", func() string { return parse(head + "    inbox: { maxBytes: lots }\n") }},
-		{"intro too long", func() string { return parse(head + "    inbox: { intro: \"" + strings.Repeat("x", 513) + "\" }\n") }},
 		{"inbox on a Service", func() string { return parse(head + "services:\n  clock:\n    image: x/y:1\n    inbox: {}\n") }},
 		{"power on a Service", func() string { return parse(head + "services:\n  clock:\n    image: x/y:1\n    power: {}\n") }},
 		{"wildcard in wakeOnMessage", func() string { return parse(head + "    power: { wakeOnMessage: { from: [\"*\"] } }\n") }},

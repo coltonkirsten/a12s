@@ -55,21 +55,15 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
-// up sends a preset directory as files and a seccomp path as the profile; instructions and a preset CLAUDE.md
-// together are refused.
-func TestUpInlinesPresetsAndSeccomp(t *testing.T) {
+// up sends a seccomp path as the profile itself.
+func TestUpInlinesSeccomp(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "presets/scout/.claude/skills/x"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "p.json"), []byte(`{"defaultAction":"SCMP_ACT_ALLOW"}`), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	for p, body := range map[string]string{"presets/scout/CLAUDE.md": "hi\n", "presets/scout/.claude/skills/x/SKILL.md": "skill\n", "p.json": `{"defaultAction":"SCMP_ACT_ALLOW"}`} {
-		if err := os.WriteFile(filepath.Join(dir, p), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
 	}
 	yaml := "apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata: { name: t }\n" +
 		"defaults: { harness: { kind: claude-code, version: 2.1.280 }, image: slim }\n" +
-		"agent_computers:\n  scout: { home: { preset: ./presets/scout }, security: { seccomp: ./p.json } }\n  plain: {}\n"
+		"agent_computers:\n  scout: { instructions: hi, security: { seccomp: ./p.json } }\n  plain: {}\n"
 	if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -86,17 +80,8 @@ func TestUpInlinesPresetsAndSeccomp(t *testing.T) {
 		t.Fatal(err)
 	}
 	scout := f.Computers["scout"]
-	if scout.Home.Preset != "" || scout.Instructions != "hi\n" || len(scout.Files) != 1 || scout.Files[".claude/skills/x/SKILL.md"] != "skill\n" || string(scout.Security.Seccomp.Profile) != `{"defaultAction":"SCMP_ACT_ALLOW"}` {
+	if scout.Instructions != "hi" || string(scout.Security.Seccomp.Profile) != `{"defaultAction":"SCMP_ACT_ALLOW"}` {
 		t.Fatalf("scout = %+v", scout)
-	}
-
-	both := strings.Replace(yaml, "home: { preset: ./presets/scout }", "home: { preset: ./presets/scout }, instructions: be brief", 1)
-	if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(both), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	spec, _ = fleet.LoadSpec(g.fleetPath)
-	if err := g.inline(spec); err == nil || !strings.Contains(err.Error(), "also has CLAUDE.md") {
-		t.Fatalf("instructions and a preset CLAUDE.md = %v", err)
 	}
 }
 

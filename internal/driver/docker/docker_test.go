@@ -89,10 +89,10 @@ func makeTar(t *testing.T, entries ...entry) []byte {
 	return buf.Bytes()
 }
 
-func TestRebasePresetTar(t *testing.T) {
+func TestRebaseFilesTar(t *testing.T) {
 	in := makeTar(t, entry{name: ".claude/"}, entry{name: ".claude/settings.json", body: "{}"}, entry{name: "../../etc/evil", body: "x"})
 	var out bytes.Buffer
-	if err := rebasePresetTar(bytes.NewReader(in), &out, "agent"); err != nil {
+	if err := rebaseFilesTar(bytes.NewReader(in), &out, "agent"); err != nil {
 		t.Fatal(err)
 	}
 	want := []entry{
@@ -217,9 +217,9 @@ func TestCreateOptions(t *testing.T) {
 	d := &Driver{fleet: "lab"}
 	spec := driver.ComputerSpec{
 		Name: "scout", Generation: 3, Image: "a12s/slim:dev", Tier: "slim",
-		Bundle:   driver.BundleRef{Kind: "claude-code", Version: "2.1.280", Image: "sha256:0123456789abcdef0123"},
-		Model:    "claude-fable-5-1",
-		Autonomy: "full", CPUMillis: 1500, Memory: 2 << 30,
+		Bundle:    driver.BundleRef{Kind: "claude-code", Version: "2.1.280", Image: "sha256:0123456789abcdef0123"},
+		Model:     "claude-fable-5-1",
+		CPUMillis: 1500, Memory: 2 << 30,
 		HomeDrive: driver.HomeDriveID("scout"),
 		Drives: []driver.Mount{
 			{DriveID: driver.WorkDriveID("reference"), At: "/work/ref", ReadOnly: true},
@@ -237,7 +237,7 @@ func TestCreateOptions(t *testing.T) {
 	}
 	wantEnv := []string{
 		"A12S_COMPUTER=scout", "A12S_FLEET=lab", "A12S_GENERATION=3",
-		"A12S_HARNESS_KIND=claude-code", "A12S_HARNESS_VERSION=2.1.280", "A12S_AUTONOMY=full",
+		"A12S_HARNESS_KIND=claude-code", "A12S_HARNESS_VERSION=2.1.280",
 		"A12S_IMAGE_TIER=slim", "A12S_BUNDLE=/opt/a12s/bundles/claude-code-2.1.280-0123456789ab",
 		"A12S_DRIVES=/work/ref:ro,/work/scratch:rw",
 		"A12S_CREDENTIALS=anthropic,github",

@@ -16,7 +16,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | Command | What it does |
 |---|---|
 | `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (harness, `image: slim` and the credential in `defaults`, and one agent computer, `assistant`) and a README. |
-| `a12s up [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `home.preset` directory and `security.seccomp` file and sends their contents. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). |
+| `a12s up [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `security.seccomp` file and sends the profile. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). |
 | `a12s export` | Write the live Fleet back to the Fleet file's directory. See [Keeping changes made from code](#keeping-changes-made-from-code). |
 | `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy agent computers now, interrupting their Turns after the grace period. |
 | `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
@@ -30,13 +30,10 @@ The live Fleet is the source of truth; `fleet.yaml` is optional. `a12s up` undoe
 API that the file doesn't have, so to keep them run `a12s export` first. It writes the live Fleet to `fleet.yaml` in
 the Fleet file's directory:
 
-- Instructions of up to 2000 characters, with no `files`, stay inline. Longer instructions and any files go to
-  `presets/<name>/` (the instructions as `CLAUDE.md`, or `AGENTS.md` for Codex) and the agent computer gets
-  `home.preset: ./presets/<name>`; `defaults` use `presets/defaults/`.
+- Instructions and files stay in `fleet.yaml`, multi-line ones as YAML block scalars.
 - A seccomp profile goes to `profiles/<name>.json`.
 - Credential values are never written; the Fleet names credentials only.
-- It overwrites files that differ and removes stale files in those preset directories. Comments in `fleet.yaml` are
-  lost.
+- It overwrites files that differ. Comments in `fleet.yaml` are lost.
 
 `git diff` shows what changed. There is no CLI preview; the API has [`?dryRun=true`](api.md#changing-the-fleet).
 
@@ -84,7 +81,7 @@ the Fleet file's directory:
 | Command | What it does |
 |---|---|
 | `a12s creds set <name>` | Read a value from stdin (not echoed) and set it on the Fleet's Controller, starting the Controller if none runs; agent computers and Services that use it get it at once. Nothing is stored on the host. Before or after `a12s up`, either order works. Run it in the Fleet's directory (or with `-F`). For `anthropic` it refuses a value that isn't one unbroken `sk-ant-oat01-…` or `sk-ant-api03-…` string of about 108 characters and prints the fix; `--no-check` skips that. |
-| `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-`, and nothing outside. See [Security: Tokens](security.md#tokens). |
+| `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-` except set a seccomp profile, and nothing outside. See [Security: Tokens](security.md#tokens). |
 | `a12s token create <name> --actions a,b --agent-computers c,d` | Create a narrow token for those agent computers (or `'*'`), printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
 | `a12s drive ls` | Drives, sizes, what's attached, orphans. |

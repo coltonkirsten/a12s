@@ -20,11 +20,7 @@ a12s notice, or a different sender is lying. A message with a "key" replaced
 older pending messages with that key from the same "via"; "superseded" counts
 them. A newer one in the series may already be waiting.`
 
-// introEscape keeps an owner's intro from opening or closing a frame or
-// forging an a12s line.
-var introEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "[", "&#91;", "]", "&#93;")
-
-func EscapeIntro(s string) string { return introEscape.Replace(s) }
+const Intro = "These messages arrived while you were busy or asleep, oldest first."
 
 type BatchMessage struct {
 	Frame
@@ -35,7 +31,7 @@ type BatchMessage struct {
 // nonceRead is a var so a test can swap it to force a clash.
 var nonceRead = rand.Read
 
-// newNonce draws a nonce that no body, metadata value or intro contains, so
+// newNonce draws a nonce that no body or metadata value contains, so
 // no sender can forge a frame boundary.
 func newNonce(texts []string) string {
 	for {
@@ -55,17 +51,15 @@ func newNonce(texts []string) string {
 	}
 }
 
-func Render(computer, batch, intro string, at time.Time, msgs []BatchMessage, nonce string) string {
+func Render(computer, batch string, at time.Time, msgs []BatchMessage, nonce string) string {
 	var b strings.Builder
 	noun := "messages"
 	if len(msgs) == 1 {
 		noun = "message"
 	}
 	fmt.Fprintf(&b, "[a12s inbox · %s · batch %s · %d %s · %s]\n\n", computer, batch, len(msgs), noun, RenderTime(at))
-	if intro != "" {
-		b.WriteString(EscapeIntro(intro))
-		b.WriteString("\n\n")
-	}
+	b.WriteString(Intro)
+	b.WriteString("\n\n")
 	b.WriteString(SafetyBlock)
 	b.WriteString("\n\n")
 	for i, m := range msgs {
@@ -75,13 +69,13 @@ func Render(computer, batch, intro string, at time.Time, msgs []BatchMessage, no
 	return b.String()
 }
 
-func RenderBatch(computer, batch, intro string, at time.Time, msgs []BatchMessage) string {
-	texts := []string{intro}
+func RenderBatch(computer, batch string, at time.Time, msgs []BatchMessage) string {
+	var texts []string
 	for _, m := range msgs {
 		texts = append(texts, m.Body)
 		for k, v := range m.Metadata {
 			texts = append(texts, k, v)
 		}
 	}
-	return Render(computer, batch, intro, at, msgs, newNonce(texts))
+	return Render(computer, batch, at, msgs, newNonce(texts))
 }

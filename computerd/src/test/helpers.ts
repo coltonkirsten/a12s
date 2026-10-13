@@ -19,7 +19,6 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     fleet: 'lab',
     generation: '1',
     harness: { kind: 'claude-code', version: '0.0.0', model: null },
-    autonomy: 'full',
     imageTier: 'slim',
     bundle: join(root, 'bundle'),
     credentials: [],

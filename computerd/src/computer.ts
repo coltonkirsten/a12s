@@ -214,7 +214,6 @@ export class Computer {
         sessionId: wanted,
         cwd,
         model: this.cfg.harness.model,
-        autonomy: this.cfg.autonomy,
         mcpServers: this.mcpServers,
       });
     } catch (err) {

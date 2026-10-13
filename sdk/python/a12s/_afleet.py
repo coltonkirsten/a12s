@@ -293,7 +293,8 @@ class AsyncTokens:
         """A token for another program; the secret is in the result once.
 
         With ``prefix`` it may do everything the owner can for agent computers, Services and credentials whose names
-        start with it, and nothing outside; otherwise it may do ``actions`` on ``agent_computers``.
+        start with it except set ``security.seccomp``, and nothing outside; otherwise it may do ``actions`` on
+        ``agent_computers``.
         """
         req: dict[str, Any] = {"name": name}
         if prefix is not None:

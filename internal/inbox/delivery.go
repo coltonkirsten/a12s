@@ -108,7 +108,7 @@ func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
 	return b, err
 }
 
-func buildRequest(computer, id, session, intro string, now time.Time, msgs []*api.Message, pendingAfter int) (api.TurnRequest, *time.Time) {
+func buildRequest(computer, id, session string, now time.Time, msgs []*api.Message, pendingAfter int) (api.TurnRequest, *time.Time) {
 	var bms []BatchMessage
 	inbox := &api.TurnInbox{Batch: id, PendingAfter: pendingAfter}
 	var earliest *time.Time
@@ -126,7 +126,7 @@ func buildRequest(computer, id, session, intro string, now time.Time, msgs []*ap
 			earliest = &t
 		}
 	}
-	return api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, intro, now, bms), Inbox: inbox}, earliest
+	return api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, now, bms), Inbox: inbox}, earliest
 }
 
 // claimTx expires due Messages before the snapshot so an expired one is never
@@ -181,11 +181,7 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	if msgs[0].Fresh || override {
 		session = api.SessionNew
 	}
-	var intro string
-	if err := tx.QueryRow(`SELECT intro FROM inboxes WHERE computer = ?`, computer).Scan(&intro); err != nil {
-		return nil, "", err
-	}
-	req, earliest := buildRequest(computer, id, session, intro, now, msgs, len(all)-n)
+	req, earliest := buildRequest(computer, id, session, now, msgs, len(all)-n)
 	b := &Batch{ID: id, Computer: computer, Request: req, Claimed: now, State: BatchClaimed, Override: override}
 	var notAfter any
 	if earliest != nil {

@@ -29,7 +29,7 @@ func runUp(g *globals, args []string) error {
 	return g.up(o)
 }
 
-// loadSpec reads the Fleet file as the API takes it: presets and seccomp profiles inline.
+// loadSpec reads the Fleet file as the API takes it: seccomp profiles inline.
 func (g *globals) loadSpec() (*fleet.Spec, *fleet.Fleet, error) {
 	spec, err := fleet.LoadSpec(g.fleetPath)
 	if err != nil {
@@ -103,10 +103,9 @@ func (g *globals) finishUp(resp *api.PutFleetResponse, stdout, stderr io.Writer)
 	return nil
 }
 
-// inline turns what only a Fleet file can say into what the API takes: each home.preset directory becomes files and
-// each security.seccomp path the profile itself.
+// inline turns what only a Fleet file can say into what the API takes: each security.seccomp path becomes the
+// profile itself.
 func (g *globals) inline(spec *fleet.Spec) error {
-	var defaultKind string
 	one := func(field string, raw json.RawMessage) (json.RawMessage, error) {
 		if len(raw) == 0 {
 			return raw, nil
@@ -115,49 +114,19 @@ func (g *globals) inline(spec *fleet.Spec) error {
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("%s: %w", field, err)
 		}
-		kind := c.Harness.Kind
-		if kind == "" {
-			kind = defaultKind
+		p := c.Security.Seccomp.Path
+		if p == "" {
+			return raw, nil
 		}
-		if p := c.Home.Preset; p != "" {
-			files, err := fleet.InlineFiles(g.presetDir(p))
-			if err != nil {
-				return nil, fmt.Errorf("%s.home.preset: %w", field, err)
-			}
-			// The preset's instructions file is the instructions, so a preset and inline instructions read the same.
-			name := fleet.InstructionsFile(kind)
-			if body, ok := files[name]; ok {
-				if c.Instructions != "" {
-					return nil, fmt.Errorf("%s.instructions: the preset %s also has %s; keep one", field, p, name)
-				}
-				c.Instructions = body
-				delete(files, name)
-			}
-			for path, body := range files {
-				if _, dup := c.Files[path]; dup {
-					return nil, fmt.Errorf("%s.files: %s is also in the preset %s; keep one", field, path, p)
-				}
-				if c.Files == nil {
-					c.Files = map[string]string{}
-				}
-				c.Files[path] = body
-			}
-			c.Home.Preset = ""
+		data, err := os.ReadFile(g.fleetRel(p))
+		if err != nil {
+			return nil, fmt.Errorf("%s.security.seccomp: %v", field, err)
 		}
-		if p := c.Security.Seccomp.Path; p != "" {
-			data, err := os.ReadFile(g.presetDir(p))
-			if err != nil {
-				return nil, fmt.Errorf("%s.security.seccomp: %v", field, err)
-			}
-			if _, err := fleet.ValidateSeccomp(data); err != nil {
-				return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
-			}
-			if err := c.Security.Seccomp.UnmarshalJSON(data); err != nil {
-				return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
-			}
+		if _, err := fleet.ValidateSeccomp(data); err != nil {
+			return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
 		}
-		if field == "defaults" {
-			defaultKind = c.Harness.Kind
+		if err := c.Security.Seccomp.UnmarshalJSON(data); err != nil {
+			return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
 		}
 		return fleet.SpecOf(c), nil
 	}

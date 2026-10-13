@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -19,8 +20,8 @@ KEY:
   b: { credentials: [] }
 `
 
-// A spec keeps each agent computer as written; Effective merges the defaults in: maps merge, lists replace (an
-// explicit empty one too).
+// A spec keeps each agent computer as written; Effective merges the defaults in: maps merge, credentials add to the
+// defaults' (an explicit empty list too).
 func TestSpecMergesDefaults(t *testing.T) {
 	s, err := DecodeSpec([]byte(strings.Replace(specYAML, "KEY", "agent_computers", 1)))
 	if err != nil {
@@ -37,7 +38,7 @@ func TestSpecMergesDefaults(t *testing.T) {
 	if a.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "sonnet"}) || len(a.Files) != 2 || a.Credentials[0] != "anthropic" {
 		t.Errorf("a = %+v", a)
 	}
-	if len(b.Credentials) != 0 || b.Image != "slim" {
+	if !slices.Equal(b.Credentials, []string{"anthropic"}) || b.Image != "slim" {
 		t.Errorf("b = %+v", b)
 	}
 	if _, err := DecodeSpec([]byte(strings.Replace(specYAML, "KEY", "computers", 1))); err == nil {

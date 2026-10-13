@@ -99,11 +99,9 @@ class ComputerStatus:
     harness: Harness
     image: str
     seccomp: str | None = None
-    autonomy: str
     generation: int
     staged_generation: int | None = None
     credential_generation: int | None = None
-    home_size: str | None = None
     drives: list[str] | None = None
     egress_mode: str | None = None
     warnings: list[str] | None = None

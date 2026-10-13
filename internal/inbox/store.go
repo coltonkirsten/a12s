@@ -86,8 +86,7 @@ CREATE TABLE IF NOT EXISTS inboxes (
   max_messages INTEGER NOT NULL DEFAULT 200,
   max_messages_src TEXT NOT NULL DEFAULT 'builtin',
   max_bytes INTEGER NOT NULL DEFAULT 327680,
-  max_bytes_src TEXT NOT NULL DEFAULT 'builtin',
-  intro TEXT NOT NULL DEFAULT ''
+  max_bytes_src TEXT NOT NULL DEFAULT 'builtin'
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -229,31 +228,25 @@ func BuiltinLimits() Limits {
 	}
 }
 
-type Config struct {
-	Limits Limits
-	Intro  string
-}
-
 // SyncFleet orphans an undeclared Computer's inbox rather than deleting it, so
 // a returning name reattaches its pending Messages.
-func (s *Store) SyncFleet(ctx context.Context, declared map[string]Config, by string) error {
+func (s *Store) SyncFleet(ctx context.Context, declared map[string]Limits, by string) error {
 	var touched []string
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		now := s.now()
-		rows, err := tx.Query(`SELECT computer, declared, max_messages, max_messages_src, max_bytes, max_bytes_src, intro FROM inboxes`)
+		rows, err := tx.Query(`SELECT computer, declared, max_messages, max_messages_src, max_bytes, max_bytes_src FROM inboxes`)
 		if err != nil {
 			return err
 		}
 		type row struct {
 			declared bool
 			lim      Limits
-			intro    string
 		}
 		have := map[string]row{}
 		for rows.Next() {
 			var name string
 			var r row
-			if err := rows.Scan(&name, &r.declared, &r.lim.MaxMessages.Value, &r.lim.MaxMessages.Source, &r.lim.MaxBytes.Value, &r.lim.MaxBytes.Source, &r.intro); err != nil {
+			if err := rows.Scan(&name, &r.declared, &r.lim.MaxMessages.Value, &r.lim.MaxMessages.Source, &r.lim.MaxBytes.Value, &r.lim.MaxBytes.Source); err != nil {
 				rows.Close()
 				return err
 			}
@@ -263,23 +256,14 @@ func (s *Store) SyncFleet(ctx context.Context, declared map[string]Config, by st
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		for name, cfg := range declared {
-			lim := cfg.Limits
+		for name, lim := range declared {
 			r, ok := have[name]
 			if !ok {
-				if _, err := tx.Exec(`INSERT INTO inboxes (computer, max_messages, max_messages_src, max_bytes, max_bytes_src, intro) VALUES (?, ?, ?, ?, ?, ?)`,
-					name, lim.MaxMessages.Value, lim.MaxMessages.Source, lim.MaxBytes.Value, lim.MaxBytes.Source, cfg.Intro); err != nil {
+				if _, err := tx.Exec(`INSERT INTO inboxes (computer, max_messages, max_messages_src, max_bytes, max_bytes_src) VALUES (?, ?, ?, ?, ?)`,
+					name, lim.MaxMessages.Value, lim.MaxMessages.Source, lim.MaxBytes.Value, lim.MaxBytes.Source); err != nil {
 					return err
 				}
 				continue
-			}
-			if r.intro != cfg.Intro {
-				if _, err := tx.Exec(`UPDATE inboxes SET intro = ? WHERE computer = ?`, cfg.Intro, name); err != nil {
-					return err
-				}
-				if err := event(tx, name, "", "intro_changed", now, by, nil); err != nil {
-					return err
-				}
 			}
 			if !r.declared {
 				if _, err := tx.Exec(`UPDATE inboxes SET declared = 1 WHERE computer = ?`, name); err != nil {

@@ -107,15 +107,12 @@ func (c *Controller) syncInboxes(ctx context.Context, f *fleet.Fleet, by string)
 	if c.inbox == nil || f == nil {
 		return nil
 	}
-	declared := map[string]inbox.Config{}
+	declared := map[string]inbox.Limits{}
 	for _, name := range f.ComputerNames() {
 		s := f.ResolveInbox(name)
-		declared[name] = inbox.Config{
-			Limits: api.InboxLimits{
-				MaxMessages: api.LimitValue{Value: s.MaxMessages, Source: s.MaxMessagesSource},
-				MaxBytes:    api.LimitValue{Value: s.MaxBytes, Source: s.MaxBytesSource},
-			},
-			Intro: s.Intro,
+		declared[name] = api.InboxLimits{
+			MaxMessages: api.LimitValue{Value: s.MaxMessages, Source: s.MaxMessagesSource},
+			MaxBytes:    api.LimitValue{Value: s.MaxBytes, Source: s.MaxBytesSource},
 		}
 	}
 	return c.inbox.SyncFleet(ctx, declared, by)

@@ -19,8 +19,6 @@ metadata: { name: lab }
 
 defaults:
   resources: { cpu: 1, memory: 2Gi }
-  home: { size: 10Gi }
-  autonomy: full                     # full | restricted
   egress: { allow: [] }              # deny by default
 
 drives:
@@ -32,7 +30,13 @@ agent_computers:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim
     credentials: [anthropic]
-    home: { preset: ./presets/scout }          # files for its home drive; edit them and a12s up to update
+    instructions: You are scout. Read /work/ref and answer questions about it.
+    files:                                     # more files for its home drive; edit them and a12s up to update
+      .claude/skills/cite/SKILL.md: |
+        ---
+        name: cite
+        description: Cite the file and line for every claim.
+        ---
     drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
     power:
@@ -54,9 +58,10 @@ agent_computers:
 
 ## Merging defaults
 
-Every agent computer inherits `defaults` and can override any field. **Maps merge** key by key; **lists replace**.
-So an agent computer's `egress.allow` replaces the default list instead of adding to it, and
-`agent_computers.x.inbox.maxMessages` overrides only that field of `defaults.inbox`. `defaults` apply to agent
+Every agent computer inherits `defaults` and can override any field. **Maps merge** key by key; **lists replace**,
+except `credentials`, which add to the defaults' list. So an agent computer's `egress.allow` replaces the default list
+instead of adding to it, `credentials: [github]` with `defaults.credentials: [anthropic]` gives it both, and
+`agent_computers.x.resources.memory` overrides only that field of `defaults.resources`. `defaults` apply to agent
 computers only, never to Services. Putting the harness, image and credentials in `defaults` keeps each agent computer
 to its role, and lets code create one with only a name and instructions:
 
@@ -67,7 +72,7 @@ defaults:
   credentials: [anthropic]
 agent_computers:
   lead:    { instructions: "You are lead. …", grants: { send: [worker1] } }
-  worker1: { home: { preset: ./presets/worker }, grants: { send: [lead] } }
+  worker1: { instructions: "You are worker1. …", grants: { send: [lead] } }
 ```
 
 ## Top level
@@ -108,16 +113,12 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `harness.model` | Optional, passed to the harness as is: an alias it knows (`haiku`, `sonnet`, `opus` for Claude Code) or a full model id. Default: the harness's own default. |
 | `image` | `slim`, or a custom image reference built FROM slim. See [Images](images.md#custom-images). |
 | `instructions` | Text written to the home drive as `CLAUDE.md` (claude-code) or `AGENTS.md` (codex): the agent's standing role. |
-| `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.claude/skills/x/SKILL.md`, `.mcp.json`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB. |
+| `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.claude/skills/x/SKILL.md`, `.mcp.json`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB; `instructions` and a `files` entry for the same `CLAUDE.md` (`AGENTS.md` for codex) is an error. |
 | `resources` | `{cpu, memory}`, e.g. `{ cpu: 2, memory: 4Gi }`. Zero means no limit. |
-| `home.size` | Home drive size. |
-| `home.preset` | A directory, relative to the Fleet file, of files for the home drive (`CLAUDE.md`, skills, settings). Only the Fleet file has it: `a12s up` reads the directory and sends its files as `files` (text files only; a symlink or a binary file is an error, and so is a path also in `files`). A preset `CLAUDE.md` (`AGENTS.md` for codex) together with `instructions` is an error: keep one. |
-| `autonomy` | `full` (default) or `restricted`. See [Permissions](concepts.md#permissions). |
-| `credentials` | Credential names; set each value with `a12s creds set <name>`. See [Credentials](credentials.md). |
+| `credentials` | Credential names, added to `defaults.credentials`; set each value with `a12s creds set <name>`. See [Credentials](credentials.md). |
 | `drives` | `[{name, at, readOnly?}]`: work drives and their absolute mount paths. |
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
-| `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Default: Docker's default profile. |
-| `inbox` | `{maxMessages, maxBytes, intro}`. See [Inbox](inbox.md#queue-size). |
+| `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Only the owner sets it: a prefix token can't. Default: Docker's default profile. |
 | `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |
 | `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
 | `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
@@ -136,7 +137,7 @@ Scaling is editing `agent_computers:` and running `a12s up` again: only what cha
 The first time an image, bundle or Service ref is used, the Controller pins the image ID it resolves to, in its own
 state. A pin never moves while its image exists, so to roll out a rebuilt image give it a new tag: a new ref is a new
 pin. If the pinned image is gone, the ref's current image is used. `a12s service status <svc>` shows a Service's pin.
-Presets and seccomp profiles are not pinned: edit one and run `a12s up`, and it applies at the next idle boundary.
+Instructions, files and seccomp profiles are not pinned: edit one and run `a12s up`, and it applies at the next idle boundary.
 
 To upgrade a12s, install the new release, rebuild custom images FROM the new `slim` under new tags, and run `a12s up`.
 
@@ -146,6 +147,6 @@ To upgrade a12s, install the new release, rebuild custom images FROM the new `sl
 example:
 
 ```text
-agent_computers.builder.inbox.maxBytes: 2Mi is above the 1Mi ceiling, which protects the model's context budget  fix: set 1Mi or less
+agent_computers.builder.power.sleepAfterIdle: 10d is out of range  fix: use off, or 1s to 7d (e.g. 5s, 15m, 2h, 1d)
 scout uses db, but there is no Service db  fix: add services.db or remove it from scout.uses
 ```

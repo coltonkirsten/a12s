@@ -1,5 +1,6 @@
 """The agent computer spec: the fleet file's agent computer as keyword arguments. Every field is optional; anything
-left out comes from the Fleet's defaults (maps merge, lists replace). Nested keys are the JSON's, camelCase."""
+left out comes from the Fleet's defaults (maps merge, lists replace, credentials add to the defaults'). Nested keys
+are the JSON's, camelCase."""
 
 from __future__ import annotations
 
@@ -15,10 +16,6 @@ class HarnessSpec(TypedDict, total=False):
 class ResourcesSpec(TypedDict, total=False):
     cpu: Union[str, float]
     memory: str
-
-
-class HomeSpec(TypedDict, total=False):
-    size: str
 
 
 class DriveMountSpec(TypedDict, total=False):
@@ -39,7 +36,6 @@ class SecuritySpec(TypedDict, total=False):
 class InboxSpec(TypedDict, total=False):
     maxMessages: int
     maxBytes: str
-    intro: str
 
 
 WakeOnMessageSpec = TypedDict("WakeOnMessageSpec", {"from": list[str], "maxWakesPerHour": int}, total=False)
@@ -67,8 +63,6 @@ class AgentComputerSpec(TypedDict, total=False):
     files: dict[str, str]
     """More text files for the home drive, by path relative to it; up to 1 MiB with the instructions."""
     resources: ResourcesSpec
-    home: HomeSpec
-    autonomy: Literal["full", "restricted"]
     credentials: list[str]
     drives: list[DriveMountSpec]
     egress: EgressSpec

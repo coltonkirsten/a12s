@@ -134,14 +134,6 @@ func (c Computer) validate(field string, drives map[string]Drive) []error {
 	for _, msg := range validateFiles(c) {
 		errs = append(errs, fmt.Errorf("%s.%s", field, msg))
 	}
-	switch c.Autonomy {
-	case AutonomyFull, AutonomyRestricted:
-	default:
-		bad("autonomy", "must be %s or %s, got %q", AutonomyFull, AutonomyRestricted, c.Autonomy)
-	}
-	if c.Home.Preset != "" && (path.IsAbs(c.Home.Preset) || strings.Contains(c.Home.Preset, "\\")) {
-		bad("home.preset", "%q must be a path relative to the Fleet file", c.Home.Preset)
-	}
 
 	seenCred := map[string]bool{}
 	for _, cred := range c.Credentials {

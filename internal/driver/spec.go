@@ -88,7 +88,6 @@ type ComputerSpec struct {
 	Tier       string    `json:"tier"`
 	Bundle     BundleRef `json:"bundle"`
 	Model      string    `json:"model,omitempty"`
-	Autonomy   string    `json:"autonomy"`
 	CPUMillis  int64     `json:"cpuMillis,omitempty"`   // 0 = no limit
 	Memory     int64     `json:"memoryBytes,omitempty"` // 0 = no limit
 	HomeDrive  string    `json:"homeDrive"`             // HomeDriveID(Name)
@@ -97,9 +96,9 @@ type ComputerSpec struct {
 	Credentials   []string `json:"credentials,omitempty"`
 	ProxyURL      string   `json:"proxyUrl,omitempty"`
 	ControllerURL string   `json:"controllerUrl,omitempty"`
-	// Preset is a tar copied onto the home drive before the first start and again whenever PresetDigest changes.
-	Preset       []byte `json:"preset,omitempty"`
-	PresetDigest string `json:"presetDigest,omitempty"`
+	// Files is a tar copied onto the home drive before the first start and again whenever FilesDigest changes.
+	Files       []byte `json:"files,omitempty"`
+	FilesDigest string `json:"filesDigest,omitempty"`
 	// Seccomp is a profile from the Fleet's security.seccomp that replaces the substrate default.
 	Seccomp string     `json:"seccomp,omitempty"`
 	Uses    []Endpoint `json:"uses,omitempty"`
@@ -114,7 +113,6 @@ func (s ComputerSpec) Env(fleet string) []string {
 		"A12S_GENERATION=" + strconv.FormatInt(s.Generation, 10),
 		"A12S_HARNESS_KIND=" + s.Bundle.Kind,
 		"A12S_HARNESS_VERSION=" + s.Bundle.Version,
-		"A12S_AUTONOMY=" + s.Autonomy,
 		"A12S_IMAGE_TIER=" + s.Tier,
 		"A12S_BUNDLE=" + s.Bundle.Path(),
 		"A12S_DRIVES=" + s.drivesEnv(),

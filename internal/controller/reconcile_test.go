@@ -41,14 +41,14 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 
 	// Missing pins were resolved.
 	l := h.pins()
-	if l.Images[imageRef("slim")] != "sha256:slim1" || len(l.Images) != 1 || len(l.Seccomp) != 0 || len(l.Presets) != 0 ||
+	if l.Images[imageRef("slim")] != "sha256:slim1" || len(l.Images) != 1 ||
 		l.Bundles["claude-code@2.1.280"] != "sha256:claude1" || l.Bundles["codex@0.154.0"] != "sha256:codex1" {
 		t.Fatalf("pins = %+v", l)
 	}
 
-	// Specs: pinned IDs run, presets travel, the default seccomp profile applies.
+	// Specs: pinned IDs run, files travel, the default seccomp profile applies.
 	scout, tester := h.d.get("scout").spec, h.d.get("tester").spec
-	if scout.Image != "sha256:slim1" || scout.Bundle.Image != "sha256:claude1" || len(scout.Preset) == 0 || scout.Seccomp != "" {
+	if scout.Image != "sha256:slim1" || scout.Bundle.Image != "sha256:claude1" || len(scout.Files) == 0 || scout.Seccomp != "" {
 		t.Errorf("scout spec = %+v", scout)
 	}
 	if tester.Seccomp != "" || tester.CPUMillis != 2000 || tester.Memory != 4<<30 {
@@ -400,13 +400,13 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 func TestChangedInstructionsAreApplied(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
-	before := h.d.get("scout").spec.PresetDigest
+	before := h.d.get("scout").spec.FilesDigest
 	if before == "" {
-		t.Fatal("scout's preset files were not sent to the driver")
+		t.Fatal("scout's files were not sent to the driver")
 	}
 	changed := h.up(labFleet(t, func(f *fleet.Fleet) {
 		c := f.Computers["scout"]
-		c.Files, c.Home.Preset = nil, ""
+		c.Files = nil
 		c.Instructions = "You are scout, version 2.\n"
 		f.Computers["scout"] = c
 	}), false)
@@ -414,13 +414,13 @@ func TestChangedInstructionsAreApplied(t *testing.T) {
 		t.Fatalf("up = %+v, want scout updated", changed)
 	}
 	spec := h.d.get("scout").spec
-	if spec.PresetDigest == before {
-		t.Fatal("the preset digest did not change")
+	if spec.FilesDigest == before {
+		t.Fatal("the files digest did not change")
 	}
-	tr := tar.NewReader(bytes.NewReader(spec.Preset))
+	tr := tar.NewReader(bytes.NewReader(spec.Files))
 	hdr, err := tr.Next()
 	if err != nil || hdr.Name != "CLAUDE.md" {
-		t.Fatalf("preset tar: %v %v", hdr, err)
+		t.Fatalf("files tar: %v %v", hdr, err)
 	}
 	body, _ := io.ReadAll(tr)
 	if string(body) != "You are scout, version 2.\n" {

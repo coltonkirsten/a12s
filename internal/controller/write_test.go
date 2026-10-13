@@ -34,7 +34,7 @@ func TestAgentComputerWrites(t *testing.T) {
 	if res.Version != v0+1 || res.AgentComputer == nil || res.AgentComputer.Status.Phase != api.PhaseReady {
 		t.Fatalf("create = %+v", res)
 	}
-	if got := h.d.get("hello").spec; got.PresetDigest == "" {
+	if got := h.d.get("hello").spec; got.FilesDigest == "" {
 		t.Fatal("hello's instructions were not written to its home drive")
 	}
 	if r := h.api("PUT", "/v1/agent-computers/hello", helloSpec, "If-None-Match", "*"); r.StatusCode != 409 || apiError(t, r).Code != api.ErrExists {
@@ -93,7 +93,7 @@ func TestAgentComputerAdmissionCodes(t *testing.T) {
 		code   api.ErrorCode
 	}{
 		{`{"image":"slim"}`, 400, api.ErrMissingField},
-		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","home":{"preset":"./p"}}`, 400, api.ErrInvalid},
+		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","security":{"seccomp":"./p.json"}}`, 400, api.ErrInvalid},
 		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","bogus":1}`, 400, api.ErrInvalid},
 		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","files":{"../x":"y"}}`, 400, api.ErrInvalid},
 	} {
@@ -151,52 +151,6 @@ func TestFleetIfMatch(t *testing.T) {
 	if r.StatusCode != 200 || r.Header.Get("ETag") != etag(fr.Version) {
 		t.Fatalf("matching If-Match = %d, etag %s (an unchanged Fleet keeps its version)", r.StatusCode, r.Header.Get("ETag"))
 	}
-}
-
-// A Controller upgraded from a release that stored the merged Fleet keeps every agent computer, with its preset as
-// files and its seccomp profile inline.
-func TestLegacyStateMigrates(t *testing.T) {
-	dir := t.TempDir()
-	tarData := mustPresetTar(t)
-	sum, err := hashPresetTar(tarData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, presetDir), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(presetPath(dir, sum), tarData, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	profile := `{"defaultAction":"SCMP_ACT_ALLOW"}`
-	legacy := `{"fleet":{"apiVersion":"a12s.ai/v1alpha1","kind":"Fleet","metadata":{"name":"lab"},
-		"computers":{"scout":{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","home":{"preset":"./presets/scout"},"security":{"seccomp":"./p.json"}}}},
-		"lock":{"images":{},"bundles":{},"presets":{"./presets/scout":"` + sum + `"},"seccomp":{"./p.json":"sha256:x"}},
-		"seccomp":{"sha256:x":` + quoted(profile) + `},"computers":{}}`
-	if err := os.WriteFile(filepath.Join(dir, stateFile), []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	st, err := loadState(filepath.Join(dir, stateFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := st.Fleet.Computers["scout"]
-	if c.Home.Preset != "" || !strings.Contains(c.Files["CLAUDE.md"], "scout") || string(c.Security.Seccomp.Profile) != profile {
-		t.Fatalf("migrated scout = %+v", c)
-	}
-}
-
-func mustPresetTar(t *testing.T) []byte {
-	t.Helper()
-	files, err := fleet.InlineFiles("../../examples/lab/presets/scout")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _, err := fleet.FilesTar(files)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
 }
 
 func quoted(s string) string {

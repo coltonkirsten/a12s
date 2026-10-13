@@ -180,13 +180,11 @@ type ComputerStatus struct {
 	Image         string   `json:"image"` // slim or an image reference
 	// Seccomp is the digest of the custom seccomp profile the agent computer runs with.
 	Seccomp    string `json:"seccomp,omitempty"`
-	Autonomy   string `json:"autonomy"`
 	Generation int64  `json:"generation"`
 	// StagedGeneration is greater than Generation while a change waits for idle.
-	StagedGeneration     int64       `json:"stagedGeneration,omitempty"`
-	CredentialGeneration int64       `json:"credentialGeneration,omitempty"`
-	HomeSize             fleet.Bytes `json:"homeSize,omitzero"`
-	Drives               []string    `json:"drives,omitempty"`
+	StagedGeneration     int64    `json:"stagedGeneration,omitempty"`
+	CredentialGeneration int64    `json:"credentialGeneration,omitempty"`
+	Drives               []string `json:"drives,omitempty"`
 	// EgressMode is EgressEnforced, EgressUnenforced or EgressAllowAll, for
 	// the active generation.
 	EgressMode string        `json:"egressMode,omitempty"`

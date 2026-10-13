@@ -88,12 +88,12 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
   session record), work drives at their `at:`, the bundle cache read-only at `/opt/a12s/bundles`, tmpfs
   `/run/a12s` (secrets, TLS, computerd's socket) and `/tmp`.
 - **Instructions and files** are copied onto the home drive as one tar before the first start and again when they
-  change, with a root-owned marker in `/home/.a12s-preset` naming the applied digest. A copy overwrites those files
+  change, with a root-owned marker in `/home/.a12s-files` naming the applied digest. A copy overwrites those files
   and leaves the rest of the home drive alone.
 - **computerd** (`/opt/a12s/computerd`) waits for its TLS files, listens with mTLS on `:7443`, keeps the journal
   (`/home/.a12s/journal.db`, SQLite) and runs the harness as uid 1000.
 - **Environment** set by the driver includes `A12S_COMPUTER`, `A12S_FLEET`, `A12S_HARNESS_KIND`,
-  `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_AUTONOMY`, `A12S_BUNDLE`, `A12S_CREDENTIALS`, `A12S_DRIVES`,
+  `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_BUNDLE`, `A12S_CREDENTIALS`, `A12S_DRIVES`,
   `A12S_PROXY` and `A12S_CONTROLLER`, plus `A12S_SERVICE_<SVC>_<PORT>` for each used Service port.
 
 ### computerd API
@@ -114,8 +114,8 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
   session id and `resume`. User, project and local settings load, so the agent's own skills and MCP config work.
   Stop interrupts, then sends SIGTERM after 10 s and SIGKILL after 5 s more. One process per Turn.
 - **Codex:** `codex app-server` over JSON-RPC on stdio, one long-lived child per agent computer: `thread/start` or
-  `thread/resume`, `turn/start`, `turn/interrupt`. Every server request (approvals, user input, elicitation) is
-  answered according to `autonomy`.
+  `thread/resume`, `turn/start`, `turn/interrupt`. Every server request is answered: approvals are granted (approval
+  policy `never`, `danger-full-access`), user input and elicitation are declined.
 - Both get the `a12s` system tools MCP server; each used Service's MCP port is registered as `a12s-<svc>` through a
   stdio-to-HTTP bridge.
 

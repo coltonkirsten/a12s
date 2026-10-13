@@ -7,9 +7,6 @@ type Pins struct {
 	Images   map[string]string `json:"images"`
 	Bundles  map[string]string `json:"bundles"`
 	Services map[string]string `json:"services,omitempty"`
-	// Presets and Seccomp are only read from the state of an older Controller, to migrate it.
-	Presets map[string]string `json:"presets,omitempty"`
-	Seccomp map[string]string `json:"seccomp,omitempty"`
 }
 
 func ServiceKey(name, ref string) string { return name + "@" + ref }

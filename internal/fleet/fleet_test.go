@@ -21,12 +21,12 @@ func TestParseLabExample(t *testing.T) {
 		t.Errorf("ComputerNames = %v", got)
 	}
 	scout, builder, tester := f.Computers["scout"], f.Computers["builder"], f.Computers["tester"]
-	if scout.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"}) || scout.Home.Preset != "./presets/scout" ||
+	if scout.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"}) || scout.Instructions != "You are scout.\n" ||
 		!reflect.DeepEqual(scout.Drives, []DriveMount{{Name: "reference", At: "/work/ref", ReadOnly: true}}) ||
 		!reflect.DeepEqual(scout.Egress.Allow, []string{"api.anthropic.com"}) || !reflect.DeepEqual(scout.Credentials, []string{"anthropic"}) {
 		t.Errorf("scout %+v", scout)
 	}
-	if builder.Harness.Kind != HarnessCodex || !reflect.DeepEqual(builder.Credentials, []string{"openai", "github"}) || builder.Autonomy != AutonomyFull {
+	if builder.Harness.Kind != HarnessCodex || !reflect.DeepEqual(builder.Credentials, []string{"openai", "github"}) {
 		t.Errorf("builder %+v", builder)
 	}
 	if tester.Image != TierSlim || tester.Resources.CPU != 2000 || tester.Resources.Memory != 4*Bytes(1<<30) {
@@ -62,11 +62,10 @@ agent_computers:
 				Harness:   Harness{Kind: HarnessCodex, Version: "0.154.0", Model: "gpt-6-astra"},
 				Image:     TierSlim,
 				Resources: Resources{CPU: 1000, Memory: 4 << 30},
-				Autonomy:  AutonomyFull,
 			},
 		},
 		{
-			name: "lists replace instead of appending",
+			name: "lists replace, credentials add to the defaults'",
 			yaml: `
 defaults:
   harness: { kind: codex, version: 0.154.0 }
@@ -75,14 +74,13 @@ defaults:
   egress: { allow: [a.example.com, b.example.com] }
 agent_computers:
   c:
-    credentials: [github]
+    credentials: [github, openai]
     egress: { allow: [c.example.com] }
 `,
 			want: Computer{
 				Harness:     Harness{Kind: HarnessCodex, Version: "0.154.0"},
 				Image:       TierSlim,
-				Autonomy:    AutonomyFull,
-				Credentials: []string{"github"},
+				Credentials: []string{"openai", "github"},
 				Egress:      Egress{Allow: []string{"c.example.com"}},
 			},
 		},
@@ -97,10 +95,9 @@ agent_computers:
   c: { egress: { allow: [] } }
 `,
 			want: Computer{
-				Harness:  Harness{Kind: HarnessCodex, Version: "0.154.0"},
-				Image:    TierSlim,
-				Autonomy: AutonomyFull,
-				Egress:   Egress{Allow: []string{}},
+				Harness: Harness{Kind: HarnessCodex, Version: "0.154.0"},
+				Image:   TierSlim,
+				Egress:  Egress{Allow: []string{}},
 			},
 		},
 		{
@@ -109,14 +106,12 @@ agent_computers:
 defaults:
   harness: { kind: claude-code, version: 1.10 }
   image: slim
-  autonomy: full
 agent_computers:
-  c: { autonomy: restricted, image: me/agent:1 }
+  c: { image: me/agent:1 }
 `,
 			want: Computer{
-				Harness:  Harness{Kind: HarnessClaudeCode, Version: "1.10"},
-				Image:    "me/agent:1",
-				Autonomy: AutonomyRestricted,
+				Harness: Harness{Kind: HarnessClaudeCode, Version: "1.10"},
+				Image:   "me/agent:1",
 			},
 		},
 		{
@@ -133,7 +128,6 @@ agent_computers:
 				Harness:   Harness{Kind: HarnessCodex, Version: "1"},
 				Image:     TierSlim,
 				Resources: Resources{CPU: 500},
-				Autonomy:  AutonomyFull,
 			},
 		},
 	}
@@ -174,8 +168,6 @@ agent_computers:
 		{"custom image by digest", base + strings.Replace(c, "image: slim", "image: sha256:"+strings.Repeat("a", 64), 1), ""},
 		{"bad image", base + strings.Replace(c, "image: slim", "image: 'Not An Image'", 1), "computers.c.image"},
 		{"missing image", base + strings.Replace(c, "    image: slim\n", "", 1), "computers.c.image"},
-		{"restricted", base + c + "    autonomy: restricted\n", ""},
-		{"bad autonomy", base + c + "    autonomy: yolo\n", "autonomy"},
 		{"egress hosts", base + c + "    egress: { allow: [api.openai.com, github.com] }\n", ""},
 		{"egress star", base + c + "    egress: { allow: ['*'] }\n", ""},
 		{"egress url", base + c + "    egress: { allow: ['https://github.com'] }\n", "egress.allow"},
@@ -186,8 +178,6 @@ agent_computers:
 		{"resources", base + c + "    resources: { cpu: 0.5, memory: 512Mi }\n", ""},
 		{"bad memory", base + c + "    resources: { memory: 2GB }\n", "invalid size"},
 		{"bad cpu", base + c + "    resources: { cpu: lots }\n", "invalid cpu"},
-		{"bad home size", base + c + "    home: { size: -1Gi }\n", "invalid size"},
-		{"absolute preset", base + c + "    home: { preset: /etc/x }\n", "home.preset"},
 		{"credentials", base + c + "    credentials: [openai, github]\n", ""},
 		{"duplicate credential", base + c + "    credentials: [openai, openai]\n", "listed twice"},
 		{"undeclared drive", base + c + "    drives: [{ name: nope, at: /work/x }]\n", "not declared"},
@@ -239,12 +229,12 @@ func TestValidateReportsAllErrors(t *testing.T) {
 kind: Fleet
 metadata: { name: t }
 agent_computers:
-  c: { harness: { kind: x, version: "1" }, image: slim, autonomy: none }
+  c: { harness: { kind: x, version: "1" }, image: slim, egress: { allow: [Bad] } }
 `))
 	if err == nil {
 		t.Fatal("want error")
 	}
-	for _, s := range []string{"apiVersion", "harness.kind", "autonomy"} {
+	for _, s := range []string{"apiVersion", "harness.kind", "egress.allow"} {
 		if !strings.Contains(err.Error(), s) {
 			t.Errorf("error %q does not mention %s", err, s)
 		}
@@ -333,12 +323,12 @@ func TestSecurityAndRemovedBrowserTier(t *testing.T) {
 		"image: browser": "no longer part of a12s",
 		"image: slim\n    security: { seccomp: /etc/x.json }": "must be a path relative to the Fleet file",
 	} {
-		_, err := Parse([]byte(base + "agent_computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    " + yaml + "\n"))
+		_, err := Parse([]byte(base + "agent_computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    " + yaml + "\n"))
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", yaml, err, want)
 		}
 	}
-	f, err := Parse([]byte(base + "defaults:\n  security: { seccomp: ./profiles/chromium.json }\nagent_computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    image: me/agent:1\n"))
+	f, err := Parse([]byte(base + "defaults:\n  security: { seccomp: ./profiles/chromium.json }\nagent_computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    image: me/agent:1\n"))
 	if err != nil || f.Computers["c"].Security.Seccomp.Path != "./profiles/chromium.json" {
 		t.Fatalf("security from defaults: %v %+v", err, f)
 	}

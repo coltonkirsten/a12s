@@ -12,13 +12,13 @@ import (
 
 // export then up's reading of the files gives back the same Fleet: nothing is lost on the way through the file.
 func TestExportRoundTrips(t *testing.T) {
-	long := strings.Repeat("Be thorough. ", 200)
+	long := strings.Repeat("Be thorough.\n", 200) + "  indented\ttab, trailing space \n\nno final newline"
 	live := &fleet.Spec{
 		APIVersion: fleet.APIVersion, Kind: fleet.Kind, Metadata: fleet.Metadata{Name: "t"},
 		Defaults: json.RawMessage(`{"harness":{"kind":"codex","version":"0.154.0"},"image":"slim","credentials":["openai"],"egress":{"allow":[]}}`),
 		AgentComputers: map[string]json.RawMessage{
 			"short": json.RawMessage(`{"instructions":"Be brief."}`),
-			"long":  json.RawMessage(`{"instructions":` + strings.TrimSpace(mustJSON(long)) + `,"files":{"skills/x/SKILL.md":"skill","bin/run":"#!/bin/sh\necho hi\n"}}`),
+			"long":  json.RawMessage(`{"instructions":` + strings.TrimSpace(mustJSON(long)) + `,"files":{"skills/x/SKILL.md":"skill","bin/run":"#!/bin/sh\necho hi\n",".mcp.json":"{\"a\": 1}\n"}}`),
 			"sec":   json.RawMessage(`{"security":{"seccomp":{"defaultAction":"SCMP_ACT_ALLOW"}}}`),
 		},
 	}
@@ -26,11 +26,8 @@ func TestExportRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := files["presets/long/AGENTS.md"]; !ok {
-		t.Fatalf("long instructions of a codex agent computer go to AGENTS.md: %v", keys(files))
-	}
-	if strings.Contains(string(files["fleet.yaml"]), "presets/short") {
-		t.Fatalf("short instructions stay inline:\n%s", files["fleet.yaml"])
+	if len(files) != 2 || files["profiles/sec.json"] == nil {
+		t.Fatalf("instructions and files stay in fleet.yaml, a seccomp profile is its own file: %v", keys(files))
 	}
 	dir := t.TempDir()
 	for rel, b := range files {

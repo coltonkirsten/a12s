@@ -7,8 +7,6 @@ metadata: { name: lab }
 
 defaults:
   resources: { cpu: 1, memory: 1Gi }
-  home: { size: 10Gi }
-  autonomy: full
   egress: { allow: [] }
   inbox: { maxMessages: 200, maxBytes: 320Ki }
 
@@ -40,7 +38,6 @@ agent_computers:
     credentials: [anthropic]
     drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
-    inbox: { intro: "Review requests from builder, oldest first. Reply with a verdict per request." }
 
 services:
   clock:

@@ -40,7 +40,7 @@ const tls = { ca: readFileSync(join(ca, 'ca.crt')), cert: readFileSync(join(ca, 
 const env = {
   PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
   A12S_COMPUTER: 'smoke', A12S_FLEET: 'lab', A12S_GENERATION: '1', A12S_HARNESS_KIND: kind,
-  A12S_HARNESS_VERSION: kind === 'codex' ? '0.154.0' : '2.1.280', A12S_AUTONOMY: 'full', A12S_IMAGE_TIER: 'slim',
+  A12S_HARNESS_VERSION: kind === 'codex' ? '0.154.0' : '2.1.280', A12S_IMAGE_TIER: 'slim',
   A12S_BUNDLE: join(T, 'bundle'), A12S_CREDENTIALS: cred, A12S_HOME_ROOT: join(T, 'home'), A12S_RUN_DIR: run,
 };
 let daemon;

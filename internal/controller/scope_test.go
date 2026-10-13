@@ -105,6 +105,46 @@ func TestPrefixTokenCannotLeaveItsLane(t *testing.T) {
 	}
 }
 
+// A seccomp profile loosens the sandbox, so only the owner sets one: a prefix token can't add, change or remove an
+// agent computer's own security.seccomp, by any write path, though it may edit everything else of one the owner set.
+func TestPrefixTokenCannotSetSeccomp(t *testing.T) {
+	h, biz := prefixHarness(t)
+	const profile = `{"defaultAction":"SCMP_ACT_ALLOW"}`
+	const other = `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["ptrace"],"action":"SCMP_ACT_ERRNO"}]}`
+	wantSeccompForbidden := func(what string, res *http.Response) {
+		t.Helper()
+		if e := apiError(t, res); res.StatusCode != http.StatusForbidden || e.Code != api.ErrForbidden || !strings.Contains(e.Message, "seccomp") {
+			t.Errorf("%s = %d %s (%s), want 403 forbidden naming seccomp", what, res.StatusCode, e.Code, e.Message)
+		}
+	}
+	wantSeccompForbidden("create with a profile", biz("PUT", "/v1/agent-computers/biz-a", bizSpec+`,"security":{"seccomp":`+profile+`}}`))
+	wantSeccompForbidden("dry-run create with a profile", biz("PUT", "/v1/agent-computers/biz-a?dryRun=true", bizSpec+`,"security":{"seccomp":`+profile+`}}`))
+	if r := biz("PUT", "/v1/agent-computers/biz-a", bizSpec+"}"); r.StatusCode != 200 {
+		t.Fatalf("create without a profile = %d", r.StatusCode)
+	}
+	wantSeccompForbidden("patch a profile in", biz("PATCH", "/v1/agent-computers/biz-a", `{"security":{"seccomp":`+profile+`}}`))
+
+	if r := h.api("PUT", "/v1/agent-computers/biz-s", bizSpec+`,"security":{"seccomp":`+profile+`}}`); r.StatusCode != 200 {
+		t.Fatalf("owner creates biz-s with a profile = %d %+v", r.StatusCode, apiError(t, r))
+	}
+	v := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Version
+	wantSeccompForbidden("patch the owner's profile", biz("PATCH", "/v1/agent-computers/biz-s", `{"security":{"seccomp":`+other+`}}`))
+	wantSeccompForbidden("patch the owner's profile away", biz("PATCH", "/v1/agent-computers/biz-s", `{"security":null}`))
+	wantSeccompForbidden("put without the owner's profile", biz("PUT", "/v1/agent-computers/biz-s", bizSpec+"}"))
+	if got := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Version; got != v {
+		t.Fatalf("refused writes changed the Fleet: v%d -> v%d", v, got)
+	}
+	if r := biz("PATCH", "/v1/agent-computers/biz-s", `{"instructions":"sell"}`); r.StatusCode != 200 {
+		t.Fatalf("patch other fields of biz-s = %d %+v", r.StatusCode, apiError(t, r))
+	}
+	if r := biz("PUT", "/v1/agent-computers/biz-s", bizSpec+`,"security":{"seccomp":`+profile+`}}`); r.StatusCode != 200 {
+		t.Fatalf("put keeping the owner's profile = %d %+v", r.StatusCode, apiError(t, r))
+	}
+	if r := biz("DELETE", "/v1/agent-computers/biz-s", ""); r.StatusCode != 200 {
+		t.Fatalf("remove biz-s = %d", r.StatusCode)
+	}
+}
+
 // Defaults are merged into the token's agent computers, so they can't carry it outside either.
 func TestPrefixTokenCannotReachOutThroughDefaults(t *testing.T) {
 	h, biz := prefixHarness(t)
@@ -112,7 +152,7 @@ func TestPrefixTokenCannotReachOutThroughDefaults(t *testing.T) {
 		t.Fatalf("create = %d", r.StatusCode)
 	}
 	fr := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", ""))
-	fr.Fleet.Defaults = json.RawMessage(`{"resources":{"cpu":1,"memory":"2Gi"},"home":{"size":"10Gi"},"egress":{"allow":[]},"grants":{"send":["scout"]}}`)
+	fr.Fleet.Defaults = json.RawMessage(`{"resources":{"cpu":1,"memory":"2Gi"},"egress":{"allow":[]},"grants":{"send":["scout"]}}`)
 	body, _ := json.Marshal(api.PutFleetRequest{Fleet: &fr.Fleet})
 	if r := h.api("PUT", "/v1/fleet", string(body)); r.StatusCode != 200 {
 		t.Fatalf("owner sets defaults = %d %+v", r.StatusCode, apiError(t, r))
