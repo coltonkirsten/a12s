@@ -4,9 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
-Upgrading: while still on 0.6.0, remove `home:`, `autonomy:` and `inbox.intro` from fleet.yaml (and from specs your
-code writes) and run `a12s up`, so the live Fleet holds none of them; a Controller whose stored Fleet still has one
-refuses to start. Then install the new release and `a12s up`.
+Upgrading: install the new release and `a12s up`. The new Controller drops the fields this release removes from the
+Fleet it stored (`home`, `autonomy`, `inbox.intro`, work `drives`, the top-level `egress`, a Service's `publish` and
+`egress.tcp`, a manifest's `login`) and keeps the rest running. A write that sets one of them is refused, so take them
+out of fleet.yaml and out of the specs your code writes.
 
 ### Breaking
 - **The v0.4 names are gone.** A Fleet file's `computers:` key is refused: rename it to `agent_computers:`. The
@@ -56,8 +57,8 @@ refuses to start. Then install the new release and `a12s up`.
   `drives: [{name, at, readOnly}]` and the agent's `lock` / `release` system tools are removed, and a Fleet that names
   them is refused. Agent computers share work through Messages or a Service. Home drives, Service state drives and
   `a12s drive ls` / `rm` stay; `drive ls` no longer lists work drives and its rows have no `access`, and status rows
-  have no `drives`. Before upgrading, copy out what you need and `a12s drive rm <name>` each work drive while the old
-  release runs, then drop `drives:` from fleet.yaml (a Controller whose stored Fleet still has them doesn't start).
+  have no `drives`. A work drive's volume (`a12s-<fleet>-drive-<name>`) keeps its data after
+  the upgrade: copy out what you need, then `docker volume rm` it (`a12s down --purge` also removes it).
 - **`a12s service login` is gone**, with the Service manifest's `login {command, produces}`, the
   `/v1/services/{s}/login` routes and the `{"credential": "reauth"}` health answer: set a Service's credential with
   `a12s creds set <name>` like any other.

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,6 +100,9 @@ func readStateFile(path string) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load state: %w", err)
 	}
+	if data, err = dropRemovedFields(data); err != nil {
+		return nil, fmt.Errorf("load state %s: %w", path, err)
+	}
 	if err := json.Unmarshal(data, st); err != nil {
 		return nil, fmt.Errorf("load state %s: %w", path, err)
 	}
@@ -115,6 +119,46 @@ func readStateFile(path string) (*State, error) {
 		st.Manifests = map[string]*fleet.ServiceManifest{}
 	}
 	return st, nil
+}
+
+// dropRemovedFields strips the Fleet fields v0.7.0 removed from the stored Spec: the Spec decodes strictly, and a
+// Controller that can't load its own state can't take the a12s up that would fix it.
+func dropRemovedFields(data []byte) ([]byte, error) {
+	var st map[string]any
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&st); err != nil {
+		return nil, err
+	}
+	spec, _ := st["spec"].(map[string]any)
+	if spec == nil {
+		return data, nil
+	}
+	delete(spec, "drives")
+	delete(spec, "egress")
+	computers := []any{spec["defaults"]}
+	for _, c := range asObject(spec["agent_computers"]) {
+		computers = append(computers, c)
+	}
+	for _, c := range computers {
+		c := asObject(c)
+		delete(c, "home")
+		delete(c, "autonomy")
+		delete(c, "drives")
+		delete(asObject(c["inbox"]), "intro")
+	}
+	for _, s := range asObject(spec["services"]) {
+		s := asObject(s)
+		delete(s, "publish")
+		delete(asObject(s["egress"]), "tcp")
+		delete(asObject(s["manifest"]), "login")
+	}
+	return json.Marshal(st)
+}
+
+func asObject(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
 }
 
 func (s *State) save(path string) error {
