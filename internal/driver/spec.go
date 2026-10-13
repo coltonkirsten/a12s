@@ -128,6 +128,15 @@ type Keep struct {
 	Target string `json:"target"`
 }
 
+// AttachTargets are every attached folder's mount point, for computerd to check before it writes anything.
+func (s ComputerSpec) AttachTargets() []string {
+	var out []string
+	for _, a := range s.Attach {
+		out = append(out, a.Target)
+	}
+	return out
+}
+
 // KeepTargets are every kept path's mount point, for computerd to hand to the agent's uid.
 func (s ComputerSpec) KeepTargets() []string {
 	var out []string
@@ -162,6 +171,9 @@ func (s ComputerSpec) Env(fleet string) []string {
 	}
 	if len(s.Send) > 0 {
 		env = append(env, "A12S_SEND="+strings.Join(s.Send, ","))
+	}
+	if attach := s.AttachTargets(); len(attach) > 0 {
+		env = append(env, "A12S_ATTACH="+strings.Join(attach, ","))
 	}
 	if keep := s.KeepTargets(); len(keep) > 0 {
 		env = append(env, "A12S_KEEP="+strings.Join(keep, ","))

@@ -336,8 +336,8 @@ func TestCreateOptionsAttach(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("mounts =\n%+v\nwant\n%+v", got, want)
 	}
-	if !slices.Contains(o.Config.Env, "A12S_KEEP=/home/agent/project/node_modules") {
-		t.Errorf("env lacks A12S_KEEP: %q", o.Config.Env)
+	if !slices.Contains(o.Config.Env, "A12S_KEEP=/home/agent/project/node_modules") || !slices.Contains(o.Config.Env, "A12S_ATTACH=/home/agent/docs,/home/agent/project") {
+		t.Errorf("env lacks A12S_KEEP or A12S_ATTACH: %q", o.Config.Env)
 	}
 }
 

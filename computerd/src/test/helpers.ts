@@ -25,6 +25,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     proxy: null,
     send: [],
     uses: '',
+    attach: [],
     keep: [],
     controller: null,
     port: 0,

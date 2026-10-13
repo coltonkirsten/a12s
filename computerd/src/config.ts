@@ -18,6 +18,8 @@ export interface Config {
   send: string[];
   /** Raw A12S_USES (the endpoints of the Services it uses). */
   uses: string;
+  /** Mount points of the attached host folders (A12S_ATTACH). */
+  attach: string[];
   /** Mount points of the drives that hold an attached folder's kept paths (A12S_KEEP). */
   keep: string[];
   controller: string | null;
@@ -61,6 +63,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     proxy: env.A12S_PROXY || null,
     send: (env.A12S_SEND ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     uses: env.A12S_USES ?? '',
+    attach: (env.A12S_ATTACH ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     keep: (env.A12S_KEEP ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     controller: env.A12S_CONTROLLER || null,
     port: Number((!isRoot && env.A12S_PORT) || 7443),

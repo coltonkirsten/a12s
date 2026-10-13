@@ -26,23 +26,29 @@ export function prepareDirs(cfg: Config): void {
 }
 
 /**
- * The kept paths whose drives computerd hands to the agent. Each must be exactly a mount point below the home with
- * no symlink on the way, so a path the agent shaped in an earlier generation can't steer root's chown elsewhere.
+ * Each path must be exactly a mount point below the home with no symlink on the way. Docker follows a symlink the
+ * agent left at a mount's path in an earlier generation, which would put the mount over a root-managed directory.
  */
-export function keepMounts(cfg: Config, mountinfo: string): string[] {
+export function homeMounts(cfg: Config, paths: string[], mountinfo: string): string[] {
   const mountPoints = new Set(mountinfo.split('\n').map((line) => line.split(' ')[4]).filter(Boolean));
-  for (const p of cfg.keep) {
+  for (const p of paths) {
     if (!p.startsWith(`${cfg.agentHome}/`) || !mountPoints.has(p) || realpathSync(p) !== p) {
-      throw new Error(`kept path ${p} is not a drive mounted in the home`);
+      throw new Error(`${p} is not mounted at its own path in the home`);
     }
   }
-  return cfg.keep;
+  return paths;
+}
+
+/** Runs before anything is written, so a redirected attached folder never receives the journal or secrets. */
+export function checkAttach(cfg: Config): void {
+  if (!cfg.isRoot || cfg.attach.length === 0) return;
+  homeMounts(cfg, cfg.attach, readFileSync('/proc/self/mountinfo', 'utf8'));
 }
 
 /** A keep drive starts empty and root-owned; the agent installs into it, so it gets the drive's root (only). */
 export function prepareKeep(cfg: Config): void {
   if (!cfg.isRoot || cfg.keep.length === 0) return;
-  for (const p of keepMounts(cfg, readFileSync('/proc/self/mountinfo', 'utf8'))) {
+  for (const p of homeMounts(cfg, cfg.keep, readFileSync('/proc/self/mountinfo', 'utf8'))) {
     const fd = openSync(p, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     try {
       const st = fstatSync(fd);

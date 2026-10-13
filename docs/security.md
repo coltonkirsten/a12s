@@ -79,6 +79,10 @@ yourself, keep them under version control, and use `readOnly: true` for anything
 - **Kept paths stay inside.** Each `keep` path is a drive of its own mounted over that path, so what the agent
   installs there (`node_modules`, `.venv`) never reaches the host folder. computerd hands only the root of each
   such drive to the agent, after checking that it is exactly a mount point below its home.
+- **A mount can't be steered.** Docker follows a symlink at a mount's path, so an agent could leave
+  `/home/agent/<name>` as a link to a root-only directory before the folder is attached. computerd checks, before it
+  writes anything, that every attached folder and kept drive is mounted exactly at its own path, and otherwise
+  refuses to start.
 - **It is visible.** `a12s up` prints `<name> has <folder> at /home/agent/<name> (read-write)` for each one.
 
 ## Egress

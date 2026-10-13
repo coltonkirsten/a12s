@@ -86,7 +86,9 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
   session record), the bundle cache read-only at `/opt/a12s/bundles`, tmpfs
   `/run/a12s` (secrets, TLS, computerd's socket) and `/tmp`. Each attached folder is a bind mount at
   `/home/agent/<name>` (read-only when asked), with each kept path's volume mounted over its path inside it;
-  computerd gives the root of each kept volume (named in `A12S_KEEP`) to uid 1000 before the harness starts.
+  computerd checks that each attached folder (`A12S_ATTACH`) and kept volume (`A12S_KEEP`) is mounted exactly at its
+  path, with no symlink on the way, and refuses to start otherwise; it gives the root of each kept volume to uid 1000
+  before the harness starts.
 - **Instructions and files** are copied onto the home drive as one tar before the first start and again when they
   change, with a root-owned marker in `/home/.a12s-files` naming the applied digest. A copy overwrites those files
   and leaves the rest of the home drive alone.
