@@ -176,7 +176,7 @@ func doctor(ctx context.Context, g *globals) []check {
 	} else {
 		ok("egress proxy enforcing")
 	}
-	for _, cs := range st.Computers {
+	for _, cs := range st.AgentComputers {
 		switch cs.Phase {
 		case api.PhaseError:
 			reason := ""

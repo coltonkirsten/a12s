@@ -59,12 +59,12 @@
   async function refresh() {
     const st = await a12s.status();
     $("fleet").textContent = st.fleet;
-    $("computers").innerHTML = st.computers.map((c) => `
+    $("computers").innerHTML = st.agentComputers.map((c) => `
       <div class="computer"><b>${esc(c.name)}</b><span class="phase">${esc(c.phase)}</span>
       <div class="meta">${esc(c.harness.kind)} ${esc(c.harness.model ?? "")} · inbox ${c.inbox?.pending ?? 0}</div></div>`).join("");
     const to = $("to");
-    if (to.options.length !== st.computers.length) {
-      to.innerHTML = st.computers.map((c) => `<option>${esc(c.name)}</option>`).join("");
+    if (to.options.length !== st.agentComputers.length) {
+      to.innerHTML = st.agentComputers.map((c) => `<option>${esc(c.name)}</option>`).join("");
     }
   }
   await refresh();

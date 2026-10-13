@@ -4,7 +4,58 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+One unit is now an **agent computer** (`AgentComputer` in code), and the SDKs hand out objects you call methods on.
+Agent computers and Services can be created, changed and removed while the Fleet runs.
+
+### Breaking
+- **HTTP routes are `/v1/agent-computers/...`** (were `/v1/computers/...`), with the same shapes. The old paths are
+  still served, on the owner API and the mTLS listener, for one release. What to do: change the path in any client
+  that calls the API directly; svckit already uses the new one.
+- **The Fleet file key is `agent_computers:`** (was `computers:`). The old key is still read for one release and
+  `a12s up` prints a hint. What to do: rename `computers:` to `agent_computers:` in `fleet.yaml`.
+- **`PUT /v1/fleet` no longer takes `presets` or `seccomp`.** `a12s up` now sends a preset's files as `files` and a
+  seccomp profile as JSON inside the Fleet, and `fleet.lock` no longer records presets or seccomp digests. An older
+  CLI can't apply a Fleet with presets or seccomp profiles to this Controller. What to do: upgrade the CLI and the
+  Controller together (they ship together), then run `a12s up`. The `presets:` and `seccomp:` entries of an
+  existing `fleet.lock` are no longer used; you can delete them.
+- **`GET /v1/status` lists agent computers under `agentComputers`** (Python: `agent_computers`). The old `computers`
+  list is still sent for one release. What to do: read `agentComputers`.
+- **The TypeScript type `Fleet` is now `FleetSpec`**: `Fleet` is the new class. What to do: rename the type in your
+  code.
+- **Name-first SDK calls are deprecated**: `connect()`, `A12sClient`, and in Python `a12s.connect()`,
+  `a12s.connect_async()`, `Client` and `AsyncClient` (`client.prompt("hello", "…")`) still work for one release.
+  What to do: `const fleet = await Fleet.connect()` / `fleet = a12s.Fleet()`, then
+  `(await fleet.agentComputers.get("hello")).prompt("…")` / `fleet.agent_computers.get("hello").prompt("…")`.
+
+### Added
+- **The object SDK.** `Fleet.connect()` (TypeScript) and `a12s.Fleet()` / `a12s.AsyncFleet()` (Python) find the
+  running Fleet like `connect()` did. `fleet.agentComputers` / `fleet.agent_computers` has `create(name, spec)`,
+  `get(name)` (raises `NotFound`) and `list()`; an `AgentComputer` has `name`, `spec`, `effective` and `status`, and
+  `reload`, `prompt`, `send`, `events`, `turns`, `update`, `sleep`, `wake`, `stop`, `inbox`, `message`, `withdraw`
+  and `remove`. `fleet.services` (Service: `reload`, `update`, `sleep`, `wake`, `remove`), `fleet.tokens`
+  (`create`, `list`, `remove`), `fleet.get()`, `fleet.replace(fn)` (a conditional whole-Fleet write that retries on
+  a conflict), `fleet.events()`, `fleet.turns()` and `fleet.status()`. See [SDK](docs/sdk.md).
+- **`instructions:`** on an agent computer (or in `defaults`): text written to its home as `CLAUDE.md` (Claude Code)
+  or `AGENTS.md` (Codex). **`files:`** (`{path: text}`) adds more text files to its home, up to 1 MiB with the
+  instructions; a file that starts with `#!` is executable. `home.preset` still works in the Fleet file: `a12s up`
+  reads the directory and sends it as files (text only; symlinks and binary files are refused). `instructions` plus
+  a preset `CLAUDE.md` is an error. In the SDK and the API, `security.seccomp` is the profile's JSON object.
+- **Per-agent-computer and per-Service routes**: `GET /v1/agent-computers`, and `GET`, `PUT`, `PATCH` (JSON merge
+  patch) and `DELETE` on `/v1/agent-computers/{c}` and `/v1/services/{s}`. `PUT` with `If-None-Match: *` only
+  creates. These writes take no version: they touch only the named one, and the last write wins.
+- **Fleet versions**: `GET /v1/fleet` returns the Fleet as written, its version (also the `ETag`) and `drift`, what
+  changed through the API since the last `a12s up`. The version goes up by one with every change. `PUT /v1/fleet`
+  takes `If-Match`. Every write takes `?dryRun=true` and answers with the new `version` and a `changes` list.
+- Error codes `missing_field` (400: no harness or image in the spec or `defaults`), `missing_credential` (400: a
+  credential with no value in the Controller), `exists` (409: a create-only write on a taken name) and
+  `version_mismatch` (412: a stale `If-Match`).
+
 ### Changed
+- A ComputerStatus's `seccomp` (and `a12s status`) shows the profile's `sha256:` digest instead of its path; `a12s up`
+  prints `<name> runs with its own seccomp profile`.
+- `a12s up` makes the running Fleet match the file, so it removes agent computers created through the SDK or API
+  and undoes their changes; `GET /v1/fleet` lists them as `drift` until then.
+- A Fleet may have no agent computers.
 - `llms.txt` is enough on its own to build on a12s: credentials (and the wrapped setup-token paste), every Fleet
   field, what the agent sees, streaming with `prompt(..., { onEvent })`, a hand-off recipe, custom images, Services
   with a complete svckit example and manifest, and a gateway page. The README links its raw URL for coding agents.

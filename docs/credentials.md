@@ -8,7 +8,7 @@ container's config or a drive.
 
 | Name | Value | How the harness gets it |
 |---|---|---|
-| `anthropic` | **Recommended:** a `claude setup-token` token (`sk-ant-oat…`) | `CLAUDE_CODE_OAUTH_TOKEN`. Long-lived, never refreshed inside the Computer, no credential file. |
+| `anthropic` | **Recommended:** a `claude setup-token` token (`sk-ant-oat…`) | `CLAUDE_CODE_OAUTH_TOKEN`. Long-lived, never refreshed inside the agent computer, no credential file. |
 | `anthropic` | An API key (`sk-ant-api…`) | `ANTHROPIC_API_KEY` |
 | `anthropic` | A JSON credentials file | Symlinked as `$CLAUDE_CONFIG_DIR/.credentials.json` |
 | `openai` | An OpenAI API key | `OPENAI_API_KEY` |
@@ -34,7 +34,7 @@ Bind a setup token or an API key, not a copy of your interactive Claude login.
 - computerd passes each secret only to the harness process.
 - If a harness refreshes a JSON login (Codex `auth.json`), it writes through the symlink onto tmpfs. computerd also
   moves back onto tmpfs any credential file a harness replaced on the home drive, after every Turn and at shutdown.
-- **Refreshes are one-way.** A token refreshed inside a Computer is not written back to your machine. To rotate,
+- **Refreshes are one-way.** A token refreshed inside an agent computer is not written back to your machine. To rotate,
   update the binding and run `a12s up`. A setup token is never refreshed, so this only affects JSON logins.
 - Credential rotation restarts the harness process, so a long-lived Codex server doesn't keep a revoked key.
   computerd reports the credential generation it has actually loaded (`a12s status`).

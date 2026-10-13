@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,29 +13,43 @@ import (
 
 var errEmptyDocument = errors.New("empty document")
 
-// rawFleet keeps defaults and computers as YAML nodes until defaults are merged
-// in, so scalars keep their exact text ("1.10" stays a string, not the float 1.1).
+// rawFleet keeps defaults and agent computers as YAML nodes, so each decodes strictly on its own and scalars keep
+// their exact text ("1.10" stays a string, not the float 1.1).
 type rawFleet struct {
-	APIVersion string               `yaml:"apiVersion"`
-	Kind       string               `yaml:"kind"`
-	Metadata   Metadata             `yaml:"metadata"`
-	Egress     FleetEgress          `yaml:"egress"`
-	Defaults   yaml.Node            `yaml:"defaults"`
-	Drives     map[string]Drive     `yaml:"drives"`
-	Computers  map[string]yaml.Node `yaml:"computers"`
-	Services   map[string]yaml.Node `yaml:"services"`
+	APIVersion     string               `yaml:"apiVersion"`
+	Kind           string               `yaml:"kind"`
+	Metadata       Metadata             `yaml:"metadata"`
+	Egress         FleetEgress          `yaml:"egress"`
+	Defaults       yaml.Node            `yaml:"defaults"`
+	Drives         map[string]Drive     `yaml:"drives"`
+	AgentComputers map[string]yaml.Node `yaml:"agent_computers"`
+	Computers      map[string]yaml.Node `yaml:"computers"`
+	Services       map[string]yaml.Node `yaml:"services"`
 }
 
 func Load(path string) (*Fleet, error) {
-	data, err := os.ReadFile(path)
+	s, err := LoadSpec(path)
 	if err != nil {
-		return nil, fmt.Errorf("read fleet: %w", err)
+		return nil, err
 	}
-	f, err := Parse(data)
+	f, err := s.Resolve()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return f, nil
+}
+
+// LoadSpec reads a Fleet file as written. home.preset and security.seccomp paths stay paths.
+func LoadSpec(path string) (*Spec, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read fleet: %w", err)
+	}
+	s, err := DecodeSpec(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return s, nil
 }
 
 func Parse(data []byte) (*Fleet, error) {
@@ -50,59 +65,79 @@ func Parse(data []byte) (*Fleet, error) {
 
 // Decode applies defaults without validating. Unknown fields are errors.
 func Decode(data []byte) (*Fleet, error) {
+	s, err := DecodeSpec(data)
+	if err != nil {
+		return nil, err
+	}
+	f, err := s.Effective()
+	if err != nil {
+		return nil, fmt.Errorf("parse fleet: %w", err)
+	}
+	return f, nil
+}
+
+// DecodeSpec decodes a Fleet file without merging defaults. It takes the old `computers` key for one release.
+func DecodeSpec(data []byte) (*Spec, error) {
 	var raw rawFleet
 	if err := decodeStrict(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse fleet: %w", err)
 	}
-	f := &Fleet{
-		APIVersion: raw.APIVersion,
-		Kind:       raw.Kind,
-		Metadata:   raw.Metadata,
-		Egress:     raw.Egress,
-		Drives:     raw.Drives,
-		Computers:  make(map[string]Computer, len(raw.Computers)),
+	s := &Spec{
+		APIVersion:     raw.APIVersion,
+		Kind:           raw.Kind,
+		Metadata:       raw.Metadata,
+		Egress:         raw.Egress,
+		Drives:         raw.Drives,
+		AgentComputers: map[string]json.RawMessage{},
+	}
+	nodes := raw.AgentComputers
+	if raw.Computers != nil {
+		if raw.AgentComputers != nil {
+			return nil, errors.New("parse fleet: both agent_computers and computers are set; rename computers to agent_computers")
+		}
+		nodes, s.LegacyKey = raw.Computers, true
 	}
 	var errs []error
 	if err := computerOnlyEgress("defaults", &raw.Defaults); err != nil {
 		errs = append(errs, err)
 	}
-	for _, name := range sortedKeys(raw.Computers) {
-		node := raw.Computers[name]
+	for _, name := range sortedKeys(nodes) {
+		node := nodes[name]
 		if err := computerOnlyEgress(name, &node); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if len(raw.Services) > 0 {
-		f.Services = make(map[string]Service, len(raw.Services))
+		s.Services = make(map[string]Service, len(raw.Services))
 	}
 	for _, name := range sortedKeys(raw.Services) {
 		node := raw.Services[name]
-		var s Service
-		if err := decodeService(name, &node, &s); err != nil {
+		var svc Service
+		if err := decodeService(name, &node, &svc); err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		f.Services[name] = s
+		s.Services[name] = svc
 	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("parse fleet: %w", errors.Join(errs...))
 	}
-	defaults := mapping(&raw.Defaults)
-	if err := decodeComputer(defaults, &f.Defaults); err != nil {
+	var defaults Computer
+	if err := decodeComputer(mapping(&raw.Defaults), &defaults); err != nil {
 		return nil, fmt.Errorf("parse fleet: defaults: %w", err)
 	}
-	for _, name := range sortedKeys(raw.Computers) {
-		node := raw.Computers[name]
-		var c Computer
-		if err := decodeComputer(merge(defaults, mapping(&node)), &c); err != nil {
-			return nil, fmt.Errorf("parse fleet: computers.%s: %w", name, err)
-		}
-		if c.Autonomy == "" {
-			c.Autonomy = AutonomyFull
-		}
-		f.Computers[name] = c
+	if d := SpecOf(defaults); string(d) != "{}" {
+		s.Defaults = d
 	}
-	return f, nil
+	for _, name := range sortedKeys(nodes) {
+		node := nodes[name]
+		var c Computer
+		if err := decodeComputer(mapping(&node), &c); err != nil {
+			return nil, fmt.Errorf("parse fleet: agent_computers.%s: %w", name, err)
+		}
+		s.AgentComputers[name] = SpecOf(c)
+	}
+	return s, nil
 }
 
 // mapping returns other node kinds as is, so they fail to decode into a Computer.
@@ -116,29 +151,6 @@ func mapping(n *yaml.Node) *yaml.Node {
 	return n
 }
 
-// merge merges mappings key by key; scalars and lists replace. Neither input is modified.
-func merge(base, over *yaml.Node) *yaml.Node {
-	base, over = mapping(base), mapping(over)
-	if base.Kind != yaml.MappingNode || over.Kind != yaml.MappingNode {
-		return over
-	}
-	out := *base
-	out.Content = append([]*yaml.Node(nil), base.Content...)
-	for i := 0; i+1 < len(over.Content); i += 2 {
-		key, val := over.Content[i], over.Content[i+1]
-		j := indexKey(&out, key.Value)
-		switch {
-		case j < 0:
-			out.Content = append(out.Content, key, val)
-		case mapping(out.Content[j+1]).Kind == yaml.MappingNode && mapping(val).Kind == yaml.MappingNode && !isNull(val):
-			out.Content[j+1] = merge(out.Content[j+1], val)
-		default:
-			out.Content[j+1] = val
-		}
-	}
-	return &out
-}
-
 func indexKey(m *yaml.Node, key string) int {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
@@ -147,8 +159,6 @@ func indexKey(m *yaml.Node, key string) int {
 	}
 	return -1
 }
-
-func isNull(n *yaml.Node) bool { return n.Kind == yaml.ScalarNode && n.Tag == "!!null" }
 
 func decodeComputer(n *yaml.Node, c *Computer) error {
 	if len(n.Content) == 0 && n.Kind == yaml.MappingNode {

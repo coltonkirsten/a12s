@@ -93,7 +93,7 @@ func validatePower(field string, p Power, computer func(string) bool, service fu
 			case kind == "computer" && computer(name):
 			case kind == "service" && service(name):
 			case kind == "computer":
-				bad("wakeOnMessage.from", "add computers."+name+" or remove it", "%q: there is no Computer %s", pr, name)
+				bad("wakeOnMessage.from", "add agent_computers."+name+" or remove it", "%q: there is no agent computer %s", pr, name)
 			case kind == "service":
 				bad("wakeOnMessage.from", "add services."+name+" or remove it", "%q: there is no Service %s", pr, name)
 			default:

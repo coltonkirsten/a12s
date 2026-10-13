@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,9 +59,19 @@ func runLock(g *globals, args []string) error {
 }
 
 func (g *globals) up(asleep bool, image string, refresh []string) error {
-	f, err := fleet.Load(g.fleetPath)
+	spec, err := fleet.LoadSpec(g.fleetPath)
 	if err != nil {
 		return err
+	}
+	if err := g.inline(spec); err != nil {
+		return err
+	}
+	f, err := spec.Resolve()
+	if err != nil {
+		return fmt.Errorf("%s: %w", g.fleetPath, err)
+	}
+	if spec.LegacyKey {
+		fmt.Fprintf(os.Stderr, "hint: %s uses computers:, the old name of agent_computers: (it still works in this release)\n", g.fleetPath)
 	}
 	onDisk, err := fleet.LoadLock(g.lockPath())
 	if err != nil {
@@ -88,14 +97,6 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 		return err
 	}
 	maps.Copy(creds, svcCreds)
-	presets, err := g.presets(f, lock)
-	if err != nil {
-		return err
-	}
-	seccomp, err := g.seccompProfiles(f)
-	if err != nil {
-		return err
-	}
 
 	ctx, cancel := interruptible()
 	defer cancel()
@@ -111,7 +112,7 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 	for _, name := range refresh {
 		delete(lock.Services, fleet.ServiceKey(name, f.Services[name].Image))
 	}
-	req := api.PutFleetRequest{Fleet: f, Lock: lock, Credentials: creds, Asleep: asleep, Presets: presets, Seccomp: seccomp, Refresh: refresh}
+	req := api.PutFleetRequest{Fleet: spec, Lock: lock, Credentials: creds, Asleep: asleep, Refresh: refresh, File: true}
 	var resp api.PutFleetResponse
 	if err := c.Do(ctx, "PUT", "/v1/fleet", req, &resp); err != nil {
 		return err
@@ -163,57 +164,61 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 	return nil
 }
 
-// presets re-pins a preset whose content changed: it is the project's own source, versioned with the Fleet file.
-func (g *globals) presets(f *fleet.Fleet, lock *fleet.Lock) (map[string][]byte, error) {
-	out := map[string][]byte{}
-	for _, name := range f.ComputerNames() {
-		p := f.Computers[name].Home.Preset
-		if p == "" || out[p] != nil {
-			continue
+// inline turns what only a Fleet file can say into what the API takes: each home.preset directory becomes files and
+// each security.seccomp path the profile itself.
+func (g *globals) inline(spec *fleet.Spec) error {
+	one := func(field string, raw json.RawMessage) (json.RawMessage, error) {
+		if len(raw) == 0 {
+			return raw, nil
 		}
-		dir := g.presetDir(p)
-		hash, err := fleet.HashPreset(dir)
-		if err != nil {
-			return nil, err
+		var c fleet.Computer
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("%s: %w", field, err)
 		}
-		lock.SetPreset(p, hash)
-		var buf bytes.Buffer
-		if err := fleet.WritePresetTar(dir, &buf); err != nil {
-			return nil, err
+		if p := c.Home.Preset; p != "" {
+			files, err := fleet.InlineFiles(g.presetDir(p))
+			if err != nil {
+				return nil, fmt.Errorf("%s.home.preset: %w", field, err)
+			}
+			for path, body := range files {
+				if _, dup := c.Files[path]; dup {
+					return nil, fmt.Errorf("%s.files: %s is also in the preset %s; keep one", field, path, p)
+				}
+				if c.Files == nil {
+					c.Files = map[string]string{}
+				}
+				c.Files[path] = body
+			}
+			c.Home.Preset = ""
 		}
-		out[p] = buf.Bytes()
+		if p := c.Security.Seccomp.Path; p != "" {
+			data, err := os.ReadFile(g.presetDir(p))
+			if err != nil {
+				return nil, fmt.Errorf("%s.security.seccomp: %v", field, err)
+			}
+			if _, err := fleet.ValidateSeccomp(data); err != nil {
+				return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
+			}
+			if err := c.Security.Seccomp.UnmarshalJSON(data); err != nil {
+				return nil, fmt.Errorf("%s.security.seccomp: %s: %v", field, p, err)
+			}
+		}
+		return fleet.SpecOf(c), nil
 	}
-	if len(out) == 0 {
-		return nil, nil
+	var err error
+	if spec.Defaults, err = one("defaults", spec.Defaults); err != nil {
+		return err
 	}
-	return out, nil
-}
-
-// seccompProfiles reads and checks each security.seccomp profile, so a bad one fails before anything is sent.
-func (g *globals) seccompProfiles(f *fleet.Fleet) (map[string]string, error) {
-	out := map[string]string{}
-	for _, name := range f.ComputerNames() {
-		p := f.Computers[name].Security.Seccomp
-		if _, done := out[p]; p == "" || done {
-			continue
+	for _, name := range spec.Names() {
+		if spec.AgentComputers[name], err = one("agent_computers."+name, spec.AgentComputers[name]); err != nil {
+			return err
 		}
-		data, err := os.ReadFile(g.presetDir(p))
-		if err != nil {
-			return nil, fmt.Errorf("computers.%s.security.seccomp: %v", name, err)
-		}
-		if _, err := fleet.ValidateSeccomp(data); err != nil {
-			return nil, fmt.Errorf("computers.%s.security.seccomp: %s: %v", name, p, err)
-		}
-		out[p] = string(data)
 	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
+	return nil
 }
 
 func cloneLock(l *fleet.Lock) *fleet.Lock {
-	return &fleet.Lock{A12s: l.A12s, Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Presets: maps.Clone(l.Presets), Services: maps.Clone(l.Services), Seccomp: maps.Clone(l.Seccomp)}
+	return &fleet.Lock{A12s: l.A12s, Images: maps.Clone(l.Images), Bundles: maps.Clone(l.Bundles), Services: maps.Clone(l.Services)}
 }
 
 func addedPins(prev, next *fleet.Lock) []string {
@@ -222,7 +227,7 @@ func addedPins(prev, next *fleet.Lock) []string {
 		out = append(out, "a12s@"+next.A12s)
 	}
 	for _, pair := range [][2]map[string]string{
-		{prev.Images, next.Images}, {prev.Bundles, next.Bundles}, {prev.Presets, next.Presets}, {prev.Services, next.Services}, {prev.Seccomp, next.Seccomp},
+		{prev.Images, next.Images}, {prev.Bundles, next.Bundles}, {prev.Services, next.Services},
 	} {
 		var keys []string
 		for k, v := range pair[1] {

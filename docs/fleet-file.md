@@ -4,14 +4,18 @@ A Fleet is declared in three files that sit side by side:
 
 | File | In git? | What it holds |
 |---|---|---|
-| `fleet.yaml` | yes | The portable desired state: Computers, drives, Services, grants. |
+| `fleet.yaml` | yes | The portable desired state: agent computers, drives, Services, grants. |
 | `a12s.bindings.yaml` | **no** | Where each named credential comes from on this machine. |
-| `fleet.lock` | yes | The exact image, bundle, preset, seccomp profile and Service digests the Fleet runs. |
+| `fleet.lock` | yes | The exact image, bundle and Service digests the Fleet runs. |
 
 `a12s init` scaffolds all three (plus a `.gitignore` for the bindings file and a README).
 
 The CLI finds the Fleet file from `--fleet`/`-F`, then `$A12S_FLEET`, then the nearest `fleet.yaml` in the current
 directory or a parent. The bindings file is `a12s.bindings.yaml` next to it unless `--bindings` says otherwise.
+
+The SDK and the HTTP API change the same Fleet while it runs ([SDK](sdk.md#agent-computers)). `a12s up` makes the
+running Fleet match the file again: it removes agent computers created from code and undoes changes made through the
+API.
 
 ## Example
 
@@ -30,12 +34,12 @@ drives:
   a12s-repo: { size: 20Gi, access: exclusive }
   reference: { size: 5Gi,  access: shared }
 
-computers:
+agent_computers:
   scout:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim
     credentials: [anthropic]
-    home: { preset: ./presets/scout }          # copied onto the home drive; edit it and a12s up to update
+    home: { preset: ./presets/scout }          # files for its home drive; edit them and a12s up to update
     drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
     power:
@@ -45,6 +49,8 @@ computers:
   builder:
     harness: { kind: codex, version: 0.154.0 }
     image: slim
+    instructions: |                            # its AGENTS.md (CLAUDE.md for claude-code)
+      You build and test changes to the a12s repo in /work/a12s.
     credentials: [openai, github]
     drives: [{ name: a12s-repo, at: /work/a12s }]
     egress: { allow: [api.openai.com, github.com, registry.npmjs.org] }
@@ -55,18 +61,19 @@ computers:
 
 ## Merging defaults
 
-Every Computer inherits `defaults` and can override any field. **Maps merge** key by key; **lists replace**. So a
-Computer's `egress.allow` replaces the default list instead of adding to it, and
-`computers.x.inbox.maxMessages` overrides only that field of `defaults.inbox`. `defaults` apply to Computers only,
-never to Services. Putting the harness, image and credentials in `defaults` keeps each Computer to its role:
+Every agent computer inherits `defaults` and can override any field. **Maps merge** key by key; **lists replace**.
+So an agent computer's `egress.allow` replaces the default list instead of adding to it, and
+`agent_computers.x.inbox.maxMessages` overrides only that field of `defaults.inbox`. `defaults` apply to agent
+computers only, never to Services. Putting the harness, image and credentials in `defaults` keeps each agent computer
+to its role, and lets code create one with only a name and instructions:
 
 ```yaml
 defaults:
   harness: { kind: claude-code, version: 2.1.280, model: haiku }
   image: slim
   credentials: [anthropic]
-computers:
-  lead:    { home: { preset: ./presets/lead }, grants: { send: [worker1] } }
+agent_computers:
+  lead:    { instructions: "You are lead. …", grants: { send: [worker1] } }
   worker1: { home: { preset: ./presets/worker }, grants: { send: [lead] } }
 ```
 
@@ -79,9 +86,9 @@ computers:
 | `metadata.name` | The Fleet name, a DNS label. Docker resources are named `a12s-<fleet>-…`. |
 | `egress.enforcement` | `enforced` (default) or `unenforced`, for substrates that can't enforce egress. Printed on every status line. |
 | `egress.allowPrivate` | CIDRs of private ranges that Services' `egress.tcp` may reach. Printed on every status line. |
-| `defaults` | Any Computer field, applied to every Computer. |
+| `defaults` | Any agent computer field, applied to every agent computer. |
 | `drives` | Work drives, by name. |
-| `computers` | Computers, by name (DNS labels). |
+| `agent_computers` | Agent computers, by name (DNS labels). The old key `computers` is still read for one release; `a12s up` prints a hint to rename it. |
 | `services` | Services, by name. See [Services](services.md). |
 
 ## Drives
@@ -93,13 +100,13 @@ drives:
 
 | `access` | Meaning |
 |---|---|
-| `exclusive` | One Computer attaches it, read-write. |
+| `exclusive` | One agent computer attaches it, read-write. |
 | `shared` | Any number attach it, all `readOnly: true`. |
 | `shared-write` | Any number attach and write. Writers can coordinate with the `lock`/`release` system tools. |
 
 On Docker, drives are named volumes. Docker can't enforce a quota on them, so `size` is recorded but not enforced.
 
-## Computer fields
+## Agent computer fields
 
 | Field | Meaning |
 |---|---|
@@ -107,23 +114,29 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `harness.version` | The harness version; selects the bundle `<kind>@<version>`, pinned in `fleet.lock`. |
 | `harness.model` | Optional, passed to the harness as is: an alias it knows (`haiku`, `sonnet`, `opus` for Claude Code) or a full model id. Default: the harness's own default. |
 | `image` | `slim`, or a custom image reference built FROM slim. See [Images](images.md#custom-images). |
+| `instructions` | Text written to the home drive as `CLAUDE.md` (claude-code) or `AGENTS.md` (codex): the agent's standing role. |
+| `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.claude/skills/x/SKILL.md`, `.mcp.json`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB. |
 | `resources` | `{cpu, memory}`, e.g. `{ cpu: 2, memory: 4Gi }`. Zero means no limit. |
 | `home.size` | Home drive size. |
-| `home.preset` | A directory, relative to the Fleet file, copied onto the home drive (`CLAUDE.md`, skills, settings). Edit it and run `a12s up`: the new files are copied at the Computer's next idle boundary and the session continues. Files the agent wrote elsewhere on the home drive are kept; a preset file the agent edited is overwritten. |
+| `home.preset` | A directory, relative to the Fleet file, of files for the home drive (`CLAUDE.md`, skills, settings). Only the Fleet file has it: `a12s up` reads the directory and sends its files as `files` (text files only; a symlink or a binary file is an error, and so is a path also in `files`). A preset `CLAUDE.md` (`AGENTS.md` for codex) together with `instructions` is an error: keep one. |
 | `autonomy` | `full` (default) or `restricted`. See [Permissions](concepts.md#permissions). |
 | `credentials` | Credential names, resolved through the bindings file. See [Credentials](credentials.md). |
 | `drives` | `[{name, at, readOnly?}]`: work drives and their absolute mount paths. |
-| `egress.allow` | Hosts this Computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
-| `security.seccomp` | A seccomp profile in Docker's JSON format, as a path relative to the Fleet file (absolute paths are refused), that replaces Docker's default profile for this Computer. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Default: Docker's default profile. |
+| `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
+| `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Default: Docker's default profile. |
 | `inbox` | `{maxMessages, maxBytes, intro}`. See [Inbox](inbox.md#queue-size). |
 | `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`. See [Power policy](inbox.md#power-policy). |
-| `uses` | Services this Computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
-| `grants.send` | Computers this one may enqueue to, through the `send` system tool. |
+| `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
+| `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
 
-Power state is deliberately **not** in the file: sleep is an operation, not a definition. To create Computers
+Power state is deliberately **not** in the file: sleep is an operation, not a definition. To create agent computers
 asleep, run `a12s up --asleep`.
 
-Scaling is editing `computers:` and running `a12s up` again: only what changed is created, staged or removed.
+Instructions and files are written onto the home drive before the agent computer first starts, and again when they
+change: a changed file is rewritten at the next idle boundary and the session continues. Files the agent wrote
+elsewhere on the home drive are kept; one of these files that the agent edited is overwritten.
+
+Scaling is editing `agent_computers:` and running `a12s up` again: only what changed is created, staged or removed.
 
 ## Bindings file
 
@@ -145,9 +158,7 @@ The CLI reads the bindings on the host and sends the values to the Controller wi
 a12s:     v0.3.0
 images:   { slim: "sha256:…", "ghcr.io/you/browser-agent:1": "sha256:…" }
 bundles:  { "claude-code@2.1.280": "sha256:…", "codex@0.154.0": "sha256:…" }
-presets:  { "./presets/scout": "sha256:…" }
 services: { "db@ghcr.io/you/mcp-postgres:1": "sha256:…" }
-seccomp:  { "./profiles/chromium.json": "sha256:…" }
 ```
 
 `a12s: v0.3.0` pins the a12s release. A release binary of another version refuses to apply the Fleet and says how to
@@ -157,8 +168,8 @@ upgrade, also delete the `slim` entry under `images:` (it pins the old release's
 custom image FROM the new base under a new tag.
 
 `a12s up` resolves and appends missing entries and never changes an existing image, bundle or Service pin.
-Presets and seccomp profiles are your own source, so their entries follow the files: `up` updates them when a preset
-or profile changes, and the change applies at the Computer's next idle boundary. Moving a
+Presets and seccomp profiles are your own source and travel inside the Fleet itself, so the lock doesn't record them:
+edit one and run `a12s up`, and the change applies at the agent computer's next idle boundary. Moving a
 version forward is explicit: change the version or ref in `fleet.yaml` (a new key), or run `a12s lock update services/<svc>` to re-pin
 an unchanged Service ref.
 
@@ -168,6 +179,6 @@ an unchanged Service ref.
 example:
 
 ```text
-computers.builder.inbox.maxBytes: 2Mi is above the 1Mi ceiling, which protects the model's context budget  fix: set 1Mi or less
+agent_computers.builder.inbox.maxBytes: 2Mi is above the 1Mi ceiling, which protects the model's context budget  fix: set 1Mi or less
 scout uses db, but there is no Service db  fix: add services.db or remove it from scout.uses
 ```

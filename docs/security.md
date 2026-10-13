@@ -1,6 +1,6 @@
 # Security model
 
-a12s assumes the agent inside a Computer may be confused or prompt-injected, and limits what it can reach and
+a12s assumes the agent inside an agent computer may be confused or prompt-injected, and limits what it can reach and
 change.
 
 ## Isolation
@@ -13,40 +13,43 @@ change.
   can't read, edit or erase its own record.
 - The harness comes from a read-only bundle. A prompt injection can't patch the harness and keep the patch across a
   sleep.
-- Each Computer and Service has its own isolated internal Docker network with isolated gateway mode. There is no
-  path to host services, to other Computers or to the Controller's owner API. Containers publish no ports, except a
+- Each agent computer and Service has its own isolated internal Docker network with isolated gateway mode. There is
+  no path to host services, to other agent computers or to the Controller's owner API. Containers publish no ports, except a
   Service's explicit `publish:`.
-- Computers and Services run under Docker's default seccomp profile, unless the Fleet sets `security.seccomp` on
-  a Computer (below).
+- Agent computers and Services run under Docker's default seccomp profile, unless the Fleet sets
+  `security.seccomp` on an agent computer (below).
 
 ## Seccomp
 
 Some software in a custom image needs syscalls Docker's default profile blocks; Chromium's own sandbox, for example,
-needs user namespaces (`clone`/`unshare` with `CLONE_NEWUSER`). `security.seccomp` gives one Computer (or every
-Computer, from `defaults`) its own profile instead of turning that sandbox off:
+needs user namespaces (`clone`/`unshare` with `CLONE_NEWUSER`). `security.seccomp` gives one agent computer (or
+every agent computer, from `defaults`) its own profile instead of turning that sandbox off:
 
 ```yaml
-computers:
+agent_computers:
   browser:
     image: ghcr.io/you/browser-agent:1
     security:
       seccomp: ./profiles/chromium.json     # relative to fleet.yaml
 ```
 
-- **It replaces only the seccomp filter.** The Computer keeps `no-new-privileges`, the same capabilities, the
+- **It replaces only the seccomp filter.** The agent computer keeps `no-new-privileges`, the same capabilities, the
   read-only root filesystem and everything else above. There is no privileged mode and no capability option.
-- **Only the Fleet's owner sets it.** It is read from `fleet.yaml`, never from an image label or file, so a pulled
-  image can't loosen its own sandbox.
-- **It is checked before anything changes.** `a12s up` reads the file and refuses it unless it is a seccomp profile
-  in Docker's JSON format with only the known top-level fields (`defaultAction`, `defaultErrnoRet`, `architectures`,
+- **Only the Fleet's owner sets it.** It comes from `fleet.yaml` or from an owner-token write through the SDK or the
+  HTTP API, never from an image label or file, so a pulled image can't loosen its own sandbox.
+- **It travels inline.** In the Fleet file it is a path relative to the file (or the profile itself, as a mapping);
+  `a12s up` reads the file and sends the profile's JSON. Through the SDK and the HTTP API, `security.seccomp` is the
+  profile's JSON object; a path there is refused.
+- **It is checked before anything changes.** `a12s up` and the Controller refuse a profile unless it is a seccomp
+  profile in Docker's JSON format with only the known top-level fields (`defaultAction`, `defaultErrnoRet`, `architectures`,
   `archMap`, `syscalls`, `flags`), every syscall rule naming its syscalls and a valid `SCMP_ACT_*` action. Profiles
   that hand decisions to an outside process (`SCMP_ACT_NOTIFY`, `listenerPath`) are refused, and so is one that lists
   no syscalls with a default other than `SCMP_ACT_ALLOW`. Errors name the field:
-  `computers.browser.security.seccomp: ./profiles/chromium.json: …`. The Controller checks again.
-- **It is pinned and visible.** `fleet.lock` records the profile's sha256 under `seccomp:`, and the digest is part of
-  the Computer's generation: editing the profile restages the Computer at its next idle boundary, like any other
-  change. `a12s up` prints `<name> runs with custom seccomp profile <path>`, and `a12s status` shows
-  `seccomp <path>` on that Computer's line.
+  `agent_computers.browser.security.seccomp: ./profiles/chromium.json: …`.
+- **It is visible.** The profile's sha256 is part of the agent computer's generation: changing the profile restages
+  it at its next idle boundary, like any other change. `a12s up` prints `<name> runs with its own seccomp profile`,
+  `a12s status` shows `seccomp sha256:…` on that agent computer's line, and its status in the API carries the digest
+  as `seccomp`.
 - A profile whose `defaultAction` is `SCMP_ACT_ALLOW` is accepted with a warning: it allows every syscall it does
   not list.
 
@@ -57,13 +60,13 @@ for Chromium.
 
 ## Egress
 
-Every Computer's and Service's only route out is the Controller's validating egress proxy.
+Every agent computer's and Service's only route out is the Controller's validating egress proxy.
 
 - Only hosts in `egress.allow` (plus the harness bundle's sign-in hosts) are reachable, over HTTPS (CONNECT to
   port 443). Plain `http://` to the internet is refused.
 - The proxy resolves names itself and rejects private, link-local and cloud-metadata addresses and DNS rebinding.
   Raw UDP, external DNS and SSH are blocked; agents use HTTPS for git.
-- A denied request becomes a `diagnostic` event in the Computer's journal, so you see exactly what was blocked.
+- A denied request becomes a `diagnostic` event in the agent computer's journal, so you see exactly what was blocked.
 - `allow: ["*"]` permits any public host on any port, for experiments. Private and metadata addresses stay blocked.
   It's shown on every status line.
 - `egress.enforcement: unenforced` exists for substrates that can't enforce egress, and is shown on every status
@@ -73,7 +76,7 @@ Every Computer's and Service's only route out is the Controller's validating egr
 
 ## Identity
 
-- The Controller is a built-in certificate authority. Each Computer and Service start gets a fresh certificate with
+- The Controller is a built-in certificate authority. Each agent computer and Service start gets a fresh certificate with
   a typed identity (`a12s://<fleet>/<kind>/<name>/<generation>`). The Controller accepts a certificate only while it
   is the live one for a running container; it is revoked before every stop, so a copied key is refused once the
   container stops.
@@ -81,8 +84,9 @@ Every Computer's and Service's only route out is the Controller's validating egr
 - The owner API listens on `127.0.0.1` with a random bearer token in `~/.a12s/<fleet>/controller.json` (0600).
 - `a12s gateway` listens on `127.0.0.1`, answers only loopback host names, and needs a key made for each run (a
   cookie after the printed link is opened, or a bearer token) before it forwards `/v1/` with its scoped token.
-  Scoped tokens carry an allowlist of actions and Computers.
-- Inside the Fleet, Services and Computers call the Controller with their certificates and can do only what their
+  Scoped tokens carry an allowlist of actions and agent computers. Changing the Fleet (creating, changing or
+  removing agent computers and Services, `PUT /v1/fleet`) takes the owner token.
+- Inside the Fleet, Services and agent computers call the Controller with their certificates and can do only what their
   `grants` say. Messages carry `via`, the authenticated principal, which no caller can set.
 
 ## Secrets
@@ -99,7 +103,7 @@ the agent so. See [Inbox](inbox.md#what-the-agent-sees).
 
 - Containers share the host kernel. Tenants that are hostile to each other need a sandboxed runtime (gVisor, Kata).
 - Any host on an allowlist is a possible exfiltration channel.
-- With `autonomy: full` (the default), the agent approves its own tool calls inside its Computer.
+- With `autonomy: full` (the default), the agent approves its own tool calls inside its agent computer.
 - MCP config the agent writes to its home drive (and a cloned repo's `.mcp.json`) is loaded after
   `restart_harness`.
 - A Service program can copy its own secret into its state drive; choose Service programs the way you choose MCP

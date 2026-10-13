@@ -47,7 +47,7 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		if err != nil {
 			return err
 		}
-		for _, cs := range st.Computers {
+		for _, cs := range st.AgentComputers {
 			names = append(names, cs.Name)
 		}
 		for _, ss := range st.Services {

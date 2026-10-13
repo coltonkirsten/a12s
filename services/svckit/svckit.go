@@ -164,14 +164,14 @@ func (c *Client) do(method, path string, in, out any) (int, error) {
 // Send enqueues to a Computer the Service's grants name.
 func (c *Client) Send(computer string, m Enqueue) (Message, int, error) {
 	var out Message
-	code, err := c.do(http.MethodPost, "/v1/computers/"+url.PathEscape(computer)+"/inbox", m, &out)
+	code, err := c.do(http.MethodPost, "/v1/agent-computers/"+url.PathEscape(computer)+"/inbox", m, &out)
 	return out, code, err
 }
 
 // Get reads back one of the Service's own Messages.
 func (c *Client) Get(computer, id string) (Message, error) {
 	var out Message
-	_, err := c.do(http.MethodGet, "/v1/computers/"+url.PathEscape(computer)+"/inbox/"+url.PathEscape(id), nil, &out)
+	_, err := c.do(http.MethodGet, "/v1/agent-computers/"+url.PathEscape(computer)+"/inbox/"+url.PathEscape(id), nil, &out)
 	return out, err
 }
 

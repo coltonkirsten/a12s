@@ -112,12 +112,15 @@ func scaffold(dirName, harness string) (string, string, error) {
 kind: Fleet
 metadata: { name: %s }
 
-computers:
-  hello:
-    harness: %s
-    image: slim
-    credentials: [%s]
-    egress: { allow: [%s] }
+defaults:                      # every agent computer gets these unless it sets its own
+  harness: %s
+  image: slim
+  credentials: [%s]
+  egress: { allow: [%s] }
+
+agent_computers:
+  assistant:
+    instructions: You are a helpful assistant. Keep answers short.
 `, name, h, cred, host)
 	bindings := "# Per deployment, git-ignored. Maps each credential name in fleet.yaml to where it comes from here.\n# a12s creds set <name> fills this in.\ncredentials: {}\n"
 	return text, bindings, nil
@@ -143,5 +146,5 @@ func starterReadme(name string) string {
 	return "# " + name + "\n\n" +
 		"An a12s Fleet. a12s is a pinned dependency (" + pin + "), installed like Docker: never vendor or edit its source here.\n" +
 		"Extend it through fleet.yaml, your own images and Services, and the client SDK.\n\n" +
-		"```sh\na12s creds set anthropic   # once per machine\na12s up\na12s prompt hello \"hi\"\na12s down\n```\n"
+		"```sh\na12s creds set anthropic   # once per machine\na12s up\na12s prompt assistant \"hi\"\na12s down\n```\n"
 }

@@ -98,7 +98,7 @@ func inboxCounts(fleetName string) string {
 			held++
 		}
 	}
-	for _, cs := range st.Computers {
+	for _, cs := range st.AgentComputers {
 		add(cs.Inbox)
 	}
 	for i := range st.OrphanedInboxes {

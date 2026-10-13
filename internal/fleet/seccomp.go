@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"gopkg.in/yaml.v3"
 )
 
 // seccompProfile is the subset of Docker's seccomp profile format a12s accepts. Unknown fields are refused rather
@@ -70,4 +72,76 @@ func ValidateSeccomp(data []byte) (allowByDefault bool, err error) {
 func HashSeccomp(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// Seccomp is a security.seccomp value. In a Fleet file it is a path relative to the file (or the profile itself as a
+// mapping); everywhere else it is the profile JSON. a12s up reads the file, so the Controller only ever sees JSON.
+type Seccomp struct {
+	Path    string
+	Profile json.RawMessage
+}
+
+func (s Seccomp) IsZero() bool { return s.Path == "" && len(s.Profile) == 0 }
+
+// Digest identifies the profile; "" when there is none.
+func (s Seccomp) Digest() string {
+	if len(s.Profile) == 0 {
+		return ""
+	}
+	return HashSeccomp(s.Profile)
+}
+
+func (s Seccomp) MarshalJSON() ([]byte, error) {
+	if len(s.Profile) > 0 {
+		return s.Profile, nil
+	}
+	return json.Marshal(s.Path)
+}
+
+func (s *Seccomp) UnmarshalJSON(b []byte) error {
+	*s = Seccomp{}
+	switch {
+	case bytes.Equal(bytes.TrimSpace(b), []byte("null")):
+		return nil
+	case len(b) > 0 && b[0] == '"':
+		return json.Unmarshal(b, &s.Path)
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, b); err != nil {
+		return err
+	}
+	s.Profile = buf.Bytes()
+	return nil
+}
+
+func (s *Seccomp) UnmarshalYAML(n *yaml.Node) error {
+	*s = Seccomp{}
+	if n.Kind == yaml.ScalarNode {
+		if n.Tag == "!!null" {
+			return nil
+		}
+		s.Path = n.Value
+		return nil
+	}
+	var v any
+	if err := n.Decode(&v); err != nil {
+		return err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("security.seccomp: %v", err)
+	}
+	s.Profile = b
+	return nil
+}
+
+func (s Seccomp) MarshalYAML() (any, error) {
+	if len(s.Profile) == 0 {
+		return s.Path, nil
+	}
+	var v any
+	if err := json.Unmarshal(s.Profile, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }

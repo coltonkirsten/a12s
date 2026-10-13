@@ -50,6 +50,18 @@ export class A12sError extends Error {
   }
 }
 
+/** A 404: the agent computer, Service, Message or token does not exist. */
+export class NotFound extends A12sError {
+  constructor(status: number, body: ApiErrorBody) {
+    super(status, body);
+    this.name = "NotFound";
+  }
+}
+
+function apiError(status: number, body: ApiErrorBody): A12sError {
+  return status === 404 ? new NotFound(status, body) : new A12sError(status, body);
+}
+
 /** Thrown by an event stream with `onGap: "throw"` when events were lost. */
 export class A12sGapError extends Error {
   readonly after?: number;
@@ -98,6 +110,10 @@ export interface PromptResult extends Turn {
 
 const enc = encodeURIComponent;
 
+/**
+ * @deprecated Use {@link Fleet}: `fleet.agentComputers.get(name)` returns an {@link AgentComputer} with these
+ * methods. Kept for one release.
+ */
 export class A12sClient {
   readonly url: string;
   private readonly token?: string;
@@ -113,15 +129,21 @@ export class A12sClient {
     return this.token ? { authorization: `Bearer ${this.token}`, ...extra } : extra;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  /** @internal */
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts: { headers?: Record<string, string>; signal?: AbortSignal } = {},
+  ): Promise<T> {
     const res = await this.fetchImpl(this.url + path, {
       method,
-      headers: this.headers(body === undefined ? {} : { "content-type": "application/json" }),
+      headers: this.headers({ ...(body === undefined ? {} : { "content-type": "application/json" }), ...opts.headers }),
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal,
+      signal: opts.signal,
     });
     const text = await res.text();
-    if (!res.ok) throw new A12sError(res.status, parseError(res.status, text));
+    if (!res.ok) throw apiError(res.status, parseError(res.status, text));
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
@@ -131,8 +153,8 @@ export class A12sClient {
   }
 
   async computer(name: string): Promise<ComputerStatus> {
-    const c = (await this.status()).computers.find((x) => x.name === name);
-    if (!c) throw new A12sError(404, { code: "not_found", message: `no Computer ${name}` });
+    const c = (await this.status()).agentComputers.find((x) => x.name === name);
+    if (!c) throw new NotFound(404, { code: "not_found", message: `no Computer ${name}` });
     return c;
   }
 
@@ -143,7 +165,7 @@ export class A12sClient {
   send(computer: string, msg: EnqueueRequest | string): Promise<EnqueueResponse> {
     const m: EnqueueRequest = typeof msg === "string" ? { body: msg } : { ...msg };
     m.idempotencyKey ??= globalThis.crypto.randomUUID();
-    return this.request("POST", `/v1/computers/${enc(computer)}/inbox`, m);
+    return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox`, m);
   }
 
   /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends: what `a12s prompt` does. */
@@ -173,8 +195,8 @@ export class A12sClient {
     }
     return new EventStream((name, live, signal) => {
       const q = opts.turn ? `?turn=${enc(opts.turn)}` : "";
-      return this.stream(name, `/v1/computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
-    }, names ?? (async () => (await this.status()).computers.map((c) => c.name)), opts.signal);
+      return this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
+    }, names ?? (async () => (await this.status()).agentComputers.map((c) => c.name)), opts.signal);
   }
 
   /**
@@ -191,32 +213,32 @@ export class A12sClient {
     if (opts.bodies) q.set("bodies", "true");
     if (opts.after !== undefined) q.set("after", String(opts.after));
     const qs = q.toString();
-    return this.request("GET", `/v1/computers/${enc(computer)}/inbox${qs ? "?" + qs : ""}`);
+    return this.request("GET", `/v1/agent-computers/${enc(computer)}/inbox${qs ? "?" + qs : ""}`);
   }
 
   message(computer: string, id: string): Promise<Message> {
-    return this.request("GET", `/v1/computers/${enc(computer)}/inbox/${enc(id)}`);
+    return this.request("GET", `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}`);
   }
 
   /** Withdraws a pending Message; a 409 A12sError names its state if it is too late. */
   withdraw(computer: string, id: string): Promise<Message> {
-    return this.request("DELETE", `/v1/computers/${enc(computer)}/inbox/${enc(id)}`);
+    return this.request("DELETE", `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}`);
   }
 
   /** Interrupts a Turn (default: the active one). The Turn ends `interrupted`; nothing is replayed. */
   async stop(computer: string, turn?: string): Promise<void> {
     const id = turn ?? (await this.computer(computer)).activeTurn;
-    if (id) await this.request("POST", `/v1/computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
+    if (id) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
   }
 
   /** Stops the Computer's processes and keeps its disks, session and inbox. */
   async sleep(computer: string): Promise<void> {
-    await this.request("POST", `/v1/computers/${enc(computer)}/power`, { state: "asleep" });
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "asleep" });
   }
 
   /** Starts a sleeping Computer; its session resumes on the next Turn. */
   async wake(computer: string): Promise<void> {
-    await this.request("POST", `/v1/computers/${enc(computer)}/power`, { state: "awake" });
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "awake" });
   }
 
   async services(): Promise<ServiceStatus[]> {
@@ -241,7 +263,7 @@ export class A12sClient {
   private async deliveredIn(computer: string, id: string, signal?: AbortSignal): Promise<string> {
     // Every subscription starts with a snapshot, so resubscribing after a drop never misses the delivery.
     while (!signal?.aborted) {
-      for await (const ev of this.stream(computer, `/v1/computers/${enc(computer)}/inbox/${enc(id)}/events`, undefined, {
+      for await (const ev of this.stream(computer, `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}/events`, undefined, {
         signal,
         once: true,
       })) {
@@ -291,7 +313,7 @@ export class A12sClient {
         continue;
       }
       if (!res.ok) {
-        const err = new A12sError(res.status, parseError(res.status, await res.text()));
+        const err = apiError(res.status, parseError(res.status, await res.text()));
         // Asleep or starting: the journal comes back with the Computer.
         if (res.status !== 503 && res.status !== 502) throw err;
         opts.live?.();

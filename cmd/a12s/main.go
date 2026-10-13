@@ -288,7 +288,7 @@ func interruptible() (context.Context, context.CancelFunc) {
 }
 
 func computerPath(name, suffix string) string {
-	return "/v1/computers/" + url.PathEscape(name) + suffix
+	return "/v1/agent-computers/" + url.PathEscape(name) + suffix
 }
 
 func status(ctx context.Context, c *cli.Client) (*api.StatusResponse, error) {

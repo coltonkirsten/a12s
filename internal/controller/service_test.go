@@ -196,7 +196,7 @@ func TestServicePinning(t *testing.T) {
 	}
 	lock = res.Lock
 	delete(lock.Services, "clock@a12s/svc-test:0.2")
-	r, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f2, Lock: lock, Credentials: labCreds, Presets: labPresets(t), Refresh: []string{"clock"}})
+	r, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f2), Lock: lock, Credentials: labCreds, Refresh: []string{"clock"}}, writeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestServiceAdmission(t *testing.T) {
 			Health: &fleet.ServiceHealth{Exec: []string{"pg_isready"}},
 		}}
 	})
-	_, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
+	_, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	if err == nil || !strings.Contains(err.Error(), "services.pg") || !strings.Contains(err.Error(), "/var/lib/postgresql/data") || !strings.Contains(err.Error(), "fix:") {
 		t.Fatalf("uncovered volume: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestServiceAdmission(t *testing.T) {
 		s.Credentials = []string{"postgres"}
 		f.Services["clock"] = s
 	})
-	_, err = h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
+	_, err = h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	if err == nil || !strings.Contains(err.Error(), "services.clock: ") || !strings.Contains(err.Error(), "postgres") || !strings.Contains(err.Error(), "fix: a12s creds set postgres") {
 		t.Fatalf("missing credential: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestServiceAdmission(t *testing.T) {
 		s.Manifest = &fleet.ServiceManifest{Login: &fleet.ServiceLogin{Command: []string{"login"}, Produces: "gh-oauth"}}
 		f.Services["clock"] = s
 	})
-	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
+	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	if err != nil || len(res.Errors) > 0 {
 		t.Fatalf("login credential: %v %+v", err, res.Errors)
 	}

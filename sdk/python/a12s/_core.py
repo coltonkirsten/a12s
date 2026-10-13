@@ -12,7 +12,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
-from ._errors import A12sError, A12sGapError, A12sStreamError
+from ._errors import A12sError, A12sGapError, A12sStreamError, NotFound
 from ._parse import from_json
 from ._sse import SSEFrame
 from ._types import EnqueueResponse, Event, PromptResult, ToolCall, Turn, TurnInboxMessage
@@ -36,10 +36,10 @@ def headers(token: str | None, extra: dict[str, str] | None = None) -> dict[str,
     return h
 
 
-def json_request(token: str | None, body: Any) -> dict[str, Any]:
+def json_request(token: str | None, body: Any, extra: dict[str, str] | None = None) -> dict[str, Any]:
     if body is None:
-        return {"headers": headers(token)}
-    return {"headers": headers(token, {"content-type": "application/json"}), "content": json.dumps(body)}
+        return {"headers": headers(token, extra)}
+    return {"headers": headers(token, {**(extra or {}), "content-type": "application/json"}), "content": json.dumps(body)}
 
 
 def decode(res: httpx.Response) -> Any:
@@ -55,7 +55,8 @@ def api_error(status: int, text: str) -> A12sError:
     except ValueError:
         b = None
     if isinstance(b, dict) and isinstance(b.get("code"), str):
-        return A12sError(status, b["code"], str(b.get("message", "")), b.get("fix"), b.get("details"))
+        cls = NotFound if status == 404 and b["code"] == "not_found" else A12sError
+        return cls(status, b["code"], str(b.get("message", "")), b.get("fix"), b.get("details"))
     return A12sError(status, f"http_{status}", text.strip() or f"HTTP {status}")
 
 
@@ -92,7 +93,7 @@ def inbox_path(computer: str, state: str | None, bodies: bool, after: int | None
     if after is not None:
         q["after"] = str(after)
     qs = urlencode(q)
-    return f"/v1/computers/{enc(computer)}/inbox" + (f"?{qs}" if qs else "")
+    return f"/v1/agent-computers/{enc(computer)}/inbox" + (f"?{qs}" if qs else "")
 
 
 def stream_names(computers: str | Sequence[str] | None, turn: str | None, after: int | None) -> list[str] | None:
@@ -104,11 +105,11 @@ def stream_names(computers: str | Sequence[str] | None, turn: str | None, after:
 
 def events_path(computer: str, turn: str | None = None) -> str:
     q = f"?turn={enc(turn)}" if turn else ""
-    return f"/v1/computers/{enc(computer)}/events{q}"
+    return f"/v1/agent-computers/{enc(computer)}/events{q}"
 
 
 def message_events_path(computer: str, id: str) -> str:
-    return f"/v1/computers/{enc(computer)}/inbox/{enc(id)}/events"
+    return f"/v1/agent-computers/{enc(computer)}/inbox/{enc(id)}/events"
 
 
 class StreamState:

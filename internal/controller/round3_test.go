@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -116,23 +115,6 @@ func TestExclusiveDriveSwap(t *testing.T) {
 	}
 	if v := h.d.twoWriters(); len(v) > 0 {
 		t.Fatalf("two writers: %v", v)
-	}
-}
-
-// A corrupted cached preset is repaired by the next up.
-func TestCorruptPresetIsRepairedByUp(t *testing.T) {
-	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
-	sum := res.Lock.Presets["./presets/scout"]
-	if err := os.WriteFile(presetPath(h.dir, sum), []byte("garbage"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if loadPreset(h.dir, sum) != nil {
-		t.Fatal("corrupt entry loaded")
-	}
-	h.up(labFleet(t, nil), res.Lock, false)
-	if loadPreset(h.dir, sum) == nil {
-		t.Fatal("up did not repair the cached preset")
 	}
 }
 

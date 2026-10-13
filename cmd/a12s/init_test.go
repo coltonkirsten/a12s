@@ -16,7 +16,7 @@ func TestScaffoldParses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s:\n%s\n%v", h, text, err)
 		}
-		if f.Metadata.Name != "fleet" || len(f.Services) != 0 || f.Computers["hello"].Image != fleet.TierSlim {
+		if f.Metadata.Name != "fleet" || len(f.Services) != 0 || f.Computers["assistant"].Image != fleet.TierSlim {
 			t.Fatalf("%s: %+v", h, f)
 		}
 	}

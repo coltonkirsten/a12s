@@ -1,8 +1,8 @@
 # Inbox and power policy
 
-Every Computer has a durable inbox owned by the Controller. You, a scoped token, a Service or another Computer can
-put work in it while the Computer is idle, busy or asleep. When the Computer is idle, everything pending is delivered
-as one Turn.
+Every agent computer has a durable inbox owned by the Controller. You, a scoped token, a Service or another agent
+computer can put work in it while the agent computer is idle, busy or asleep. When the agent computer is idle,
+everything pending is delivered as one Turn.
 
 ```sh
 a12s send builder "Run the dependency audit"            # enqueue and exit
@@ -12,19 +12,19 @@ a12s inbox builder                                      # list pending Messages,
 
 ## The rules
 
-1. One durable inbox per Computer. It survives restarts, sleep, wake, Controller restarts and a plain `a12s down`.
-2. Anyone with API access, or a Service or Computer holding `grants.send`, can enqueue. Bodies are untrusted data.
-3. When the Computer is idle, the Controller drains **all** pending Messages, in order, into **one** Turn. Messages
+1. One durable inbox per agent computer. It survives restarts, sleep, wake, Controller restarts and a plain `a12s down`.
+2. Anyone with API access, or a Service or agent computer holding `grants.send`, can enqueue. Bodies are untrusted data.
+3. When the agent computer is idle, the Controller drains **all** pending Messages, in order, into **one** Turn. Messages
    that arrive during the Turn wait for the next one.
 4. A Batch continues the current session by default. A Message sent with `--fresh` (or `prompt --new`) starts a new
    session; it begins a new Batch, so it never drags another sender's Message out of the conversation it was written
    for.
-5. A Message wakes a sleeping Computer only if that Computer's [power policy](#power-policy) says so.
+5. A Message wakes a sleeping agent computer only if its [power policy](#power-policy) says so.
 6. Delivery is **at-least-once**: a Message is consumed when the harness has received it. A crash in the
    milliseconds between receipt and the journal write can deliver it twice; nothing is ever dropped silently.
 7. Strict FIFO in commit order. There are no priorities and no delayed delivery.
 
-`a12s prompt` is enqueue-and-stream: it waits in line if the Computer is busy (`queued: builder is busy with turn
+`a12s prompt` is enqueue-and-stream: it waits in line if the agent computer is busy (`queued: builder is busy with turn
 t_41 (2 messages ahead)`), and its Turn may carry other senders' Messages too. Ctrl-C withdraws the Message while it
 is pending and stops its Turn once delivered; a second Ctrl-C stops waiting.
 
@@ -76,7 +76,7 @@ Bodies are at most 64 KiB of UTF-8. `-` reads the body from stdin.
 | Value | Means |
 |---|---|
 | absent | Wait until delivered, withdrawn or cleared. |
-| `0` | **Now or never.** Accepted only if the Computer can take it immediately; otherwise refused (`409 not_idle`) and nothing is stored. |
+| `0` | **Now or never.** Accepted only if the agent computer can take it immediately; otherwise refused (`409 not_idle`) and nothing is stored. |
 | `90s`, `15m`, `1h`, up to `30d` | **A window.** Not delivered by then, it expires. |
 
 An expired Message keeps a terminal row with the reason and is journaled with its body. Expiry never reorders
@@ -85,7 +85,7 @@ anything and never delays a Message.
 ### Replace keys
 
 A Message with a replace key supersedes the **pending** Message with the same key from the same principal (`via`),
-and commits at the tail of the queue. A cron that fires every 15 minutes at a Computer stuck in a two-hour Turn
+and commits at the tail of the queue. A cron that fires every 15 minutes at an agent computer stuck in a two-hour Turn
 therefore leaves one pending Message, the newest, rendered with `superseded="7"`. A Message already claimed for
 delivery is never replaced. A replace that doesn't grow the inbox is accepted even when the inbox is full.
 
@@ -94,7 +94,7 @@ delivery is never replaced. A replace that doesn't grow the inbox is accepted ev
 ```yaml
 defaults:
   inbox: { maxMessages: 200, maxBytes: 320Ki }   # the built-in values
-computers:
+agent_computers:
   builder:
     inbox: { maxMessages: 50, intro: "Review requests from scout, oldest first." }
 ```
@@ -108,7 +108,7 @@ The byte cap is the input budget: the whole pending snapshot becomes one prompt 
 1Mi is a hard ceiling; values above the default warn on `a12s up`. A full inbox answers `429 inbox_full`; a
 Message that could never fit answers `413 exceeds_inbox`. Lowering a limit below what is outstanding drops nothing:
 new enqueues are refused until the backlog drains. Limit changes take effect when the Fleet is accepted, without
-restarting the Computer.
+restarting the agent computer.
 
 ## Holds
 
@@ -129,23 +129,23 @@ new session).
 ```text
 a12s inbox <name> [--all] [--bodies]    list; --all includes ended Messages
 a12s inbox rm <name> <id>               withdraw one pending Message
-a12s inbox clear <name> [--yes]         discard every pending Message (--orphan for a removed Computer's inbox)
+a12s inbox clear <name> [--yes]         discard every pending Message (--orphan for a removed agent computer's inbox)
 a12s inbox hold <name>                  stop delivering
 a12s inbox resume <name> [--new]        deliver again
 a12s wake <name> --clear-inbox          wake and discard what was pending at that moment
 ```
 
-Discarded, withdrawn, expired and replaced Messages are never erased silently: each is journaled on the Computer as
+Discarded, withdrawn, expired and replaced Messages are never erased silently: each is journaled on the agent computer as
 `inbox.discarded` with its body. Ended rows are pruned from the Controller's database after 7 days, once journaled.
 
 ## Power policy
 
-A Computer can declare when it sleeps and who may wake it. It's off unless the Fleet says otherwise.
+An agent computer can declare when it sleeps and who may wake it. It's off unless the Fleet says otherwise.
 
 ```yaml
 defaults:
   power: { sleepAfterIdle: 30m }
-computers:
+agent_computers:
   scout:
     power:
       sleepAfterIdle: 15m
@@ -161,15 +161,15 @@ computers:
 - **Idle** means `Ready`, with no Turn running, no work owed, nothing pending (or the inbox held), and no `a12s shell`
   attached. Background processes the agent started don't count; sleep ends them.
 - **The Controller decides; the sender gains nothing.** No request field asks for a wake. A pending Message wakes the
-  Computer only if its `via` is listed. Once awake, the first Batch delivers everything pending.
-- **Manual sleep wins.** After `a12s sleep <name>`, no Message wakes the Computer until a manual `a12s wake`.
+  agent computer only if its `via` is listed. Once awake, the first Batch delivers everything pending.
+- **Manual sleep wins.** After `a12s sleep <name>`, no Message wakes the agent computer until a manual `a12s wake`.
   `a12s sleep <name> --allow-wake` sleeps it and leaves the policy in charge.
 - **Credentials.** The Controller holds credentials only in memory. After a Controller restart, auto-wake pauses
   until `a12s up` sends them again.
-- A failed automatic wake pauses auto-wake for that Computer until a manual `a12s wake` or `a12s up`.
+- A failed automatic wake pauses auto-wake for that agent computer until a manual `a12s wake` or `a12s up`.
 - `--expires 0` never wakes anything: a wake takes seconds. Send a window (`--expires 60s`) instead.
 
-`a12s status` shows each Computer's power state:
+`a12s status` shows each agent computer's power state:
 
 ```text
 COMPUTER  PHASE                  INBOX          POWER
@@ -190,6 +190,6 @@ a12s token ls
 a12s token rm ci
 ```
 
-Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`; Computers: a list or `*`. A token's principal is
-`token:<name>`. A token with `send` can read and withdraw only its own Messages. Changing the Fleet, `apply`,
-`shell`, drives and tokens stay owner-only.
+Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`; agent computers: a list or `*`. A token's principal is
+`token:<name>`. A token with `send` can read and withdraw only its own Messages. Changing the Fleet (creating, changing
+and removing agent computers and Services included), `apply`, `shell`, drives and tokens stay owner-only.

@@ -953,6 +953,7 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	f := c.state.Fleet
 	s := f.Services[name]
 	out := api.ServiceStatus{Name: name, Image: s.Image, Send: s.Grants.Send, Uses: fleet.UseNames(s.Uses), Publish: s.Publish}
+	out.Spec, _ = json.Marshal(s)
 	if c.state.Lock != nil {
 		out.Pin = c.state.Lock.Services[fleet.ServiceKey(name, s.Image)]
 	}

@@ -15,7 +15,7 @@ defaults:
 drives:
   reference: { size: 5Gi, access: shared }
 
-computers:
+agent_computers:
   scout:
     harness: { kind: claude-code, version: 2.1.280, model: claude-haiku-4-5 }
     image: slim

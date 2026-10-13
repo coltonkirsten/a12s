@@ -51,44 +51,51 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
-func TestPresetsPinAndRefuseChange(t *testing.T) {
+// up sends a preset directory as files and a seccomp path as the profile; instructions and a preset CLAUDE.md
+// together are refused.
+func TestUpInlinesPresetsAndSeccomp(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "presets/scout"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "presets/scout/.claude/skills/x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "presets/scout/CLAUDE.md"), []byte("hi\n"), 0o644); err != nil {
+	for p, body := range map[string]string{"presets/scout/CLAUDE.md": "hi\n", "presets/scout/.claude/skills/x/SKILL.md": "skill\n", "p.json": `{"defaultAction":"SCMP_ACT_ALLOW"}`} {
+		if err := os.WriteFile(filepath.Join(dir, p), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	yaml := "apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata: { name: t }\n" +
+		"defaults: { harness: { kind: claude-code, version: 2.1.280 }, image: slim }\n" +
+		"agent_computers:\n  scout: { home: { preset: ./presets/scout }, security: { seccomp: ./p.json } }\n  plain: {}\n"
+	if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	g := &globals{fleetPath: filepath.Join(dir, "fleet.yaml")}
-	f := &fleet.Fleet{Computers: map[string]fleet.Computer{
-		"scout": {Home: fleet.Home{Preset: "./presets/scout"}},
-		"twin":  {Home: fleet.Home{Preset: "./presets/scout"}},
-		"plain": {},
-	}}
-	lock := fleet.NewLock()
-	tars, err := g.presets(f, lock)
+	spec, err := fleet.LoadSpec(g.fleetPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tars) != 1 || len(tars["./presets/scout"]) == 0 || !strings.HasPrefix(lock.Presets["./presets/scout"], "sha256:") {
-		t.Fatalf("tars %d, lock %v", len(tars), lock.Presets)
-	}
-	if got := addedPins(fleet.NewLock(), lock); fmt.Sprint(got) != "[./presets/scout]" {
-		t.Errorf("addedPins = %v", got)
-	}
-	if got := addedPins(lock, cloneLock(lock)); len(got) != 0 {
-		t.Errorf("addedPins of a clone = %v", got)
-	}
-	// Changed content moves the pin: the preset is the project's own source.
-	before := lock.Presets["./presets/scout"]
-	if err := os.WriteFile(filepath.Join(dir, "presets/scout/CLAUDE.md"), []byte("changed\n"), 0o644); err != nil {
+	if err := g.inline(spec); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.presets(f, lock); err != nil {
+	f, err := spec.Resolve()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if after := lock.Presets["./presets/scout"]; after == before {
-		t.Errorf("pin not moved: %s", after)
+	scout := f.Computers["scout"]
+	if scout.Home.Preset != "" || scout.Files["CLAUDE.md"] != "hi\n" || scout.Files[".claude/skills/x/SKILL.md"] != "skill\n" || string(scout.Security.Seccomp.Profile) != `{"defaultAction":"SCMP_ACT_ALLOW"}` {
+		t.Fatalf("scout = %+v", scout)
+	}
+
+	both := strings.Replace(yaml, "home: { preset: ./presets/scout }", "home: { preset: ./presets/scout }, instructions: be brief", 1)
+	if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(both), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, _ = fleet.LoadSpec(g.fleetPath)
+	if err := g.inline(spec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spec.Resolve(); err == nil || !strings.Contains(err.Error(), "instructions: also set") {
+		t.Fatalf("instructions and a preset CLAUDE.md = %v", err)
 	}
 }
 
@@ -137,14 +144,14 @@ func TestPromptEndToEnd(t *testing.T) {
 		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/v1/status":
-			_ = json.NewEncoder(w).Encode(api.StatusResponse{Fleet: "lab", Computers: []api.ComputerStatus{{Name: "scout", Phase: api.PhaseBusy, ActiveTurn: "t_6"}}})
-		case r.Method == "POST" && r.URL.Path == "/v1/computers/scout/inbox":
+			_ = json.NewEncoder(w).Encode(api.StatusResponse{Fleet: "lab", AgentComputers: []api.ComputerStatus{{Name: "scout", Phase: api.PhaseBusy, ActiveTurn: "t_6"}}})
+		case r.Method == "POST" && r.URL.Path == "/v1/agent-computers/scout/inbox":
 			mu.Lock()
 			_ = json.NewDecoder(r.Body).Decode(&enq)
 			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(api.EnqueueResponse{ID: "m_1", Seq: 1, State: api.MsgPending, Position: 0, Phase: api.PhaseBusy})
-		case r.Method == "GET" && r.URL.Path == "/v1/computers/scout/inbox/m_1/events":
+		case r.Method == "GET" && r.URL.Path == "/v1/agent-computers/scout/inbox/m_1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			snap, _ := json.Marshal(api.Event{V: 1, Computer: "scout", Seq: 1, Type: "snapshot", Data: json.RawMessage(`{"message":{"id":"m_1","state":"pending"},"held":false}`)})
 			fmt.Fprintf(w, "id: 1\ndata: %s\n\n", snap)
@@ -152,7 +159,7 @@ func TestPromptEndToEnd(t *testing.T) {
 			fmt.Fprintf(w, "id: 3\ndata: %s\n\n", del)
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
-		case r.Method == "GET" && r.URL.Path == "/v1/computers/scout/events" && r.URL.Query().Get("turn") == "t_7":
+		case r.Method == "GET" && r.URL.Path == "/v1/agent-computers/scout/events" && r.URL.Query().Get("turn") == "t_7":
 			mu.Lock()
 			conns++
 			n := conns

@@ -35,45 +35,104 @@ func imageRef(image string) string {
 
 func bundleRef(h fleet.Harness) string { return version.Bundle(h.Kind, h.Version) }
 
-// PutFleet is `a12s up`; admission errors change nothing.
-func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api.PutFleetResponse, error) {
+// PutFleet is `a12s up`: the whole Fleet. Admission errors change nothing.
+func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest, o writeOpts) (api.PutFleetResponse, error) {
+	if req.Fleet == nil {
+		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "fleet is required")
+	}
+	o.whole, o.file, o.lock, o.creds, o.asleep, o.refresh = true, req.File, req.Lock, req.Credentials, req.Asleep, req.Refresh
+	return c.applySpec(ctx, func(*fleet.Spec) (*fleet.Spec, error) { return req.Fleet, nil }, o)
+}
+
+// writeOpts says what a write may touch and how it is admitted.
+type writeOpts struct {
+	whole bool // PUT /v1/fleet: may touch everything
+	file  bool // the Fleet comes from a Fleet file: it becomes the Applied spec
+	// only names the agent computers and Services a partial write touches.
+	only    []string
+	dryRun  bool
+	ifMatch *int64
+	by      caller
+	lock    *fleet.Lock // nil: the stored lock
+	creds   api.Credentials
+	asleep  bool
+	refresh []string
+}
+
+func (o writeOpts) touches(name string) bool { return o.whole || slices.Contains(o.only, name) }
+
+// applySpec runs mutate on a copy of the stored Spec under the exclusive apply lock, admits the result and converges
+// what the write touches. Nothing changes when admission fails or on a dry run.
+func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec) (*fleet.Spec, error), o writeOpts) (api.PutFleetResponse, error) {
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
 
-	f := req.Fleet
-	if f == nil {
-		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "fleet is required")
+	c.mu.Lock()
+	cur, version, oldFleet := c.state.Spec, c.state.Version, c.state.Fleet
+	storedLock := c.state.Lock
+	c.mu.Unlock()
+	if o.ifMatch != nil && *o.ifMatch != version {
+		return api.PutFleetResponse{}, &httpError{status: http.StatusPreconditionFailed, body: api.Error{Code: api.ErrVersionMismatch,
+			Message: fmt.Sprintf("the Fleet is at version %d, not %d: it changed since you read it", version, *o.ifMatch),
+			Fix:     "read it again (GET /v1/fleet) and retry; the SDK's fleet.replace does this for you"}}
+	}
+	if cur == nil {
+		cur = &fleet.Spec{APIVersion: fleet.APIVersion, Kind: fleet.Kind, Metadata: fleet.Metadata{Name: c.cfg.Fleet}, AgentComputers: map[string]json.RawMessage{}}
+	} else {
+		cur = cur.Clone()
+	}
+	spec, err := mutate(cur)
+	if err != nil {
+		return api.PutFleetResponse{}, err
+	}
+	canonicalize(spec)
+	if spec.Metadata.Name != c.cfg.Fleet {
+		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "this Controller runs fleet %q, not %q", c.cfg.Fleet, spec.Metadata.Name)
+	}
+	f, err := spec.Effective()
+	if err != nil {
+		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
+	}
+	if err := admitFields(f, o); err != nil {
+		return api.PutFleetResponse{}, err
 	}
 	if err := f.Validate(); err != nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
 	}
-	if f.Metadata.Name != c.cfg.Fleet {
-		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "this Controller runs fleet %q, not %q", c.cfg.Fleet, f.Metadata.Name)
-	}
-	creds := req.Credentials
+	creds := o.creds
 	c.mu.Lock()
 	if len(creds) == 0 {
 		creds = c.creds
 	}
 	c.mu.Unlock()
 	for _, name := range f.ComputerNames() {
+		if !o.touches(name) {
+			continue
+		}
 		if missing := missingCredentials(f.Computers[name].Credentials, creds); len(missing) > 0 {
-			return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid,
-				"computers.%s: no material for credentials %s (check the bindings file)", name, strings.Join(missing, ", "))
+			return api.PutFleetResponse{}, &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrMissingCredential,
+				Message: fmt.Sprintf("agent_computers.%s: credentials %s have no value", name, strings.Join(missing, ", ")),
+				Fix:     "fleet.credentials.set(name, value), or a12s creds set <name> and a12s up"}}
 		}
 	}
+	changes := c.diff(oldFleet, f, o)
+	if o.dryRun {
+		return api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
+			Warnings: slices.Concat(f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}, nil
+	}
+	lockIn := o.lock
+	if lockIn == nil {
+		lockIn = storedLock
+	}
 	var admitWarnings []string
-	lock, hosts, manifests, err := c.resolve(ctx, f, req.Lock, req.Presets, req.Refresh, &admitWarnings)
+	lock, hosts, manifests, err := c.resolve(ctx, f, lockIn, o.refresh, &admitWarnings)
 	if err != nil {
 		return api.PutFleetResponse{}, err
 	}
 	if err := serviceCredentialErrors(f, manifests, creds); err != nil {
 		return api.PutFleetResponse{}, err
 	}
-	profiles, err := admitSeccomp(f, req.Seccomp, lock, &admitWarnings)
-	if err != nil {
-		return api.PutFleetResponse{}, err
-	}
+	admitSeccomp(f, &admitWarnings)
 
 	// Durable sleep marks, read before taking the lock.
 	sleptMarks := map[string]bool{}
@@ -93,14 +152,19 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 	// Admitted: this Fleet is now the desired state.
 	c.mu.Lock()
 	var previous map[string]fleet.Computer
-	if c.state.Fleet != nil {
-		previous = c.state.Fleet.Computers
-	}
 	var previousServices map[string]fleet.Service
 	if c.state.Fleet != nil {
-		previousServices = c.state.Fleet.Services
+		previous, previousServices = c.state.Fleet.Computers, c.state.Fleet.Services
 	}
-	c.state.Fleet, c.state.Lock, c.state.Seccomp = f, lock, profiles
+	changed := c.state.Spec == nil || specJSON(c.state.Spec) != specJSON(spec)
+	c.state.Spec, c.state.Fleet, c.state.Lock = spec, f, lock
+	if changed {
+		c.state.Version++
+	}
+	if o.file {
+		c.state.Applied = spec.Clone()
+	}
+	version = c.state.Version
 	maps.Copy(c.state.BundleHosts, hosts)
 	newServices := []string{}
 	for _, name := range f.ServiceNames() {
@@ -111,33 +175,38 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 			c.state.Services[name] = srec
 			newServices = append(newServices, name)
 		}
-		srec.Restarts = 0
+		if o.touches(name) {
+			srec.Restarts = 0
+		}
 	}
-	c.creds = maps.Clone(creds)
+	if len(o.creds) > 0 {
+		c.creds = maps.Clone(creds)
+	}
 	for _, name := range f.ComputerNames() {
 		rec := c.state.Computers[name]
 		if rec == nil {
 			rec = &Record{DesiredPower: driver.PowerAwake}
-			if req.Asleep || sleptMarks[name] {
+			if o.asleep || sleptMarks[name] {
 				// A Computer that went to sleep before `down` comes back asleep: the mark is Fleet data
 				// in fleet.db.
 				rec.DesiredPower = driver.PowerAsleep
 			}
 			c.state.Computers[name] = rec
 		}
-		rec.Restarts = 0
+		if o.touches(name) {
+			rec.Restarts = 0
+		}
 	}
 	err = c.saveLocked()
 	c.mu.Unlock()
 	if err != nil {
 		return api.PutFleetResponse{}, err
 	}
-	prunePresets(c.cfg.StateDir, lock.Presets)
 	if c.inbox != nil {
 		for _, name := range newServices {
 			if _, ok, err := c.inbox.ServiceDesired(ctx, name); err == nil && !ok {
 				desired := driver.PowerAwake
-				if req.Asleep {
+				if o.asleep {
 					desired = driver.PowerAsleep
 				}
 				_ = c.inbox.SetServiceDesired(ctx, name, string(desired))
@@ -148,11 +217,14 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		return api.PutFleetResponse{}, err
 	}
 	c.syncPower(ctx, f, api.PrincipalLocal)
-	if c.inbox != nil {
+	if c.inbox != nil && o.whole {
 		_ = c.inbox.ClearPaused(ctx) // a12s up resumes an auto-wake paused by a failed wake
 	}
+	if changed {
+		c.fleetChanged(version, o.by.principal, changes)
+	}
 
-	res := api.PutFleetResponse{Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()),
+	res := api.PutFleetResponse{Version: version, Changes: changes, Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()),
 		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -175,7 +247,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		goneSvc[name] = true
 	}
 	for _, name := range slices.Sorted(maps.Keys(goneSvc)) {
-		if _, ok := f.Services[name]; ok {
+		if _, ok := f.Services[name]; ok || !o.touches(name) {
 			continue
 		}
 		if err := c.removeService(ctx, name); err != nil {
@@ -183,8 +255,9 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		}
 		res.Services.Removed = append(res.Services.Removed, name)
 	}
-	souts := c.convergeServices(ctx, f.ServiceNames(), obs)
-	for _, name := range f.ServiceNames() {
+	svcNames := slices.DeleteFunc(f.ServiceNames(), func(n string) bool { return !o.touches(n) })
+	souts := c.convergeServices(ctx, svcNames, obs)
+	for _, name := range svcNames {
 		o := souts[name]
 		_, existed := previousServices[name]
 		var waiting *serviceWaiting
@@ -216,7 +289,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		gone[name] = true
 	}
 	for _, name := range slices.Sorted(maps.Keys(gone)) {
-		if _, ok := f.Computers[name]; ok {
+		if _, ok := f.Computers[name]; ok || !o.touches(name) {
 			continue
 		}
 		if err := c.removeComputer(ctx, name); err != nil {
@@ -225,8 +298,9 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 		res.Removed = append(res.Removed, name)
 	}
 
-	outcomes := c.convergeAll(ctx, f.ComputerNames(), obs)
-	for _, name := range f.ComputerNames() {
+	names := slices.DeleteFunc(f.ComputerNames(), func(n string) bool { return !o.touches(n) })
+	outcomes := c.convergeAll(ctx, names, obs)
+	for _, name := range names {
 		o := outcomes[name]
 		_, existed := previous[name]
 		switch {
@@ -246,8 +320,73 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest) (api
 			res.Updated = append(res.Updated, name)
 		}
 	}
+	for i, ch := range res.Changes {
+		if ch.Kind == api.KindAgentComputer && ch.Op == api.ChangeUpdate {
+			res.Changes[i].When = api.WhenNow
+			if slices.Contains(res.Staged, ch.Name) {
+				res.Changes[i].When = api.WhenIdle
+			}
+		}
+	}
 	c.refreshAddrs(ctx)
 	return res, nil
+}
+
+// admitFields refuses what only a Fleet file may hold, and names fields that neither the spec nor the defaults set.
+func admitFields(f *fleet.Fleet, o writeOpts) error {
+	var missing, fileOnly []string
+	for _, name := range f.ComputerNames() {
+		comp := f.Computers[name]
+		field := "agent_computers." + name
+		if comp.Harness.Kind == "" {
+			missing = append(missing, field+".harness.kind")
+		}
+		if comp.Harness.Version == "" {
+			missing = append(missing, field+".harness.version")
+		}
+		if comp.Image == "" {
+			missing = append(missing, field+".image")
+		}
+		if comp.Home.Preset != "" {
+			fileOnly = append(fileOnly, field+".home.preset")
+		}
+		if comp.Security.Seccomp.Path != "" {
+			fileOnly = append(fileOnly, field+".security.seccomp")
+		}
+	}
+	if len(fileOnly) > 0 {
+		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid,
+			Message: strings.Join(fileOnly, ", ") + ": paths exist only in a Fleet file; send the preset as files and the seccomp profile as JSON",
+			Fix:     "a12s up does this; from the API set instructions, files and security.seccomp inline"}}
+	}
+	if len(missing) > 0 {
+		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrMissingField,
+			Message: strings.Join(missing, ", ") + ": not set here or in defaults",
+			Fix:     "set it on the agent computer or in defaults"}}
+	}
+	return nil
+}
+
+// canonicalize re-encodes every entry so equal specs are equal JSON.
+func canonicalize(s *fleet.Spec) {
+	if s.AgentComputers == nil {
+		s.AgentComputers = map[string]json.RawMessage{}
+	}
+	for n, raw := range s.AgentComputers {
+		s.AgentComputers[n] = json.RawMessage(fleet.Canonical(raw))
+	}
+	if len(s.Defaults) > 0 {
+		if d := fleet.Canonical(s.Defaults); d == "{}" {
+			s.Defaults = nil
+		} else {
+			s.Defaults = json.RawMessage(d)
+		}
+	}
+}
+
+func specJSON(s *fleet.Spec) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 type result int
@@ -363,7 +502,7 @@ func (c *Controller) activeLocked(name string) Active {
 		Unenforced:  c.state.Fleet.Egress.Unenforced(),
 		Send:        slices.Clone(comp.Grants.Send),
 		Uses:        c.endpointsLocked(comp.Uses),
-		Seccomp:     comp.Security.Seccomp,
+		Seccomp:     comp.Security.Seccomp.Digest(),
 	}
 }
 
@@ -549,15 +688,6 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 			}
 		}
 		return held
-	}
-	c.mu.Lock()
-	preset := c.state.Fleet.Computers[name].Home.Preset
-	sum := c.state.Lock.Presets[preset]
-	c.mu.Unlock()
-	if preset != "" {
-		if spec.Preset = loadPreset(c.cfg.StateDir, sum); spec.Preset == nil {
-			return c.fail(name, fmt.Errorf("preset %s (%s) is not stored; run a12s up to send it", preset, sum), true)
-		}
 	}
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
@@ -804,8 +934,8 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 // resolve checks the Fleet against the substrate and the lock, makes the
 // images and bundles available, and returns the lock with missing pins
 // added (an existing pin never changes) and each bundle's sign-in hosts.
-func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte, refresh []string, warnings *[]string) (*fleet.Lock, map[string][]string, map[string]*fleet.ServiceManifest, error) {
-	lock, hosts, caps, err := c.resolveComputers(ctx, f, in, presets, warnings)
+func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, refresh []string, warnings *[]string) (*fleet.Lock, map[string][]string, map[string]*fleet.ServiceManifest, error) {
+	lock, hosts, caps, err := c.resolveComputers(ctx, f, in, warnings)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -816,7 +946,7 @@ func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock
 	return lock, hosts, manifests, nil
 }
 
-func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, presets map[string][]byte, warnings *[]string) (*fleet.Lock, map[string][]string, driver.Capabilities, error) {
+func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, warnings *[]string) (*fleet.Lock, map[string][]string, driver.Capabilities, error) {
 	invalid := func(format string, args ...any) error {
 		return errorf(http.StatusBadRequest, api.ErrInvalid, format, args...)
 	}
@@ -837,7 +967,6 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 	if in != nil {
 		maps.Copy(lock.Images, in.Images)
 		maps.Copy(lock.Bundles, in.Bundles)
-		maps.Copy(lock.Presets, in.Presets)
 		maps.Copy(lock.Services, in.Services)
 	}
 	hosts := map[string][]string{}
@@ -880,21 +1009,6 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 			}
 			lock.PinBundle(m.Kind, m.Version, id)
 			hosts[key] = append([]string{}, m.SignInHosts...)
-		}
-		if p := comp.Home.Preset; p != "" && !seen["preset "+p] {
-			seen["preset "+p] = true
-			data, ok := presets[p]
-			if !ok {
-				return nil, nil, caps, invalid("computers.%s.home.preset: %q was not sent with the Fleet", name, p)
-			}
-			sum, err := hashPresetTar(data)
-			if err != nil {
-				return nil, nil, caps, invalid("computers.%s.home.preset: %v", name, err)
-			}
-			if err := savePreset(c.cfg.StateDir, sum, data); err != nil {
-				return nil, nil, caps, err
-			}
-			lock.SetPreset(p, sum)
 		}
 	}
 	return lock, hosts, caps, nil
@@ -953,16 +1067,14 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Uses:        c.endpointsLocked(comp.Uses),
 		Send:        slices.Clone(comp.Grants.Send),
 	}
-	if comp.Home.Preset != "" {
-		spec.PresetDigest = lock.Presets[comp.Home.Preset]
-	}
-	var seccompDigest string
-	if p := comp.Security.Seccomp; p != "" {
-		seccompDigest = lock.Seccomp[p]
-		if spec.Seccomp = c.state.Seccomp[seccompDigest]; spec.Seccomp == "" {
-			return driver.ComputerSpec{}, "", fmt.Errorf("seccomp profile %s is not stored; run a12s up to send it", p)
+	if files := comp.HomeFiles(); len(files) > 0 {
+		var err error
+		if spec.Preset, spec.PresetDigest, err = fleet.FilesTar(files); err != nil {
+			return driver.ComputerSpec{}, "", err
 		}
 	}
+	seccompDigest := comp.Security.Seccomp.Digest()
+	spec.Seccomp = string(comp.Security.Seccomp.Profile)
 	for _, m := range comp.Drives {
 		spec.Drives = append(spec.Drives, driver.Mount{DriveID: driver.WorkDriveID(m.Name), At: m.At, ReadOnly: m.ReadOnly})
 	}
@@ -985,33 +1097,19 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 	return spec, hex.EncodeToString(sum[:]), nil
 }
 
-// admitSeccomp checks every security.seccomp profile the CLI sent and pins its digest. The profile comes only
-// from the Fleet's owner, never from an image, and replaces nothing but the seccomp filter: capabilities and
+// admitSeccomp warns about profiles that allow every syscall they do not list. The profile comes only from the
+// Fleet's owner, never from an image, and replaces nothing but the seccomp filter: capabilities and
 // no-new-privileges stay as they are.
-func admitSeccomp(f *fleet.Fleet, sent map[string]string, lock *fleet.Lock, warnings *[]string) (map[string]string, error) {
-	profiles := map[string]string{}
-	lock.Seccomp = map[string]string{}
+func admitSeccomp(f *fleet.Fleet, warnings *[]string) {
 	for _, name := range f.ComputerNames() {
-		p := f.Computers[name].Security.Seccomp
-		if p == "" {
+		p := f.Computers[name].Security.Seccomp.Profile
+		if len(p) == 0 {
 			continue
 		}
-		data, ok := sent[p]
-		if !ok {
-			return nil, errorf(http.StatusBadRequest, api.ErrInvalid, "computers.%s.security.seccomp: %q was not sent with the Fleet", name, p)
+		if allowAll, err := fleet.ValidateSeccomp(p); err == nil && allowAll {
+			*warnings = append(*warnings, fmt.Sprintf("agent_computers.%s.security.seccomp: the profile allows every syscall it does not list", name))
 		}
-		allowAll, err := fleet.ValidateSeccomp([]byte(data))
-		if err != nil {
-			return nil, errorf(http.StatusBadRequest, api.ErrInvalid, "computers.%s.security.seccomp: %s: %v", name, p, err)
-		}
-		if allowAll {
-			*warnings = append(*warnings, fmt.Sprintf("computers.%s.security.seccomp: %s allows every syscall it does not list", name, p))
-		}
-		sum := fleet.HashSeccomp([]byte(data))
-		lock.SetSeccomp(p, sum)
-		profiles[sum] = data
 	}
-	return profiles, nil
 }
 
 // hashPresetTar is fleet.HashPreset computed over the tar stream

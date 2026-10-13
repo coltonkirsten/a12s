@@ -1,0 +1,179 @@
+package controller
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/coltonkirsten/a12s/internal/api"
+	"github.com/coltonkirsten/a12s/internal/fleet"
+)
+
+const helloSpec = `{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","credentials":["anthropic"],"instructions":"Be helpful"}`
+
+func TestAgentComputerWrites(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), nil, false)
+	v0 := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Version
+
+	// A dry run lists the change and changes nothing.
+	dry := decodeBody[api.PutFleetResponse](t, h.api("PUT", "/v1/agent-computers/hello?dryRun=true", helloSpec))
+	if !dry.DryRun || len(dry.Changes) != 1 || dry.Changes[0].Op != api.ChangeCreate || dry.Version != v0 {
+		t.Fatalf("dry run = %+v", dry)
+	}
+	if res := h.api("GET", "/v1/agent-computers/hello", ""); res.StatusCode != 404 {
+		t.Fatalf("dry run created hello: %d", res.StatusCode)
+	}
+
+	res := decodeBody[api.PutFleetResponse](t, h.api("PUT", "/v1/agent-computers/hello", helloSpec, "If-None-Match", "*"))
+	if res.Version != v0+1 || res.AgentComputer == nil || res.AgentComputer.Status.Phase != api.PhaseReady {
+		t.Fatalf("create = %+v", res)
+	}
+	if got := h.d.get("hello").spec; got.PresetDigest == "" {
+		t.Fatal("hello's instructions were not written to its home drive")
+	}
+	if r := h.api("PUT", "/v1/agent-computers/hello", helloSpec, "If-None-Match", "*"); r.StatusCode != 409 || apiError(t, r).Code != api.ErrExists {
+		t.Fatalf("create on a taken name = %d", r.StatusCode)
+	}
+
+	// Defaults fill what the spec leaves out; the spec reads back as written.
+	ac := decodeBody[api.AgentComputer](t, h.api("GET", "/v1/agent-computers/hello", ""))
+	var eff fleet.Computer
+	if err := json.Unmarshal(ac.Effective, &eff); err != nil || eff.Resources.Memory == 0 || eff.Instructions != "Be helpful" {
+		t.Fatalf("effective = %s (%v)", ac.Effective, err)
+	}
+	if strings.Contains(string(ac.Spec), "resources") {
+		t.Fatalf("spec = %s", ac.Spec)
+	}
+
+	// A patch touches only hello; the version moves once per change.
+	scoutGen := h.d.get("scout").spec.Generation
+	p := decodeBody[api.PutFleetResponse](t, h.api("PATCH", "/v1/agent-computers/hello", `{"instructions":"Be brief","egress":{"allow":["github.com"]}}`))
+	if p.Version != v0+2 || len(p.Changes) != 1 || strings.Join(p.Changes[0].Fields, ",") != "egress,instructions" {
+		t.Fatalf("patch = %+v", p)
+	}
+	if h.d.get("scout").spec.Generation != scoutGen {
+		t.Fatal("a write to hello touched scout")
+	}
+	if same := decodeBody[api.PutFleetResponse](t, h.api("PATCH", "/v1/agent-computers/hello", `{"instructions":"Be brief"}`)); same.Version != v0+2 || len(same.Changes) != 0 {
+		t.Fatalf("a no-op patch = %+v", same)
+	}
+
+	// Listing and the old path both see it.
+	list := decodeBody[api.AgentComputersResponse](t, h.api("GET", "/v1/agent-computers", ""))
+	if len(list.AgentComputers) != 5 {
+		t.Fatalf("list = %d", len(list.AgentComputers))
+	}
+	if r := h.api("GET", "/v1/computers/hello", ""); r.StatusCode != 200 {
+		t.Fatalf("old path = %d", r.StatusCode)
+	}
+
+	// Drift: what changed since the last whole-Fleet write.
+	fr := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", ""))
+	if len(fr.Drift) != 1 || fr.Drift[0].Name != "hello" || fr.Drift[0].Op != api.ChangeCreate {
+		t.Fatalf("drift = %+v", fr.Drift)
+	}
+
+	if d := decodeBody[api.PutFleetResponse](t, h.api("DELETE", "/v1/agent-computers/hello", "")); len(d.Removed) != 1 || d.Version != v0+3 {
+		t.Fatalf("delete = %+v", d)
+	}
+	if h.d.get("hello").spec.Name != "" || !h.d.hasDrive("home-hello") {
+		t.Fatal("delete removes the agent computer and keeps its drive")
+	}
+	if r := h.api("DELETE", "/v1/agent-computers/hello", ""); r.StatusCode != 404 {
+		t.Fatalf("delete twice = %d", r.StatusCode)
+	}
+}
+
+func TestAgentComputerAdmissionCodes(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), nil, false)
+	for _, tc := range []struct {
+		body   string
+		status int
+		code   api.ErrorCode
+	}{
+		{`{"image":"slim"}`, 400, api.ErrMissingField},
+		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","credentials":["hubspot"]}`, 400, api.ErrMissingCredential},
+		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","home":{"preset":"./p"}}`, 400, api.ErrInvalid},
+		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","bogus":1}`, 400, api.ErrInvalid},
+		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","files":{"../x":"y"}}`, 400, api.ErrInvalid},
+	} {
+		r := h.api("PUT", "/v1/agent-computers/x", tc.body)
+		if e := apiError(t, r); r.StatusCode != tc.status || e.Code != tc.code {
+			t.Errorf("%s: %d %s (%s), want %d %s", tc.body, r.StatusCode, e.Code, e.Message, tc.status, tc.code)
+		}
+	}
+}
+
+func TestFleetIfMatch(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), nil, false)
+	fr := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", ""))
+	body, _ := json.Marshal(api.PutFleetRequest{Fleet: &fr.Fleet, Credentials: labCreds})
+	stale := `"` + string(rune('0'+fr.Version-1)) + `"`
+	if r := h.api("PUT", "/v1/fleet", string(body), "If-Match", stale); r.StatusCode != http.StatusPreconditionFailed || apiError(t, r).Code != api.ErrVersionMismatch {
+		t.Fatalf("stale If-Match = %d", r.StatusCode)
+	}
+	r := h.api("PUT", "/v1/fleet", string(body), "If-Match", etag(fr.Version))
+	if r.StatusCode != 200 || r.Header.Get("ETag") != etag(fr.Version) {
+		t.Fatalf("matching If-Match = %d, etag %s (an unchanged Fleet keeps its version)", r.StatusCode, r.Header.Get("ETag"))
+	}
+}
+
+// A Controller upgraded from a release that stored the merged Fleet keeps every agent computer, with its preset as
+// files and its seccomp profile inline.
+func TestLegacyStateMigrates(t *testing.T) {
+	dir := t.TempDir()
+	tarData := mustPresetTar(t)
+	sum, err := hashPresetTar(tarData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, presetDir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(presetPath(dir, sum), tarData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile := `{"defaultAction":"SCMP_ACT_ALLOW"}`
+	legacy := `{"fleet":{"apiVersion":"a12s.ai/v1alpha1","kind":"Fleet","metadata":{"name":"lab"},
+		"computers":{"scout":{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","home":{"preset":"./presets/scout"},"security":{"seccomp":"./p.json"}}}},
+		"lock":{"images":{},"bundles":{},"presets":{"./presets/scout":"` + sum + `"},"seccomp":{"./p.json":"sha256:x"}},
+		"seccomp":{"sha256:x":` + quoted(profile) + `},"computers":{}}`
+	if err := os.WriteFile(filepath.Join(dir, stateFile), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadState(filepath.Join(dir, stateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := st.Fleet.Computers["scout"]
+	if c.Home.Preset != "" || !strings.Contains(c.Files["CLAUDE.md"], "scout") || string(c.Security.Seccomp.Profile) != profile {
+		t.Fatalf("migrated scout = %+v", c)
+	}
+	if st.Applied == nil {
+		t.Fatal("the migrated spec is the applied one: no drift")
+	}
+}
+
+func mustPresetTar(t *testing.T) []byte {
+	t.Helper()
+	files, err := fleet.InlineFiles("../../examples/lab/presets/scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := fleet.FilesTar(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func quoted(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}

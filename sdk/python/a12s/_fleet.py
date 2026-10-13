@@ -1,0 +1,351 @@
+"""The object SDK: a Fleet hands out AgentComputer and Service objects you call methods on."""
+
+from __future__ import annotations
+
+import builtins
+import os
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+from . import _core as core
+from ._client import Client, EventStream, TurnStream
+from ._connect import _discover
+from ._errors import A12sError
+from ._parse import from_json
+from ._spec import AgentComputerSpec, FleetSpec
+from ._types import (
+    Change,
+    ComputerStatus,
+    EnqueueResponse,
+    Event,
+    InboxList,
+    Message,
+    PromptResult,
+    ServiceStatus,
+    Status,
+    Token,
+)
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+# Whole-Fleet writes retry this often when someone else wrote in between.
+_REPLACE_TRIES = 5
+
+
+def ac_path(name: str, suffix: str = "") -> str:
+    return f"/v1/agent-computers/{core.enc(name)}{suffix}"
+
+
+def service_path(name: str, suffix: str = "") -> str:
+    return f"/v1/services/{core.enc(name)}{suffix}"
+
+
+def write_headers(replace: bool) -> dict[str, str] | None:
+    return None if replace else {"if-none-match": "*"}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FleetState:
+    """The Fleet as written and its version. ``drift`` lists what changed through the API since the last a12s up."""
+
+    version: int
+    spec: FleetSpec
+    drift: list[Change]
+
+
+def fleet_state(data: Any) -> FleetState:
+    return FleetState(
+        version=int(data.get("version") or 0),
+        spec=FleetSpec(data.get("fleet") or {}),
+        drift=[from_json(Change, c) for c in data.get("drift") or []],
+    )
+
+
+class AgentComputer:
+    """A handle on one agent computer. Methods always call the Controller; ``spec``, ``effective`` and ``status`` are
+    a snapshot from the last create, get, reload or update."""
+
+    def __init__(self, fleet: Fleet, data: dict[str, Any]) -> None:
+        self._fleet = fleet
+        self._set(data)
+
+    def _set(self, data: dict[str, Any]) -> None:
+        self.name: str = data["name"]
+        self.spec: dict[str, Any] = data.get("spec") or {}
+        self.effective: dict[str, Any] = data.get("effective") or {}
+        self.status: ComputerStatus = from_json(ComputerStatus, data.get("status") or {"name": self.name})
+
+    def __repr__(self) -> str:
+        return f"<AgentComputer {self.name} {self.status.phase}>"
+
+    def reload(self) -> AgentComputer:
+        self._set(self._fleet._client._request("GET", ac_path(self.name)))
+        return self
+
+    def prompt(
+        self,
+        text: str,
+        *,
+        on_event: Callable[[Event], None] | None = None,
+        sender: str | None = None,
+        metadata: dict[str, str] | None = None,
+        fresh: bool = False,
+        idempotency_key: str | None = None,
+        expires: int | None = None,
+        replace_key: str | None = None,
+    ) -> PromptResult:
+        """Sends ``text`` and returns the Turn that delivers it, once it ends. ``on_event`` gets its events live."""
+        return self._fleet._client.prompt(
+            self.name,
+            text,
+            on_event=on_event,
+            sender=sender,
+            metadata=metadata,
+            fresh=fresh,
+            idempotency_key=idempotency_key,
+            expires=expires,
+            replace_key=replace_key,
+        )
+
+    def send(
+        self,
+        text: str,
+        *,
+        sender: str | None = None,
+        metadata: dict[str, str] | None = None,
+        fresh: bool = False,
+        idempotency_key: str | None = None,
+        expires: int | None = None,
+        replace_key: str | None = None,
+    ) -> EnqueueResponse:
+        """Queues ``text`` and returns at once; it is delivered at the next idle moment, even if busy or asleep."""
+        return self._fleet._client.send(
+            self.name,
+            text,
+            sender=sender,
+            metadata=metadata,
+            fresh=fresh,
+            idempotency_key=idempotency_key,
+            expires=expires,
+            replace_key=replace_key,
+        )
+
+    def events(
+        self, *, turn: str | None = None, after: int | None = None, reconnect: float = 1.0, on_gap: core.OnGap = "yield"
+    ) -> EventStream:
+        """Its events, live; ``turn`` replays one Turn from its start."""
+        return self._fleet._client.events(self.name, turn=turn, after=after, reconnect=reconnect, on_gap=on_gap)
+
+    def turns(self, *, reconnect: float = 1.0, on_gap: core.OnGap = "yield") -> TurnStream:
+        """Its Turns, live, as they end."""
+        return self._fleet._client.turns(self.name, reconnect=reconnect, on_gap=on_gap)
+
+    def update(self, **changes: Unpack[AgentComputerSpec]) -> AgentComputer:
+        """Changes the given fields (maps merge, lists replace). It applies at the next idle moment; the session
+        continues."""
+        res = self._fleet._client._request("PATCH", ac_path(self.name), dict(changes))
+        if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):
+            self._set(res["agentComputer"])
+        return self
+
+    def sleep(self) -> None:
+        self._fleet._client.sleep(self.name)
+
+    def wake(self) -> None:
+        self._fleet._client.wake(self.name)
+
+    def stop(self, turn: str | None = None) -> None:
+        """Interrupts a Turn (default: the active one)."""
+        self._fleet._client.stop(self.name, turn)
+
+    def inbox(self, *, state: str | None = None, bodies: bool = False, after: int | None = None) -> InboxList:
+        return self._fleet._client.inbox(self.name, state=state, bodies=bodies, after=after)
+
+    def message(self, id: str) -> Message:
+        return self._fleet._client.message(self.name, id)
+
+    def withdraw(self, id: str) -> Message:
+        return self._fleet._client.withdraw(self.name, id)
+
+    def remove(self) -> None:
+        """Stops and removes it. Its drives stay."""
+        self._fleet._client._request("DELETE", ac_path(self.name))
+
+
+class AgentComputers:
+    def __init__(self, fleet: Fleet) -> None:
+        self._fleet = fleet
+
+    def create(self, name: str, *, replace: bool = False, **spec: Unpack[AgentComputerSpec]) -> AgentComputer:
+        """Creates an agent computer and returns once it is up. A taken name raises A12sError ``exists`` unless
+        ``replace``."""
+        res = self._fleet._client._request("PUT", ac_path(name), dict(spec), write_headers(replace))
+        if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):
+            return AgentComputer(self._fleet, res["agentComputer"])
+        return self.get(name)
+
+    def get(self, name: str) -> AgentComputer:
+        """Raises a12s.NotFound when there is none."""
+        return AgentComputer(self._fleet, self._fleet._client._request("GET", ac_path(name)))
+
+    def list(self) -> builtins.list[AgentComputer]:
+        res = self._fleet._client._request("GET", "/v1/agent-computers")
+        return [AgentComputer(self._fleet, d) for d in (res or {}).get("agentComputers") or []]
+
+
+class Service:
+    """A handle on one Service; ``spec`` and ``status`` are a snapshot like AgentComputer's."""
+
+    def __init__(self, fleet: Fleet, data: dict[str, Any]) -> None:
+        self._fleet = fleet
+        self._set(data)
+
+    def _set(self, data: dict[str, Any]) -> None:
+        self.status: ServiceStatus = from_json(ServiceStatus, data)
+        self.name: str = self.status.name
+        self.spec: dict[str, Any] = data.get("spec") or {}
+
+    def __repr__(self) -> str:
+        return f"<Service {self.name} {self.status.phase}>"
+
+    def reload(self) -> Service:
+        self._set(self._fleet._client._request("GET", service_path(self.name)))
+        return self
+
+    def update(self, **changes: Any) -> Service:
+        res = self._fleet._client._request("PATCH", service_path(self.name), changes)
+        if isinstance(res, dict) and isinstance(res.get("service"), dict):
+            self._set(res["service"])
+        return self
+
+    def sleep(self) -> None:
+        self._set(self._fleet._client._request("POST", service_path(self.name, "/power"), {"state": "asleep"}))
+
+    def wake(self) -> None:
+        self._set(self._fleet._client._request("POST", service_path(self.name, "/power"), {"state": "awake"}))
+
+    def remove(self) -> None:
+        """Stops and removes it. Its state drive stays."""
+        self._fleet._client._request("DELETE", service_path(self.name))
+
+
+class Services:
+    def __init__(self, fleet: Fleet) -> None:
+        self._fleet = fleet
+
+    def create(self, name: str, *, replace: bool = False, **spec: Any) -> Service:
+        res = self._fleet._client._request("PUT", service_path(name), spec, write_headers(replace))
+        if isinstance(res, dict) and isinstance(res.get("service"), dict):
+            return Service(self._fleet, res["service"])
+        return self.get(name)
+
+    def get(self, name: str) -> Service:
+        return Service(self._fleet, self._fleet._client._request("GET", service_path(name)))
+
+    def list(self) -> builtins.list[Service]:
+        res = self._fleet._client._request("GET", "/v1/services")
+        return [Service(self._fleet, d) for d in (res or {}).get("services") or []]
+
+
+class Tokens:
+    def __init__(self, fleet: Fleet) -> None:
+        self._fleet = fleet
+
+    def create(
+        self, name: str, *, actions: Sequence[str] | None = None, agent_computers: Sequence[str] | None = None
+    ) -> Token:
+        """A token for another program; the secret is in the result once."""
+        req: dict[str, Any] = {"name": name}
+        if actions is not None:
+            req["actions"] = list(actions)
+        if agent_computers is not None:
+            req["computers"] = list(agent_computers)
+        return from_json(Token, self._fleet._client._request("POST", "/v1/tokens", req))
+
+    def list(self) -> builtins.list[Token]:
+        res = self._fleet._client._request("GET", "/v1/tokens")
+        return [from_json(Token, t) for t in (res or {}).get("tokens") or []]
+
+    def remove(self, name: str) -> None:
+        self._fleet._client._request("DELETE", f"/v1/tokens/{core.enc(name)}")
+
+
+class Fleet:
+    """A running Fleet. It connects like ``connect()``: ``url`` and ``token``, else ``$A12S_URL`` and
+    ``$A12S_TOKEN``, else the nearest fleet.yaml's Fleet (or ``fleet=``), else the only running Controller.
+
+    ``fleet.agent_computers``, ``fleet.services`` and ``fleet.tokens`` hand out objects; ``with a12s.Fleet() as
+    fleet:`` closes it.
+    """
+
+    def __init__(
+        self,
+        url: str | None = None,
+        token: str | None = None,
+        *,
+        fleet: str | None = None,
+        home: str | os.PathLike[str] | None = None,
+        cwd: str | os.PathLike[str] | None = None,
+        http: httpx.Client | None = None,
+    ) -> None:
+        self._client = Client(*_discover(fleet, url, token, home, cwd), http=http)
+        self.url = self._client.url
+        self.agent_computers = AgentComputers(self)
+        self.services = Services(self)
+        self.tokens = Tokens(self)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> Fleet:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def status(self) -> Status:
+        return self._client.status()
+
+    def events(
+        self,
+        agent_computers: str | Sequence[str] | None = None,
+        *,
+        reconnect: float = 1.0,
+        on_gap: core.OnGap = "yield",
+    ) -> EventStream:
+        """Live events of every agent computer (or those named), merged."""
+        return self._client.events(agent_computers, reconnect=reconnect, on_gap=on_gap)
+
+    def turns(
+        self,
+        agent_computers: str | Sequence[str] | None = None,
+        *,
+        reconnect: float = 1.0,
+        on_gap: core.OnGap = "yield",
+    ) -> TurnStream:
+        """Turns of every agent computer (or those named), as they end."""
+        return self._client.turns(agent_computers, reconnect=reconnect, on_gap=on_gap)
+
+    def get(self) -> FleetState:
+        """The whole Fleet as written, and its version."""
+        return fleet_state(self._client._request("GET", "/v1/fleet"))
+
+    def replace(self, fn: Callable[[FleetSpec], FleetSpec | None]) -> FleetState:
+        """Reads the Fleet, runs ``fn`` on it (edit it in place, or return a new one) and writes it back, retrying when
+        someone else wrote in between."""
+        for attempt in range(_REPLACE_TRIES):
+            state = self.get()
+            spec = fn(state.spec)
+            body = {"fleet": dict(spec if spec is not None else state.spec)}
+            try:
+                self._client._request("PUT", "/v1/fleet", body, {"if-match": f'"{state.version}"'})
+            except A12sError as err:
+                if err.code == "version_mismatch" and attempt < _REPLACE_TRIES - 1:
+                    continue
+                raise
+            return self.get()
+        raise AssertionError("unreachable")

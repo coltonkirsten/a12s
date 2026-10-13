@@ -16,25 +16,25 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 
 | Command | What it does |
 |---|---|
-| `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (one Computer, `hello`, on `image: slim`), `fleet.lock` (pinning this a12s release), an empty bindings file, `.gitignore` and a README. |
-| `a12s up [--asleep] [--controller-image ref]` | Start the Controller if needed, validate and apply the Fleet: create, update or stage Computers and Services, pin new digests in `fleet.lock`. It prints `<name> runs with custom seccomp profile <path>` for each Computer with [`security.seccomp`](security.md#seccomp). `--asleep` creates new Computers asleep. |
-| `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy Computers now, interrupting their Turns after the grace period. |
-| `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp <path>` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
+| `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (harness, `image: slim` and the credential in `defaults`, and one agent computer, `assistant`), `fleet.lock` (pinning this a12s release), an empty bindings file, `.gitignore` and a README. |
+| `a12s up [--asleep] [--controller-image ref]` | Start the Controller if needed, validate and apply the Fleet file: create, update or stage agent computers and Services, remove the ones the file doesn't list (including those created through the SDK or API), pin new digests in `fleet.lock`. It reads each `home.preset` directory and `security.seccomp` file and sends their contents. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp), and a hint when the file still uses the old `computers:` key. `--asleep` creates new agent computers asleep. |
+| `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy agent computers now, interrupting their Turns after the grace period. |
+| `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
 | `a12s down [--purge [--yes]]` | Remove the Fleet's containers, networks and Controller; keep drives and the inbox database. `--purge` also destroys them after listing them and asking. Neither touches credentials saved with `creds set` (`~/.a12s/<fleet>/`). |
-| `a12s doctor` | Check the Fleet file, Docker, images and bundles, bindings, the Controller, egress and every Computer's and Service's health. One line per check with the fix; exits 1 on any failure. |
+| `a12s doctor` | Check the Fleet file, Docker, images and bundles, bindings, the Controller, egress and every agent computer's and Service's health. One line per check with the fix; exits 1 on any failure. |
 | `a12s lock update services/<svc>` | Re-pin a Service whose image ref hasn't changed. |
 | `a12s version` | The a12s release and the registry its images come from. |
 
-## Working with Computers
+## Working with agent computers
 
 | Command | What it does |
 |---|---|
 | `a12s prompt <name> [--new] "…"` | Enqueue a Message and stream the Turn that delivers it. `--new` starts a fresh session. |
-| `a12s send <name> "…" [flags]` | Enqueue a Message and exit; works while the Computer is busy or asleep. `-` reads the body from stdin. Flags: `--from`, `--fresh`, `--meta k=v`, `--key`, `--expires`, `--replace` (see [Inbox](inbox.md#message-options)). |
+| `a12s send <name> "…" [flags]` | Enqueue a Message and exit; works while the agent computer is busy or asleep. `-` reads the body from stdin. Flags: `--from`, `--fresh`, `--meta k=v`, `--key`, `--expires`, `--replace` (see [Inbox](inbox.md#message-options)). |
 | `a12s stop <name> [--hold]` | Interrupt the active Turn. `--hold` holds the inbox first, so nothing else is delivered. |
-| `a12s logs <name> [--follow] [--since <seq>]` | Replay the Computer's journal, and follow it. |
+| `a12s logs <name> [--follow] [--since <seq>]` | Replay the agent computer's journal, and follow it. |
 | `a12s gateway [--web dir \| --dev url \| -- command...] [--dev-port n] [--port 7012 \| --addr host:port] [--allow actions] [--computers c,d] [--no-open]` | Serve a web app (default: a built-in dashboard) on `127.0.0.1`: a directory (`--web`), a dev server it starts (`-- npm run dev`; it reads the port from the dev server's output, or `--dev-port`) or one already running (`--dev`), proxied with websockets. Next to it, the browser SDK at `/a12s.js` and the API at `/v1/` under a scoped token the page never sees. It opens `http://127.0.0.1:<port>/?key=…` in the browser (`--no-open`: only print it); the key is new each run, and `/v1/` and `/a12s.js` need it. Like every command it serves the Fleet found from `-F` or the current directory; if the port is taken it says so, and `--port` picks another. Each gateway gets its own scoped token, `gateway-<port>`, revoked when it stops (a killed gateway's token is removed by the next one to start), so several can serve one Fleet on different ports. `--addr` takes a loopback address only; anything else is refused (see [SDK: Serve other people](sdk.md#serve-other-people)). See [SDK: In the browser](sdk.md#in-the-browser). |
-| `a12s shell <name> [--root] [-- command...]` | An audited terminal inside a Computer or Service, outside the harness. Counts as activity for the power policy. |
+| `a12s shell <name> [--root] [-- command...]` | An audited terminal inside an agent computer or Service, outside the harness. Counts as activity for the power policy. |
 
 ## Inbox
 
@@ -42,7 +42,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 |---|---|
 | `a12s inbox <name> [--all] [--bodies]` | List pending Messages with limits, usage and the last 24 hours' expired, replaced, withdrawn and discarded counts. |
 | `a12s inbox rm <name> <id>` | Withdraw a pending Message. |
-| `a12s inbox clear <name> [--yes] [--orphan]` | Discard every pending Message (journaled, not erased). `--orphan` targets the inbox of a Computer no longer in the Fleet. |
+| `a12s inbox clear <name> [--yes] [--orphan]` | Discard every pending Message (journaled, not erased). `--orphan` targets the inbox of an agent computer no longer in the Fleet. |
 | `a12s inbox hold <name>` | Keep accepting Messages, stop delivering them. |
 | `a12s inbox resume <name> [--new]` | Deliver again; `--new` delivers the next Batch in a new session. |
 
@@ -51,7 +51,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | Command | What it does |
 |---|---|
 | `a12s sleep <name>... \| --all [--allow-wake]` | Stop processes, keep storage. A manual sleep suppresses automatic wakes until a manual wake; `--allow-wake` leaves the power policy in charge. |
-| `a12s wake <name>... \| --all [--clear-inbox]` | Start Computers (or Services). The session resumes on the next Turn. `--clear-inbox` discards what was pending first. |
+| `a12s wake <name>... \| --all [--clear-inbox]` | Start agent computers (or Services). The session resumes on the next Turn. `--clear-inbox` discards what was pending first. |
 
 `--all` covers Services too.
 
@@ -69,7 +69,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | Command | What it does |
 |---|---|
 | `a12s creds set <name>` | Read a value from stdin (not echoed), store it at `~/.a12s/<fleet>/<name>` (0600) and bind it in the Fleet's bindings file. Run it in the Fleet's directory (or with `-F`). `down --purge` keeps these files. |
-| `a12s token create <name> --actions a,b --computers c,d` | Create a scoped API token; it's printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
+| `a12s token create <name> --actions a,b --computers c,d` | Create a scoped API token for those agent computers (or `'*'`); it's printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
 | `a12s drive ls` | Drives, sizes, what's attached, orphans. |
 | `a12s drive rm <name> [--yes]` | Destroy one drive (asks first). With `down --purge`, the only commands that destroy data. |

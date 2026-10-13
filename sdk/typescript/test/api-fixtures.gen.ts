@@ -5,6 +5,85 @@ import type * as T from "../src/types.js";
 export const statusResponse: T.StatusResponse = {
   "fleet": "fleet",
   "egressEnforcement": "egressEnforcement",
+  "agentComputers": [
+    {
+      "name": "name",
+      "phase": "Ready",
+      "error": {
+        "reason": "reason",
+        "retryable": true
+      },
+      "resumePending": true,
+      "session": "session",
+      "activeTurn": "activeTurn",
+      "harness": {
+        "kind": "kind",
+        "version": "version",
+        "model": "model"
+      },
+      "image": "image",
+      "seccomp": "seccomp",
+      "autonomy": "autonomy",
+      "generation": 1,
+      "stagedGeneration": 1,
+      "credentialGeneration": 1,
+      "homeSize": "1",
+      "drives": [
+        "drives"
+      ],
+      "egressMode": "egressMode",
+      "warnings": [
+        "warnings"
+      ],
+      "inbox": {
+        "computer": "computer",
+        "held": true,
+        "holdReason": "holdReason",
+        "diagnostic": "diagnostic",
+        "pending": 1,
+        "claimed": 1,
+        "limits": {
+          "maxMessages": {
+            "value": 1,
+            "source": "source"
+          },
+          "maxBytes": {
+            "value": 1,
+            "source": "source"
+          }
+        },
+        "usage": {
+          "messages": 1,
+          "bytes": 1
+        },
+        "overLimit": true,
+        "ended24h": {
+          "expired": 1,
+          "replaced": 1,
+          "withdrawn": 1,
+          "discarded": 1
+        },
+        "orphaned": true,
+        "sessionOverride": "sessionOverride"
+      },
+      "inboxCleared": 1,
+      "power": {
+        "sleepAfterIdle": "sleepAfterIdle",
+        "wakeOnMessage": [
+          "wakeOnMessage"
+        ],
+        "maxWakesPerHour": 1,
+        "autoWake": "autoWake",
+        "reason": "reason",
+        "fix": "fix",
+        "wakesLastHour": 1,
+        "nextWakeAt": "2026-10-12T12:00:00Z",
+        "idleSince": "2026-10-12T12:00:00Z",
+        "sleptBy": "sleptBy",
+        "sleptAt": "2026-10-12T12:00:00Z"
+      }
+    }
+  ],
   "computers": [
     {
       "name": "name",
@@ -168,7 +247,8 @@ export const statusResponse: T.StatusResponse = {
       "egressMode": "egressMode",
       "warnings": [
         "warnings"
-      ]
+      ],
+      "spec": {}
     }
   ]
 };
@@ -176,6 +256,19 @@ export const statusResponse: T.StatusResponse = {
 export const statusResponseMinimal: T.StatusResponse = {
   "fleet": "fleet",
   "egressEnforcement": "egressEnforcement",
+  "agentComputers": [
+    {
+      "name": "name",
+      "phase": "Ready",
+      "harness": {
+        "kind": "kind",
+        "version": "version"
+      },
+      "image": "image",
+      "autonomy": "autonomy",
+      "generation": 1
+    }
+  ],
   "computers": [
     {
       "name": "name",
@@ -193,6 +286,19 @@ export const statusResponseMinimal: T.StatusResponse = {
 };
 
 export const putFleetResponse: T.PutFleetResponse = {
+  "version": 1,
+  "dryRun": true,
+  "changes": [
+    {
+      "op": "op",
+      "kind": "kind",
+      "name": "name",
+      "when": "when",
+      "fields": [
+        "fields"
+      ]
+    }
+  ],
   "created": [
     "created"
   ],
@@ -239,10 +345,136 @@ export const putFleetResponse: T.PutFleetResponse = {
     "removed": [
       "removed"
     ]
+  },
+  "agentComputer": {
+    "name": "name",
+    "spec": {},
+    "effective": {},
+    "status": {
+      "name": "name",
+      "phase": "Ready",
+      "error": {
+        "reason": "reason",
+        "retryable": true
+      },
+      "resumePending": true,
+      "session": "session",
+      "activeTurn": "activeTurn",
+      "harness": {
+        "kind": "kind",
+        "version": "version",
+        "model": "model"
+      },
+      "image": "image",
+      "seccomp": "seccomp",
+      "autonomy": "autonomy",
+      "generation": 1,
+      "stagedGeneration": 1,
+      "credentialGeneration": 1,
+      "homeSize": "1",
+      "drives": [
+        "drives"
+      ],
+      "egressMode": "egressMode",
+      "warnings": [
+        "warnings"
+      ],
+      "inbox": {
+        "computer": "computer",
+        "held": true,
+        "holdReason": "holdReason",
+        "diagnostic": "diagnostic",
+        "pending": 1,
+        "claimed": 1,
+        "limits": {
+          "maxMessages": {
+            "value": 1,
+            "source": "source"
+          },
+          "maxBytes": {
+            "value": 1,
+            "source": "source"
+          }
+        },
+        "usage": {
+          "messages": 1,
+          "bytes": 1
+        },
+        "overLimit": true,
+        "ended24h": {
+          "expired": 1,
+          "replaced": 1,
+          "withdrawn": 1,
+          "discarded": 1
+        },
+        "orphaned": true,
+        "sessionOverride": "sessionOverride"
+      },
+      "inboxCleared": 1,
+      "power": {
+        "sleepAfterIdle": "sleepAfterIdle",
+        "wakeOnMessage": [
+          "wakeOnMessage"
+        ],
+        "maxWakesPerHour": 1,
+        "autoWake": "autoWake",
+        "reason": "reason",
+        "fix": "fix",
+        "wakesLastHour": 1,
+        "nextWakeAt": "2026-10-12T12:00:00Z",
+        "idleSince": "2026-10-12T12:00:00Z",
+        "sleptBy": "sleptBy",
+        "sleptAt": "2026-10-12T12:00:00Z"
+      }
+    }
+  },
+  "service": {
+    "name": "name",
+    "phase": "Ready",
+    "error": {
+      "reason": "reason",
+      "retryable": true
+    },
+    "image": "image",
+    "pin": "pin",
+    "generation": 1,
+    "restarts": 1,
+    "health": "health",
+    "healthSince": "healthSince",
+    "send": [
+      "send"
+    ],
+    "uses": [
+      "uses"
+    ],
+    "usedBy": [
+      "usedBy"
+    ],
+    "publish": [
+      "publish"
+    ],
+    "ports": [
+      "ports"
+    ],
+    "stateDrive": "stateDrive",
+    "egressMode": "egressMode",
+    "warnings": [
+      "warnings"
+    ],
+    "spec": {}
   }
 };
 
 export const putFleetResponseMinimal: T.PutFleetResponse = {
+  "version": 1,
+  "changes": [
+    {
+      "op": "op",
+      "kind": "kind",
+      "name": "name",
+      "when": "when"
+    }
+  ],
   "created": [
     "created"
   ],
@@ -267,6 +499,266 @@ export const putFleetResponseMinimal: T.PutFleetResponse = {
       "removed"
     ]
   }
+};
+
+export const fleetResponse: T.FleetResponse = {
+  "version": 1,
+  "fleet": {
+    "apiVersion": "apiVersion",
+    "kind": "kind",
+    "metadata": {
+      "name": "name"
+    },
+    "egress": {
+      "enforcement": "enforcement",
+      "allowPrivate": [
+        "allowPrivate"
+      ]
+    },
+    "defaults": {},
+    "drives": {
+      "k": {
+        "size": "1",
+        "access": "access"
+      }
+    },
+    "agent_computers": {
+      "k": {}
+    },
+    "services": {
+      "k": {
+        "image": "image",
+        "manifest": {
+          "a12s": 1,
+          "name": "name",
+          "version": "version",
+          "user": "1:1",
+          "health": {
+            "http": {
+              "port": 0
+            },
+            "exec": [
+              ""
+            ],
+            "interval": "interval",
+            "startup": "startup"
+          },
+          "ports": {
+            "k": {
+              "port": 1,
+              "protocol": "protocol",
+              "mcp": {
+                "path": ""
+              }
+            }
+          },
+          "credentials": [
+            {
+              "name": "name",
+              "required": true
+            }
+          ],
+          "login": {
+            "command": [
+              ""
+            ],
+            "produces": "produces"
+          },
+          "state": {
+            "at": "at",
+            "size": "1"
+          },
+          "tmpfs": [
+            "tmpfs"
+          ],
+          "resources": {
+            "cpu": "1m",
+            "memory": "1"
+          }
+        },
+        "config": {
+          "k": null
+        },
+        "credentials": [
+          "credentials"
+        ],
+        "egress": {
+          "allow": [
+            "allow"
+          ],
+          "tcp": [
+            {
+              "name": "name",
+              "host": "host",
+              "port": 1
+            }
+          ]
+        },
+        "grants": {
+          "send": [
+            "send"
+          ]
+        },
+        "uses": [
+          {
+            "name": "name",
+            "mcp": true
+          }
+        ],
+        "resources": {
+          "cpu": "1m",
+          "memory": "1"
+        },
+        "state": {
+          "size": "1"
+        },
+        "publish": [
+          "publish"
+        ]
+      }
+    }
+  },
+  "drift": [
+    {
+      "op": "op",
+      "kind": "kind",
+      "name": "name",
+      "when": "when",
+      "fields": [
+        "fields"
+      ]
+    }
+  ]
+};
+
+export const fleetResponseMinimal: T.FleetResponse = {
+  "version": 1,
+  "fleet": {
+    "apiVersion": "apiVersion",
+    "kind": "kind",
+    "metadata": {
+      "name": "name"
+    },
+    "agent_computers": {
+      "k": {}
+    }
+  },
+  "drift": [
+    {
+      "op": "op",
+      "kind": "kind",
+      "name": "name",
+      "when": "when"
+    }
+  ]
+};
+
+export const agentComputersResponse: T.AgentComputersResponse = {
+  "agentComputers": [
+    {
+      "name": "name",
+      "spec": {},
+      "effective": {},
+      "status": {
+        "name": "name",
+        "phase": "Ready",
+        "error": {
+          "reason": "reason",
+          "retryable": true
+        },
+        "resumePending": true,
+        "session": "session",
+        "activeTurn": "activeTurn",
+        "harness": {
+          "kind": "kind",
+          "version": "version",
+          "model": "model"
+        },
+        "image": "image",
+        "seccomp": "seccomp",
+        "autonomy": "autonomy",
+        "generation": 1,
+        "stagedGeneration": 1,
+        "credentialGeneration": 1,
+        "homeSize": "1",
+        "drives": [
+          "drives"
+        ],
+        "egressMode": "egressMode",
+        "warnings": [
+          "warnings"
+        ],
+        "inbox": {
+          "computer": "computer",
+          "held": true,
+          "holdReason": "holdReason",
+          "diagnostic": "diagnostic",
+          "pending": 1,
+          "claimed": 1,
+          "limits": {
+            "maxMessages": {
+              "value": 1,
+              "source": "source"
+            },
+            "maxBytes": {
+              "value": 1,
+              "source": "source"
+            }
+          },
+          "usage": {
+            "messages": 1,
+            "bytes": 1
+          },
+          "overLimit": true,
+          "ended24h": {
+            "expired": 1,
+            "replaced": 1,
+            "withdrawn": 1,
+            "discarded": 1
+          },
+          "orphaned": true,
+          "sessionOverride": "sessionOverride"
+        },
+        "inboxCleared": 1,
+        "power": {
+          "sleepAfterIdle": "sleepAfterIdle",
+          "wakeOnMessage": [
+            "wakeOnMessage"
+          ],
+          "maxWakesPerHour": 1,
+          "autoWake": "autoWake",
+          "reason": "reason",
+          "fix": "fix",
+          "wakesLastHour": 1,
+          "nextWakeAt": "2026-10-12T12:00:00Z",
+          "idleSince": "2026-10-12T12:00:00Z",
+          "sleptBy": "sleptBy",
+          "sleptAt": "2026-10-12T12:00:00Z"
+        }
+      }
+    }
+  ]
+};
+
+export const agentComputersResponseMinimal: T.AgentComputersResponse = {
+  "agentComputers": [
+    {
+      "name": "name",
+      "spec": {},
+      "effective": {},
+      "status": {
+        "name": "name",
+        "phase": "Ready",
+        "harness": {
+          "kind": "kind",
+          "version": "version"
+        },
+        "image": "image",
+        "autonomy": "autonomy",
+        "generation": 1
+      }
+    }
+  ]
 };
 
 export const enqueueRequest: T.EnqueueRequest = {
@@ -482,7 +974,8 @@ export const servicesResponse: { services: T.ServiceStatus[] } = {
       "egressMode": "egressMode",
       "warnings": [
         "warnings"
-      ]
+      ],
+      "spec": {}
     }
   ]
 };

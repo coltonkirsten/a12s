@@ -134,13 +134,15 @@ class ServiceStatus:
     state_drive: str | None = None
     egress_mode: str | None = None
     warnings: list[str] | None = None
+    spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Status:
     fleet: str
     egress_enforcement: str
-    computers: list[ComputerStatus]
+    agent_computers: list[ComputerStatus]
+    computers: list[ComputerStatus]  # agent_computers under its old name, for one release
     orphaned_drives: list[DriveRow] | None = None
     credentials_loaded: bool
     warnings: list[str] | None = None
@@ -268,3 +270,36 @@ class PromptResult(Turn):
     """The finished Turn and the Message that started it."""
 
     message: EnqueueResponse
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Change:
+    """One entry of a write's change list. ``when`` is "now", or "idle" when a busy agent computer applies it later."""
+
+    op: str
+    kind: str
+    name: str
+    when: str
+    fields: list[str] | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentComputerInfo:
+    """GET /v1/agent-computers/{name}: the spec as written, with the defaults merged in, and the status."""
+
+    name: str
+    spec: dict[str, Any]
+    effective: dict[str, Any]
+    status: ComputerStatus
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentComputersResponse:
+    agent_computers: list[AgentComputerInfo]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FleetResponse:
+    version: int
+    fleet: dict[str, Any]
+    drift: list[Change]

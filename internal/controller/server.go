@@ -84,34 +84,43 @@ func decode(w http.ResponseWriter, r *http.Request, limit int64, v any) bool {
 // Handler is the owner API, behind the owner bearer token or a scoped token.
 func (c *Controller) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/fleet", allow("", "", c.handleGetFleet))
 	mux.HandleFunc("PUT /v1/fleet", allow("", "", c.handlePutFleet))
 	mux.HandleFunc("GET /v1/status", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, c.Status(r.Context()))
 	}))
-	mux.HandleFunc("POST /v1/computers/{c}/turns", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/agent-computers", allow(api.ActionStatus, "", c.handleAgentComputers))
+	mux.HandleFunc("GET /v1/agent-computers/{c}", allow(api.ActionStatus, "c", c.handleAgentComputer))
+	mux.HandleFunc("PUT /v1/agent-computers/{c}", allow("", "", c.handlePutAgentComputer))
+	mux.HandleFunc("PATCH /v1/agent-computers/{c}", allow("", "", c.handlePatchAgentComputer))
+	mux.HandleFunc("DELETE /v1/agent-computers/{c}", allow("", "", c.handleDeleteAgentComputer))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/turns", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, api.Error{Code: api.ErrGone, Message: "turns are started from the inbox now (one way in)",
-			Fix: "POST /v1/computers/" + r.PathValue("c") + "/inbox, or a12s prompt / a12s send"})
+			Fix: "POST /v1/agent-computers/" + r.PathValue("c") + "/inbox, or a12s prompt / a12s send"})
 	})
-	mux.HandleFunc("GET /v1/computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))
-	mux.HandleFunc("POST /v1/computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
-	mux.HandleFunc("POST /v1/computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
 	mux.HandleFunc("POST /v1/apply", allow("", "", c.handleApply))
-	mux.HandleFunc("POST /v1/computers/{c}/shell", allow("", "", c.handleShell))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/shell", allow("", "", c.handleShell))
 	mux.HandleFunc("GET /v1/drives", allow("", "", c.handleDrives))
 	mux.HandleFunc("DELETE /v1/drives/{d}", allow("", "", c.handleRemoveDrive))
 
-	mux.HandleFunc("POST /v1/computers/{c}/inbox", allow(api.ActionSend, "c", c.handleEnqueue))
-	mux.HandleFunc("GET /v1/computers/{c}/inbox", allow(api.ActionInbox, "c", c.handleInboxList))
-	mux.HandleFunc("GET /v1/computers/{c}/inbox/{id}", allowSendOrInbox(c.handleInboxGet))
-	mux.HandleFunc("GET /v1/computers/{c}/inbox/{id}/events", allowSendOrInbox(c.handleMessageEvents))
-	mux.HandleFunc("DELETE /v1/computers/{c}/inbox/{id}", allowSendOrInbox(c.handleWithdraw))
-	mux.HandleFunc("POST /v1/computers/{c}/inbox/clear", allow(api.ActionInbox, "c", c.handleInboxClear))
-	mux.HandleFunc("POST /v1/computers/{c}/inbox/hold", allow(api.ActionInbox, "c", c.handleInboxHold))
-	mux.HandleFunc("POST /v1/computers/{c}/inbox/resume", allow(api.ActionInbox, "c", c.handleInboxResume))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox", allow(api.ActionSend, "c", c.handleEnqueue))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/inbox", allow(api.ActionInbox, "c", c.handleInboxList))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/inbox/{id}", allowSendOrInbox(c.handleInboxGet))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/inbox/{id}/events", allowSendOrInbox(c.handleMessageEvents))
+	mux.HandleFunc("DELETE /v1/agent-computers/{c}/inbox/{id}", allowSendOrInbox(c.handleWithdraw))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox/clear", allow(api.ActionInbox, "c", c.handleInboxClear))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox/hold", allow(api.ActionInbox, "c", c.handleInboxHold))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox/resume", allow(api.ActionInbox, "c", c.handleInboxResume))
 	mux.HandleFunc("GET /v1/services", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, api.ServicesResponse{Services: c.Services()})
 	}))
 	mux.HandleFunc("GET /v1/services/{s}", allow(api.ActionStatus, "", c.handleService))
+	mux.HandleFunc("PUT /v1/services/{s}", allow("", "", c.handlePutService))
+	mux.HandleFunc("PATCH /v1/services/{s}", allow("", "", c.handlePatchService))
+	mux.HandleFunc("DELETE /v1/services/{s}", allow("", "", c.handleDeleteService))
 	mux.HandleFunc("GET /v1/services/{s}/logs", allow("", "", c.handleServiceLogs))
 	mux.HandleFunc("POST /v1/services/{s}/power", allow("", "", c.handleServicePower))
 	mux.HandleFunc("POST /v1/services/{s}/shell", allow("", "", c.handleServiceShell))
@@ -120,7 +129,7 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tokens", allow("", "", c.handleTokenCreate))
 	mux.HandleFunc("GET /v1/tokens", allow("", "", c.handleTokens))
 	mux.HandleFunc("DELETE /v1/tokens/{name}", allow("", "", c.handleTokenDelete))
-	return c.authenticate(mux)
+	return legacyPaths(c.authenticate(mux))
 }
 
 // detached runs fn on the Controller's context so the work finishes even if the caller
@@ -145,22 +154,6 @@ func detached[T any](c *Controller, r *http.Request, fn func(ctx context.Context
 		var zero T
 		return zero, r.Context().Err(), false
 	}
-}
-
-func (c *Controller) handlePutFleet(w http.ResponseWriter, r *http.Request) {
-	var req api.PutFleetRequest
-	if !decode(w, r, maxFleetBody, &req) {
-		return
-	}
-	res, err, ok := detached(c, r, func(ctx context.Context) (api.PutFleetResponse, error) { return c.PutFleet(ctx, req) })
-	if !ok {
-		return
-	}
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
 }
 
 func (c *Controller) handleApply(w http.ResponseWriter, r *http.Request) {
@@ -350,10 +343,11 @@ func (c *Controller) handleShell(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.ShellResponse{Container: c.containerName(name), User: user})
 }
 
-func (c *Controller) Status(ctx context.Context) api.StatusResponse {
+func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	c.mu.Lock()
 	f := c.state.Fleet
-	res := api.StatusResponse{Fleet: c.cfg.Fleet, EgressEnforcement: fleet.EnforcementEnforced, Computers: []api.ComputerStatus{}}
+	res = api.StatusResponse{Fleet: c.cfg.Fleet, EgressEnforcement: fleet.EnforcementEnforced, AgentComputers: []api.ComputerStatus{}, Computers: []api.ComputerStatus{}}
+	defer func() { res.Computers = res.AgentComputers }()
 	needCreds := false
 	if f != nil {
 		for _, comp := range f.Computers {
@@ -382,10 +376,10 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 	}
 
 	names := f.ComputerNames()
-	res.Computers = make([]api.ComputerStatus, len(names))
+	res.AgentComputers = make([]api.ComputerStatus, len(names))
 	var wg sync.WaitGroup
 	for i, name := range names {
-		wg.Go(func() { res.Computers[i] = c.computerStatus(ctx, name) })
+		wg.Go(func() { res.AgentComputers[i] = c.computerStatus(ctx, name) })
 	}
 	wg.Wait()
 
@@ -399,14 +393,14 @@ func (c *Controller) Status(ctx context.Context) api.StatusResponse {
 					res.Warnings = append(res.Warnings, fmt.Sprintf("orphaned inbox %s: %d pending (a12s inbox clear %s --orphan discards them)", s.Computer, s.Pending, s.Computer))
 				}
 			}
-			for i := range res.Computers {
-				if s, ok := byName[res.Computers[i].Name]; ok {
-					res.Computers[i].Inbox = &s
+			for i := range res.AgentComputers {
+				if s, ok := byName[res.AgentComputers[i].Name]; ok {
+					res.AgentComputers[i].Inbox = &s
 					if s.Held {
-						res.Computers[i].Warnings = append(res.Computers[i].Warnings, fmt.Sprintf("inbox held (%s); a12s inbox resume %s", s.HoldReason, s.Computer))
+						res.AgentComputers[i].Warnings = append(res.AgentComputers[i].Warnings, fmt.Sprintf("inbox held (%s); a12s inbox resume %s", s.HoldReason, s.Computer))
 					}
 					if s.OverLimit {
-						res.Computers[i].Warnings = append(res.Computers[i].Warnings, fmt.Sprintf("inbox over its limit (%d/%d); new messages are refused until it drains", s.Usage.Messages, s.Limits.MaxMessages.Value))
+						res.AgentComputers[i].Warnings = append(res.AgentComputers[i].Warnings, fmt.Sprintf("inbox over its limit (%d/%d); new messages are refused until it drains", s.Usage.Messages, s.Limits.MaxMessages.Value))
 					}
 				}
 			}

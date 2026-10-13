@@ -1,5 +1,7 @@
 package api
 
+import "encoding/json"
+
 // PhaseUnhealthy is reported, not restarted. Services have no Busy.
 const PhaseUnhealthy Phase = "Unhealthy"
 
@@ -29,6 +31,8 @@ type ServiceStatus struct {
 	StateDrive  string   `json:"stateDrive,omitempty"`
 	EgressMode  string   `json:"egressMode,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
+	// Spec is the Service as written in the Fleet.
+	Spec json.RawMessage `json:"spec,omitempty"`
 }
 
 type ServicesResponse struct {

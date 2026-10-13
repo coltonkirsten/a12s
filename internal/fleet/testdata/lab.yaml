@@ -13,7 +13,7 @@ drives:
   ux-scratch: { size: 5Gi,  access: exclusive }
   reference:  { size: 5Gi,  access: shared }   # readOnly attachments only; shared-write allows writers
 
-computers:
+agent_computers:
   scout:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim

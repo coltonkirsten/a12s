@@ -25,6 +25,10 @@ class A12sError(Exception):
         self.details = details
 
 
+class NotFound(A12sError):
+    """No agent computer, Service or other object by that name: ``get()`` on a missing name raises it."""
+
+
 class A12sGapError(Exception):
     """Raised by an event stream with ``on_gap="throw"`` when events were lost."""
 
