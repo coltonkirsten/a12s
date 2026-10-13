@@ -2,7 +2,18 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.4.0 (2026-10-12)
+
+The live Fleet: hold a `Fleet` and create, change and remove agent computers on it from code while it runs, with
+credentials that survive restarts, prefix tokens that give an app its own lane, and one event stream for the whole
+Fleet.
+
+```python
+fleet = a12s.Fleet()
+hello = fleet.agent_computers.create("hello", instructions="Be helpful")
+hello.prompt("hi")
+hello.remove()
+```
 
 One unit is now an **agent computer** (`AgentComputer` in code), and the SDKs hand out objects you call methods on.
 Agent computers and Services can be created, changed and removed while the Fleet runs.
