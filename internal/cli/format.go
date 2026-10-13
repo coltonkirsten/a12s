@@ -89,6 +89,26 @@ func SeccompLines(f *fleet.Fleet) []string {
 	return out
 }
 
+// AttachLines names every host folder an agent computer can reach, since each widens its sandbox.
+func AttachLines(f *fleet.Fleet) []string {
+	var out []string
+	for _, name := range f.ComputerNames() {
+		attach := f.Computers[name].Attach
+		for _, an := range slices.Sorted(maps.Keys(attach)) {
+			a, access := attach[an], "read-write"
+			if a.ReadOnly {
+				access = "read-only"
+			}
+			line := fmt.Sprintf("%s has %s at %s (%s)", name, a.Host, fleet.AttachTarget(an), access)
+			if len(a.Keep) > 0 {
+				line += "; kept inside a12s: " + strings.Join(a.Keep, ", ")
+			}
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 func UpErrors(r *api.PutFleetResponse) []string {
 	var out []string
 	for _, name := range slices.Sorted(maps.Keys(r.Errors)) {

@@ -46,7 +46,7 @@ func runExport(g *globals, args []string) error {
 	if err := c.Do(ctx, "GET", "/v1/fleet", nil, &live); err != nil {
 		return err
 	}
-	files, err := exportFiles(&live.Fleet)
+	files, err := exportFiles(&live.Fleet, g.dir())
 	if err != nil {
 		return err
 	}
@@ -97,8 +97,8 @@ func (g *globals) fleetName() (string, error) {
 	return f.Metadata.Name, nil
 }
 
-// exportFiles is every file export writes, by path relative to the Fleet file's directory.
-func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
+// exportFiles is every file export writes, by path relative to the Fleet file's directory dir.
+func exportFiles(spec *fleet.Spec, dir string) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	one := func(dirName string, raw json.RawMessage) (*fleet.Computer, error) {
 		var c fleet.Computer
@@ -106,6 +106,10 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 			if err := json.Unmarshal(raw, &c); err != nil {
 				return nil, err
 			}
+		}
+		for an, a := range c.Attach {
+			a.Host = exportHost(a.Host, dir)
+			c.Attach[an] = a
 		}
 		if prof := c.Security.Seccomp.Profile; len(prof) > 0 {
 			var pretty bytes.Buffer
@@ -238,4 +242,35 @@ func allScalars(ns []*yaml.Node) bool {
 		}
 	}
 	return true
+}
+
+// exportHost writes an attach host the way a person would: relative to the Fleet file when it is inside the file's
+// directory or next to it, else ~/… under the home directory, else absolute.
+func exportHost(host, dir string) string {
+	if !filepath.IsAbs(host) {
+		return host
+	}
+	base := dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		base = abs
+	}
+	if real, err := filepath.EvalSymlinks(base); err == nil {
+		base = real
+	}
+	if rel, err := filepath.Rel(base, host); err == nil && !strings.HasPrefix(rel, "../..") {
+		rel = filepath.ToSlash(rel)
+		if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+			return rel
+		}
+		return "./" + rel
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if real, err := filepath.EvalSymlinks(home); err == nil {
+			home = real
+		}
+		if rel, err := filepath.Rel(home, host); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return host
 }

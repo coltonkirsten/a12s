@@ -419,8 +419,8 @@ export class Tokens {
 
   /**
    * A token for another program; owner only. The secret is in the result once. With `prefix` it may do everything
-   * the owner can for names that start with it except set `security.seccomp`, and nothing outside; otherwise
-   * `actions` on `agentComputers`.
+   * the owner can for names that start with it except set `security.seccomp` or `attach`, and nothing outside;
+   * otherwise `actions` on `agentComputers`.
    */
   create(name: string, opts: { prefix: string } | { actions: TokenAction[]; agentComputers?: string[] }): Promise<Token> {
     if ("prefix" in opts) {

@@ -67,7 +67,7 @@ func (d *Driver) Observe(ctx context.Context) (driver.Observation, error) {
 	}
 	for _, v := range vols.Items {
 		id := v.Labels[LabelDrive]
-		obs.Drives[id] = driver.DriveState{ID: id, Name: v.Name, AttachedTo: attached[v.Name]}
+		obs.Drives[id] = driver.DriveState{ID: id, Name: v.Name, AttachedTo: attached[v.Name], Computer: v.Labels[LabelComputer], Path: v.Labels[LabelPath]}
 	}
 	return obs, nil
 }

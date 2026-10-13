@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/distribution/reference"
@@ -42,6 +43,9 @@ func (f *Fleet) Validate() error {
 	isComputer := func(n string) bool { _, ok := f.Computers[n]; return ok }
 	isService := f.hasService
 	errs = append(errs, validatePower("defaults.power", f.Defaults.Power, isComputer, isService)...)
+	if len(f.Defaults.Attach) > 0 {
+		bad("defaults.attach", "an attached folder belongs to one agent computer; move it under agent_computers.<name>.attach")
+	}
 
 	for _, name := range f.ComputerNames() {
 		c := f.Computers[name]
@@ -98,7 +102,7 @@ func (c Computer) validate(field string) []error {
 			bad("security.seccomp", "%v", err)
 		}
 	}
-	for _, msg := range validateFiles(c) {
+	for _, msg := range slices.Concat(validateFiles(c), validateAttach(c)) {
 		errs = append(errs, fmt.Errorf("%s.%s", field, msg))
 	}
 

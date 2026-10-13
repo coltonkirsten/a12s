@@ -10,7 +10,7 @@ import type { HarnessDeps } from './adapters/spawn.js';
 import { loadConfig, type Config } from './config.js';
 import { Computer } from './computer.js';
 import { credentialEnv } from './credentials.js';
-import { prepareDirs } from './dirs.js';
+import { checkAttach, prepareDirs, prepareKeep } from './dirs.js';
 import { Journal } from './journal.js';
 import { sendToInbox, type TlsMaterial } from './send.js';
 import { apiHandler, controllerOnly, localHandler } from './server.js';
@@ -43,7 +43,9 @@ function mcpServers(cfg: Config): Record<string, McpServer> {
 async function main(): Promise<void> {
   const cfg = loadConfig();
   log(`starting for ${cfg.computer} (${cfg.harness.kind} ${cfg.harness.version}, root=${cfg.isRoot})`);
+  checkAttach(cfg);
   prepareDirs(cfg);
+  prepareKeep(cfg);
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const tls = await waitForTls(cfg);
 

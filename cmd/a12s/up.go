@@ -2,9 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
@@ -70,7 +76,7 @@ func (g *globals) up(o upOptions) error {
 		return err
 	}
 	if !g.json {
-		for _, line := range cli.SeccompLines(f) {
+		for _, line := range slices.Concat(cli.SeccompLines(f), cli.AttachLines(f)) {
 			fmt.Fprintln(os.Stdout, line)
 		}
 	}
@@ -104,7 +110,7 @@ func (g *globals) finishUp(resp *api.PutFleetResponse, stdout, stderr io.Writer)
 }
 
 // inline turns what only a Fleet file can say into what the API takes: each security.seccomp path becomes the
-// profile itself.
+// profile itself, and each attach host the folder's absolute path.
 func (g *globals) inline(spec *fleet.Spec) error {
 	one := func(field string, raw json.RawMessage) (json.RawMessage, error) {
 		if len(raw) == 0 {
@@ -114,9 +120,21 @@ func (g *globals) inline(spec *fleet.Spec) error {
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("%s: %w", field, err)
 		}
+		for _, an := range slices.Sorted(maps.Keys(c.Attach)) {
+			if field == "defaults" {
+				break // refused by validation, with a clearer message than a path error
+			}
+			a := c.Attach[an]
+			host, err := g.resolveHost(a.Host)
+			if err != nil {
+				return nil, fmt.Errorf("%s.attach.%s.host: %v", field, an, err)
+			}
+			a.Host = host
+			c.Attach[an] = a
+		}
 		p := c.Security.Seccomp.Path
 		if p == "" {
-			return raw, nil
+			return fleet.SpecOf(c), nil
 		}
 		data, err := os.ReadFile(g.fleetRel(p))
 		if err != nil {
@@ -137,6 +155,66 @@ func (g *globals) inline(spec *fleet.Spec) error {
 	for _, name := range spec.Names() {
 		if spec.AgentComputers[name], err = one("agent_computers."+name, spec.AgentComputers[name]); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// resolveHost turns an attach host as written in the Fleet file (relative to the file, ~/…, or absolute) into the
+// folder's real absolute path, and checks that it is a folder on this machine.
+func (g *globals) resolveHost(host string) (string, error) {
+	p := host
+	switch {
+	case host == "":
+		return "", nil
+	case host == "~" || strings.HasPrefix(host, "~/"):
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		p = filepath.Join(home, strings.TrimPrefix(host, "~"))
+	case !filepath.IsAbs(host):
+		p = g.fleetRel(host)
+	}
+	p, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	// Docker binds the target of a symlink; checking that target keeps the Controller's checks honest.
+	real, err := filepath.EvalSymlinks(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s does not exist (fix: create the folder, or correct the path; relative paths start at the Fleet file's directory)", p)
+	}
+	if err != nil {
+		return "", err
+	}
+	if fi, err := os.Stat(real); err != nil {
+		return "", err
+	} else if !fi.IsDir() {
+		return "", fmt.Errorf("%s is not a folder", real)
+	}
+	if err := refuseHomeSecrets(real); err != nil {
+		return "", err
+	}
+	return real, nil
+}
+
+// refuseHomeSecrets keeps ~/.a12s (every Fleet's owner token) and ~/.docker (Docker Desktop's socket) out of an
+// agent computer. Only the CLI knows the home directory, so the Controller can't check this.
+func refuseHomeSecrets(host string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	if real, err := filepath.EvalSymlinks(home); err == nil {
+		home = real
+	}
+	inside := func(p, dir string) bool { return p == dir || strings.HasPrefix(p, dir+"/") }
+	for _, secret := range []string{".a12s", ".docker"} {
+		// Lowercased: macOS file systems are case-insensitive.
+		s, h := strings.ToLower(filepath.Join(home, secret)), strings.ToLower(host)
+		if inside(h, s) || inside(s, h) {
+			return fmt.Errorf("%s is or contains %s, which holds the owner token or the Docker socket (fix: attach a project folder instead)", host, filepath.Join(home, secret))
 		}
 	}
 	return nil

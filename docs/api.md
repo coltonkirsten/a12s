@@ -60,7 +60,8 @@ profile's `sha256:` digest) when the agent computer runs with its own seccomp pr
   start with the prefix it may call every route the owner can, except the whole-Fleet ones (`GET`/`PUT /v1/fleet`),
   drives and tokens. What its agent computers and Services send to and use (`grants.send`, `uses`, those from
   `defaults` included) must be inside the prefix too; its specs may name any credential.
-  It can't add, change or drop an agent computer's own `security.seccomp` (`403 forbidden`): only the owner sets one.
+  It can't add, change or drop an agent computer's own `security.seccomp` or `attach`, or change the `image` of one
+  with `attach` (`403 forbidden`): only the owner does.
   `GET /v1/status`, `/v1/agent-computers`, `/v1/services` and `/v1/credentials` list only names inside it, and its
   status and write responses carry no Fleet-wide warnings. Anything outside is `403 out_of_prefix`; the whole-Fleet
   routes, drives and tokens are `403 forbidden`. See [Security: Tokens](security.md#tokens).
@@ -79,7 +80,7 @@ The Fleet is the desired state: `defaults`, `agent_computers` and `services`, as
 
 **One agent computer or Service.** `PUT /v1/agent-computers/{c}` takes its spec, the Fleet file's fields for one
 agent computer; whatever it leaves out comes from `defaults`. `instructions` and `files` carry the text for its home,
-and `security.seccomp` is the profile's JSON object. These writes take no version: they change only the named one,
+`security.seccomp` is the profile's JSON object, and each `attach` host is an absolute path. These writes take no version: they change only the named one,
 and the last write wins.
 
 ```http
@@ -113,8 +114,8 @@ Content-Type: application/json
 With `If-Match`, a Fleet that changed since you read it answers `412 version_mismatch`: read it again and retry.
 Without it, the write is unconditional. `credentials` (`{name: value}`, values base64 in JSON) are merged into the
 Controller's store: names it leaves out keep their values. The version goes up by one with every write that changes
-something. Only the Fleet file can hold paths: a `security.seccomp` path in the body is refused (`a12s up` sends the
-profile as JSON).
+something. Only the Fleet file can hold paths relative to it: a `security.seccomp` path or a relative or `~` `attach`
+host in the body is refused (`a12s up` sends the profile as JSON and the folder's absolute path).
 
 **Every write** takes `?dryRun=true`: it checks the write as the write does (images, their Service manifests and
 custom-image labels included, so it fails with the same error) and lists what it would change, and changes nothing. Every

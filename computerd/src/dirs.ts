@@ -1,4 +1,4 @@
-import { chmodSync, chownSync, lstatSync, mkdirSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, fchownSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { AGENT_GID, AGENT_UID, type Config } from './config.js';
 import { agentFs } from './credentials.js';
 
@@ -22,5 +22,41 @@ export function prepareDirs(cfg: Config): void {
   // Everything below /home/agent is the agent's: created as the agent, never chowned by root.
   for (const r of agentFs(cfg, [{ op: 'mkdir', path: cfg.claudeConfigDir }, { op: 'mkdir', path: cfg.codexHome }])) {
     if (!r.ok) throw new Error(`cannot create harness config dirs: ${r.error}`);
+  }
+}
+
+/**
+ * Each path must be exactly a mount point below the home with no symlink on the way. Docker follows a symlink the
+ * agent left at a mount's path in an earlier generation, which would put the mount over a root-managed directory.
+ */
+export function homeMounts(cfg: Config, paths: string[], mountinfo: string): string[] {
+  const mountPoints = new Set(mountinfo.split('\n').map((line) => line.split(' ')[4]).filter(Boolean));
+  for (const p of paths) {
+    if (!p.startsWith(`${cfg.agentHome}/`) || !mountPoints.has(p) || realpathSync(p) !== p) {
+      throw new Error(`${p} is not mounted at its own path in the home`);
+    }
+  }
+  return paths;
+}
+
+/** Runs before anything is written, so a redirected attached folder never receives the journal or secrets. */
+export function checkAttach(cfg: Config): void {
+  if (!cfg.isRoot || cfg.attach.length === 0) return;
+  homeMounts(cfg, cfg.attach, readFileSync('/proc/self/mountinfo', 'utf8'));
+}
+
+/** A keep drive starts empty and root-owned; the agent installs into it, so it gets the drive's root (only). */
+export function prepareKeep(cfg: Config): void {
+  if (!cfg.isRoot || cfg.keep.length === 0) return;
+  for (const p of homeMounts(cfg, cfg.keep, readFileSync('/proc/self/mountinfo', 'utf8'))) {
+    const fd = openSync(p, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      // O_NOFOLLOW covers only the last component: what the fd really is must still be p, whatever changed since.
+      if (readlinkSync(`/proc/self/fd/${fd}`) !== p) throw new Error(`${p} moved while it was being prepared`);
+      const st = fstatSync(fd);
+      if (st.uid !== AGENT_UID || st.gid !== AGENT_GID) fchownSync(fd, AGENT_UID, AGENT_GID);
+    } finally {
+      closeSync(fd);
+    }
   }
 }

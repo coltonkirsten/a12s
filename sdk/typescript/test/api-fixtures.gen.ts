@@ -88,6 +88,7 @@ export const statusResponse: T.StatusResponse = {
       "name": "name",
       "kind": "home",
       "computer": "computer",
+      "path": "path",
       "service": "service",
       "size": "1",
       "attachedTo": [

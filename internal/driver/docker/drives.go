@@ -27,6 +27,9 @@ func (d *Driver) EnsureDrive(ctx context.Context, spec driver.DriveSpec) (bool, 
 	switch spec.Kind {
 	case driver.DriveHome:
 		labels[LabelComputer] = spec.Computer
+	case driver.DriveKeep:
+		labels[LabelComputer] = spec.Computer
+		labels[LabelPath] = spec.Path
 	case driver.DriveStateKind:
 		labels[LabelService] = spec.Computer
 	}

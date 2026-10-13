@@ -24,6 +24,7 @@ const (
 	LabelRole       = "a12s.role"
 	LabelDrive      = "a12s.drive" // drive ID, on drive volumes
 	LabelSize       = "a12s.size"  // requested drive size in bytes (not enforced)
+	LabelPath       = "a12s.path"  // a keep drive's mount point
 	// LabelData's volume holds fleet.db; it survives down and only purge destroys it.
 	LabelData = "a12s.data"
 

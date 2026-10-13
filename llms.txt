@@ -124,6 +124,12 @@ Agent computer fields (all optional except a harness, image and credential, whic
   Docker's default for that agent computer only; `a12s up` reads the file and sends the profile itself. From the SDK
   or the HTTP API, `seccomp` is the profile's JSON object. Set it only when the image's software needs blocked
   syscalls (Chromium's sandbox: see Custom images). Only the owner sets it, not a prefix token.
+- attach: {name: {host, readOnly, keep}}: a folder on this machine mounted at /home/agent/<name> (name: a DNS label,
+  not bin; at most 8), so the agent works on your project in place. host: in fleet.yaml relative to it, ~/… or
+  absolute (`a12s up` sends the absolute path; from the SDK or HTTP API it must be absolute). readOnly: true mounts it
+  read-only. keep: [node_modules, .venv]: paths under it that live on a12s drives instead of in your folder (needs
+  readOnly false). Not ~, ~/.a12s or ~/.docker. Only the owner sets it (not a prefix token, not the gateway), never
+  in defaults, and only the owner changes the image of an agent computer with one. See gotchas.
 
 Top level also takes `services:` (see Services). Change anything and run `a12s up`: it applies at each agent
 computer's next idle moment, never mid-Turn, and keeps the session; changed files are written again, other files in
@@ -132,7 +138,7 @@ its home stay. The Controller pins the image a tag names when first used: to pic
 The live Fleet is the source of truth; fleet.yaml is optional. `a12s up` is a plain apply: the live Fleet becomes the
 file, so it removes agent computers created from code and replaces changes made through the SDK or API.
 `a12s export` writes the live Fleet back to fleet.yaml (instructions and files inline, seccomp profiles to
-profiles/<name>.json; comments are lost): run it before `a12s up` to keep what code changed (`git diff` shows it).
+profiles/<name>.json, attach hosts relative to fleet.yaml when nearby; comments are lost): run it before `a12s up` to keep what code changed (`git diff` shows it).
 Give each agent computer one owner: the file or your code.
 
 ## What the agent sees
@@ -165,7 +171,7 @@ a12s stop <c> | sleep <c> [--hold] | wake <c>   # end the Turn; sleep (--hold: o
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f]
 a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names
-                                      #   (not seccomp), nothing outside. Prints the secret (a12st_…) once, alone on
+                                      #   (not seccomp or attach), nothing outside. Prints the secret (a12st_…) once, alone on
                                       #   stdout: TOKEN=$(a12s token create bizapp --prefix biz-)
 a12s token create <name> --actions send,events,status,inbox,power,stop --agent-computers c1,c2|'*'   # narrow
 a12s creds set <name>                 # see Setup
@@ -360,7 +366,8 @@ A page with a send box and live events: https://github.com/coltonkirsten/a12s-co
 - Tokens (owner only): POST /v1/tokens {"name", "prefix"} or {"name", "actions", "computers": [names] or ["*"]}
   → {…, secret} (shown once). A prefix token may do what the owner can on agent computers, Services and credentials
   whose names start with its prefix; their grants.send and uses (defaults included: override a default grant outside
-  it) must stay inside it, else 403 out_of_prefix. /v1/fleet, drives, tokens and security.seccomp are 403 forbidden.
+  it) must stay inside it, else 403 out_of_prefix. /v1/fleet, drives, tokens, security.seccomp and attach are 403
+  forbidden.
   Reads list only its names.
 - Error codes an app branches on: not_found (404), exists, in_use, busy (409), no_grant, forbidden, out_of_prefix
   (403), version_mismatch (412), inbox_full (429), asleep (503).
@@ -441,6 +448,13 @@ SDK objects (Python names; TypeScript is camelCase):
 - Every Claude Code Turn logs one or two `egress.denied` events for telemetry hosts: harmless.
 - Nothing is delivered? `a12s inbox <c>` (held? says why; `a12s inbox resume <c>`), `a12s status` (asleep?
   `a12s wake <c>`), `a12s doctor`.
+- attach: Docker Desktop must share the folder (/Users, /Volumes, /private, /tmp, /var/folders by default; else
+  Settings > Resources > File sharing); a folder Docker can't see puts the agent computer in Error with that fix.
+  Mac bind mounts are slower than drives: keep node_modules, .venv and build output in `keep` (also keeps Linux
+  binaries out of your macOS folder; an empty directory marks each in your folder). The harness starts in
+  /home/agent: tell it in instructions to work in ~/<name>. Ownership: on Docker Desktop files stay yours; on Linux
+  the agent writes as uid 1000, so the folder must be writable by it. Nothing merges: when you and the agent edit
+  the same file, the last save wins. The agent can delete anything in a writable folder: commit first.
 - Upgrading a12s: install the new release, rebuild custom images FROM the new slim under new tags, `a12s up`.
   After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored.
 

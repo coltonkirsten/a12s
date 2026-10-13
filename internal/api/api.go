@@ -256,14 +256,16 @@ type DriveKind string
 const (
 	DriveHome  DriveKind = "home"
 	DriveState DriveKind = "state" // a Service's state drive: "<svc>-state"
+	DriveKeep  DriveKind = "keep"  // a kept path of an attached folder: "keep-<computer>-<attach>-<path>-<digest>"
 )
 
 // DriveRow.Name is what `a12s drive rm` takes: "home-<computer>" for home drives, "<service>-state" for state
-// drives.
+// drives, "keep-…" for keep drives.
 type DriveRow struct {
 	Name       string      `json:"name"`
 	Kind       DriveKind   `json:"kind"`
-	Computer   string      `json:"computer,omitempty"` // owner of a home drive
+	Computer   string      `json:"computer,omitempty"` // owner of a home or keep drive
+	Path       string      `json:"path,omitempty"`     // where a keep drive is mounted
 	Service    string      `json:"service,omitempty"`  // owner of a state drive
 	Size       fleet.Bytes `json:"size,omitzero"`
 	AttachedTo []string    `json:"attachedTo,omitempty"`

@@ -85,6 +85,8 @@ coder = fleet.agent_computers.create(
 - `instructions` becomes `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex) in its home; `files` are more text files
   there, by path. Together at most 1 MiB. A file that starts with `#!` is executable.
 - `security.seccomp` is the profile's JSON object itself (in the Fleet file it is a path).
+- `attach` hosts are absolute paths on the machine running a12s (in the Fleet file they may be relative); only the
+  owner sets them. See [Attached folders](fleet-file.md#attached-folders).
 - A name that is taken fails with `A12sError` code `exists`; pass `replace: true` (`replace=True`) to overwrite it.
 - A field that neither the spec nor `defaults` sets (harness, image) fails with `missing_field`. A credential the
   Controller holds no value for doesn't fail: `create` returns with a warning (`console.warn`, `A12sWarning`) and the
@@ -452,7 +454,7 @@ a12s token create dashboard --actions status,events --agent-computers '*'   # re
   with its prefix: `fleet.agentComputers.create("biz-a", …)`, send, events, sleep, remove. Lists show only those
   names; anything outside, or a spec whose `grants.send` or `uses` (also from `defaults`) point outside,
   raises `out_of_prefix`. It can't call `fleet.get()`, `fleet.replace()` or `fleet.tokens`, or set
-  `security.seccomp` (`forbidden`). See
+  `security.seccomp` or `attach` (`forbidden`). See
   [Security: Tokens](security.md#tokens).
 - A **narrow token** may make only its actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on its agent
   computers. A token with `send` sees only its own Messages. Creating, changing and removing agent computers, Services

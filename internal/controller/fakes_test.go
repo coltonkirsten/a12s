@@ -31,7 +31,9 @@ type fakeDriver struct {
 	mu        sync.Mutex
 	computers map[string]*fakeContainer
 	drives    map[string]bool
-	images    map[string]string // ref -> ID
+	// driveSpecs is how each drive was created.
+	driveSpecs map[string]driver.DriveSpec
+	images     map[string]string // ref -> ID
 	// computerImages overrides what InspectComputerImage reports for an image ID.
 	computerImages map[string]driver.ComputerImage
 	bundles        map[string]driver.Bundle
@@ -131,6 +133,11 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 		}
 		obs.Computers[name] = st
 		attached[c.spec.HomeDrive] = append(attached[c.spec.HomeDrive], name)
+		for _, a := range c.spec.Attach {
+			for _, k := range a.Keep {
+				attached[k.Drive] = append(attached[k.Drive], name)
+			}
+		}
 	}
 	for name, sv := range d.services {
 		if sv.spec.StateDrive != "" {
@@ -138,7 +145,8 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 		}
 	}
 	for id := range d.drives {
-		obs.Drives[id] = driver.DriveState{ID: id, Name: "a12s-lab-" + id, AttachedTo: attached[id]}
+		ds := d.driveSpecs[id]
+		obs.Drives[id] = driver.DriveState{ID: id, Name: "a12s-lab-" + id, AttachedTo: attached[id], Computer: ds.Computer, Path: ds.Path}
 	}
 	return obs, nil
 }
@@ -170,6 +178,10 @@ func (d *fakeDriver) EnsureDrive(_ context.Context, spec driver.DriveSpec) (bool
 		return false, nil
 	}
 	d.drives[spec.ID] = true
+	if d.driveSpecs == nil {
+		d.driveSpecs = map[string]driver.DriveSpec{}
+	}
+	d.driveSpecs[spec.ID] = spec
 	d.record("drive %s", spec.ID)
 	return true, nil
 }
