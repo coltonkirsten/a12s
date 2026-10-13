@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 // UpSummary prints:
 //
-//	created scout, builder (asleep: none)
+//	created scout, builder
 //	updated tester
 //	staged reviewer (applies when idle; a12s apply --interrupt to force)
 //	removed old (drives kept)
@@ -47,11 +48,11 @@ func ChangeLines(changes []api.Change) []string {
 func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 	var lines []string
 	if len(r.Created) > 0 {
-		sleeping := "none"
+		line := "created " + strings.Join(r.Created, ", ")
 		if asleep {
-			sleeping = strings.Join(r.Created, ", ")
+			line += " (asleep until their first Message or a12s wake)"
 		}
-		lines = append(lines, fmt.Sprintf("created %s (asleep: %s)", strings.Join(r.Created, ", "), sleeping))
+		lines = append(lines, line)
 	}
 	if len(r.Updated) > 0 {
 		lines = append(lines, "updated "+strings.Join(r.Updated, ", "))
@@ -248,8 +249,11 @@ func StatusWarnings(st *api.StatusResponse) []string {
 	if !st.CredentialsLoaded {
 		add("the Controller holds no credentials (it restarted?): run a12s up or a12s wake to send them")
 	}
-	for _, d := range st.OrphanedDrives {
-		add(fmt.Sprintf("orphaned drive %s: no Computer in the Fleet uses it (a12s drive rm %s destroys it)", d.Name, d.Name))
+	// A Controller that already lists the orphaned drives in its warnings would be said twice.
+	if !slices.ContainsFunc(st.Warnings, func(w string) bool { return strings.HasPrefix(w, "orphaned drives") }) {
+		for _, d := range st.OrphanedDrives {
+			add(fmt.Sprintf("orphaned drive %s: no agent computer in the Fleet uses it (a12s drive rm %s destroys it)", d.Name, d.Name))
+		}
 	}
 	for _, s := range st.Warnings {
 		add(s)

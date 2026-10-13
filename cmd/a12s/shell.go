@@ -19,7 +19,7 @@ func runShell(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) < 1 {
-		return usageError("shell needs a Computer name")
+		return usageError("shell needs an agent computer name")
 	}
 	name, command := pos[0], pos[1:]
 	docker, err := exec.LookPath("docker")

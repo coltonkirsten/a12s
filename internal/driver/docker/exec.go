@@ -134,7 +134,7 @@ func (d *Driver) runningComputer(ctx context.Context, computer string) (driver.C
 		return driver.ComputerState{}, err
 	}
 	if res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RoleComputer {
-		return driver.ComputerState{}, fmt.Errorf("container %s is not a Computer of fleet %s", d.ContainerName(computer), d.fleet)
+		return driver.ComputerState{}, fmt.Errorf("container %s is not an agent computer of fleet %s", d.ContainerName(computer), d.fleet)
 	}
 	st := d.computerState(computer, res.Container)
 	if !st.Running {

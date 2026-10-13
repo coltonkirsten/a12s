@@ -134,7 +134,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	admitSeccomp(f, &admitWarnings)
 	if o.dryRun {
 		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
-			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
+			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 		if o.by.prefix() != "" {
 			res.Warnings = nil
 		}
@@ -235,7 +235,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		c.fleetChanged(version, o.by.principal, changes)
 	}
 
-	res := api.PutFleetResponse{Version: version, Changes: changes, Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()),
+	res := api.PutFleetResponse{Version: version, Changes: changes, Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()),
 		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {

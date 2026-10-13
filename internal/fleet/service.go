@@ -136,7 +136,7 @@ func (f *Fleet) hasService(name string) bool { _, ok := f.Services[name]; return
 func (f *Fleet) HasService(name string) bool { return f.hasService(name) }
 
 var serviceForbidden = []struct{ key, why, fix string }{
-	{"harness", "a Service runs no harness", "remove it; a Service that wants a harness is a Computer"},
+	{"harness", "a Service runs no harness", "remove it; a Service that wants a harness is an agent computer"},
 	{"home", "a Service has no home drive", "remove it; use the manifest's state drive for data that must persist"},
 	{"autonomy", "a Service runs no agent, so it has no autonomy", "remove it"},
 	{"inbox", "a Service has no inbox", "remove it"},
@@ -234,13 +234,13 @@ func (f *Fleet) validateServices() []error {
 			bad(field, "rename it", "%q is reserved for the Controller's certificate identity", name)
 		}
 		if _, ok := f.Computers[name]; ok {
-			bad(field, "rename one of them", "%s is already a Computer; Computers and Services share one <name>.a12s namespace", name)
+			bad(field, "rename one of them", "%s is already an agent computer; agent computers and Services share one <name>.a12s namespace", name)
 		}
 		switch {
 		case s.Image == "":
 			bad(field+".image", "set an image reference", "required")
 		case s.Image == TierSlim:
-			bad(field+".image", "use the Service's own image reference", "%q is the Computer base image; a Service runs its own image", s.Image)
+			bad(field+".image", "use the Service's own image reference", "%q is the agent computer base image; a Service runs its own image", s.Image)
 		default:
 			if _, err := reference.ParseAnyReference(s.Image); err != nil {
 				bad(field+".image", "", "%q is not a valid image reference: %v", s.Image, err)
@@ -308,9 +308,9 @@ func (f *Fleet) validateGrants(field string, g Grants) []error {
 	for _, to := range g.Send {
 		switch {
 		case to == AllowAll || strings.Contains(to, "*"):
-			errs = append(errs, fmt.Errorf("%s.grants.send: %q: there is no wildcard  fix: name each Computer", field, to))
+			errs = append(errs, fmt.Errorf("%s.grants.send: %q: there is no wildcard  fix: name each agent computer", field, to))
 		case f.hasService(to):
-			errs = append(errs, fmt.Errorf("%s.grants.send: %s is a Service, and only Computers have inboxes  fix: remove it from %s.grants.send", field, to, field))
+			errs = append(errs, fmt.Errorf("%s.grants.send: %s is a Service, and only agent computers have inboxes  fix: remove it from %s.grants.send", field, to, field))
 		}
 		if seen[to] {
 			errs = append(errs, fmt.Errorf("%s.grants.send: %s is listed twice", field, to))
@@ -330,7 +330,7 @@ func (f *Fleet) validateUses(field, self string, uses []Use) []error {
 			errs = append(errs, fmt.Errorf("%s.uses: a Service can't use itself  fix: remove %s from %s.uses", field, self, field))
 		case !f.hasService(u.Name):
 			if _, isComputer := f.Computers[u.Name]; isComputer {
-				errs = append(errs, fmt.Errorf("%s.uses: %s is a Computer; uses reaches Services only, and the inbox is the only way to a Computer  fix: remove it, or add it to %s.grants.send", field, u.Name, field))
+				errs = append(errs, fmt.Errorf("%s.uses: %s is an agent computer; uses reaches Services only, and the inbox is the only way to an agent computer  fix: remove it, or add it to %s.grants.send", field, u.Name, field))
 			} else {
 				errs = append(errs, fmt.Errorf("%s uses %s, but there is no Service %s  fix: add services.%s or remove it from %s.uses", who, u.Name, u.Name, u.Name, field))
 			}
@@ -432,6 +432,28 @@ func (f *Fleet) GrantWarnings() []string {
 	}
 	if len(f.Egress.AllowPrivate) > 0 {
 		out = append(out, fmt.Sprintf("egress.allowPrivate %s: Services' named TCP egress may reach these private ranges", strings.Join(f.Egress.AllowPrivate, ", ")))
+	}
+	return out
+}
+
+var harnessCredential = map[string]string{HarnessClaudeCode: "anthropic", HarnessCodex: "openai"}
+
+// CredentialWarnings: an agent computer without its harness's credential fails every Turn at sign-in, and a
+// credentials list on one agent computer replaces the defaults' list instead of adding to it.
+func (f *Fleet) CredentialWarnings() []string {
+	var out []string
+	for _, name := range f.ComputerNames() {
+		c := f.Computers[name]
+		need := harnessCredential[c.Harness.Kind]
+		if need == "" || slices.Contains(c.Credentials, need) {
+			continue
+		}
+		has := "none"
+		if len(c.Credentials) > 0 {
+			has = "[" + strings.Join(c.Credentials, ", ") + "]"
+		}
+		out = append(out, fmt.Sprintf("agent_computers.%s.credentials: %s needs %s, and its list is %s, so every Turn fails to sign in (a list here replaces the defaults' list)  fix: credentials: [%s]",
+			name, c.Harness.Kind, need, has, strings.Join(append([]string{need}, c.Credentials...), ", ")))
 	}
 	return out
 }

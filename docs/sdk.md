@@ -46,6 +46,7 @@ The Fleet is found the way the CLI finds it: the `fleet.yaml` in the current dir
 |---|---|---|
 | Several Fleets running | `Fleet.connect({ fleet: "myproject" })` | `a12s.Fleet(fleet="myproject")` |
 | A scoped token or another URL | `Fleet.connect({ url, token })` | `a12s.Fleet(url=…, token=…)` |
+| This machine's Fleet under a scoped token | `Fleet.connect({ token })` | `a12s.Fleet(token=…)` |
 | Environment | `$A12S_URL` and `$A12S_TOKEN` | the same |
 | A web page | `a12s gateway --web <dir>`, then `Fleet.connect()` in the page ([In the browser](#in-the-browser)) | |
 
@@ -254,7 +255,8 @@ Streams reconnect by themselves after a network drop and resume where they were.
 `onGap: "throw"` (`on_gap="throw"`) to raise `A12sGapError` instead. Events were lost either way: resync with
 `fleet.status()` and `agent.turns({ limit })`.
 
-To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`).
+To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`). The stream ends after its
+`turn.finished`.
 
 ## The whole Fleet
 
@@ -397,7 +399,8 @@ way: in a browser, `Fleet.connect()` talks to the page's own origin.
 | AgentComputer | `inbox({ state, bodies })` | `inbox(state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
 | AgentComputer | `message(id)`, `withdraw(id)` | the same | One Message; take back a pending one. |
 | AgentComputer | `stop(turn?)` | `stop(turn=None)` | Interrupt a Turn (default: the active one). |
-| AgentComputer | `sleep()`, `wake()` | the same | Stop it and keep its disks, session and inbox; start it again. |
+| AgentComputer | `sleep({ allowWake? })`, `wake({ clearInbox? })` | `sleep(allow_wake=)`, `wake(clear_inbox=)` | Stop it and keep its disks, session and inbox; start it again. A plain sleep holds it asleep until `wake()`; `allowWake` lets its wakeOnMessage policy wake it. |
+| AgentComputer | `hold({ reason? })`, `resume()` | `hold(reason=)`, `resume()` | Hold delivery (Messages still queue); release it. |
 
 `connect()` and the client it returns (`A12sClient` in TypeScript, `Client` and `AsyncClient` in Python), whose
 methods take the agent computer's name first (`a12s.prompt("hello", "…")`), still work for one release and are

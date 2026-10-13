@@ -51,7 +51,7 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 	default:
 		c := existing.Container
 		if c.Config.Labels[LabelFleet] != d.fleet || c.Config.Labels[LabelRole] != RoleComputer {
-			return fmt.Errorf("stage %s: container %s exists but is not a Computer of fleet %s", spec.Name, name, d.fleet)
+			return fmt.Errorf("stage %s: container %s exists but is not an agent computer of fleet %s", spec.Name, name, d.fleet)
 		}
 		if c.State != nil && (c.State.Running || c.State.Restarting || c.State.Paused) {
 			return fmt.Errorf("stage %s generation %d: %w", spec.Name, spec.Generation, driver.ErrRunning)
@@ -517,7 +517,7 @@ func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 	case err != nil:
 		return fmt.Errorf("remove %s: %w", computer, err)
 	case res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RoleComputer:
-		return fmt.Errorf("remove %s: container %s is not a Computer of fleet %s", computer, name, d.fleet)
+		return fmt.Errorf("remove %s: container %s is not an agent computer of fleet %s", computer, name, d.fleet)
 	default:
 		if _, err := d.cli.ContainerRemove(ctx, res.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
 			return fmt.Errorf("remove %s: %w", computer, err)

@@ -133,15 +133,26 @@ class AsyncAgentComputer:
         """Changes the given fields (maps merge, lists replace). It applies at the next idle moment; the session
         continues."""
         res = await self._fleet._client._request("PATCH", ac_path(self.name), dict(changes))
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):
             self._set(res["agentComputer"])
         return self
 
-    async def sleep(self) -> None:
-        await self._fleet._client.sleep(self.name)
+    async def sleep(self, *, allow_wake: bool = False) -> None:
+        """Puts it to sleep until wake(). With ``allow_wake``, its power policy (wakeOnMessage) may wake it."""
+        await self._fleet._client.sleep(self.name, allow_wake=allow_wake)
 
-    async def wake(self) -> None:
-        await self._fleet._client.wake(self.name)
+    async def wake(self, *, clear_inbox: bool = False) -> None:
+        """Wakes it; ``clear_inbox`` discards the pending Messages first."""
+        await self._fleet._client.wake(self.name, clear_inbox=clear_inbox)
+
+    async def hold(self, *, reason: str | None = None) -> InboxList:
+        """Holds its inbox: Messages still queue, none is delivered until resume()."""
+        return await self._fleet._client.hold(self.name, reason=reason)
+
+    async def resume(self) -> InboxList:
+        """Releases a hold on its inbox."""
+        return await self._fleet._client.resume(self.name)
 
     async def stop(self, turn: str | None = None) -> None:
         """Interrupts a Turn (default: the active one)."""
@@ -169,6 +180,7 @@ class AsyncAgentComputers:
         """Creates an agent computer and returns once it is up. A taken name raises A12sError ``exists`` unless
         ``replace``."""
         res = await self._fleet._client._request("PUT", ac_path(name), dict(spec), write_headers(replace))
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):
             return AsyncAgentComputer(self._fleet, res["agentComputer"])
         return await self.get(name)
@@ -203,6 +215,7 @@ class AsyncService:
 
     async def update(self, **changes: Any) -> AsyncService:
         res = await self._fleet._client._request("PATCH", service_path(self.name), changes)
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("service"), dict):
             self._set(res["service"])
         return self
@@ -224,6 +237,7 @@ class AsyncServices:
 
     async def create(self, name: str, *, replace: bool = False, **spec: Any) -> AsyncService:
         res = await self._fleet._client._request("PUT", service_path(name), spec, write_headers(replace))
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("service"), dict):
             return AsyncService(self._fleet, res["service"])
         return await self.get(name)
@@ -351,7 +365,7 @@ class AsyncFleet:
                 spec = await spec
             body = {"fleet": dict(spec if spec is not None else state.spec)}
             try:
-                await self._client._request("PUT", "/v1/fleet", body, {"if-match": f'"{state.version}"'})
+                core.warn_writes(await self._client._request("PUT", "/v1/fleet", body, {"if-match": f'"{state.version}"'}))
             except A12sError as err:
                 if err.code == "version_mismatch" and attempt < _REPLACE_TRIES - 1:
                     continue

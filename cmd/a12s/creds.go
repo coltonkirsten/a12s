@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
@@ -23,6 +24,7 @@ func runCreds(g *globals, args []string) error {
 		return usageError("creds set <name>  (reads the value from stdin)")
 	}
 	fs := g.flags("creds set")
+	noCheck := fs.Bool("no-check", false, "store the value even if it does not look like this credential")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
@@ -60,6 +62,11 @@ func runCreds(g *globals, args []string) error {
 	value = bytes.TrimSpace(value)
 	if len(value) == 0 {
 		return fmt.Errorf("no value for %s on stdin", name)
+	}
+	if !*noCheck {
+		if err := checkCredentialShape(name, value); err != nil {
+			return err
+		}
 	}
 	path, err := cli.CredentialPath(f.Metadata.Name, name)
 	if err != nil {
@@ -156,5 +163,29 @@ func serviceLogin(g *globals, args []string) error {
 		return printJSON(map[string]string{"service": name, "credential": l.Produces, "file": path, "bindings": g.bindings()})
 	}
 	fmt.Printf("logged in: %s saved to %s (0600) and bound; nothing is left in the container. Run a12s up to start %s with it.\n", l.Produces, path, name)
+	return nil
+}
+
+// checkCredentialShape catches the common paste mistakes (a wrapped setup token stored in pieces, a stray quote,
+// the wrong secret) before a Turn fails with a bare 401.
+func checkCredentialShape(name string, value []byte) error {
+	if name != "anthropic" {
+		return nil
+	}
+	v := string(value)
+	const fix = "fix: pbpaste | tr -d ' \\n' | a12s creds set anthropic   (or printf %s \"$TOKEN\" | a12s creds set anthropic; --no-check skips this check)"
+	if strings.ContainsAny(v, " \t\r\n") {
+		return fmt.Errorf("the anthropic value has spaces or line breaks inside it: a token wrapped over several terminal lines was pasted in pieces\n%s", fix)
+	}
+	if !strings.HasPrefix(v, "sk-ant-oat01-") && !strings.HasPrefix(v, "sk-ant-api03-") {
+		shown := v
+		if len(shown) > 10 {
+			shown = shown[:10]
+		}
+		return fmt.Errorf("the anthropic value starts %q, not sk-ant-oat01- (a claude setup-token token) or sk-ant-api03- (an Anthropic API key)\n%s", shown, fix)
+	}
+	if len(v) < 90 || len(v) > 400 {
+		return fmt.Errorf("the anthropic value is %d characters; a setup token or API key is about 108: it was probably cut off while pasting\n%s", len(v), fix)
+	}
 	return nil
 }

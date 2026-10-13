@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import warnings
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator, Sequence
 import dataclasses
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
-from ._errors import A12sError, A12sGapError, A12sStreamError, NotFound
+from ._errors import A12sError, A12sGapError, A12sStreamError, A12sWarning, NotFound
 from ._parse import from_json
 from ._sse import SSEFrame
 from ._types import EnqueueResponse, Event, PromptResult, TokenUsage, ToolCall, Turn, TurnInboxMessage
@@ -100,7 +101,7 @@ def inbox_path(computer: str, state: str | None, bodies: bool, after: int | None
 def stream_names(computers: str | Sequence[str] | None, turn: str | None, after: int | None) -> list[str] | None:
     names = [computers] if isinstance(computers, str) else None if computers is None else list(computers)
     if (turn is not None or after is not None) and (names is None or len(names) != 1):
-        raise TypeError("events: turn and after need exactly one Computer")
+        raise TypeError("events: turn and after need exactly one agent computer")
     return names
 
 
@@ -291,3 +292,36 @@ def turn_of(data: Any) -> Turn:
     t = from_json(Turn, data)
     name = data.get("agentComputer", "") if isinstance(data, dict) else ""
     return dataclasses.replace(t, agent_computer=name, computer=name)
+
+
+def until_turn_finished(events: Iterator[Event]) -> Iterator[Event]:
+    """A Turn replay: its events up to and including its turn.finished. The server keeps the stream open after."""
+    try:
+        for ev in events:
+            yield ev
+            if ev.type == "turn.finished":
+                return
+    finally:
+        close = getattr(events, "close", None)
+        if close is not None:
+            close()
+
+
+async def until_turn_finished_async(events: AsyncIterator[Event]) -> AsyncGenerator[Event, None]:
+    """until_turn_finished for asyncio."""
+    try:
+        async for ev in events:
+            yield ev
+            if ev.type == "turn.finished":
+                return
+    finally:
+        aclose = getattr(events, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
+
+def warn_writes(res: Any) -> None:
+    """A write's warnings (a grant to an agent computer that doesn't exist yet, a missing harness credential) as
+    A12sWarning, so they reach the developer instead of being dropped."""
+    for w in (res.get("warnings") if isinstance(res, dict) else None) or []:
+        warnings.warn(str(w), A12sWarning, stacklevel=3)

@@ -68,7 +68,7 @@ func doctor(ctx context.Context, g *globals) []check {
 		bad("fix the Fleet file (or point at it with --fleet)", "%v", err)
 		return out
 	}
-	ok("fleet %s: %d Computer(s), %d Service(s)", f.Metadata.Name, len(f.Computers), len(f.Services))
+	ok("fleet %s: %d agent computer(s), %d Service(s)", f.Metadata.Name, len(f.Computers), len(f.Services))
 	lock, _ := fleet.LoadLock(g.lockPath())
 
 	dc, err := client.New(client.FromEnv)
@@ -148,7 +148,7 @@ func doctor(ctx context.Context, g *globals) []check {
 		if _, err := b.Resolve(cli.Needed(f)); err != nil {
 			bad("a12s creds set <name> for each credential named above", "%v", err)
 		} else if len(cli.Needed(f)) > 0 {
-			ok("bindings: every Computer credential resolves")
+			ok("bindings: every agent computer credential resolves")
 		}
 		for cred, who := range cli.NeededByServices(f) {
 			if _, ok := b.Credentials[cred]; !ok {

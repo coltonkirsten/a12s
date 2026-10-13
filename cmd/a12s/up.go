@@ -232,7 +232,7 @@ func (g *globals) finishUp(onDisk, lock *fleet.Lock, resp *api.PutFleetResponse,
 		fmt.Fprintln(stderr, line)
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("%d Computer(s) or Service(s) did not converge (a12s status shows their state)", len(failed))
+		return fmt.Errorf("%d agent computer(s) or Service(s) did not converge (a12s status shows their state)", len(failed))
 	}
 	return nil
 }

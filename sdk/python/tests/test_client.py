@@ -427,3 +427,38 @@ def test_stop_defaults_to_the_active_turn() -> None:
         client.stop("nope")
     assert seen == ["GET /v1/status", "POST /v1/agent-computers/lead/turns/t_1/stop", "GET /v1/status", "GET /v1/status"]
 
+
+
+@pytest.mark.usefixtures("clean_env")
+def test_connect_with_a_token_keeps_the_discovered_url(tmp_path: Path) -> None:
+    write_controller(tmp_path, "proj", 52011)
+    url, token = a12s._connect._discover("proj", None, "a12st_prefix", tmp_path, tmp_path)
+    assert (url, token) == ("http://127.0.0.1:52011", "a12st_prefix"), "a given token replaces only the owner token"
+
+
+def replay_server(req: Req, res: Res) -> None:
+    assert req.url == "/v1/agent-computers/lead/events?turn=t_9"
+    res.write_head(200)
+    res.write(ev(10, "text.delta", "t_9", {"text": "hi"}))
+    res.write(ev(11, "turn.finished", "t_9", {"status": "completed", "usage": {}}))
+    res.write('event: head\ndata: {"seq":11}\n\n')
+    # The server keeps a Turn replay open after it; only the client knows the Turn is over.
+    time.sleep(5)
+    res.end(": keepalive\n\n")
+
+
+def test_turn_replay_ends_after_turn_finished(fake: Fake) -> None:
+    with fake(replay_server).client() as client:
+        started = time.monotonic()
+        types = [e.type for e in client.events("lead", turn="t_9")]
+    assert types == ["text.delta", "turn.finished"]
+    assert time.monotonic() - started < 4
+
+
+@pytest.mark.anyio
+async def test_async_turn_replay_ends_after_turn_finished(fake: Fake) -> None:
+    async with fake(replay_server).aclient() as client:
+        started = time.monotonic()
+        types = [e.type async for e in client.events("lead", turn="t_9")]
+    assert types == ["text.delta", "turn.finished"]
+    assert time.monotonic() - started < 4

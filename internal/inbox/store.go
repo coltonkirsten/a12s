@@ -500,7 +500,7 @@ func (s *Store) Enqueue(ctx context.Context, e Enqueue, non NowOrNever) (*Enqueu
 		if !growsNothing {
 			if bytes > maxB-PreambleReserve {
 				return errf(413, api.ErrExceedsInbox,
-					fmt.Sprintf("shorten the body, or raise computers.%s.inbox.maxBytes (ceiling 1Mi)", e.Computer),
+					fmt.Sprintf("shorten the body, or raise agent_computers.%s.inbox.maxBytes (ceiling 1Mi)", e.Computer),
 					"this message renders to %d bytes, more than %s's whole inbox holds (%d bytes less the 4 KiB preamble)", bytes, e.Computer, maxB)
 			}
 			if newM > maxM || newB > maxB-PreambleReserve {

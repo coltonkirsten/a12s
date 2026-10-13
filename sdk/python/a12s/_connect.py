@@ -31,7 +31,7 @@ def connect(
     4. the only Fleet with a running Controller on this machine.
 
     For 2-4 it reads ``<home>/.a12s/<fleet>/controller.json`` (default home: the home directory), which ``a12s up``
-    writes.
+    writes: its URL always, and its owner token unless ``token`` is given (a prefix or narrow token on this machine).
     """
     return Client(*_discover(fleet, url, token, home, cwd))
 
@@ -63,7 +63,7 @@ def _discover(
     path = root / name / "controller.json"
     try:
         cf = json.loads(path.read_text(encoding="utf-8"))
-        return f"http://127.0.0.1:{int(cf['port'])}", cf.get("token")
+        return f"http://127.0.0.1:{int(cf['port'])}", token if token is not None else cf.get("token")
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as err:
         raise RuntimeError(f"Fleet {name} isn't running (no {path}): run a12s up in its directory first") from err
 

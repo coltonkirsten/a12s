@@ -159,7 +159,7 @@ func runInbox(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usageError("inbox needs one Computer name (or rm, clear, hold, resume)")
+		return usageError("inbox needs one agent computer name (or rm, clear, hold, resume)")
 	}
 	c, _, err := g.connect()
 	if err != nil {
@@ -192,7 +192,7 @@ func runInboxRm(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) != 2 {
-		return usageError("inbox rm needs a Computer name and a message id")
+		return usageError("inbox rm needs an agent computer name and a message id")
 	}
 	c, _, err := g.connect()
 	if err != nil {
@@ -214,13 +214,13 @@ func runInboxRm(g *globals, args []string) error {
 func runInboxClear(g *globals, args []string) error {
 	fs := g.flags("inbox clear")
 	yes := fs.Bool("yes", false, "do not ask for confirmation")
-	orphan := fs.Bool("orphan", false, "clear the inbox of a Computer no longer in the Fleet")
+	orphan := fs.Bool("orphan", false, "clear the inbox of an agent computer no longer in the Fleet")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
-		return usageError("inbox clear needs one Computer name")
+		return usageError("inbox clear needs one agent computer name")
 	}
 	name := pos[0]
 	c, _, err := g.connect()
@@ -269,7 +269,7 @@ func runInboxHold(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usageError("inbox hold needs one Computer name")
+		return usageError("inbox hold needs one agent computer name")
 	}
 	c, _, err := g.connect()
 	if err != nil {
@@ -296,7 +296,7 @@ func runInboxResume(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usageError("inbox resume needs one Computer name")
+		return usageError("inbox resume needs one agent computer name")
 	}
 	c, _, err := g.connect()
 	if err != nil {

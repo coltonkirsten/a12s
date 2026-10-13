@@ -43,3 +43,7 @@ class A12sGapError(Exception):
 
 class A12sStreamError(Exception):
     """An event stream received a frame that is not a valid journal event."""
+
+
+class A12sWarning(UserWarning):
+    """A write that succeeded with a warning the Controller attached (``warnings`` in its answer)."""

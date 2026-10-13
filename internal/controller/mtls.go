@@ -26,7 +26,7 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 	computerOnly := func(h http.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if p, _ := peerOf(r); p.Kind != KindComputer {
-				writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: p.String() + " may not use leases", Fix: "leases are for Computers"})
+				writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: p.String() + " may not use leases", Fix: "leases are for agent computers"})
 				return
 			}
 			h.ServeHTTP(w, r)

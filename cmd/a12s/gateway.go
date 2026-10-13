@@ -29,7 +29,7 @@ func runGateway(g *globals, args []string) error {
 	dev := flags.String("dev", "", "URL of a running dev server to proxy everything but /v1/ and /a12s.js to")
 	devPort := flags.Int("dev-port", 0, "the port of the dev server started after --, when it doesn't print its URL")
 	allow := flags.String("allow", "status,events,send,inbox", "API actions the page may use ("+strings.Join(api.TokenActions, ",")+")")
-	computers := flags.String("computers", "*", "Computers the page may reach, comma-separated")
+	computers := flags.String("computers", "*", "agent computers the page may reach, comma-separated")
 	noOpen := flags.Bool("no-open", false, "don't open the browser")
 	pos, err := parse(flags, args)
 	if err != nil {
@@ -162,9 +162,9 @@ func pageMay(tok api.Token) string {
 			can = append(can, a)
 		}
 	}
-	on := "every Computer"
+	on := "every agent computer"
 	if len(tok.Computers) != 1 || tok.Computers[0] != "*" {
-		on = "Computers " + strings.Join(tok.Computers, ", ")
+		on = "agent computers " + strings.Join(tok.Computers, ", ")
 	}
 	return fmt.Sprintf("the page may %s, on %s (token:%s; change with --allow, --computers)", strings.Join(can, ", "), on, tok.Name)
 }

@@ -15,7 +15,7 @@ func runStatus(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) > 1 {
-		return usageError("status takes at most one Computer or Service name")
+		return usageError("status takes at most one agent computer or Service name")
 	}
 	c, _, err := g.connect()
 	if err != nil {
@@ -41,11 +41,11 @@ func runStatus(g *globals, args []string) error {
 			}
 		}
 		if len(only) == 0 && len(svc) == 0 {
-			return fmt.Errorf("fleet %s has no Computer or Service %q", st.Fleet, pos[0])
+			return fmt.Errorf("fleet %s has no agent computer or Service %q", st.Fleet, pos[0])
 		}
 		st.AgentComputers, st.Services = only, svc
 	} else if len(st.AgentComputers) == 0 && !g.json {
-		fmt.Println("no Computers (run a12s up)")
+		fmt.Println("no agent computers (run a12s up)")
 	}
 	if g.json {
 		return printJSON(st)
