@@ -2,7 +2,7 @@
 
 ## The slim image
 
-Every Computer runs `slim` or an image built FROM it (`image: ghcr.io/you/your-image:tag`).
+Every agent computer runs `slim` or an image built FROM it (`image: ghcr.io/you/your-image:tag`).
 
 | Image | Contents |
 |---|---|
@@ -28,8 +28,8 @@ computerd as root itself, so an image's `ENTRYPOINT`, `CMD`, `USER` and `HEALTHC
 is in [Extending a12s](extending.md#a-custom-agent-image).
 
 An image never changes the sandbox it runs in. When software in it needs syscalls Docker's default seccomp profile
-blocks, the Fleet's owner sets [`security.seccomp`](fleet-file.md#computer-fields) on that Computer; a label or file
-in the image can't.
+blocks, the Fleet's owner sets [`security.seccomp`](fleet-file.md#agent-computer-fields) on that agent computer; a label or
+file in the image can't.
 
 Build the a12s images with `make images` (slim and controller).
 
@@ -38,11 +38,11 @@ Build the a12s images with `make images` (slim and controller).
 a12s ships no browser. To give an agent one, build an image FROM slim with Chromium (and Playwright or the
 Playwright MCP server, if the agent should drive it through MCP). Chromium's own sandbox needs user-namespace
 syscalls (`clone`/`unshare` with `CLONE_NEWUSER`, `setns`, `chroot`) that Docker's default seccomp profile blocks;
-without them it fails with "No usable sandbox!". Don't fall back to `--no-sandbox`: give that Computer a profile that
-is Docker's default plus those syscalls.
+without them it fails with "No usable sandbox!". Don't fall back to `--no-sandbox`: give that agent computer a
+profile that is Docker's default plus those syscalls.
 
 ```yaml
-computers:
+agent_computers:
   browser:
     image: ghcr.io/you/browser-agent:1      # FROM ghcr.io/coltonkirsten/a12s/slim:0.3.0 + Chromium
     security:
@@ -73,7 +73,7 @@ whose filesystem is `/bundle/{bundle.json, bin/<binary>, …}`:
 
 - The Controller extracts the bundle into the read-only cache volume at
   `/opt/a12s/bundles/<kind>-<version>-<imageID[:12]>/`, keyed by image identity.
-- `signInHosts` are added to that Computer's egress allowlist automatically, so a Fleet lists only the hosts its work
+- `signInHosts` are added to that agent computer's egress allowlist automatically, so a Fleet lists only the hosts its work
   needs.
 - Default refs are `a12s/bundle-<kind>:<version>` in a source build and
   `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>` in a release; `fleet.lock` pins the image ID.

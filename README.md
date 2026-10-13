@@ -17,11 +17,38 @@
 
 ## What is a12s?
 
-a12s runs Claude Code and Codex agents on your machine, each in its own Docker container with its own
-disk, conversation and inbox. You describe them in one file, start them with one command, and send them work from
+a12s runs Claude Code and Codex agents on your machine as agent computers: each one is its own Docker container
+with its own disk, conversation and inbox. You create them from code or from one file, and send them work from
 TypeScript, Python or the command line.
 
-- **They keep their state.** Stop an agent and start it tomorrow: its files and conversation are still there.
+<table>
+<tr><th>Python</th><th>TypeScript / JavaScript</th></tr>
+<tr><td>
+
+```python
+import a12s
+
+fleet = a12s.Fleet()            # connects to the running fleet (or url=, token=)
+hello = fleet.agent_computers.create("hello", instructions="Be helpful")
+hello.prompt("hi")
+hello.remove()
+```
+
+</td><td>
+
+```js
+import { Fleet } from "@coltonkirsten/a12s";
+
+const fleet = await Fleet.connect();
+const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
+await hello.prompt("hi");
+await hello.remove();
+```
+
+</td></tr>
+</table>
+
+- **They keep their state.** Stop an agent computer and start it tomorrow: its files and conversation are still there.
 - **They are locked down.** No network except the hosts you list, no root, and credentials kept only in memory.
 - **They take work like a queue.** Send a task while an agent is busy or asleep; it runs when the agent is free.
 
@@ -39,62 +66,53 @@ Needs Docker running, and a Claude subscription or an Anthropic API key.
 
 ## Quickstart
 
-Start one agent:
+Write a `fleet.yaml` in a new folder. `defaults` is what every agent computer gets unless it sets its own:
+
+```yaml
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: demo }
+defaults:
+  harness: { kind: claude-code, version: 2.1.280 }
+  image: slim
+  credentials: [anthropic]
+agent_computers:
+  pong:
+    instructions: Reply to every message with the single word pong.
+```
+
+Start it:
 
 ```sh
-a12s init hello && cd hello              # writes fleet.yaml: one Claude Code agent named "hello"
 claude setup-token                       # prints a long-lived token; or use an API key
 a12s creds set anthropic                 # paste it
 a12s up                                  # the first run downloads the images (about 1.5 GB)
-a12s prompt hello "Reply with the single word pong."
+a12s prompt pong "ping"
 ```
 
-Then send it work from code:
-
-<table>
-<tr><th>TypeScript / JavaScript (<code>hello.mjs</code>)</th><th>Python (<code>hello.py</code>)</th></tr>
-<tr><td>
-
-```js
-import { connect } from "@coltonkirsten/a12s";
-
-const a12s = await connect();
-const turn = await a12s.prompt("hello", "Name three prime numbers.");
-console.log(turn.text);
-```
-
-</td><td>
-
-```python
-import a12s
-
-client = a12s.connect()
-turn = client.prompt("hello", "Name three prime numbers.")
-print(turn.text)
-```
-
-</td></tr>
-</table>
-
-Run it in the same folder: `node hello.mjs` or `python hello.py`. `a12s down` stops everything and keeps the disks.
+Then run the code above in the same folder (`python hello.py`, or `node hello.mjs`): it creates the agent computer
+`hello` from the defaults, prompts it and removes it. `a12s down` stops everything and keeps the disks. `a12s init`
+writes a starter Fleet if you'd rather not type one.
 
 ## How it works
 
 ```mermaid
 flowchart LR
   F["fleet.yaml"] -- "a12s up" --> C["Controller"]
-  App["Your app<br/>TS, Python, HTTP"] -- "send work, stream events" --> C
-  C --> A["Computer<br/>Claude Code"]
-  C --> B["Computer<br/>Codex"]
+  App["Your app<br/>TS, Python, HTTP"] -- "create agent computers,<br/>send work, stream events" --> C
+  C --> A["Agent computer<br/>Claude Code"]
+  C --> B["Agent computer<br/>Codex"]
   C --> S["Service<br/>cron, webhook, MCP"]
   S -. "puts work in an inbox" .-> A
 ```
 
-- **Fleet file:** `fleet.yaml` lists your agents (Computers) and helpers (Services). `a12s up` makes the machine match it.
+- **Fleet:** your agent computers and helpers (Services). `fleet.yaml` declares them and `a12s up` makes the machine
+  match it; the SDK and the HTTP API add, change and remove them while the Fleet runs.
 - **Controller:** a small server on your machine that starts the containers, holds the credentials and queues work.
-- **Computer:** one agent with its own disk, conversation and inbox. Its network is closed except for the hosts you allow.
+- **Agent computer:** one agent with its own disk, conversation and inbox. Its network is closed except for the hosts
+  you allow.
 - **Service:** a non-agent container, such as a clock, a webhook receiver or a database, that may only do what the
-  Fleet file grants it.
+  Fleet grants it.
 
 ## Examples
 
@@ -107,7 +125,7 @@ flowchart LR
 
 ## Docs
 
-- [Concepts](docs/concepts.md): Fleet, Computer, Message, Turn and Event, in a few minutes.
+- [Concepts](docs/concepts.md): Fleet, agent computer, Message, Turn and Event, in a few minutes.
 - [Recipes](docs/recipes.md): agents that hand work to each other, web apps, schedules, webhooks, tools and network access.
 - [SDK](docs/sdk.md): TypeScript and Python, side by side.
 - Reference: [Fleet file](docs/fleet-file.md) · [CLI](docs/cli.md) · [HTTP API](docs/api.md) ·

@@ -4,13 +4,14 @@ Five ideas are enough to build with a12s:
 
 | | What it is |
 |---|---|
-| **Fleet** | Your `fleet.yaml`: the Computers (and Services) one project runs. `a12s up` makes the running Fleet match the file. |
-| **Computer** | One agent's durable machine: a harness (Claude Code or Codex), a home drive, a conversation (session) and an inbox. Containers come and go; the Computer stays. |
-| **Message** | Work you put in a Computer's inbox (`send`). Anyone allowed can send: you, your app, a Service, or another Computer with `grants.send`. |
-| **Turn** | One delivery of work: the Computer takes everything pending in its inbox, runs the agent once, and ends `completed`, `failed` or `interrupted`. |
-| **Event** | What a Computer journals while it works: `turn.started`, streamed `text.delta`, `tool.started`, `turn.finished`, … Your app follows them live. |
+| **Fleet** | The agent computers (and Services) one project runs. `fleet.yaml` declares it and `a12s up` makes the running Fleet match the file; the SDK adds, changes and removes agent computers while it runs. |
+| **Agent computer** | One agent's durable machine (`AgentComputer` in code): a harness (Claude Code or Codex), a home drive with its instructions, a conversation (session) and an inbox. Containers come and go; the agent computer stays. |
+| **Message** | Work you put in an agent computer's inbox (`send`). Anyone allowed can send: you, your app, a Service, or another agent computer with `grants.send`. |
+| **Turn** | One delivery of work: the agent computer takes everything pending in its inbox, runs the agent once, and ends `completed`, `failed` or `interrupted`. |
+| **Event** | What an agent computer journals while it works: `turn.started`, streamed `text.delta`, `tool.started`, `turn.finished`, … Your app follows them live. |
 
-The everyday loop: **edit `fleet.yaml` or a role's `CLAUDE.md` → `a12s up` → send a Message → follow its Turn.**
+The everyday loop: **edit `fleet.yaml` or an agent computer's instructions → `a12s up` → send a Message → follow its
+Turn.** From code: **create an agent computer → prompt it → remove it.**
 
 ```text
             send                   delivered as a Turn            events
@@ -20,10 +21,10 @@ The everyday loop: **edit `fleet.yaml` or a role's `CLAUDE.md` → `a12s up` →
                                                 inbox of worker1 ─▶ worker1 ─▶ … ─▶ inbox of lead
 ```
 
-Agents talk to each other the same way you talk to them: a Computer whose Fleet entry has `grants.send: [worker1]`
-gets a `send` tool (`mcp__a12s__send`, arguments `computer` and `body`). The Message lands in worker1's inbox, and
-worker1's next Turn delivers it, labeled `via="computer:lead"`. Replies go back the same way. Each Computer keeps
-its conversation between Turns, so a lead remembers what it handed out. [Recipes](recipes.md#lead-and-workers)
+Agents talk to each other the same way you talk to them: an agent computer whose Fleet entry has
+`grants.send: [worker1]` gets a `send` tool (`mcp__a12s__send`, arguments `computer` and `body`). The Message lands
+in worker1's inbox, and worker1's next Turn delivers it, labeled `via="computer:lead"`. Replies go back the same way.
+Each agent computer keeps its conversation between Turns, so a lead remembers what it handed out. [Recipes](recipes.md#lead-and-workers)
 puts this together.
 
 ## Everything else, briefly
@@ -33,13 +34,13 @@ puts this together.
 | **Session** | The harness's own conversation, under its own id. It survives sleep; a12s resumes it on the next Turn. `fresh` (or `prompt --new`) starts a new one. |
 | **Batch** | The pending Messages one Turn delivers together. |
 | **Principal** (`via`) | Who really sent a Message: `local` (you, with the owner token), `token:<name>`, `service:<name>` or `computer:<name>`. Agents should trust `via`, not the sender's own label. |
-| **Grant** | A permission written on the side that acts: `grants.send` (may send to these Computers), `uses` (may reach these Services). |
+| **Grant** | A permission written on the side that acts: `grants.send` (may send to these agent computers), `uses` (may reach these Services). |
 | **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server, a webhook bridge. See [Services](services.md). |
-| **Drive** | A persistent volume: each Computer's home drive, plus shared work drives. |
-| **Preset** | A directory (`home.preset`) copied onto a Computer's home drive: its `CLAUDE.md`, skills, settings. Edit it and run `a12s up`. |
+| **Drive** | A persistent volume: each agent computer's home drive, plus shared work drives. |
+| **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds skills, settings and anything else. A **preset** (`home.preset`) is a directory of such files that `a12s up` sends. |
 | **Harness**, **HarnessBundle** | The agent program (Claude Code or Codex), shipped as a pinned read-only bundle per version. |
-| **Controller** | The process `a12s up` starts in a container: it reconciles the Fleet, owns the inboxes and serves the API. |
-| **computerd** | The small daemon inside every Computer that runs the harness and keeps the journal. |
+| **Controller** | The process `a12s up` starts in a container: it holds the Fleet and its version, reconciles it, owns the inboxes and serves the API. |
+| **computerd** | The small daemon inside every agent computer that runs the harness and keeps the journal. |
 
 ## How the pieces fit
 
@@ -47,20 +48,20 @@ puts this together.
  you ── a12s CLI ──(loopback, bearer token)──▶ Controller ──(mTLS)──▶ computerd ──▶ harness (Claude Code / Codex)
                                                   │                       │
                                        fleet.db (inboxes)           journal.db on the home drive
-                                       egress proxy  ◀── all outbound traffic from every Computer and Service
+                                       egress proxy  ◀── all outbound traffic from every agent computer and Service
 ```
 
-`a12s up` starts the Controller container and hands it the Fleet. The Controller creates one container and one
-isolated internal network per Computer and Service. Each Computer's only route out is the Controller's egress
-proxy. See [Architecture](architecture.md) for the details.
+`a12s up` starts the Controller container and hands it the Fleet; the SDK and the HTTP API change it from then on.
+The Controller creates one container and one isolated internal network per agent computer and Service. Each agent
+computer's only route out is the Controller's egress proxy. See [Architecture](architecture.md) for the details.
 
 ## Lifecycle
 
-A Computer moves through `Provisioning → Starting → Ready ⇄ Busy → Stopping → Asleep`, plus `Error`, which carries a
+An agent computer moves through `Provisioning → Starting → Ready ⇄ Busy → Stopping → Asleep`, plus `Error`, which carries a
 reason.
 
 **Sleep** closes admission, interrupts the active Turn (it ends `interrupted`), allows a short flush and stops the
-container. An asleep Computer uses no CPU or RAM.
+container. An asleep agent computer uses no CPU or RAM.
 
 | Survives sleep | Does not survive |
 |---|---|
@@ -81,7 +82,8 @@ automatically. The conversation survives, so "continue" works.
 
 ## Data safety
 
-Removing a Computer from the Fleet stops it and keeps its drives and inbox; `a12s status` lists them as orphans.
+Removing an agent computer from the Fleet (from the file, or with `remove()`) stops it and keeps its drives and
+inbox; `a12s status` lists them as orphans.
 Plain `a12s down` removes the Fleet's containers, networks and Controller state and keeps every drive and the inbox
 database; the next `a12s up` reattaches them. Only two commands destroy data, and both ask first:
 
@@ -90,14 +92,18 @@ database; the next `a12s up` reattaches them. Only two commands destroy data, an
 
 ## Config changes
 
-`a12s up` stages a change right away and applies it to each Computer at its next idle boundary, with no automatic
-deadline, so a running six-hour job is never killed by a config edit. For an urgent change (a CVE in an image),
+A change to an agent computer, from `a12s up` or from the SDK's `update()`, is staged right away and applied at its
+next idle boundary, with no automatic deadline, so a running six-hour job is never killed by a config edit. For an urgent change (a CVE in an image),
 `a12s apply --interrupt --grace 30s` ends the active Turns. Services have no idle boundary, so a changed Service is
 restarted at once.
 
+Every change to the Fleet adds one to its version. A whole-Fleet write can name the version it read (`If-Match`)
+and is refused if someone wrote in between; a write to one agent computer changes only that one, and the last write
+wins.
+
 ## Event journal
 
-Every event goes to an append-only SQLite journal on the Computer's home drive, in a directory the agent's user
+Every event goes to an append-only SQLite journal on the agent computer's home drive, in a directory the agent's user
 cannot open, so an agent can't read, edit or erase its own record. `a12s logs <name>` replays it; reconnecting with
 `Last-Event-ID` resumes without losing or duplicating events.
 
@@ -126,8 +132,8 @@ computerd gives the agent a small MCP server, `a12s`, for managing its own envir
   after writing new skills or MCP config to the home drive.
 - `lock` / `release`: an advisory lock on a path in a `shared-write` drive, held as a Controller lease that
   expires if the holder dies. Plain file writes ignore it.
-- `send` (`computer`, `body`, and optionally `fresh`, `expires`, `replaceKey`): put a Message in another Computer's
-  inbox. Present only when the Computer has `grants.send`, and only for those Computers. It returns a receipt, not
+- `send` (`computer`, `body`, and optionally `fresh`, `expires`, `replaceKey`): put a Message in another agent
+  computer's inbox. Present only when the agent computer has `grants.send`, and only for those agent computers. It returns a receipt, not
   an answer: the reply, if any, comes back as a new Message in a later Turn.
 
 Skills, MCP configs and harness settings live on the home drive, so the agent can change them; the harness program

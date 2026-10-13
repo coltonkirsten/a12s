@@ -1,65 +1,158 @@
 # SDK
 
-The SDK is how a program talks to a running Fleet: send work to Computers, follow what they do, read the result.
-There is one for TypeScript (`@coltonkirsten/a12s` on npm) and one for Python (`a12s` on PyPI), with the same methods.
+The SDK is how a program works with a running Fleet: create agent computers, send them work, follow what they do,
+read the result. There is one for TypeScript (`@coltonkirsten/a12s` on npm) and one for Python (`a12s` on PyPI), with
+the same objects and methods (camelCase in TypeScript, snake_case in Python).
 
 ```sh
 npm install @coltonkirsten/a12s   # Node 20+, Bun, Deno, browsers
 pip install a12s                # Python 3.10+ (uv add a12s)
 ```
 
+```python
+fleet = a12s.Fleet()            # connects to the running fleet (or url=, token=)
+hello = fleet.agent_computers.create("hello", instructions="Be helpful")
+hello.prompt("hi")
+hello.remove()
+```
+
+```ts
+const fleet = await Fleet.connect();
+const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
+await hello.prompt("hi");
+await hello.remove();
+```
+
+A `Fleet` hands out objects: `fleet.agent_computers` (`fleet.agentComputers`) gives `AgentComputer`s,
+`fleet.services` gives `Service`s, and `fleet.tokens` manages scoped tokens. You call methods on the objects.
+
 ## Connect
 
 ```ts
-import { connect } from "@coltonkirsten/a12s";
-const a12s = await connect();
+import { Fleet } from "@coltonkirsten/a12s";
+const fleet = await Fleet.connect();
 ```
 
 ```python
 import a12s
-client = a12s.connect()
+fleet = a12s.Fleet()
 ```
 
-`connect()` finds the running Fleet the way the CLI does: the `fleet.yaml` in the current directory or a parent
-(or `$A12S_FLEET`), else the only Fleet running on this machine. It connects as the owner, with the
-`~/.a12s/<fleet>/controller.json` that `a12s up` writes. Other ways in:
+The Fleet is found the way the CLI finds it: the `fleet.yaml` in the current directory or a parent (or
+`$A12S_FLEET`), else the only Fleet running on this machine. It connects as the owner, with the
+`~/.a12s/<fleet>/controller.json` that `a12s up` writes. A Fleet has to be running (`a12s up`) first. Other ways in:
 
 | You have | TypeScript | Python |
 |---|---|---|
-| Several Fleets running | `connect({ fleet: "myproject" })` | `a12s.connect(fleet="myproject")` |
-| A scoped token or another URL | `connect({ url, token })` | `a12s.connect(url=…, token=…)` |
+| Several Fleets running | `Fleet.connect({ fleet: "myproject" })` | `a12s.Fleet(fleet="myproject")` |
+| A scoped token or another URL | `Fleet.connect({ url, token })` | `a12s.Fleet(url=…, token=…)` |
 | Environment | `$A12S_URL` and `$A12S_TOKEN` | the same |
-| A web page | `a12s gateway --web <dir>`, then `connect()` in the page ([In the browser](#in-the-browser)) | |
+| A web page | `a12s gateway --web <dir>`, then `Fleet.connect()` in the page ([In the browser](#in-the-browser)) | |
 
-In Python, `a12s.connect_async()` returns an `AsyncClient` with the same methods: `await` them, and use
-`async for` and `async with` for streams.
+In Python, `with a12s.Fleet() as fleet:` closes the connection at the end (or call `fleet.close()`).
+`a12s.AsyncFleet()` has the same objects and methods: `await` them, and use `async for` and `async with` for streams
+(`await fleet.aclose()`).
+
+## Agent computers
+
+### Create
+
+`create` takes a name and any [agent computer field](fleet-file.md#agent-computer-fields) of the Fleet file:
+keyword arguments in Python, an object in TypeScript. Nested keys are the Fleet file's own (`sleepAfterIdle`,
+`readOnly`) in both languages. Whatever you leave out comes from the Fleet's `defaults`, so with harness, image and
+credentials in `defaults` a name and instructions are enough. It returns once the agent computer is up.
+
+```ts
+const coder = await fleet.agentComputers.create("coder", {
+  instructions: "You write and run Python. Answer with the output.",
+  files: { ".claude/skills/style/SKILL.md": "…" },
+  egress: { allow: ["pypi.org", "files.pythonhosted.org"] },
+  power: { sleepAfterIdle: "30m" },
+});
+```
+
+```python
+coder = fleet.agent_computers.create(
+    "coder",
+    instructions="You write and run Python. Answer with the output.",
+    files={".claude/skills/style/SKILL.md": "…"},
+    egress={"allow": ["pypi.org", "files.pythonhosted.org"]},
+    power={"sleepAfterIdle": "30m"},
+)
+```
+
+- `instructions` becomes `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex) in its home; `files` are more text files
+  there, by path. Together at most 1 MiB. A file that starts with `#!` is executable.
+- `security.seccomp` is the profile's JSON object itself (in the Fleet file it is a path).
+- A name that is taken fails with `A12sError` code `exists`; pass `replace: true` (`replace=True`) to overwrite it.
+- A field that neither the spec nor `defaults` sets (harness, image) fails with `missing_field`. A credential the
+  Controller holds no value for fails with `missing_credential`: `a12s up` sends the credentials that the Fleet
+  file's agent computers name, so keep one there that names each credential your code uses.
+- A grant must name an agent computer that exists. To add several that grant to each other, add them together with
+  [`fleet.replace`](#the-whole-fleet).
+
+### Get, list, update, remove
+
+```ts
+const lead = await fleet.agentComputers.get("lead");       // throws NotFound if there is none
+const all = await fleet.agentComputers.list();
+console.log(lead.name, lead.status.phase, lead.spec, lead.effective);
+await lead.update({ instructions: "…", power: null });     // null: back to the default
+await lead.reload();
+await coder.remove();
+```
+
+```python
+lead = fleet.agent_computers.get("lead")                   # raises a12s.NotFound if there is none
+everyone = fleet.agent_computers.list()
+print(lead.name, lead.status.phase, lead.spec, lead.effective)
+lead.update(instructions="…")
+lead.reload()
+coder.remove()
+```
+
+- `spec` is the agent computer as written, `effective` has the defaults merged in, and `status` is its phase,
+  session, inbox and power. All three are a snapshot from the last `create`, `get`, `reload` or `update`.
+- `update` changes only the fields you pass (a JSON merge patch: maps merge, lists and values replace, `null` removes
+  the field so the default applies). An idle or asleep agent computer takes it at once; a busy one at the end of its
+  Turn. The session continues. Changed files are written again; other files in its home stay.
+- `remove` stops it and removes it from the Fleet. Its drives and inbox are kept (`a12s status` lists them as
+  orphans).
+- Each call changes only that one agent computer. Two programs updating the same one: the last write wins.
+
+The Fleet file and your code share one Fleet. `a12s up` makes the Fleet match the file again: it removes agent
+computers your code created and undoes changes it made ([`fleet.get()`](#the-whole-fleet) lists them as `drift`).
+Keep long-lived roles in `fleet.yaml` and create the short-lived ones (one per task, user or branch) from code.
 
 ## Send work, get the answer
 
 ```ts
-const r = await a12s.prompt("analyst", "Summarize the open issues in three bullets.");
+const analyst = await fleet.agentComputers.get("analyst");
+const r = await analyst.prompt("Summarize the open issues in three bullets.");
 console.log(r.status, r.text);
 ```
 
 ```python
-r = client.prompt("analyst", "Summarize the open issues in three bullets.")
+analyst = fleet.agent_computers.get("analyst")
+r = analyst.prompt("Summarize the open issues in three bullets.")
 print(r.status, r.text)
 ```
 
-`prompt()` puts a Message in the Computer's inbox, waits until a Turn delivers it, follows that Turn and returns
-when it ends. If the Computer is busy, the Message waits its turn. The result is a [Turn](#turns) plus `message`.
+`prompt()` puts a Message in the agent computer's inbox, waits until a Turn delivers it, follows that Turn and
+returns when it ends. If the agent computer is busy, the Message waits its turn. The result is a [Turn](#turns) plus
+`message`. `onEvent` (`on_event`) gets that Turn's events as they happen.
 
 `send()` only puts the Message in the inbox and returns. Use it to hand off work and move on, or when the answer
-arrives some other way (from another Computer, say):
+arrives some other way (from another agent computer, say):
 
 ```ts
-await a12s.send("analyst", "Run the nightly audit.");
-await a12s.send("analyst", { body: "…", sender: "billing", metadata: { ticket: "T-42" }, expires: 3600 });
+await analyst.send("Run the nightly audit.");
+await analyst.send("…", { sender: "billing", metadata: { ticket: "T-42" }, expires: 3600 });
 ```
 
 ```python
-client.send("analyst", "Run the nightly audit.")
-client.send("analyst", "…", sender="billing", metadata={"ticket": "T-42"}, expires=3600)
+analyst.send("Run the nightly audit.")
+analyst.send("…", sender="billing", metadata={"ticket": "T-42"}, expires=3600)
 ```
 
 | Option (TS / Python) | Meaning |
@@ -72,22 +165,23 @@ client.send("analyst", "…", sender="billing", metadata={"ticket": "T-42"}, exp
 | `idempotencyKey` / `idempotency_key` | Retries with the same key return the original Message. Set for you if you don't. |
 
 Bodies are at most 64 KiB. The agent treats them as data from the sender, not as instructions that override its
-role: put instructions in its preset's `CLAUDE.md`.
+role: put instructions in its `instructions`.
 
 ## Follow what happens
 
 ### Turns
 
-`turns()` yields each Turn as it finishes, from one Computer, several, or (no argument) all of them:
+`fleet.turns()` yields each Turn as it finishes, from one agent computer, several, or (no argument) all of them;
+`agent.turns()` follows that one:
 
 ```ts
-for await (const t of a12s.turns(["lead", "worker1"])) {
+for await (const t of fleet.turns(["lead", "worker1"])) {
   console.log(t.computer, t.status, t.messages.map((m) => m.via), t.text);
 }
 ```
 
 ```python
-for t in client.turns(["lead", "worker1"]):
+for t in fleet.turns(["lead", "worker1"]):
     print(t.computer, t.status, [m.via for m in t.messages], t.text)
 ```
 
@@ -95,22 +189,23 @@ A Turn has `computer`, `id`, `status` (`completed`, `failed` or `interrupted`), 
 said), `error`, `messages` (the Messages it delivered, each with `id`, `sender` and `via`), `tools` (each tool call
 with `name`, `input`, `output`, `isError` / `is_error`), `usage`, `startedAt` / `started_at` and `finishedAt` /
 `finished_at`. `error` is a string; `input`, `output` and `usage` are the harness's JSON as is (a dict in Python).
-What an agent sends to another Computer is in `tools`: a call named `mcp__a12s__send` whose `input`
-has `computer` and `body`.
+What an agent sends to another agent computer is in `tools`: a call named `mcp__a12s__send` whose `input` has
+`computer` and `body`.
 
 ### Events
 
-`events()` is the same stream before it's folded into Turns: every event as it happens.
+`events()` is the same stream before it's folded into Turns: every event as it happens. `fleet.events()` merges
+every agent computer (or those named); `agent.events()` follows one.
 
 ```ts
-for await (const ev of a12s.events()) {
+for await (const ev of fleet.events()) {
   if (ev.type === "text.delta") process.stdout.write(ev.data.text);
   if (ev.type === "tool.started") console.log(`\n[${ev.computer}] ${ev.data.name}`);
 }
 ```
 
 ```python
-for ev in client.events():
+for ev in fleet.events():
     if ev.type == "text.delta":
         print(ev.data["text"], end="", flush=True)
     if ev.type == "tool.started":
@@ -126,29 +221,74 @@ Streams start live. To see everything a piece of work causes, start watching, wa
 then send:
 
 ```ts
-const turns = a12s.turns(["lead", "worker1", "worker2"]);
+const turns = fleet.turns(["lead", "worker1", "worker2"]);
 await turns.ready();
-await a12s.send("lead", "Plan the launch.");
+await lead.send("Plan the launch.");
 for await (const t of turns) { /* … */ }
 ```
 
 ```python
-with client.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits until it's connected
-    client.send("lead", "Plan the launch.")
+with fleet.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits until it's connected
+    lead.send("Plan the launch.")
     for t in turns:
         ...
 ```
 
-A Computer that is asleep counts as connected; its events start when it wakes. To end a stream, `break`, or call
-`close()` (Python: leaving the `with` block). TypeScript also takes `{ signal }`.
+An agent computer that is asleep counts as connected; its events start when it wakes. To end a stream, `break`, or
+call `close()` (Python: leaving the `with` block). TypeScript also takes `{ signal }`.
 
 Streams reconnect by themselves after a network drop and resume exactly where they were. If the Controller can't
-resume (the Computer's journal was reset), the stream yields one `gap` event and carries on live; pass
+resume (the agent computer's journal was reset), the stream yields one `gap` event and carries on live; pass
 `onGap: "throw"` (`on_gap="throw"`) to raise `A12sGapError` instead. Events were lost either way: resync with
-`status()`.
+`fleet.status()`.
 
-To replay one Turn from its start: `events("analyst", { turn: r.id })` (`turn=r.id`). To resume a stream you
-saved: `{ after: lastSeq }` (`after=last_seq`).
+To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`). To resume a stream you saved:
+`{ after: lastSeq }` (`after=last_seq`).
+
+## The whole Fleet
+
+`fleet.get()` returns the Fleet as written (`spec`, a `FleetSpec` with `defaults`, `agent_computers`, `services`,
+`drives`), its `version`, and `drift`: what changed through the API since the last `a12s up`. `fleet.replace(fn)`
+reads it, lets `fn` change it (in place, or by returning a new one) and writes it back only if nobody wrote in
+between; otherwise it reads again and retries, up to 5 times.
+
+```ts
+await fleet.replace((f) => {
+  f.defaults!.power = { sleepAfterIdle: "15m" };
+  f.agent_computers.lead = { instructions: "…", grants: { send: ["worker1"] } };
+  f.agent_computers.worker1 = { instructions: "…", grants: { send: ["lead"] } };
+});
+```
+
+```python
+def edit(f):
+    f.defaults.update(power={"sleepAfterIdle": "15m"})
+    f.agent_computers.update(
+        lead={"instructions": "…", "grants": {"send": ["worker1"]}},
+        worker1={"instructions": "…", "grants": {"send": ["lead"]}},
+    )
+
+fleet.replace(edit)
+```
+
+Every change adds one to the version. The HTTP API also checks a write without making it (`?dryRun=true`); see
+[HTTP API](api.md#changing-the-fleet).
+
+## Services and tokens
+
+`fleet.services` has `create`, `get` and `list`; a `Service` has `reload`, `update`, `sleep`, `wake` and `remove`,
+like an agent computer. `create` takes the [Service fields](services.md) of the Fleet file.
+
+`fleet.tokens.create(name, …)` makes a [scoped token](#least-privilege) for another program (owner only); the secret
+is in the result once. `list()` and `remove(name)` manage them.
+
+```ts
+const tok = await fleet.tokens.create("dashboard", { actions: ["status", "events"], agentComputers: ["lead"] });
+```
+
+```python
+tok = fleet.tokens.create("dashboard", actions=["status", "events"], agent_computers=["lead"])
+```
 
 ## In the browser
 
@@ -157,7 +297,7 @@ in between: it serves your page, serves the TypeScript SDK at `/a12s.js`, and fo
 with a scoped token the page never sees.
 
 ```sh
-a12s gateway                     # the built-in dashboard: every Computer, live events, a send box
+a12s gateway                     # the built-in dashboard: every agent computer, live events, a send box
 a12s gateway -- npm run dev      # your dev server (Vite, Next.js, …) behind the gateway, hot reload included
 a12s gateway --dev http://localhost:5173   # a dev server that is already running
 a12s gateway --web ./dist        # a built app (a directory of files)
@@ -166,7 +306,7 @@ a12s gateway --web ./dist        # a built app (a directory of files)
 Each run makes a new key and opens `http://127.0.0.1:7012/?key=…` in your browser (`--no-open` just prints it). The
 gateway trades the key for an HttpOnly, SameSite=Strict cookie and drops it from the address bar; `/v1/` and
 `/a12s.js` need that cookie, so another user or program on the machine can't use the Fleet through the gateway. A
-script or test passes the key as a bearer token instead: `connect({ url: "http://127.0.0.1:7012", token: key })`.
+script or test passes the key as a bearer token instead: `Fleet.connect({ url: "http://127.0.0.1:7012", token: key })`.
 Opened without the key, the gateway shows a page that says to use the printed link.
 
 With a dev server, the gateway forwards every request except `/v1/` and
@@ -175,14 +315,15 @@ the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-
 
 ```html
 <script type="module">
-  import { connect } from "/a12s.js";
-  const a12s = await connect();                       // same origin, no token
-  for await (const ev of a12s.events()) console.log(ev.computer, ev.type);
+  import { Fleet } from "/a12s.js";
+  const fleet = await Fleet.connect();                // same origin, no token
+  for await (const ev of fleet.events()) console.log(ev.computer, ev.type);
 </script>
 ```
 
-The page may use `status`, `events`, `send` and `inbox` on every Computer; narrow that with
-`--allow status,events` and `--computers lead,worker1`. The gateway prints the scope in one line when it starts:
+The page may use `status`, `events`, `send` and `inbox` on every agent computer; narrow that with
+`--allow status,events` and `--computers lead,worker1`. Creating, changing and removing agent computers is
+owner-only, so a page can't. The gateway prints the scope in one line when it starts:
 `the page may read status, follow events, send Messages, read and manage inboxes, on every Computer`. Each gateway has its own token, `gateway-<port>`, so Messages
 from the page arrive `via` `token:gateway-7012`. It is revoked when the gateway stops; one left by a killed gateway is
 removed when the next gateway starts. Several gateways can serve one Fleet on different `--port`s.
@@ -203,49 +344,51 @@ a12s token create web --actions send,status --computers lead
 
 ```ts
 // your server, on the Fleet's machine, behind your login
-const a12s = await connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
-app.post("/ask", requireLogin, async (req, res) => res.json(await a12s.send("lead", { body: req.body.q, sender: req.user.id })));
+const fleet = await Fleet.connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
+const lead = await fleet.agentComputers.get("lead");
+app.post("/ask", requireLogin, async (req, res) => res.json(await lead.send(req.body.q, { sender: req.user.id })));
 ```
 
 The Controller's port is in `~/.a12s/<fleet>/controller.json`; Messages arrive `via="token:web"`, with your `sender`.
+A server that creates agent computers for its users needs the owner token; keep it on the server.
 
-With a bundler, `npm install @coltonkirsten/a12s` and `import { connect } from "@coltonkirsten/a12s"` work the same way:
-in a browser, `connect()` talks to the page's own origin.
+With a bundler, `npm install @coltonkirsten/a12s` and `import { Fleet } from "@coltonkirsten/a12s"` work the same
+way: in a browser, `Fleet.connect()` talks to the page's own origin.
 
 ## Everything else
 
-| TypeScript | Python | What it does |
-|---|---|---|
-| `status()` | `status()` | Every Computer and Service: `phase`, `session`, `activeTurn`, `inbox`, `power`, warnings. |
-| `computer(name)` | `computer(name)` | One Computer's status. |
-| `inbox(name, { state, bodies })` | `inbox(name, state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
-| `message(name, id)`, `withdraw(name, id)` | the same | One Message; take back a pending one. |
-| `stop(name, turn?)` | `stop(name, turn=None)` | Interrupt a Turn (default: the active one). |
-| `sleep(name)`, `wake(name)` | the same | Stop a Computer and keep its disks and session; start it again. |
-| `services()`, `service(name)` | the same | Service status. |
-| `createToken({ name, actions, computers })` | `create_token(name, actions, computers)` | A scoped token for another program (owner only). |
-| `putFleet(req)` | `put_fleet(req)` | What `a12s up` sends. Most apps leave this to the CLI. |
+| On | TypeScript | Python | What it does |
+|---|---|---|---|
+| Fleet | `status()` | `status()` | Every agent computer (`agentComputers` / `agent_computers`) and Service: `phase`, `session`, `activeTurn`, `inbox`, `power`, warnings. |
+| AgentComputer | `inbox({ state, bodies })` | `inbox(state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
+| AgentComputer | `message(id)`, `withdraw(id)` | the same | One Message; take back a pending one. |
+| AgentComputer | `stop(turn?)` | `stop(turn=None)` | Interrupt a Turn (default: the active one). |
+| AgentComputer | `sleep()`, `wake()` | the same | Stop it and keep its disks, session and inbox; start it again. |
+
+`connect()` and the client it returns (`A12sClient` in TypeScript, `Client` and `AsyncClient` in Python), whose
+methods take the agent computer's name first (`a12s.prompt("hello", "…")`), still work for one release and are
+deprecated. In TypeScript the spec types are `AgentComputerSpec` and `FleetSpec`.
 
 ## Errors
 
 A refused call raises `A12sError` with the HTTP `status`, a stable `code` and usually a `fix` line, which is also in
-the message.
+the message. A 404 is `NotFound`, a subclass.
 
 ```ts
-try { await a12s.send("lead", "…"); }
+try { await lead.send("…"); }
 catch (err) { if (err instanceof A12sError && err.code === "inbox_full") { /* back off */ } else throw err; }
 ```
 
 ```python
 try:
-    client.send("lead", "…")
+    lead.send("…")
 except a12s.A12sError as err:
     if err.code != "inbox_full":
         raise
 ```
 
 The codes are listed in [HTTP API](api.md#errors). Streams also raise `A12sStreamError` for a malformed event and,
-with `onGap: "throw"`, `A12sGapError`.
+with `onGap: "throw"`, `A12sGapError`. A failed Turn is not an error: `prompt()` returns it with status `failed`.
 
 ## Least privilege
 
@@ -255,5 +398,6 @@ The owner token can do anything. Give another program a scoped token instead:
 a12s token create dashboard --actions status,events --computers '*'
 ```
 
-Then `connect({ url, token })` / `a12s.connect(url=…, token=…)`. Actions: `send`, `inbox`, `status`, `events`,
-`power`, `stop`. A token with `send` sees only its own Messages.
+Then `Fleet.connect({ url, token })` / `a12s.Fleet(url=…, token=…)`. Actions: `send`, `inbox`, `status`, `events`,
+`power`, `stop`. A token with `send` sees only its own Messages. Creating, changing and removing agent computers,
+Services and tokens, and `fleet.get()` and `fleet.replace()`, need the owner token.

@@ -3,6 +3,7 @@
 Each recipe is complete: copy it, run it, change it. They assume a12s is installed and `a12s creds set anthropic`
 is done ([Quickstart](../README.md#quickstart)), and use the TypeScript or Python SDK ([SDK](sdk.md)).
 
+- [An agent computer per task](#an-agent-computer-per-task)
 - [Lead and workers](#lead-and-workers)
 - [A web app (React, Vite, any dev server)](#a-web-app-react-vite-any-dev-server)
 - [A live dashboard in the browser](#a-live-dashboard-in-the-browser)
@@ -13,6 +14,64 @@ is done ([Quickstart](../README.md#quickstart)), and use the TypeScript or Pytho
 - [Let another program in](#let-another-program-in)
 - [Any language: the HTTP API](#any-language-the-http-api)
 - [See what's going on](#see-whats-going-on)
+
+## An agent computer per task
+
+Create an agent computer for one piece of work, use it, and remove it. The Fleet file supplies what every agent
+computer shares, in `defaults`:
+
+```yaml
+# fleet.yaml
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: review }
+
+defaults:
+  harness: { kind: claude-code, version: 2.1.280, model: sonnet }
+  image: slim
+  credentials: [anthropic]
+  egress: { allow: [github.com, api.github.com] }
+
+agent_computers:
+  triage:                                 # a long-lived one; it also makes a12s up send the credential
+    instructions: Sort incoming issues by area and urgency.
+```
+
+```ts
+// review.ts — npx tsx review.ts https://github.com/you/repo/pull/7
+import { Fleet } from "@coltonkirsten/a12s";
+
+const fleet = await Fleet.connect();
+const reviewer = await fleet.agentComputers.create(`review-${Date.now()}`, {
+  instructions: "You review pull requests. Clone the repo, read the diff, answer with at most five findings.",
+});
+try {
+  const r = await reviewer.prompt(`Review ${process.argv[2]}`);
+  console.log(r.text);
+} finally {
+  await reviewer.remove();
+}
+```
+
+```python
+# review.py — python review.py https://github.com/you/repo/pull/7
+import sys, time
+import a12s
+
+with a12s.Fleet() as fleet:
+    reviewer = fleet.agent_computers.create(
+        f"review-{int(time.time())}",
+        instructions="You review pull requests. Clone the repo, read the diff, answer with at most five findings.",
+    )
+    try:
+        print(reviewer.prompt(f"Review {sys.argv[1]}").text)
+    finally:
+        reviewer.remove()
+```
+
+Names are DNS labels of at most 40 characters. `remove()` keeps the home drive: `a12s drive ls` lists it as
+orphaned, and `a12s drive rm home-<name>` deletes it. `a12s up` removes agent computers the file doesn't list, so
+run it when no task is in flight.
 
 ## Lead and workers
 
@@ -33,12 +92,12 @@ apiVersion: a12s.ai/v1alpha1
 kind: Fleet
 metadata: { name: team }
 
-defaults:                                 # every Computer gets these
+defaults:                                 # every agent computer gets these
   harness: { kind: claude-code, version: 2.1.280, model: haiku }
   image: slim
   credentials: [anthropic]
 
-computers:
+agent_computers:
   lead:
     home: { preset: ./presets/lead }      # its CLAUDE.md: the role
     grants: { send: [worker1, worker2] }  # gives lead a send tool for these two
@@ -81,12 +140,13 @@ The app starts watching, sends the task, and stops at lead's final answer:
 
 ```ts
 // app.ts — npx tsx app.ts "your task"   (or node app.ts on Node 24+)
-import { connect } from "@coltonkirsten/a12s";
+import { Fleet } from "@coltonkirsten/a12s";
 
-const a12s = await connect();
-const turns = a12s.turns(["lead", "worker1", "worker2"]);
+const fleet = await Fleet.connect();
+const lead = await fleet.agentComputers.get("lead");
+const turns = fleet.turns(["lead", "worker1", "worker2"]);
 await turns.ready();                                   // watch first, so nothing is missed
-await a12s.send("lead", { body: process.argv[2] ?? "Two facts about octopuses: one about hearts, one about arms.", fresh: true });
+await lead.send(process.argv[2] ?? "Two facts about octopuses: one about hearts, one about arms.", { fresh: true });
 
 for await (const t of turns) {
   console.log(`[${t.computer}] ${t.text.trim()}`);
@@ -103,11 +163,12 @@ for await (const t of turns) {
 import sys
 import a12s
 
-client = a12s.connect()
+fleet = a12s.Fleet()
+lead = fleet.agent_computers.get("lead")
 task = sys.argv[1] if len(sys.argv) > 1 else "Two facts about octopuses: one about hearts, one about arms."
 
-with client.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits until it's watching
-    client.send("lead", task, fresh=True)
+with fleet.turns(["lead", "worker1", "worker2"]) as turns:    # entering waits until it's watching
+    lead.send(task, fresh=True)
     for t in turns:
         print(f"[{t.computer}] {t.text.strip()}")
         if t.computer == "lead" and "FINAL ANSWER:" in t.text:
@@ -140,20 +201,24 @@ a12s gateway -F ../fleet.yaml -- npm run dev    # opens http://127.0.0.1:7012/?k
 ```tsx
 // src/App.tsx
 import { useEffect, useState } from "react";
-import { connect } from "@coltonkirsten/a12s";
+import { Fleet } from "@coltonkirsten/a12s";
 
-const a12s = await connect();                    // same origin as the gateway: no URL, no token
+const fleet = await Fleet.connect();             // same origin as the gateway: no URL, no token
 
 export default function App() {
-  const [computers, setComputers] = useState<string[]>([]);
+  const [names, setNames] = useState<string[]>([]);
   const [sent, setSent] = useState("");
   useEffect(() => {
-    a12s.status().then((s) => setComputers(s.computers.map((c) => c.name)));
+    fleet.agentComputers.list().then((all) => setNames(all.map((a) => a.name)));
   }, []);
+  const send = async () => {
+    const hello = await fleet.agentComputers.get("hello");
+    setSent((await hello.send("Hi from the page")).id);
+  };
   return (
     <main>
-      <p>{computers.join(", ")}</p>
-      <button onClick={async () => setSent((await a12s.send("hello", "Hi from the page")).id)}>Send</button>
+      <p>{names.join(", ")}</p>
+      <button onClick={send}>Send</button>
       <p>{sent}</p>
     </main>
   );
@@ -169,7 +234,7 @@ For production, `npm run build` and serve the output with `a12s gateway --web di
 
 ## A live dashboard in the browser
 
-No code: `a12s gateway` opens a built-in dashboard at http://127.0.0.1:7012 with every Computer, their events as
+No code: `a12s gateway` opens a built-in dashboard at http://127.0.0.1:7012 with every agent computer, their events as
 they stream, and a box to send a Message.
 
 Your own page: put it in a directory and serve that instead. The gateway also serves the SDK at `/a12s.js`, and
@@ -182,12 +247,12 @@ the page needs no token or build step.
 <title>Team</title>
 <pre id="log"></pre>
 <script type="module">
-  import { connect } from "/a12s.js";
+  import { Fleet } from "/a12s.js";
 
-  const a12s = await connect();
+  const fleet = await Fleet.connect();
   const log = (line) => (document.getElementById("log").textContent += line + "\n");
 
-  for await (const ev of a12s.events()) {          // every Computer, merged
+  for await (const ev of fleet.events()) {         // every agent computer, merged
     if (ev.type === "turn.started") log(`${ev.computer}: started (from ${ev.data.inbox?.messages.map((m) => m.via).join(", ")})`);
     if (ev.type === "tool.started") log(`${ev.computer}: → ${ev.data.name}`);
     if (ev.type === "turn.finished") log(`${ev.computer}: ${ev.data.status}`);
@@ -199,50 +264,60 @@ the page needs no token or build step.
 a12s gateway --web web          # opens http://127.0.0.1:7012/?key=…
 ```
 
-To show whole answers instead of events, use `a12s.turns()` the same way. The page can send work with
-`a12s.send(...)`; those Messages arrive `via="token:gateway-7012"` (the gateway's port). Limit what the page may do with
-`--allow status,events` (read-only) and `--computers lead`.
+To show whole answers instead of events, use `fleet.turns()` the same way. The page can send work with
+`(await fleet.agentComputers.get("lead")).send(...)`; those Messages arrive `via="token:gateway-7012"` (the
+gateway's port). Limit what the page may do with `--allow status,events` (read-only) and `--computers lead`.
 
 ## Change an agent's instructions
 
-Edit its preset and apply:
+Edit its `instructions` (or its preset's `CLAUDE.md`) and apply:
 
 ```sh
-$EDITOR presets/lead/CLAUDE.md
-a12s up                         # "updated lead": the new files are copied at its next idle moment
+$EDITOR fleet.yaml              # or presets/lead/CLAUDE.md
+a12s up                         # "updated lead": the new files are written at its next idle moment
 ```
 
-The Computer restarts between Turns, never in the middle of one, and keeps its conversation. To also start a fresh
-conversation, send the next Message with `fresh: true` (`a12s prompt lead --new "…"`).
+From code, for an agent computer your code owns:
 
-A preset can hold anything Claude Code reads from the home directory: `CLAUDE.md`, `.claude/skills/`,
-`.claude/settings.json`, `.mcp.json`. Its files overwrite the agent's copies; other files on the home drive stay.
+```ts
+await (await fleet.agentComputers.get("helper")).update({ instructions: "Answer in one sentence." });
+```
+
+```python
+fleet.agent_computers.get("helper").update(instructions="Answer in one sentence.")
+```
+
+The agent computer restarts between Turns, never in the middle of one, and keeps its conversation. To also start a
+fresh conversation, send the next Message with `fresh: true` (`a12s prompt lead --new "…"`).
+
+`files` (or a preset directory) can hold anything Claude Code reads from the home directory: `.claude/skills/`,
+`.claude/settings.json`, `.mcp.json`. They overwrite the agent's copies; other files on the home drive stay.
 
 ## Give agents tools and network access
 
-Every Computer is deny-by-default on the network. Allow hosts per Computer (or in `defaults`):
+Every agent computer is deny-by-default on the network. Allow hosts per agent computer (or in `defaults`):
 
 ```yaml
-computers:
+agent_computers:
   worker1:
     egress: { allow: [github.com, api.github.com, registry.npmjs.org, pypi.org, files.pythonhosted.org] }
 ```
 
 The agent can install tools itself into its home drive (`pip install --user`, `npm install`, a binary in
-`~/bin`); they survive sleep. For tools every Computer should have from the start, build an image `FROM` the a12s
+`~/bin`); they survive sleep. For tools every agent computer should have from the start, build an image `FROM` the a12s
 base ([Extending: a custom agent image](extending.md#a-custom-agent-image)). For a secret the agent shouldn't hold,
 put it in a Service ([Services](services.md)).
 
 ## Run work on a schedule
 
-The simplest clock is the host's own: `a12s send` enqueues and exits, whether the Computer is busy or asleep.
+The simplest clock is the host's own: `a12s send` enqueues and exits, whether the agent computer is busy or asleep.
 
 ```sh
 # crontab -e
 0 9 * * 1-5  /opt/homebrew/bin/a12s -F ~/team/fleet.yaml send lead "Summarize what changed yesterday." --replace standup
 ```
 
-`--replace standup` keeps at most one pending standup if lead is busy. To let it wake a sleeping Computer, add
+`--replace standup` keeps at most one pending standup if lead is busy. To let it wake a sleeping agent computer, add
 `power: { wakeOnMessage: { from: [local] } }` to it ([Inbox and power](inbox.md#power-policy)).
 
 To keep the schedule inside the Fleet (it runs wherever the Fleet runs, under its own grant), run a clock Service:
@@ -256,7 +331,7 @@ to lead (`a12s token create hooks --actions send --computers lead`, see [below](
 the sender's signature, then:
 
 ```ts
-await a12s.send("lead", { body: `GitHub ${event}: ${summary}`, sender: "github", metadata: { source: "github", event } });
+await lead.send(`GitHub ${event}: ${summary}`, { sender: "github", metadata: { source: "github", event } });
 ```
 
 To run the receiver inside the Fleet instead, write a Service with `grants.send` and `publish:`
@@ -272,14 +347,15 @@ a12s token create ci --actions send,events --computers lead
 ```
 
 ```ts
-const a12s = await connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
+const fleet = await Fleet.connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
 ```
 
 ```python
-client = a12s.connect(url="http://127.0.0.1:52011", token=os.environ["A12S_TOKEN"])
+fleet = a12s.Fleet(url="http://127.0.0.1:52011", token=os.environ["A12S_TOKEN"])
 ```
 
-The port is in `~/.a12s/<fleet>/controller.json`. Messages it sends arrive `via="token:ci"`.
+The port is in `~/.a12s/<fleet>/controller.json`. Messages it sends arrive `via="token:ci"`. A scoped token can send
+and watch; creating, changing and removing agent computers needs the owner token.
 
 ## Any language: the HTTP API
 
@@ -288,8 +364,10 @@ CF=~/.a12s/team/controller.json
 URL=http://127.0.0.1:$(jq .port $CF); TOKEN=$(jq -r .token $CF)
 
 curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"body": "Ping", "idempotencyKey": "ping-1"}' $URL/v1/computers/lead/inbox
-curl -sN -H "Authorization: Bearer $TOKEN" $URL/v1/computers/lead/events      # live events (SSE)
+  -d '{"body": "Ping", "idempotencyKey": "ping-1"}' $URL/v1/agent-computers/lead/inbox
+curl -sN -H "Authorization: Bearer $TOKEN" $URL/v1/agent-computers/lead/events      # live events (SSE)
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'If-None-Match: *' \
+  -d '{"instructions": "Answer in one sentence."}' $URL/v1/agent-computers/helper   # create one
 ```
 
 Routes, JSON and the event-stream format: [HTTP API](api.md).
@@ -297,13 +375,13 @@ Routes, JSON and the event-stream format: [HTTP API](api.md).
 ## See what's going on
 
 ```sh
-a12s status                     # every Computer: phase, inbox, power, warnings
-a12s logs lead --follow         # one Computer's events as text
+a12s status                     # every agent computer: phase, inbox, power, warnings
+a12s logs lead --follow         # one agent computer's events as text
 a12s gateway                    # all of them, live, in the browser
 a12s doctor                     # what's broken, one line each, with the fix
 a12s inbox lead --bodies        # what's waiting
 ```
 
-An agent that doesn't call `send` usually lacks the grant: `send` only exists for Computers listed in its
-`grants.send`. A Message that never gets delivered usually means the inbox is held (`a12s inbox lead` says why;
-`a12s inbox resume lead` releases it) or the Computer is asleep without a wake policy (`a12s wake lead`).
+An agent that doesn't call `send` usually lacks the grant: `send` only exists for agent computers listed
+in its `grants.send`. A Message that never gets delivered usually means the inbox is held (`a12s inbox lead` says why;
+`a12s inbox resume lead` releases it) or the agent computer is asleep without a wake policy (`a12s wake lead`).
