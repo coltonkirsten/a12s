@@ -1178,7 +1178,6 @@ export const event: T.EventEnvelope = {
 
 export const eventMinimal: T.EventEnvelope = {
   "v": 1,
-  "agentComputer": "agentComputer",
   "computer": "computer",
   "session": "session",
   "turn": "turn",

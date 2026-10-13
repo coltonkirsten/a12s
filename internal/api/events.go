@@ -10,8 +10,9 @@ const EventVersion = 1
 // Event.Seq is the agent computer's journal sequence (0 for events the Controller makes); Session and Turn are
 // empty for events outside a turn.
 type Event struct {
-	V             int    `json:"v"`
-	AgentComputer string `json:"agentComputer"`
+	V int `json:"v"`
+	// AgentComputer is empty only in journals written before it existed, and on fleet.changed.
+	AgentComputer string `json:"agentComputer,omitempty"`
 	// Computer is AgentComputer under its old name, for one release.
 	Computer string          `json:"computer"`
 	Session  string          `json:"session"`

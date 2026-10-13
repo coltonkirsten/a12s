@@ -201,7 +201,6 @@
   },
   "eventMinimal": {
     "v": 1,
-    "agentComputer": "agentComputer",
     "computer": "computer",
     "session": "session",
     "turn": "turn",
