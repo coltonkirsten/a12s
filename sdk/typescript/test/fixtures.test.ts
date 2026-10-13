@@ -3,7 +3,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 
-import { A12sClient, A12sError, Fleet } from "../src/index.js";
+import { Client } from "../src/client.js";
+import { A12sError, Fleet } from "../src/index.js";
 import * as fx from "./api-fixtures.gen.js";
 
 // The fixtures are rendered from the Go API types (internal/api/sdkfixtures_test.go); tsc checks them against
@@ -32,7 +33,7 @@ test("the client parses every Go-rendered API fixture", async () => {
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
-  const client = new A12sClient({ url, token: "t" });
+  const client = new Client({ url, token: "t" });
   const fleet = new Fleet({ url, token: "t" });
   try {
     assert.deepEqual(await client.status(), fx.statusResponse);

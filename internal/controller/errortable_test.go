@@ -27,7 +27,7 @@ func TestErrorTable(t *testing.T) {
 		}
 		return err.Error()
 	}
-	const head = "apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata: { name: lab }\ncomputers:\n  builder:\n    harness: { kind: codex, version: 0.154.0 }\n    image: slim\n"
+	const head = "apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata: { name: lab }\nagent_computers:\n  builder:\n    harness: { kind: codex, version: 0.154.0 }\n    image: slim\n"
 	apiErr := func(res *http.Response) string {
 		e := apiError(t, res)
 		if e.Fix == "" {
@@ -68,9 +68,9 @@ func TestErrorTable(t *testing.T) {
 			}
 			return err.Error()
 		}},
-		{"the old turns endpoint", func() string { return apiErr(h.api("POST", "/v1/computers/scout/turns", "{}")) }},
+		{"the old turns endpoint", func() string { return apiErr(h.api("POST", "/v1/agent-computers/scout/turns", "{}")) }},
 		{"a wrong bearer token", func() string {
-			return apiErr(h.api("GET", "/v1/computers/scout/inbox", "", "Authorization", "Bearer nope"))
+			return apiErr(h.api("GET", "/v1/agent-computers/scout/inbox", "", "Authorization", "Bearer nope"))
 		}},
 	}
 	for _, c := range cases {

@@ -90,91 +90,6 @@ export const statusResponse: T.StatusResponse = {
       }
     }
   ],
-  "computers": [
-    {
-      "name": "name",
-      "phase": "Ready",
-      "error": {
-        "reason": "reason",
-        "retryable": true
-      },
-      "waiting": {
-        "credentials": [
-          "credentials"
-        ],
-        "fix": "fix"
-      },
-      "resumePending": true,
-      "session": "session",
-      "activeTurn": "activeTurn",
-      "harness": {
-        "kind": "kind",
-        "version": "version",
-        "model": "model"
-      },
-      "image": "image",
-      "seccomp": "seccomp",
-      "autonomy": "autonomy",
-      "generation": 1,
-      "stagedGeneration": 1,
-      "credentialGeneration": 1,
-      "homeSize": "1",
-      "drives": [
-        "drives"
-      ],
-      "egressMode": "egressMode",
-      "warnings": [
-        "warnings"
-      ],
-      "inbox": {
-        "computer": "computer",
-        "held": true,
-        "holdReason": "holdReason",
-        "diagnostic": "diagnostic",
-        "pending": 1,
-        "claimed": 1,
-        "limits": {
-          "maxMessages": {
-            "value": 1,
-            "source": "source"
-          },
-          "maxBytes": {
-            "value": 1,
-            "source": "source"
-          }
-        },
-        "usage": {
-          "messages": 1,
-          "bytes": 1
-        },
-        "overLimit": true,
-        "ended24h": {
-          "expired": 1,
-          "replaced": 1,
-          "withdrawn": 1,
-          "discarded": 1
-        },
-        "orphaned": true,
-        "sessionOverride": "sessionOverride"
-      },
-      "inboxCleared": 1,
-      "power": {
-        "sleepAfterIdle": "sleepAfterIdle",
-        "wakeOnMessage": [
-          "wakeOnMessage"
-        ],
-        "maxWakesPerHour": 1,
-        "autoWake": "autoWake",
-        "reason": "reason",
-        "fix": "fix",
-        "wakesLastHour": 1,
-        "nextWakeAt": "2026-10-12T12:00:00Z",
-        "idleSince": "2026-10-12T12:00:00Z",
-        "sleptBy": "sleptBy",
-        "sleptAt": "2026-10-12T12:00:00Z"
-      }
-    }
-  ],
   "orphanedDrives": [
     {
       "name": "name",
@@ -275,19 +190,6 @@ export const statusResponseMinimal: T.StatusResponse = {
   "fleet": "fleet",
   "egressEnforcement": "egressEnforcement",
   "agentComputers": [
-    {
-      "name": "name",
-      "phase": "Ready",
-      "harness": {
-        "kind": "kind",
-        "version": "version"
-      },
-      "image": "image",
-      "autonomy": "autonomy",
-      "generation": 1
-    }
-  ],
-  "computers": [
     {
       "name": "name",
       "phase": "Ready",
@@ -1209,7 +1111,6 @@ export const tokenMinimal: T.Token = {
 export const event: T.EventEnvelope = {
   "v": 1,
   "agentComputer": "agentComputer",
-  "computer": "computer",
   "session": "session",
   "turn": "turn",
   "seq": 1,
@@ -1220,7 +1121,6 @@ export const event: T.EventEnvelope = {
 
 export const eventMinimal: T.EventEnvelope = {
   "v": 1,
-  "computer": "computer",
   "session": "session",
   "turn": "turn",
   "seq": 1,

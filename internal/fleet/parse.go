@@ -23,7 +23,6 @@ type rawFleet struct {
 	Defaults       yaml.Node            `yaml:"defaults"`
 	Drives         map[string]Drive     `yaml:"drives"`
 	AgentComputers map[string]yaml.Node `yaml:"agent_computers"`
-	Computers      map[string]yaml.Node `yaml:"computers"`
 	Services       map[string]yaml.Node `yaml:"services"`
 }
 
@@ -76,7 +75,7 @@ func Decode(data []byte) (*Fleet, error) {
 	return f, nil
 }
 
-// DecodeSpec decodes a Fleet file without merging defaults. It takes the old `computers` key for one release.
+// DecodeSpec decodes a Fleet file without merging defaults.
 func DecodeSpec(data []byte) (*Spec, error) {
 	var raw rawFleet
 	if err := decodeStrict(data, &raw); err != nil {
@@ -91,12 +90,6 @@ func DecodeSpec(data []byte) (*Spec, error) {
 		AgentComputers: map[string]json.RawMessage{},
 	}
 	nodes := raw.AgentComputers
-	if raw.Computers != nil {
-		if raw.AgentComputers != nil {
-			return nil, errors.New("parse fleet: both agent_computers and computers are set; rename computers to agent_computers")
-		}
-		nodes, s.LegacyKey = raw.Computers, true
-	}
 	var errs []error
 	if err := computerOnlyEgress("defaults", &raw.Defaults); err != nil {
 		errs = append(errs, err)

@@ -14,6 +14,8 @@ from conftest import FakeServer, Handler, Req, Res, ev
 
 import a12s
 from a12s import A12sError, A12sGapError, A12sStreamError
+from a12s._async import AsyncClient
+from a12s._client import Client
 from a12s._connect import _fleet_name
 
 Fake = Callable[[Handler], FakeServer]
@@ -99,7 +101,7 @@ def assert_no_grant(e: A12sError) -> None:
 
 
 def test_errors_carry_the_code_and_fix_line() -> None:
-    client = a12s.Client("http://x", "t", http=httpx.Client(transport=httpx.MockTransport(refuse)))
+    client = Client("http://x", "t", http=httpx.Client(transport=httpx.MockTransport(refuse)))
     with pytest.raises(A12sError) as e:
         client.send("lead", "x")
     assert_no_grant(e.value)
@@ -107,7 +109,7 @@ def test_errors_carry_the_code_and_fix_line() -> None:
 
 @pytest.mark.anyio
 async def test_async_errors_carry_the_code_and_fix_line() -> None:
-    client = a12s.AsyncClient("http://x", "t", http=httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    client = AsyncClient("http://x", "t", http=httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
     with pytest.raises(A12sError) as e:
         await client.send("lead", "x")
     assert_no_grant(e.value)
@@ -122,7 +124,7 @@ def gap_server(req: Req, res: Res) -> None:
 
 def assert_gap(gap: a12s.Event, nxt: a12s.Event) -> None:
     assert gap.type == "gap"
-    assert gap.computer == "lead"
+    assert gap.agent_computer == "lead"
     assert gap.data == {"lastEventId": "41", "head": 7, "after": 41}
     assert nxt.seq == 8
 
@@ -235,7 +237,7 @@ def broken_transport(_: httpx.Request) -> httpx.Response:
 
 
 def test_events_non_network_failure_is_raised() -> None:
-    client = a12s.Client("http://x", "t", http=httpx.Client(transport=httpx.MockTransport(broken_transport)))
+    client = Client("http://x", "t", http=httpx.Client(transport=httpx.MockTransport(broken_transport)))
     with pytest.raises(ValueError, match="bad transport"):
         collect(client.events("lead"), 1)
 
@@ -244,7 +246,7 @@ def test_events_non_network_failure_is_raised() -> None:
 async def test_async_events_non_network_failure_is_raised() -> None:
     http = httpx.AsyncClient(transport=httpx.MockTransport(broken_transport))
     with pytest.raises(ValueError, match="bad transport"):
-        await acollect(a12s.AsyncClient("http://x", "t", http=http).events("lead"), 1)
+        await acollect(AsyncClient("http://x", "t", http=http).events("lead"), 1)
 
 
 @pytest.fixture
@@ -258,45 +260,49 @@ def write_controller(home: Path, fleet: str, port: int) -> None:
     (home / ".a12s" / fleet / "controller.json").write_text(json.dumps({"port": port, "token": "tk"}))
 
 
+def fleet_url(**kw: Any) -> str:
+    with a12s.Fleet(**kw) as fleet:
+        return fleet.url
+
+
 @pytest.mark.usefixtures("clean_env")
-def test_connect_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fleet_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home, nowhere = tmp_path / "home", tmp_path / "cwd"
     home.mkdir()
     nowhere.mkdir()
     with pytest.raises(RuntimeError, match="no running Fleet found"):
-        a12s.connect(home=home, cwd=nowhere)
+        fleet_url(home=home, cwd=nowhere)
     write_controller(home, "proj", 52011)
-    assert a12s.connect(home=home, cwd=nowhere).url == "http://127.0.0.1:52011", "the only running Fleet"
+    assert fleet_url(home=home, cwd=nowhere) == "http://127.0.0.1:52011", "the only running Fleet"
     write_controller(home, "other", 52012)
     with pytest.raises(RuntimeError, match=r"several Fleets are running \(other, proj\)"):
-        a12s.connect(home=home, cwd=nowhere)
-    assert a12s.connect(home=home, fleet="other").url == "http://127.0.0.1:52012"
+        fleet_url(home=home, cwd=nowhere)
+    assert fleet_url(home=home, fleet="other") == "http://127.0.0.1:52012"
 
     project = nowhere / "app" / "src"
     project.mkdir(parents=True)
     (nowhere / "fleet.yaml").write_text("apiVersion: a12s.ai/v1alpha1\nkind: Fleet\nmetadata: { name: proj }\n")
-    assert a12s.connect(home=home, cwd=project).url == "http://127.0.0.1:52011", "nearest fleet.yaml upward"
+    assert fleet_url(home=home, cwd=project) == "http://127.0.0.1:52011", "nearest fleet.yaml upward"
     with pytest.raises(RuntimeError, match="Fleet nope isn't running"):
-        a12s.connect(home=home, fleet="nope")
-    assert a12s.connect(url="http://h:1/", token="x").url == "http://h:1"
+        fleet_url(home=home, fleet="nope")
+    assert fleet_url(url="http://h:1/", token="x") == "http://h:1"
 
     (tmp_path / "other.yaml").write_text("metadata:\n  name: other\n")
     monkeypatch.setenv("A12S_FLEET", "../other.yaml")
-    assert a12s.connect(home=home, cwd=nowhere).url == "http://127.0.0.1:52012", "$A12S_FLEET"
+    assert fleet_url(home=home, cwd=nowhere) == "http://127.0.0.1:52012", "$A12S_FLEET"
     monkeypatch.setenv("A12S_URL", "http://env:2")
     monkeypatch.setenv("A12S_TOKEN", "envtok")
-    assert a12s.connect(home=home).url == "http://env:2"
+    assert fleet_url(home=home) == "http://env:2"
 
 
 @pytest.mark.anyio
 @pytest.mark.usefixtures("clean_env")
-async def test_connect_async_discovery(tmp_path: Path) -> None:
+async def test_async_fleet_discovery(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="no running Fleet found"):
-        await a12s.connect_async(home=tmp_path, cwd=tmp_path)
+        a12s.AsyncFleet(home=tmp_path, cwd=tmp_path)
     write_controller(tmp_path, "proj", 52011)
-    client = await a12s.connect_async(home=tmp_path, cwd=tmp_path)
-    assert isinstance(client, a12s.AsyncClient)
-    assert client.url == "http://127.0.0.1:52011"
+    async with a12s.AsyncFleet(home=tmp_path, cwd=tmp_path) as fleet:
+        assert fleet.url == "http://127.0.0.1:52011"
 
 
 def test_fleet_name_reads_flow_and_block_metadata() -> None:
@@ -330,7 +336,7 @@ def test_events_merge_every_computer_and_turns_fold_them(fake: Fake) -> None:
         for t in turns:
             assert t.messages[0].via == "local"
             assert [x.name for x in t.tools] == ["mcp__a12s__send"]
-            got.append(f"{t.computer}:{t.status}:{t.text}")
+            got.append(f"{t.agent_computer}:{t.status}:{t.text}")
             if len(got) == 2:
                 break
     assert sorted(got) == ["lead:completed:hi from lead\nSENT", "w1:completed:hi from w1\nSENT"]
@@ -343,7 +349,7 @@ async def test_async_events_merge_every_computer_and_turns_fold_them(fake: Fake)
         async for t in turns:
             assert t.messages[0].via == "local"
             assert [x.name for x in t.tools] == ["mcp__a12s__send"]
-            got.append(f"{t.computer}:{t.status}:{t.text}")
+            got.append(f"{t.agent_computer}:{t.status}:{t.text}")
             if len(got) == 2:
                 break
     assert sorted(got) == ["lead:completed:hi from lead\nSENT", "w1:completed:hi from w1\nSENT"]
@@ -405,9 +411,9 @@ async def test_async_events_ready_raises_when_a_computer_does_not_exist(fake: Fa
 
 def test_events_turn_and_after_need_one_computer() -> None:
     with pytest.raises(TypeError):
-        a12s.Client("http://x").events(["a", "b"], after=1)
+        Client("http://x").events(["a", "b"], after=1)
     with pytest.raises(TypeError):
-        a12s.AsyncClient("http://x").events(None, turn="t")
+        AsyncClient("http://x").events(None, turn="t")
 
 
 def test_stop_defaults_to_the_active_turn() -> None:
@@ -420,7 +426,7 @@ def test_stop_defaults_to_the_active_turn() -> None:
         assert req.content == b"{}"
         return httpx.Response(204)
 
-    client = a12s.Client("http://x", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    client = Client("http://x", http=httpx.Client(transport=httpx.MockTransport(handler)))
     client.stop("lead")
     client.stop("idle")
     with pytest.raises(A12sError, match="not_found"):
@@ -430,7 +436,7 @@ def test_stop_defaults_to_the_active_turn() -> None:
 
 
 @pytest.mark.usefixtures("clean_env")
-def test_connect_with_a_token_keeps_the_discovered_url(tmp_path: Path) -> None:
+def test_discovery_with_a_token_keeps_the_discovered_url(tmp_path: Path) -> None:
     write_controller(tmp_path, "proj", 52011)
     url, token = a12s._connect._discover("proj", None, "a12st_prefix", tmp_path, tmp_path)
     assert (url, token) == ("http://127.0.0.1:52011", "a12st_prefix"), "a given token replaces only the owner token"

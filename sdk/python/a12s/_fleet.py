@@ -333,8 +333,10 @@ class Credentials:
 
 
 class Fleet:
-    """A running Fleet. It connects like ``connect()``: ``url`` and ``token``, else ``$A12S_URL`` and
-    ``$A12S_TOKEN``, else the nearest fleet.yaml's Fleet (or ``fleet=``), else the only running Controller.
+    """A running Fleet, found from the first of: ``url`` and ``token``, else ``$A12S_URL`` and ``$A12S_TOKEN``,
+    else the Fleet named by ``fleet=``, else the Fleet file in ``$A12S_FLEET`` or the nearest fleet.yaml in ``cwd``
+    or a parent, else the only running Controller. For the last three it reads ``<home>/.a12s/<fleet>/controller.json``
+    (written by ``a12s up``): its URL, and its owner token unless ``token`` is given.
 
     ``fleet.agent_computers``, ``fleet.services`` and ``fleet.tokens`` hand out objects; ``with a12s.Fleet() as
     fleet:`` closes it.

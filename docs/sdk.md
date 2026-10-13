@@ -207,7 +207,7 @@ for t in fleet.turns(["lead", "worker1"]):
     print(t.agent_computer, t.status, [m.via for m in t.messages], t.text)
 ```
 
-A Turn has `agentComputer` / `agent_computer` (`computer` is the same, for one release), `id`, `status`
+A Turn has `agentComputer` / `agent_computer`, `id`, `status`
 (`completed`, `failed` or `interrupted`), `text` (everything the agent said), `error`, `messages` (the Messages it
 delivered, each with `id`, `sender` and `via`), `tools` (each tool call with `name`, `input`, `output`, `isError` /
 `is_error`), `usage`, `tokens`, `startedAt` / `started_at` and `finishedAt` / `finished_at`. `error` is a string;
@@ -367,11 +367,11 @@ the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-
 ```ts
 import { Fleet } from "@coltonkirsten/a12s";
 const fleet = await Fleet.connect();                  // same origin, no token
-for await (const ev of fleet.events()) console.log(ev.computer, ev.type);
+for await (const ev of fleet.events()) console.log(ev.agentComputer, ev.type);
 ```
 
 The page may use `status`, `events`, `send` and `inbox` on every agent computer; narrow that with
-`--allow status,events` and `--computers lead,worker1`. Creating, changing and removing agent computers is
+`--allow status,events` and `--agent-computers lead,worker1`. Creating, changing and removing agent computers is
 owner-only, so a page can't. The gateway prints the scope in one line when it starts:
 `the page may read status, follow events, send Messages, read and manage inboxes, on every Computer`. Each gateway has its own token, `gateway-<port>`, so Messages
 from the page arrive `via` `token:gateway-7012`. It is revoked when the gateway stops; one left by a killed gateway is
@@ -388,7 +388,7 @@ Fleet: it logs people in, decides what each may do, and calls a12s with a scoped
 browser.
 
 ```sh
-a12s token create web --actions send,status --computers lead
+a12s token create web --actions send,status --agent-computers lead
 ```
 
 ```ts
@@ -416,9 +416,8 @@ way: in a browser, `Fleet.connect()` talks to the page's own origin.
 | AgentComputer | `sleep({ hold? })`, `wake({ clearInbox? })` | `sleep(hold=)`, `wake(clear_inbox=)` | Stop it and keep its disks, session and inbox; start it again. A sender listed in its wakeOnMessage wakes a plain sleep; `hold` keeps it asleep until `wake()`. |
 | AgentComputer | `hold({ reason? })`, `resume()` | `hold(reason=)`, `resume()` | Hold delivery (Messages still queue); release it. |
 
-`connect()` and the client it returns (`A12sClient` in TypeScript, `Client` and `AsyncClient` in Python), whose
-methods take the agent computer's name first (`a12s.send("hello", "…")`), still work for one release and are
-deprecated. In TypeScript the spec types are `AgentComputerSpec` and `FleetSpec`.
+In TypeScript the spec types are `AgentComputerSpec` and `FleetSpec`, and `fleet.client.request(method, path, body?)`
+calls a route that has no method here, with the Fleet's URL and token.
 
 ## Errors
 

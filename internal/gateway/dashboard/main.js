@@ -1,6 +1,6 @@
-import { connect } from "@coltonkirsten/a12s";
+import { Fleet } from "@coltonkirsten/a12s";
 
-const a12s = await connect();
+const fleet = await Fleet.connect();
 const $ = (id) => document.getElementById(id);
 const log = $("log");
 const open = new Map(); // computer/turn -> the element its text streams into
@@ -17,7 +17,7 @@ function line(computer, html, cls = "") {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 async function refresh() {
-  const st = await a12s.status();
+  const st = await fleet.status();
   $("fleet").textContent = st.fleet;
   $("computers").innerHTML = st.agentComputers.map((c) => `
     <div class="computer"><b>${esc(c.name)}</b><span class="phase">${esc(c.phase)}</span>
@@ -36,37 +36,37 @@ $("send").addEventListener("submit", async (e) => {
   if (!body) return;
   $("body").value = "";
   try {
-    await a12s.send($("to").value, { body, sender: "dashboard" });
+    await (await fleet.agentComputers.get($("to").value)).send(body, { sender: "dashboard" });
   } catch (err) {
     line($("to").value, esc(err.message), "err");
   }
 });
 
-for await (const ev of a12s.events()) {
-  const key = `${ev.computer}/${ev.turn}`;
+for await (const ev of fleet.events()) {
+  const key = `${ev.agentComputer}/${ev.turn}`;
   switch (ev.type) {
     case "turn.started": {
       const from = (ev.data.inbox?.messages ?? []).map((m) => m.via).join(", ");
-      line(ev.computer, `<span class="dim">turn started${from ? ` · from ${esc(from)}` : ""}</span>`);
+      line(ev.agentComputer, `<span class="dim">turn started${from ? ` · from ${esc(from)}` : ""}</span>`);
       break;
     }
     case "text.delta": {
       let el = open.get(key);
-      if (!el) open.set(key, (el = line(ev.computer, "").appendChild(document.createElement("span"))));
+      if (!el) open.set(key, (el = line(ev.agentComputer, "").appendChild(document.createElement("span"))));
       el.textContent += ev.data.text;
       break;
     }
     case "tool.started":
       open.delete(key);
-      line(ev.computer, `<span class="dim">→ ${esc(ev.data.name)}</span>`);
+      line(ev.agentComputer, `<span class="dim">→ ${esc(ev.data.name)}</span>`);
       break;
     case "turn.finished":
       open.delete(key);
-      line(ev.computer, `<span class="${ev.data.status === "completed" ? "dim" : "err"}">turn ${esc(ev.data.status)}${ev.data.error ? `: ${esc(ev.data.error)}` : ""}</span>`);
+      line(ev.agentComputer, `<span class="${ev.data.status === "completed" ? "dim" : "err"}">turn ${esc(ev.data.status)}${ev.data.error ? `: ${esc(ev.data.error)}` : ""}</span>`);
       break;
     case "resume.failed":
     case "gap":
-      line(ev.computer, `<span class="err">${esc(ev.type)} ${esc(JSON.stringify(ev.data))}</span>`);
+      line(ev.agentComputer, `<span class="err">${esc(ev.type)} ${esc(JSON.stringify(ev.data))}</span>`);
       break;
   }
 }

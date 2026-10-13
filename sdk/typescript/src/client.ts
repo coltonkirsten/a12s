@@ -22,7 +22,7 @@ import type {
   TurnInboxMessage,
 } from "./types.js";
 
-export interface A12sClientOptions {
+export interface ConnectOptions {
   /**
    * The Controller's API, e.g. http://127.0.0.1:52011. Default "": the page's own origin, which is what a browser
    * app served by `a12s gateway` uses.
@@ -112,17 +112,14 @@ export interface Reply extends Turn {
 
 const enc = encodeURIComponent;
 
-/**
- * @deprecated Use {@link Fleet}: `fleet.agentComputers.get(name)` returns an {@link AgentComputer} with these
- * methods. Kept for one release.
- */
-export class A12sClient {
+/** The HTTP transport behind {@link Fleet} and its handles; the package doesn't export it. */
+export class Client {
   readonly url: string;
   private readonly token?: string;
   private readonly fetchImpl: typeof fetch;
   private shared?: SharedEvents;
 
-  constructor(opts: A12sClientOptions = {}) {
+  constructor(opts: ConnectOptions = {}) {
     this.url = (opts.url ?? "").replace(/\/+$/, "");
     this.token = opts.token;
     this.fetchImpl = opts.fetch ?? ((...args) => fetch(...args));
@@ -132,7 +129,6 @@ export class A12sClient {
     return this.token ? { authorization: `Bearer ${this.token}`, ...extra } : extra;
   }
 
-  /** @internal */
   async request<T>(
     method: string,
     path: string,
@@ -196,7 +192,7 @@ export class A12sClient {
 
   /**
    * Live events of one Computer, several, or (no argument) every Computer in the Fleet, merged. Each event carries
-   * its `computer`. Reconnects after a network drop without losing or repeating events. Call `await stream.ready()`
+   * its `agentComputer`. Reconnects after a network drop without losing or repeating events. Call `await stream.ready()`
    * before sending work you want to see from the start; `close()` (or `break`) ends it.
    */
   events(computers?: string | string[], opts: EventsOptions = {}): EventStream {
@@ -397,7 +393,7 @@ export class A12sClient {
             const data: GapData = { ...(server && typeof server === "object" ? server : {}), after: cursor };
             cursor = undefined; // the stream goes live; a reconnect starts live too
             if (opts.onGap === "throw") throw new A12sGapError(data);
-            const gap: GapEvent = { v: 1, computer, session: "", turn: "", seq: 0, ts: new Date().toISOString(), type: "gap", data };
+            const gap: GapEvent = { v: 1, agentComputer: computer, session: "", turn: "", seq: 0, ts: new Date().toISOString(), type: "gap", data };
             yield gap;
             continue;
           }
@@ -558,7 +554,7 @@ class SharedEvents {
     }
     if (f.event === "gap") {
       const data: GapData = cursor !== undefined ? { lastEventId: cursor } : {};
-      const gap: GapEvent = { v: 1, computer: "", session: "", turn: "", seq: 0, ts: new Date().toISOString(), type: "gap", data };
+      const gap: GapEvent = { v: 1, session: "", turn: "", seq: 0, ts: new Date().toISOString(), type: "gap", data };
       for (const s of this.subs) {
         if (s.onGap === "throw") s.fail(new A12sGapError(data));
         else s.push(gap);
@@ -584,7 +580,7 @@ class SharedEvents {
 }
 
 function agentComputerOf(ev: A12sEvent): string {
-  return ev.agentComputer || ev.computer;
+  return ev.agentComputer ?? "";
 }
 
 function wanted(names: Set<string> | undefined, ev: A12sEvent): boolean {
@@ -796,7 +792,6 @@ class TurnBuilder {
         this.open.delete(key);
         return {
           agentComputer: name,
-          computer: name,
           id: ev.turn,
           session: ev.session,
           status: ev.data.status,

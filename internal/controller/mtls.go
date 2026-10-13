@@ -44,7 +44,7 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 			Message: fmt.Sprintf("%s may not call %s %s on the mTLS listener", p, r.Method, r.URL.Path),
 			Fix:     "the mTLS listener serves inbox sends (with a grant) and leases only; owner calls go to the owner API"})
 	})
-	return legacyPaths(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, entry, err := c.livePeer(r)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: err.Error(), Fix: "a certificate works only while its container runs; a12s injects a fresh one at every start"})
@@ -55,7 +55,7 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 		k := caller{principal: p.String(), token: &api.Token{Name: p.String(), Actions: []string{api.ActionSend}, Computers: entry.Send}}
 		ctx := context.WithValue(context.WithValue(r.Context(), peerKey{}, p), callerKey{}, k)
 		mux.ServeHTTP(w, r.WithContext(ctx))
-	}))
+	})
 }
 
 func (c *Controller) livePeer(r *http.Request) (Principal, inbox.CertEntry, error) {
@@ -100,7 +100,7 @@ func (c *Controller) granted(h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		field := "computers." + p.Name + ".grants.send"
+		field := "agent_computers." + p.Name + ".grants.send"
 		if p.Kind == KindService {
 			field = "services." + p.Name + ".grants.send"
 		}

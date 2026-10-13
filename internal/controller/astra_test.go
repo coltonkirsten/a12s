@@ -48,11 +48,11 @@ func TestCertificateRefusedWhileServiceIsDown(t *testing.T) {
 	leaf, _ := h.c.ca.ServiceCert("clock", 1)
 	ctx := context.Background()
 	_ = h.c.registerCert(ctx, Principal{Kind: KindService, Name: "clock", Generation: 1}, leaf.Serial, []string{"scout"})
-	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/scout/inbox", `{"body":"x"}`); code != 201 {
+	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != 201 {
 		t.Fatalf("live: %d", code)
 	}
 	h.c.setServicePhase("clock", api.PhaseError, &api.Failure{Reason: "down"})
-	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/scout/inbox", `{"body":"x"}`); code != 403 {
+	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != 403 {
 		t.Fatalf("down: %d", code)
 	}
 }
@@ -111,13 +111,13 @@ func TestRevocationHoldsWhenTheRegistryWriteFails(t *testing.T) {
 	if err := h.c.inbox.RegisterCert(ctx, inbox.CertEntry{Principal: p.String(), Generation: 1, Serial: leaf.Serial, Send: []string{"scout"}}); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/scout/inbox", `{"body":"x"}`); code != http.StatusForbidden {
+	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != http.StatusForbidden {
 		t.Fatalf("revoked, registry write failed: %d", code)
 	}
 	if err := h.c.registerCert(ctx, p, leaf.Serial, []string{"scout"}); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/scout/inbox", `{"body":"x"}`); code != http.StatusCreated {
+	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != http.StatusCreated {
 		t.Fatalf("after a fresh start: %d", code)
 	}
 }

@@ -16,7 +16,7 @@ test('journal appends with increasing seq, filters by turn, and survives reopen'
   j.append('turn.finished', { status: 'completed', usage: null }, { turn: 't_1', session: 's1' });
   assert.deepEqual([a.seq, b.seq, c.seq], [1, 2, 3]);
   assert.deepEqual(seen, [1, 2, 3, 4]);
-  assert.deepEqual(b, { v: 1, agentComputer: 'scout', computer: 'scout', session: 's1', turn: 't_1', seq: 2, ts: b.ts, type: 'turn.started', data: { resumed: false } });
+  assert.deepEqual(b, { v: 1, agentComputer: 'scout', session: 's1', turn: 't_1', seq: 2, ts: b.ts, type: 'turn.started', data: { resumed: false } });
   assert.deepEqual(j.after(0, 't_1', 10).map((e) => e.type), ['turn.started', 'text.delta', 'turn.finished']);
   assert.deepEqual(j.after(2, null, 1).map((e) => e.seq), [3]);
   assert.deepEqual(j.findRequest('r1'), { turnId: 't_1', bodyHash: 'h1' });

@@ -336,8 +336,7 @@ class AsyncCredentials:
 
 
 class AsyncFleet:
-    """A running AsyncFleet. It connects like ``connect()``: ``url`` and ``token``, else ``$A12S_URL`` and
-    ``$A12S_TOKEN``, else the nearest fleet.yaml's AsyncFleet (or ``fleet=``), else the only running Controller.
+    """A running Fleet, for asyncio, found like :class:`Fleet` finds it.
 
     ``fleet.agent_computers``, ``fleet.services`` and ``fleet.tokens`` hand out objects; ``async with a12s.AsyncFleet() as
     fleet:`` closes it.

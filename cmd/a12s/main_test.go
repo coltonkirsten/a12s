@@ -150,9 +150,9 @@ func TestSendWaitEndToEnd(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(api.EnqueueResponse{ID: "m_1", Seq: 1, State: api.MsgPending, Position: 0, Phase: api.PhaseBusy})
 		case r.Method == "GET" && r.URL.Path == "/v1/agent-computers/scout/inbox/m_1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
-			snap, _ := json.Marshal(api.Event{V: 1, Computer: "scout", Seq: 1, Type: "snapshot", Data: json.RawMessage(`{"message":{"id":"m_1","state":"pending"},"held":false}`)})
+			snap, _ := json.Marshal(api.Event{V: 1, AgentComputer: "scout", Seq: 1, Type: "snapshot", Data: json.RawMessage(`{"message":{"id":"m_1","state":"pending"},"held":false}`)})
 			fmt.Fprintf(w, "id: 1\ndata: %s\n\n", snap)
-			del, _ := json.Marshal(api.Event{V: 1, Computer: "scout", Seq: 3, Type: "delivered", Data: json.RawMessage(`{"turn":"t_7","batch":"b_1"}`)})
+			del, _ := json.Marshal(api.Event{V: 1, AgentComputer: "scout", Seq: 3, Type: "delivered", Data: json.RawMessage(`{"turn":"t_7","batch":"b_1"}`)})
 			fmt.Fprintf(w, "id: 3\ndata: %s\n\n", del)
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
@@ -162,7 +162,7 @@ func TestSendWaitEndToEnd(t *testing.T) {
 			n := conns
 			mu.Unlock()
 			send := func(seq int64, typ api.EventType, data string) {
-				b, _ := json.Marshal(api.Event{V: 1, Computer: "scout", Turn: "t_7", Seq: seq, Type: typ, Data: json.RawMessage(data)})
+				b, _ := json.Marshal(api.Event{V: 1, AgentComputer: "scout", Turn: "t_7", Seq: seq, Type: typ, Data: json.RawMessage(data)})
 				fmt.Fprintf(w, "id: %d\ndata: %s\n\n", seq, b)
 				w.(http.Flusher).Flush()
 			}
@@ -275,7 +275,7 @@ func TestStaleGatewayTokensSparesLiveSiblings(t *testing.T) {
 
 func TestPageMaySaysTheScopeInOneLine(t *testing.T) {
 	got := pageMay(api.Token{Name: "gateway-7012", Actions: []string{"status", "send"}, Computers: []string{"lead", "worker1"}})
-	want := "the page may read status, send Messages, on agent computers lead, worker1 (token:gateway-7012; change with --allow, --computers)"
+	want := "the page may read status, send Messages, on agent computers lead, worker1 (token:gateway-7012; change with --allow, --agent-computers)"
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

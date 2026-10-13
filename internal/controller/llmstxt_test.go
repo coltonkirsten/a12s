@@ -25,7 +25,7 @@ var (
 )
 
 // TestLLMsTxtSurface keeps llms.txt's list of routes and SDK methods equal to the code: the routes registered in
-// Handler, A12sClient's public methods and the Python Client's.
+// Handler and the public methods of both SDKs' Fleet objects.
 func TestLLMsTxtSurface(t *testing.T) {
 	want := surfaceBeg + apiSurface(t) + surfaceEnd
 	b, err := os.ReadFile(llmsTxt)
@@ -84,8 +84,6 @@ func apiSurface(t *testing.T) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\nDeprecated one release (name-first): TypeScript A12sClient " + strings.Join(methods(t, "../../sdk/typescript/src/client.ts", "export class A12sClient {", "\n}\n", tsMethodRE), ", ") +
-		"; Python Client " + strings.Join(methods(t, "../../sdk/python/a12s/_client.py", "\nclass Client:", "\nclass ", pyMethodRE), ", ") + "\n")
 	return b.String()
 }
 
@@ -101,8 +99,8 @@ func methods(t *testing.T, path, start, end string, re *regexp.Regexp) []string 
 	}
 	var out []string
 	for _, m := range re.FindAllStringSubmatch(body, -1) {
-		// Overloads repeat a name; sharedEvents and reply are the TypeScript client's internal hooks for Fleet.
-		if m[1] != "constructor" && m[1] != "sharedEvents" && m[1] != "reply" && !slices.Contains(out, m[1]) {
+		// Overloads repeat a name.
+		if m[1] != "constructor" && !slices.Contains(out, m[1]) {
 			out = append(out, m[1])
 		}
 	}

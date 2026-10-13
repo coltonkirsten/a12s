@@ -164,9 +164,7 @@ type StatusResponse struct {
 	// EgressEnforcement is "enforced" or "unenforced".
 	EgressEnforcement string           `json:"egressEnforcement"`
 	AgentComputers    []ComputerStatus `json:"agentComputers"`
-	// Computers is AgentComputers under its old name, for one release.
-	Computers      []ComputerStatus `json:"computers"`
-	OrphanedDrives []DriveRow       `json:"orphanedDrives,omitempty"`
+	OrphanedDrives    []DriveRow       `json:"orphanedDrives,omitempty"`
 	// CredentialsLoaded is false after a memory-only Controller restarted,
 	// until `a12s up` or `a12s wake` sends credentials again.
 	CredentialsLoaded bool            `json:"credentialsLoaded"`

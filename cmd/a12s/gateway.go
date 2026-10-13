@@ -29,7 +29,7 @@ func runGateway(g *globals, args []string) error {
 	dev := flags.String("dev", "", "URL of a running dev server to proxy everything but /v1/ to")
 	devPort := flags.Int("dev-port", 0, "the port of the dev server started after --, when it doesn't print its URL")
 	allow := flags.String("allow", "status,events,send,inbox", "API actions the page may use ("+strings.Join(api.TokenActions, ",")+")")
-	computers := flags.String("computers", "*", "agent computers the page may reach, comma-separated")
+	computers := flags.String("agent-computers", "*", "agent computers the page may reach, comma-separated")
 	noOpen := flags.Bool("no-open", false, "don't open the browser")
 	pos, err := parse(flags, args)
 	if err != nil {
@@ -82,7 +82,7 @@ func runGateway(g *globals, args []string) error {
 		return fmt.Errorf("%w (pick another with --port)", err)
 	}
 
-	// The page gets a scoped token of its own, never the owner's: the Controller enforces --allow and --computers.
+	// The page gets a scoped token of its own, never the owner's: the Controller enforces --allow and --agent-computers.
 	// One per gateway, named for its port, so gateways on the same Fleet never revoke each other's.
 	tokenName := gatewayTokenPrefix + strconv.Itoa(*port)
 	var existing api.TokensResponse
@@ -166,7 +166,7 @@ func pageMay(tok api.Token) string {
 	if len(tok.Computers) != 1 || tok.Computers[0] != "*" {
 		on = "agent computers " + strings.Join(tok.Computers, ", ")
 	}
-	return fmt.Sprintf("the page may %s, on %s (token:%s; change with --allow, --computers)", strings.Join(can, ", "), on, tok.Name)
+	return fmt.Sprintf("the page may %s, on %s (token:%s; change with --allow, --agent-computers)", strings.Join(can, ", "), on, tok.Name)
 }
 
 const gatewayTokenPrefix = "gateway-"

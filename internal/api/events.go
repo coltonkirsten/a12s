@@ -11,16 +11,14 @@ const EventVersion = 1
 // empty for events outside a turn.
 type Event struct {
 	V int `json:"v"`
-	// AgentComputer is empty only in journals written before it existed, and on fleet.changed.
-	AgentComputer string `json:"agentComputer,omitempty"`
-	// Computer is AgentComputer under its old name, for one release.
-	Computer string          `json:"computer"`
-	Session  string          `json:"session"`
-	Turn     string          `json:"turn"`
-	Seq      int64           `json:"seq"`
-	TS       time.Time       `json:"ts"`
-	Type     EventType       `json:"type"`
-	Data     json.RawMessage `json:"data,omitempty"`
+	// AgentComputer is empty on fleet.changed and service.phase.
+	AgentComputer string          `json:"agentComputer,omitempty"`
+	Session       string          `json:"session"`
+	Turn          string          `json:"turn"`
+	Seq           int64           `json:"seq"`
+	TS            time.Time       `json:"ts"`
+	Type          EventType       `json:"type"`
+	Data          json.RawMessage `json:"data,omitempty"`
 }
 
 type EventType string

@@ -152,7 +152,6 @@ class Status:
     fleet: str
     egress_enforcement: str
     agent_computers: list[ComputerStatus]
-    computers: list[ComputerStatus]  # agent_computers under its old name, for one release
     orphaned_drives: list[DriveRow] | None = None
     credentials_loaded: bool
     warnings: list[str] | None = None
@@ -224,7 +223,6 @@ class Event:
 
     v: int
     agent_computer: str | None = None
-    computer: str  # agent_computer under its old name, for one release
     session: str
     turn: str
     seq: int
@@ -276,7 +274,6 @@ class Turn:
     """
 
     agent_computer: str
-    computer: str = ""  # agent_computer under its old name, for one release
     id: str
     session: str
     status: str

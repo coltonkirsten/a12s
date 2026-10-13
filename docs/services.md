@@ -192,11 +192,11 @@ CMD ["/usr/local/bin/clock"]
 `docker build -t my-org/clock:1 .`, then use it as in the example at the top of this page. A Service in another
 language does the same with the files and variables in [What a Service gets](#what-a-service-gets): it sends with
 `POST $A12S_API/v1/agent-computers/{c}/inbox` (the body of [Sending a Message](api.md#sending-a-message)) and reads
-back with `GET …/inbox/{id}`, presenting the certificate in `/run/a12s/tls/`. The mTLS listener still answers the
-`/v1/computers/...` paths of earlier svckit releases for one release.
+back with `GET …/inbox/{id}`, presenting the certificate in `/run/a12s/tls/`.
 
 Complete Services to copy from are in the v0.2.1 source:
 [cron, a GitHub webhook bridge, an MCP bridge (stdio MCP server over HTTP) and a Postgres MCP server](https://github.com/coltonkirsten/a12s/tree/v0.2.1/services).
-Their images stay published as `ghcr.io/coltonkirsten/a12s/svc-<name>:0.2.1` and run like any other Service image;
+Their images stay published as `ghcr.io/coltonkirsten/a12s/svc-<name>:0.2.1`, but their svckit sends on
+`/v1/computers/...`, which the Controller no longer serves: rebuild them with the current svckit to send Messages;
 [the v0.2.1 Services page](https://github.com/coltonkirsten/a12s/blob/v0.2.1/docs/services.md#the-reference-services)
 lists their config.

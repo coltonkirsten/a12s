@@ -7,6 +7,8 @@ src=$(mktemp -d)
 trap 'rm -rf "$src"' EXIT
 git -C "$REPO" archive v0.2.1 go.mod go.sum services | tar -x -C "$src"
 cd "$src"
+# v0.2.1's svckit sends on /v1/computers/..., a path the Controller no longer serves.
+perl -pi -e 's#"/v1/computers/"#"/v1/agent-computers/"#g' services/svckit/svckit.go
 for s in svc-cron svc-webhook; do docker build -q -f services/go.Dockerfile --build-arg SERVICE=$s -t a12s/$s:0.1 .; done
 docker build -q -f services/svc-mcp/Dockerfile -t a12s/svc-mcp:0.1 .
 docker build -q -f services/svc-mcp/postgres.Dockerfile --build-arg SVC_MCP_IMAGE=a12s/svc-mcp:0.1 -t a12s/svc-mcp-postgres:0.1 services/svc-mcp

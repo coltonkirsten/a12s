@@ -108,8 +108,7 @@ Every event goes to an append-only SQLite journal on the agent computer's home d
 cannot open, so an agent can't read, edit or erase its own record. `a12s logs <name>` replays it; reconnecting with
 `Last-Event-ID` resumes without losing or duplicating events.
 
-Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type, data}` (`computer` is
-`agentComputer` under its old name, for one release). Types:
+Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type, data}`. Types:
 
 | Type | `data` |
 |---|---|

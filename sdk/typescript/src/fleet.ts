@@ -1,8 +1,8 @@
 // Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run dashboard` bundles it for the browser).
 import {
-  A12sClient,
   A12sError,
-  type A12sClientOptions,
+  Client,
+  type ConnectOptions,
   type EventsOptions,
   TurnStream,
   type EventStream,
@@ -60,27 +60,29 @@ export interface CreateOptions {
  * ```
  */
 export class Fleet {
-  /** The lower-level client the handles use, for API calls that have no method here. */
-  readonly client: A12sClient;
+  /** For API calls that have no method here: `request(method, path, body?, { headers, signal })`. */
+  readonly client: Pick<Client, "url" | "request">;
   readonly agentComputers: AgentComputers;
   readonly services: Services;
   readonly tokens: Tokens;
   readonly credentials: Credentials;
+  private readonly transport: Client;
 
   /** No discovery: `url` and `token` as given, by default the page's own origin. */
-  constructor(opts: A12sClientOptions = {}) {
-    this.client = new A12sClient(opts);
-    this.agentComputers = new AgentComputers(this.client);
-    this.services = new Services(this.client);
-    this.tokens = new Tokens(this.client);
-    this.credentials = new Credentials(this.client);
+  constructor(opts: ConnectOptions = {}) {
+    this.client = this.transport = new Client(opts);
+    this.agentComputers = new AgentComputers(this.transport);
+    this.services = new Services(this.transport);
+    this.tokens = new Tokens(this.transport);
+    this.credentials = new Credentials(this.transport);
   }
 
   /**
    * In a browser: the Fleet behind the page's own origin, which is `a12s gateway` serving the page (no token
-   * needed). In Node: found like {@link connect} finds it. Pass `url` and `token` to reach anything else.
+   * needed). In Node: a running Fleet found from the files `a12s up` writes. Pass `url` and `token` to reach anything
+   * else.
    */
-  static async connect(opts: A12sClientOptions = {}): Promise<Fleet> {
+  static async connect(opts: ConnectOptions = {}): Promise<Fleet> {
     return new Fleet(opts);
   }
 
@@ -123,18 +125,18 @@ export class Fleet {
    * `turn` or `after` (one agent computer) replays from its journal instead.
    */
   events(agentComputers?: string | string[], opts: EventsOptions = {}): EventStream {
-    if (opts.turn !== undefined || opts.after !== undefined) return this.client.events(agentComputers, opts);
-    return this.client.sharedEvents(namesOf(agentComputers), opts);
+    if (opts.turn !== undefined || opts.after !== undefined) return this.transport.events(agentComputers, opts);
+    return this.transport.sharedEvents(namesOf(agentComputers), opts);
   }
 
   /** Finished Turns of the named agent computers, or all of them, as they end. */
   turns(agentComputers?: string | string[], opts: SharedEventsOptions = {}): TurnStream {
-    return new TurnStream(this.client.sharedEvents(namesOf(agentComputers), opts));
+    return new TurnStream(this.transport.sharedEvents(namesOf(agentComputers), opts));
   }
 
   /** Every agent computer and Service: phase, session, active Turn, inbox, power. */
   status(): Promise<StatusResponse> {
-    return this.client.status();
+    return this.transport.status();
   }
 }
 
@@ -151,7 +153,7 @@ function writeHeaders(opts: CreateOptions): Record<string, string> {
 }
 
 export class AgentComputers {
-  constructor(private readonly client: A12sClient) {}
+  constructor(private readonly client: Client) {}
 
   /**
    * Adds an agent computer to the Fleet and starts it. One that names a credential with no value yet resolves at once,
@@ -187,7 +189,7 @@ export class AgentComputer {
   status!: ComputerStatus;
 
   constructor(
-    private readonly client: A12sClient,
+    private readonly client: Client,
     data: AgentComputerData,
   ) {
     this.name = data.name;
@@ -335,7 +337,7 @@ export class Sending implements Promise<SentMessage> {
 }
 
 export class Services {
-  constructor(private readonly client: A12sClient) {}
+  constructor(private readonly client: Client) {}
 
   /** Adds a Service to the Fleet. Fails with code `exists` if the name is taken. */
   async create(name: string, spec: Record<string, unknown> & CreateOptions = {}): Promise<Service> {
@@ -363,7 +365,7 @@ export class Service {
   status: ServiceStatus;
 
   constructor(
-    private readonly client: A12sClient,
+    private readonly client: Client,
     status: ServiceStatus,
   ) {
     this.name = status.name;
@@ -413,7 +415,7 @@ export class Service {
 }
 
 export class Tokens {
-  constructor(private readonly client: A12sClient) {}
+  constructor(private readonly client: Client) {}
 
   /**
    * A token for another program; owner only. The secret is in the result once. With `prefix` it may do everything
@@ -437,7 +439,7 @@ export class Tokens {
 
 /** Credentials by name: set once, then name them in a spec's `credentials`. Values are never read back. */
 export class Credentials {
-  constructor(private readonly client: A12sClient) {}
+  constructor(private readonly client: Client) {}
 
   /** Stores the value on the Controller; agent computers that use it get the new value at once. */
   set(name: string, value: string): Promise<CredentialInfo> {

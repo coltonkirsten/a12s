@@ -53,7 +53,7 @@ defaults:
   resources: { cpu: 1, memory: 2Gi }
   harness: { kind: codex, version: 0.154.0 }
   image: slim
-computers:
+agent_computers:
   c:
     resources: { memory: 4Gi }
     harness: { model: gpt-6-astra }
@@ -73,7 +73,7 @@ defaults:
   image: slim
   credentials: [openai]
   egress: { allow: [a.example.com, b.example.com] }
-computers:
+agent_computers:
   c:
     credentials: [github]
     egress: { allow: [c.example.com] }
@@ -93,7 +93,7 @@ defaults:
   harness: { kind: codex, version: 0.154.0 }
   image: slim
   egress: { allow: [a.example.com] }
-computers:
+agent_computers:
   c: { egress: { allow: [] } }
 `,
 			want: Computer{
@@ -110,7 +110,7 @@ defaults:
   harness: { kind: claude-code, version: 1.10 }
   image: slim
   autonomy: full
-computers:
+agent_computers:
   c: { autonomy: restricted, image: me/agent:1 }
 `,
 			want: Computer{
@@ -126,7 +126,7 @@ defaults:
   harness: { kind: codex, version: "1" }
   image: slim
   resources: { cpu: 500m }
-computers:
+agent_computers:
   c:
 `,
 			want: Computer{
@@ -152,7 +152,7 @@ computers:
 
 func TestValidate(t *testing.T) {
 	const c = `
-computers:
+agent_computers:
   c:
     harness: { kind: codex, version: 0.154.0 }
     image: slim
@@ -238,7 +238,7 @@ func TestValidateReportsAllErrors(t *testing.T) {
 	_, err := Parse([]byte(`apiVersion: v0
 kind: Fleet
 metadata: { name: t }
-computers:
+agent_computers:
   c: { harness: { kind: x, version: "1" }, image: slim, autonomy: none }
 `))
 	if err == nil {
@@ -333,12 +333,12 @@ func TestSecurityAndRemovedBrowserTier(t *testing.T) {
 		"image: browser": "no longer part of a12s",
 		"image: slim\n    security: { seccomp: /etc/x.json }": "must be a path relative to the Fleet file",
 	} {
-		_, err := Parse([]byte(base + "computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    " + yaml + "\n"))
+		_, err := Parse([]byte(base + "agent_computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    " + yaml + "\n"))
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", yaml, err, want)
 		}
 	}
-	f, err := Parse([]byte(base + "defaults:\n  security: { seccomp: ./profiles/chromium.json }\ncomputers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    image: me/agent:1\n"))
+	f, err := Parse([]byte(base + "defaults:\n  security: { seccomp: ./profiles/chromium.json }\nagent_computers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    image: me/agent:1\n"))
 	if err != nil || f.Computers["c"].Security.Seccomp.Path != "./profiles/chromium.json" {
 		t.Fatalf("security from defaults: %v %+v", err, f)
 	}

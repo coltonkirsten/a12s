@@ -24,7 +24,7 @@ func (h *harness) send(computer, body string, extra ...string) api.EnqueueRespon
 	for _, e := range extra {
 		fields += "," + e
 	}
-	res := h.api("POST", "/v1/computers/"+computer+"/inbox", "{"+fields+"}")
+	res := h.api("POST", "/v1/agent-computers/"+computer+"/inbox", "{"+fields+"}")
 	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
 		h.t.Fatalf("send %s: %d %+v", body, res.StatusCode, apiError(h.t, res))
 	}
@@ -35,7 +35,7 @@ func jsonString(s string) string { b, _ := json.Marshal(s); return string(b) }
 
 func (h *harness) message(computer, id string) api.Message {
 	h.t.Helper()
-	return decodeBody[api.Message](h.t, h.api("GET", "/v1/computers/"+computer+"/inbox/"+id, ""))
+	return decodeBody[api.Message](h.t, h.api("GET", "/v1/agent-computers/"+computer+"/inbox/"+id, ""))
 }
 
 func (h *harness) waitMessage(computer, id, state string) api.Message {
@@ -138,7 +138,7 @@ func TestResumeFailureHolds(t *testing.T) {
 	builder.set(func(f *fakeComputerd) { f.resumeFail = true })
 	m := h.send("builder", "work")
 	waitFor(t, func() bool {
-		s := decodeBody[api.InboxSummary](t, h.api("GET", "/v1/computers/builder/inbox", ""))
+		s := decodeBody[api.InboxSummary](t, h.api("GET", "/v1/agent-computers/builder/inbox", ""))
 		return s.Held && s.HoldReason == api.HoldResumeFailed
 	})
 	builder.set(func(f *fakeComputerd) { f.resumeFail = false })
@@ -150,7 +150,7 @@ func TestResumeFailureHolds(t *testing.T) {
 	if n := len(builder.requestsSnapshot()); n != 1 {
 		t.Fatalf("delivered while held: %d", n)
 	}
-	h.api("POST", "/v1/computers/builder/inbox/resume", `{"session":"new"}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/builder/inbox/resume", `{"session":"new"}`).Body.Close()
 	waitFor(t, func() bool { return len(builder.requestsSnapshot()) == 2 })
 	if r := builder.requestsSnapshot()[1]; r.Session != api.SessionNew || len(r.Inbox.Messages) != 2 {
 		t.Fatalf("after resume --new %+v", r)
@@ -196,32 +196,32 @@ func TestContinuationRunsBeforeBatch(t *testing.T) {
 func TestNowOrNever(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, func(f *fleet.Fleet) {}), false)
-	res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"now","expires":0}`)
+	res := h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"now","expires":0}`)
 	m := decodeBody[api.EnqueueResponse](t, res)
 	if res.StatusCode != http.StatusCreated || m.Turn != "t_1" || m.Batch == "" {
 		t.Fatalf("idle = %d %+v", res.StatusCode, m)
 	}
 	h.waitPhase("builder", api.PhaseBusy)
-	res = h.api("POST", "/v1/computers/builder/inbox", `{"body":"now","expires":0}`)
+	res = h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"now","expires":0}`)
 	if e := apiError(t, res); res.StatusCode != http.StatusConflict || e.Details["reason"] != "busy" {
 		t.Fatalf("busy = %d %+v", res.StatusCode, e)
 	}
-	l := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/computers/builder/inbox?state=all", ""))
+	l := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/agent-computers/builder/inbox?state=all", ""))
 	if len(l.Messages) != 1 {
 		t.Fatalf("a refused now-or-never stored a row: %d", len(l.Messages))
 	}
 	h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep})
-	if e := apiError(t, h.api("POST", "/v1/computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
+	if e := apiError(t, h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
 		t.Fatalf("asleep %+v", e)
 	}
-	h.api("POST", "/v1/computers/reviewer/inbox/hold", `{}`).Body.Close()
-	if e := apiError(t, h.api("POST", "/v1/computers/reviewer/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "held" {
+	h.api("POST", "/v1/agent-computers/reviewer/inbox/hold", `{}`).Body.Close()
+	if e := apiError(t, h.api("POST", "/v1/agent-computers/reviewer/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "held" {
 		t.Fatalf("held %+v", e)
 	}
 	// computerd answers 409: the row existed, so it is kept, expired.
 	tester := h.cds.get("tester")
 	tester.set(func(f *fakeComputerd) { f.conflictNext = true })
-	res = h.api("POST", "/v1/computers/tester/inbox", `{"body":"now","expires":0}`)
+	res = h.api("POST", "/v1/agent-computers/tester/inbox", `{"body":"now","expires":0}`)
 	e := apiError(t, res)
 	if res.StatusCode != http.StatusConflict || e.Details["reason"] != "busy" || e.Details["id"] == "" {
 		t.Fatalf("raced = %d %+v", res.StatusCode, e)
@@ -283,7 +283,7 @@ func TestDeliveryRace(t *testing.T) {
 			for j := range each {
 				body := fmt.Sprintf(`{"body":"m %d %d","sender":"client-%d"}`, i, j, i)
 				for {
-					req, _ := http.NewRequest("POST", srv.URL+"/v1/computers/builder/inbox", strings.NewReader(body))
+					req, _ := http.NewRequest("POST", srv.URL+"/v1/agent-computers/builder/inbox", strings.NewReader(body))
 					req.Header.Set("Authorization", "Bearer test-token-0123456789")
 					res, err := http.DefaultClient.Do(req)
 					if err != nil {
@@ -307,7 +307,7 @@ func TestDeliveryRace(t *testing.T) {
 	}
 	wg.Wait()
 	waitFor(t, func() bool {
-		s := decodeBody[api.InboxSummary](t, h.api("GET", "/v1/computers/builder/inbox", ""))
+		s := decodeBody[api.InboxSummary](t, h.api("GET", "/v1/agent-computers/builder/inbox", ""))
 		return s.Pending == 0 && s.Claimed == 0
 	})
 	seen := map[string]int{}
@@ -363,7 +363,7 @@ func TestMessageStream(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), true)
 	m := h.send("builder", "x")
-	res := h.api("GET", "/v1/computers/builder/inbox/"+m.ID+"/events", "")
+	res := h.api("GET", "/v1/agent-computers/builder/inbox/"+m.ID+"/events", "")
 	r := bufio.NewReader(res.Body)
 	defer res.Body.Close()
 	next := func() api.Event {

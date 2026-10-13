@@ -105,7 +105,7 @@ func (h *hub) id(n int64) string { return h.boot + "-" + strconv.FormatInt(n, 10
 // publishControllerEvent journals nothing: these events exist on the fleet-wide stream only.
 func (c *Controller) publishControllerEvent(name string, typ api.EventType, data any, names []string, changed *api.FleetChangedData) {
 	d, _ := json.Marshal(data)
-	ev, _ := json.Marshal(api.Event{V: api.EventVersion, AgentComputer: name, Computer: name, TS: time.Now().UTC(), Type: typ, Data: d})
+	ev, _ := json.Marshal(api.Event{V: api.EventVersion, AgentComputer: name, TS: time.Now().UTC(), Type: typ, Data: d})
 	c.hub.publish(hubEvent{name: name, names: names, changed: changed, data: ev})
 }
 
@@ -131,11 +131,7 @@ func eventData(name string, data []byte) []byte {
 func (c *Controller) handleFleetEvents(w http.ResponseWriter, r *http.Request) {
 	k := callerOf(r)
 	var only []string
-	q := r.URL.Query().Get("agentComputers")
-	if q == "" {
-		q = r.URL.Query().Get("computers")
-	}
-	for _, n := range strings.Split(q, ",") {
+	for _, n := range strings.Split(r.URL.Query().Get("agentComputers"), ",") {
 		if n = strings.TrimSpace(n); n != "" {
 			only = append(only, n)
 		}

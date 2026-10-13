@@ -77,7 +77,7 @@ func TestPrefixTokenCannotLeaveItsLane(t *testing.T) {
 
 	// Renaming out of the prefix: there is no rename, so it is a create outside, by the new or the old path.
 	wantOutOfPrefix(t, "create sales", biz("PUT", "/v1/agent-computers/sales", bizSpec+"}"))
-	wantOutOfPrefix(t, "create sales (old path)", biz("PUT", "/v1/computers/sales", bizSpec+"}"))
+	wantOutOfPrefix(t, "create sales (old path)", biz("PUT", "/v1/agent-computers/sales", bizSpec+"}"))
 	wantOutOfPrefix(t, "create a dry run outside", biz("PUT", "/v1/agent-computers/sales?dryRun=true", bizSpec+"}"))
 	wantOutOfPrefix(t, "patch scout", biz("PATCH", "/v1/agent-computers/scout", `{"instructions":"mine now"}`))
 	wantOutOfPrefix(t, "delete scout", biz("DELETE", "/v1/agent-computers/scout", ""))
@@ -135,7 +135,7 @@ func TestPrefixTokenReadsOnlyItsLane(t *testing.T) {
 		t.Fatalf("create = %d", r.StatusCode)
 	}
 	st := decodeBody[api.StatusResponse](t, biz("GET", "/v1/status", ""))
-	if len(st.AgentComputers) != 1 || st.AgentComputers[0].Name != "biz-a" || len(st.Computers) != 1 || len(st.Warnings) != 0 || len(st.OrphanedDrives) != 0 {
+	if len(st.AgentComputers) != 1 || st.AgentComputers[0].Name != "biz-a" || len(st.Warnings) != 0 || len(st.OrphanedDrives) != 0 {
 		t.Fatalf("status = %+v", st)
 	}
 	list := decodeBody[api.AgentComputersResponse](t, biz("GET", "/v1/agent-computers", ""))

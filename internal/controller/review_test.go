@@ -24,7 +24,7 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 
 	turn := make(chan int, 1)
 	go func() {
-		res := h.api("POST", "/v1/computers/scout/inbox", `{"body":"work"}`)
+		res := h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"work"}`)
 		res.Body.Close()
 		turn <- res.StatusCode
 	}()
@@ -56,7 +56,7 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 		t.Fatalf("sleep did not interrupt the admitted turn: stops %v", scout.stopped())
 	}
 	// Asleep, the inbox still accepts; nothing is delivered.
-	res := h.api("POST", "/v1/computers/scout/inbox", `{"body":"x"}`)
+	res := h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`)
 	if m := decodeBody[api.EnqueueResponse](t, res); res.StatusCode != http.StatusCreated || m.State != api.MsgPending || m.Phase != api.PhaseAsleep {
 		t.Fatalf("after sleep = %d %+v", res.StatusCode, m)
 	}
@@ -68,7 +68,7 @@ func TestRestageClosesAdmission(t *testing.T) {
 	h.up(labFleet(t, nil), false)
 	gate := make(chan struct{})
 	h.cds.get("reviewer").setGate(gate)
-	go h.api("POST", "/v1/computers/reviewer/inbox", `{"body":"x"}`)
+	go h.api("POST", "/v1/agent-computers/reviewer/inbox", `{"body":"x"}`)
 	time.Sleep(20 * time.Millisecond)
 	done := make(chan api.PutFleetResponse, 1)
 	go func() {
@@ -205,7 +205,7 @@ func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 func TestTurnsEndpointIsGone(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
-	res := h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r1","session":"current","prompt":"hi"}`)
+	res := h.api("POST", "/v1/agent-computers/scout/turns", `{"requestId":"r1","session":"current","prompt":"hi"}`)
 	if e := apiError(t, res); res.StatusCode != http.StatusGone || e.Code != api.ErrGone || !strings.Contains(e.Fix, "/inbox") {
 		t.Fatalf("turns = %d %+v", res.StatusCode, e)
 	}
@@ -241,7 +241,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 func TestAsleepShowsTheLatestSession(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
-	h.api("POST", "/v1/computers/scout/inbox", `{"body":"hi","fresh":true}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"hi","fresh":true}`).Body.Close()
 	waitFor(t, func() bool { return readState(t, h.dir).Computers["scout"].Session == "s_scout_1" })
 	h.cds.get("scout").finish(api.TurnCompleted)
 	h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep})
@@ -260,7 +260,7 @@ func TestStatusEgressMode(t *testing.T) {
 	}), false)
 	st := h.c.Status(context.Background())
 	got := map[string]string{}
-	for _, cs := range st.Computers {
+	for _, cs := range st.AgentComputers {
 		got[cs.Name] = cs.EgressMode
 	}
 	if got["tester"] != api.EgressAllowAll || got["scout"] != api.EgressEnforced {

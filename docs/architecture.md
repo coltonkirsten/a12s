@@ -62,9 +62,6 @@ are `{code, message, fix?, details?}` with a stable `code`. The main routes:
 | `GET /v1/credentials`, `PUT`, `DELETE /v1/credentials/{name}` | List credential names, set or remove a value |
 | `/v1/services/…` | Service list, status, create, change, remove, logs, power, login |
 
-Both listeners also answer the `/v1/computers/...` paths of earlier releases as `/v1/agent-computers/...`, for one
-release.
-
 ### mTLS listener
 
 Agent computers and Services call the Controller with their certificates. Only the live certificate for a running

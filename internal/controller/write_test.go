@@ -69,7 +69,7 @@ func TestAgentComputerWrites(t *testing.T) {
 	if len(list.AgentComputers) != 5 {
 		t.Fatalf("list = %d", len(list.AgentComputers))
 	}
-	if r := h.api("GET", "/v1/computers/hello", ""); r.StatusCode != 200 {
+	if r := h.api("GET", "/v1/agent-computers/hello", ""); r.StatusCode != 200 {
 		t.Fatalf("old path = %d", r.StatusCode)
 	}
 

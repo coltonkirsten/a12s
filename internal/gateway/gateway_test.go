@@ -17,7 +17,7 @@ func newGateway(t *testing.T, web fstest.MapFS) (*httptest.Server, *[]*http.Requ
 	var seen []*http.Request
 	ctl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r)
-		if r.URL.Path == "/v1/computers/lead/events" {
+		if r.URL.Path == "/v1/agent-computers/lead/events" {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = io.WriteString(w, "event: head\ndata: {\"seq\":3}\n\n")
 			w.(http.Flusher).Flush()
@@ -57,7 +57,7 @@ func TestProxyAddsTheScopedTokenAndDropsBrowserCredentials(t *testing.T) {
 
 func TestEventStreamsAreFlushed(t *testing.T) {
 	gw, _ := newGateway(t, nil)
-	res, err := authed(gw).Get(gw.URL + "/v1/computers/lead/events")
+	res, err := authed(gw).Get(gw.URL + "/v1/agent-computers/lead/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestEventStreamsAreFlushed(t *testing.T) {
 func TestRefusesNonLoopbackHostsAndCrossOriginWrites(t *testing.T) {
 	gw, seen := newGateway(t, nil)
 	do := func(method, host, origin string) int {
-		req, _ := http.NewRequest(method, gw.URL+"/v1/computers/lead/inbox", strings.NewReader(`{"body":"x"}`))
+		req, _ := http.NewRequest(method, gw.URL+"/v1/agent-computers/lead/inbox", strings.NewReader(`{"body":"x"}`))
 		if host != "" {
 			req.Host = host
 		}
@@ -120,7 +120,7 @@ func TestServesTheDashboardOrTheBuiltApp(t *testing.T) {
 	if _, page := get(builtin, "/"); !strings.Contains(page, `<script type="module" src="/dashboard.js">`) {
 		t.Error("the built-in dashboard is not served at /")
 	}
-	if _, js := get(builtin, "/dashboard.js"); !strings.Contains(js, "A12sClient = class") || strings.Contains(js, "\nexport ") {
+	if _, js := get(builtin, "/dashboard.js"); !strings.Contains(js, "var Fleet = class") || strings.Contains(js, "\nexport ") {
 		t.Error("/dashboard.js is not the dashboard bundled with the SDK, or it exports the SDK")
 	}
 	app, _ := newGateway(t, fstest.MapFS{
