@@ -26,6 +26,17 @@ Agent computers and Services can be created, changed and removed while the Fleet
   `a12s.connect_async()`, `Client` and `AsyncClient` (`client.prompt("hello", "…")`) still work for one release.
   What to do: `const fleet = await Fleet.connect()` / `fleet = a12s.Fleet()`, then
   `(await fleet.agentComputers.get("hello")).prompt("…")` / `fleet.agent_computers.get("hello").prompt("…")`.
+- **The Controller stores credential values** in its state volume (`credentials.json`, mode 0600), so they survive
+  a restart of Docker or the Controller; they were in memory only. Anyone who can read the file can already exec into
+  an agent computer and read its secrets, and no API call returns a value. `a12s down` removes them with the state
+  volume. What to do: nothing, or to keep them in memory only, run `a12s down`, then
+  `a12s up --memory-only-credentials` (the flag applies when `up` starts a new Controller, which then deletes any
+  stored file).
+- **`a12s up` asks before undoing changes made through the API.** When agent computers or Services changed through
+  the SDK or API since the last `a12s up` and this `up` would undo them, it lists the changes and asks
+  `apply anyway? [y/N]`; without a terminal it fails. Its write is conditional on the Fleet version it read. What to
+  do: in CI and scripts, pass `a12s up --force` to overwrite them as before, or run `a12s export` first to keep them
+  in the file.
 
 ### Added
 - **The object SDK.** `Fleet.connect()` (TypeScript) and `a12s.Fleet()` / `a12s.AsyncFleet()` (Python) find the
@@ -47,8 +58,25 @@ Agent computers and Services can be created, changed and removed while the Fleet
   changed through the API since the last `a12s up`. The version goes up by one with every change. `PUT /v1/fleet`
   takes `If-Match`. Every write takes `?dryRun=true` and answers with the new `version` and a `changes` list.
 - Error codes `missing_field` (400: no harness or image in the spec or `defaults`), `missing_credential` (400: a
-  credential with no value in the Controller), `exists` (409: a create-only write on a taken name) and
-  `version_mismatch` (412: a stale `If-Match`).
+  credential with no value in the Controller), `exists` (409: a create-only write on a taken name),
+  `version_mismatch` (412: a stale `If-Match`) and `in_use` (409: removing a credential that is still used).
+- **Credentials from code**: `GET /v1/credentials` lists names with `set` and `usedBy`, never values;
+  `PUT /v1/credentials/{name}` `{"value": "…"}` stores one and the agent computers and Services using it get it at
+  once; `DELETE /v1/credentials/{name}` removes one (409 `in_use` while used). The SDKs wrap them as
+  `fleet.credentials.set(name, value)`, `list()` (`CredentialInfo`: `name`, `set`, `usedBy` / `used_by`) and
+  `remove(name)`. Owner token only. See [Credentials](docs/credentials.md#from-code-and-the-api).
+- **`a12s diff`**: the Fleet file against the live Fleet, changing nothing (a dry run of `up`). It prints the change
+  list and exits 2 when they differ, 0 when not; `--json` prints the changes.
+- **`a12s export [--force]`**: writes the live Fleet back to `fleet.yaml`. Instructions up to 2000 characters with no
+  files stay inline; longer ones and files go to `presets/<name>/` (`presets/defaults/` for `defaults`), seccomp
+  profiles to `profiles/<name>.json`. It never writes credential values, and it refuses to overwrite a file that
+  differs (comments in `fleet.yaml` are lost) or remove a stale preset file without `--force`. See
+  [CLI](docs/cli.md#changes-made-through-the-api).
+- `a12s creds set <name>` also sets the value on the Fleet's running Controller, so agent computers using it get it
+  at once; with no Controller running, `a12s up` sends it as before.
+- `a12s up` sends every credential bound in `a12s.bindings.yaml`, not only the ones the file's agent computers name,
+  so agent computers created from code can use any of them. Credentials merge into the Controller's store: `up` no
+  longer drops ones it doesn't send. `a12s up --memory-only-credentials` keeps them out of the state volume.
 
 ### Changed
 - A ComputerStatus's `seccomp` (and `a12s status`) shows the profile's `sha256:` digest instead of its path; `a12s up`

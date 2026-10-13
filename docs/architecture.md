@@ -25,6 +25,7 @@ The Controller runs in a container started by `a12s up` (`ghcr.io/coltonkirsten/
 
 - **Holds the Fleet** as written (defaults and each agent computer before they are merged) with a version that goes
   up by one per change, and the last Fleet `a12s up` sent, so it can report what the API changed since (`drift`).
+  `a12s up` reads the version, asks before undoing drift, and makes its write conditional on that version.
   Writes take an exclusive lock: a whole-Fleet write may name the version it read, a write to one agent computer or
   Service touches only that one.
 - **Reconciles** the Fleet against what exists, through the Driver interface. Every mutation carries a
@@ -34,6 +35,9 @@ The Controller runs in a container started by `a12s up` (`ghcr.io/coltonkirsten/
 - **Owns the inboxes** in `fleet.db`, a SQLite database (WAL, `synchronous=FULL`) on the `a12s-<fleet>-data`
   volume. It also keeps holds, scoped tokens, the certificate registry and power-policy state, so they survive a
   plain `down`/`up`.
+- **Holds the credentials** by name in `credentials.json` (0600) on its state volume, or in memory only with
+  `A12S_MEMORY_ONLY_CREDENTIALS=1` (`a12s up --memory-only-credentials`), and injects them into containers. It
+  never returns a value.
 - **Is the CA** and issues a certificate per agent computer or Service start. The CA key lives on the Controller's state
   volume.
 - **Runs the egress proxy** on port 3128 of every internal network.
@@ -57,6 +61,7 @@ are `{code, message, fix?, details?}` with a stable `code`. The main routes:
 | `POST /v1/apply` | Apply staged changes with `interrupt` and `grace` |
 | `GET /v1/drives`, `DELETE /v1/drives/{d}` | Drives |
 | `/v1/tokens` | Scoped tokens |
+| `GET /v1/credentials`, `PUT`, `DELETE /v1/credentials/{name}` | List credential names, set or remove a value |
 | `/v1/services/…` | Service list, status, create, change, remove, logs, power, login |
 
 Both listeners also answer the `/v1/computers/...` paths of earlier releases as `/v1/agent-computers/...`, for one

@@ -91,8 +91,10 @@ Every agent computer's and Service's only route out is the Controller's validati
 
 ## Secrets
 
-See [Credentials](credentials.md). In short: in memory in the Controller, on tmpfs in the container, never in an
-image, config, argv or on a drive.
+See [Credentials](credentials.md). In short: in the Controller's state volume (`credentials.json`, 0600; in memory
+only with `a12s up --memory-only-credentials`), on tmpfs in the container, never in an image, config, argv or on a
+drive. Anyone with access to Docker can read the stored file, but they can already exec into an agent computer and
+read `/run/a12s/secrets`. No API call returns a value: `GET /v1/credentials` lists names only.
 
 ## Inbox bodies are untrusted
 

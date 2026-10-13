@@ -149,8 +149,10 @@ credentials:
   github:    { env: GH_TOKEN }                  # read from an environment variable
 ```
 
-The CLI reads the bindings on the host and sends the values to the Controller with `up` and `wake`. `a12s creds set
-<name>` reads a value from stdin, stores it at `~/.a12s/<fleet>/<name>` (0600) and binds it for you.
+The CLI reads the bindings on the host and sends the values to the Controller with `up` (every credential the file
+binds, so agent computers created from code can name them too) and `wake`. `a12s creds set <name>` reads a value
+from stdin, stores it at `~/.a12s/<fleet>/<name>` (0600), binds it for you and, when the Fleet's Controller is
+running, sets it there too.
 
 ## fleet.lock
 

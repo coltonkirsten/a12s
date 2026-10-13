@@ -49,11 +49,13 @@ API key (`sk-ant-api…`). Not a copy of your interactive Claude login. Codex: `
   the Turn fails to authenticate. Join it first, e.g. `pbpaste | tr -d ' \n' | a12s creds set anthropic`, or
   `printf %s "$TOKEN" | a12s creds set anthropic`.
 - Run it in the Fleet's directory: it stores the value at ~/.a12s/<fleet>/<name> (0600) and binds it in
-  a12s.bindings.yaml (created if missing). It does not reach a running Fleet by itself: run `a12s up` after setting
-  or changing a credential. The Controller keeps credentials in memory only.
-- `a12s up` sends the credentials that fleet.yaml's agent computers name. An agent computer created from code can
-  use only credentials the Controller already holds, so keep at least one agent computer in fleet.yaml that names
-  them; otherwise the create fails with 400 missing_credential.
+  a12s.bindings.yaml (created if missing). If the Fleet's Controller is running it also sets the value there, and
+  agent computers using it get it at once; otherwise `a12s up` sends it.
+- `a12s up` sends every credential bound in a12s.bindings.yaml, so agent computers created from code can name any of
+  them. From code: `fleet.credentials.set(name, value)`. A credential set nowhere fails with 400 missing_credential.
+- The Controller stores credential values in its state volume (credentials.json, 0600), so they survive a restart
+  of Docker or the Controller; `a12s down` removes them. No API call returns a value.
+  `a12s up --memory-only-credentials` (when it starts a new Controller) keeps them in memory only.
 - A bad or expired credential fails the Turn: turn.finished status failed, error "Failed to authenticate: …".
 
 ## New project
@@ -130,8 +132,11 @@ fleet.lock pins `a12s: v0.3.0` and every image, bundle and Service digest; `a12s
 moves one: to pick up a rebuilt image, give it a new tag.
 
 `a12s up` makes the running Fleet match the file: it removes agent computers created from code and undoes changes
-made through the SDK or API (GET /v1/fleet lists them as `drift`). Give each agent computer one owner: the file or
-your code.
+made through the SDK or API (GET /v1/fleet lists them as `drift`). When it would undo such changes it lists them and
+asks `apply anyway? [y/N]`; without a terminal (CI) it fails unless `--force`. `a12s diff` shows what up would
+change; `a12s export` writes the live Fleet back to the file instead (long instructions and files go to
+presets/<name>/, seccomp profiles to profiles/<name>.json; comments in fleet.yaml are lost, so overwriting a file
+that differs needs --force). Give each agent computer one owner: the file or your code.
 
 ## What the agent sees
 
@@ -149,6 +154,10 @@ your code.
 
 ```sh
 a12s up                               # apply fleet.yaml (start the Controller if needed)
+a12s up --force                       # also undo changes made through the API without asking (CI)
+a12s up --memory-only-credentials     # a new Controller keeps credential values in memory only
+a12s diff                             # fleet.yaml vs the live Fleet, changes nothing; exit 2 if they differ
+a12s export [--force]                 # write the live Fleet back to fleet.yaml, presets/ and profiles/
 a12s status                           # phase, inbox, power, warnings (--json for machines)
 a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
 a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # enqueue and exit; busy or asleep
@@ -221,6 +230,8 @@ const tok = await fleet.tokens.create("web", { actions: ["send", "status"], agen
 tok.secret;                                         // shown once; fleet.tokens.list(), remove(name)
 
 const { version, spec, drift } = await fleet.get(); // the whole Fleet as written (FleetSpec)
+await fleet.credentials.set("stripe", key);         // agent computers using it get it at once; values never read back
+await fleet.credentials.list();                     // [{name, set, usedBy}]; remove(name): 409 in_use while used
 await fleet.replace((f) => { f.defaults!.power = { sleepAfterIdle: "15m" }; });  // If-Match, retried on conflict
 // errors: A12sError {status, code, message, fix}, NotFound (a 404, subclass of A12sError); streams:
 // A12sStreamError, A12sGapError (onGap: "throw"). A failed Turn is not an error: prompt() returns it, status "failed".
@@ -269,6 +280,8 @@ fleet.status().agent_computers        # every agent computer: phase, inbox, powe
 fleet.services.get("clock").sleep()   # Service: reload, update, sleep, wake, remove
 tok = fleet.tokens.create("web", actions=["send", "status"], agent_computers=["lead"])   # tok.secret once
 state = fleet.get()                   # state.version, state.spec (FleetSpec, a dict), state.drift
+fleet.credentials.set("stripe", key)  # agent computers using it get it at once; values are never read back
+fleet.credentials.list()              # [CredentialInfo(name, set, used_by)]; remove(name) raises in_use while used
 fleet.replace(lambda f: f.defaults.update(power={"sleepAfterIdle": "15m"}))   # If-Match, retried on conflict
 fleet.close()                         # or: with a12s.Fleet() as fleet:
 # async: fleet = a12s.AsyncFleet(); the same objects with await / async for / async with; await fleet.aclose()
@@ -525,6 +538,9 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?}], warnings, errors, …}. A
   missing harness or image (in the spec and in defaults) is 400 missing_field; a credential with no value is 400
   missing_credential.
+- Credentials (owner token): GET /v1/credentials → {credentials: [{name, set, usedBy}]} (names, never values);
+  PUT /v1/credentials/{name} {"value": "…"} stores it and updates the agent computers and Services using it;
+  DELETE /v1/credentials/{name} is 409 in_use while one uses it, 404 if none is stored.
 - The old /v1/computers/... paths still work for one release.
 
 ## API surface
@@ -601,7 +617,8 @@ Deprecated one release (name-first): TypeScript A12sClient status, computer, sen
 - Every Claude Code Turn logs one or two `diagnostic` "egress denied" events for telemetry hosts: harmless.
 - Nothing is delivered? `a12s inbox <c>` (held? says why; `a12s inbox resume <c>`), `a12s status` (asleep?
   `a12s wake <c>`), `a12s doctor`. A Turn failing with "Failed to authenticate": fix the credential, `a12s up`.
-- After restarting Docker or the Controller, run `a12s up` again: it resends the credentials.
+- After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored. With
+  --memory-only-credentials it holds none until you run `a12s up` again.
 - Upgrading a12s: change `a12s:` in fleet.lock to the new version, delete its `slim` pin, rebuild custom images FROM
   the new slim under new tags, `a12s up`.
 

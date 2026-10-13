@@ -49,7 +49,7 @@ await hello.remove();
 </table>
 
 - **They keep their state.** Stop an agent computer and start it tomorrow: its files and conversation are still there.
-- **They are locked down.** No network except the hosts you list, no root, and credentials kept only in memory.
+- **They are locked down.** No network except the hosts you list, no root, and credentials only on tmpfs inside them.
 - **They take work like a queue.** Send a task while an agent is busy or asleep; it runs when the agent is free.
 
 Using a coding agent? Give it this one file: https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt
