@@ -375,12 +375,21 @@ test('background: a turn the harness starts by itself is journaled with reason b
   await until(() => finished(bg) === 'completed');
   const evs = journal.after(0, null, 100);
   const started = evs.find((e) => e.type === 'turn.started' && e.turn === bg);
-  assert.deepEqual([started?.data.reason, started?.data.inbox, started?.data.requestId, started?.session], ['background', undefined, undefined, t.sessionId]);
+  assert.deepEqual([started?.data.reason, started?.data.inbox, started?.data.requestId, started?.data.prompt, started?.session], ['background', undefined, undefined, '', t.sessionId]);
   assert.deepEqual(evs.filter((e) => e.turn === bg).map((e) => e.type), ['turn.started', 'text.delta', 'turn.finished']);
   assert.deepEqual(evs.filter((e) => e.type.startsWith('task.')).map((e) => [e.type, e.turn]), [['task.started', t.turnId], ['task.finished', null]]);
   assert.equal(computer.status().phase, 'ready');
   const next = await computer.submitTurn({ requestId: 'r3', session: 'current', prompt: 'x' });
   assert.equal(next.sessionId, t.sessionId);
+  adapter.finish();
+  await until(() => finished(next.turnId) === 'completed');
+
+  // an adapter that writes the background turn's prompt (Codex) gets it journaled
+  adapter.backgroundTurn('<background-result …>');
+  const bg2 = String(computer.status().activeTurn);
+  adapter.finishBackground();
+  await until(() => finished(bg2) === 'completed');
+  assert.equal(journal.after(0, null, 200).find((e) => e.type === 'turn.started' && e.turn === bg2)?.data.prompt, '<background-result …>');
 });
 
 test('background: stop ends a turn and the background work; stopAll ends background work alone', async () => {

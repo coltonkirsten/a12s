@@ -40,11 +40,11 @@ export class StubAdapter implements Adapter {
     else this.listener?.taskEvent(ev);
   }
 
-  /** The harness starts a turn by itself, as Claude Code does when background work ends. */
-  backgroundTurn(): void {
+  /** The harness starts a turn by itself, as Claude Code does when background work ends (Codex: with a prompt). */
+  backgroundTurn(prompt?: string): void {
     const q = new EventQueue<AdapterEvent>();
     this.bgQueue = q;
-    this.listener?.backgroundTurn({ sessionId: this.lastSession ?? 's_none', events: q });
+    this.listener?.backgroundTurn({ sessionId: this.lastSession ?? 's_none', events: q, ...(prompt ? { prompt } : {}) });
     q.push({ type: 'text.delta', data: { text: 'the sub-agent finished' } });
   }
 

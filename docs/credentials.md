@@ -11,8 +11,9 @@ file, a container's config or a drive; the Controller stores them in its own sta
 | `anthropic` | **Recommended:** a `claude setup-token` token (`sk-ant-oat…`) | `CLAUDE_CODE_OAUTH_TOKEN`. Long-lived, never refreshed inside the agent computer, no credential file. |
 | `anthropic` | An API key (`sk-ant-api…`) | `ANTHROPIC_API_KEY` |
 | `anthropic` | A JSON credentials file | Symlinked as `$CLAUDE_CONFIG_DIR/.credentials.json` |
-| `openai` | An OpenAI API key | `OPENAI_API_KEY` |
+| `openai` | An OpenAI API key as `auth.json`: `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-…"}` | Symlinked as `$CODEX_HOME/auth.json` |
 | `openai` | A copy of `~/.codex/auth.json` (ChatGPT sign-in) | Symlinked as `$CODEX_HOME/auth.json` |
+| `openai` | A bare OpenAI API key | `OPENAI_API_KEY` only: Codex ignores it and fails with 401, so use the `auth.json` form |
 | `github` | A GitHub token | `GH_TOKEN` and `GITHUB_TOKEN` |
 | anything else | Any value | A file at `/run/a12s/secrets/<name>` only |
 
