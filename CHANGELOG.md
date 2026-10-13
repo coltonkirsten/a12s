@@ -2,7 +2,11 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.4.1 (2026-10-12)
+
+What a web console needs from the API, and the console itself: `a12s ui`. Live inbox and Service events on the
+fleet-wide stream, before and after values in every change list, when credentials changed and tokens were last used,
+a Controller port that survives restarts, and dry runs that fail exactly as the write would.
 
 ### Added
 - **`inbox.changed` on `GET /v1/events`**: after any change to an agent computer's inbox (a Message sent, withdrawn,
