@@ -782,6 +782,118 @@ export const credentialsResponseMinimal: T.CredentialsResponse = {
   ]
 };
 
+export const turnsResponse: T.TurnsResponse = {
+  "turns": [
+    {
+      "agentComputer": "agentComputer",
+      "id": "id",
+      "session": "session",
+      "status": "completed",
+      "text": "text",
+      "error": "error",
+      "messages": [
+        {
+          "id": "id",
+          "seq": 1,
+          "sender": "sender",
+          "via": "via",
+          "createdAt": "2026-10-12T12:00:00Z",
+          "bytes": 1,
+          "key": "key",
+          "superseded": 1
+        }
+      ],
+      "tools": [
+        {
+          "id": "id",
+          "name": "name",
+          "input": {},
+          "output": {},
+          "isError": true
+        }
+      ],
+      "usage": {},
+      "tokens": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 1,
+        "cacheWrite": 1
+      },
+      "startedAt": "2026-10-12T12:00:00Z",
+      "finishedAt": "2026-10-12T12:00:00Z"
+    }
+  ]
+};
+
+export const turnsResponseMinimal: T.TurnsResponse = {
+  "turns": [
+    {
+      "agentComputer": "agentComputer",
+      "id": "id",
+      "session": "session",
+      "status": "completed",
+      "text": "text",
+      "messages": [
+        {
+          "id": "id",
+          "seq": 1,
+          "sender": "sender",
+          "via": "via",
+          "createdAt": "2026-10-12T12:00:00Z",
+          "bytes": 1
+        }
+      ],
+      "tools": [
+        {
+          "id": "id",
+          "name": "name"
+        }
+      ],
+      "usage": {},
+      "finishedAt": "2026-10-12T12:00:00Z"
+    }
+  ]
+};
+
+export const egressDeniedData: T.EgressDeniedData = {
+  "host": "host",
+  "port": 1,
+  "reason": "reason"
+};
+
+export const egressDeniedDataMinimal: T.EgressDeniedData = {
+  "host": "host",
+  "port": 1
+};
+
+export const fleetChangedData: T.FleetChangedData = {
+  "version": 1,
+  "by": "by",
+  "names": [
+    "names"
+  ]
+};
+
+export const fleetChangedDataMinimal: T.FleetChangedData = {
+  "version": 1,
+  "by": "by",
+  "names": [
+    "names"
+  ]
+};
+
+export const phaseData: T.PhaseData = {
+  "phase": "Ready",
+  "error": {
+    "reason": "reason",
+    "retryable": true
+  }
+};
+
+export const phaseDataMinimal: T.PhaseData = {
+  "phase": "Ready"
+};
+
 export const enqueueRequest: T.EnqueueRequest = {
   "body": "body",
   "sender": "sender",
@@ -1054,6 +1166,7 @@ export const tokenMinimal: T.Token = {
 
 export const event: T.EventEnvelope = {
   "v": 1,
+  "agentComputer": "agentComputer",
   "computer": "computer",
   "session": "session",
   "turn": "turn",
@@ -1065,6 +1178,7 @@ export const event: T.EventEnvelope = {
 
 export const eventMinimal: T.EventEnvelope = {
   "v": 1,
+  "agentComputer": "agentComputer",
   "computer": "computer",
   "session": "session",
   "turn": "turn",
@@ -1116,6 +1230,12 @@ export const turnStartedDataMinimal: T.TurnStartedData = {
 export const turnFinishedData: T.TurnFinishedData = {
   "status": "completed",
   "usage": {},
+  "tokens": {
+    "input": 1,
+    "output": 1,
+    "cacheRead": 1,
+    "cacheWrite": 1
+  },
   "error": "error"
 };
 

@@ -133,6 +133,11 @@ func (c *Client) Diagnostic(ctx context.Context, message string, data any) error
 	return c.do(ctx, http.MethodPost, "/v1/diagnostics", body, nil)
 }
 
+// EgressDenied journals a refused connection as an egress.denied event.
+func (c *Client) EgressDenied(ctx context.Context, d api.EgressDeniedData) error {
+	return c.do(ctx, http.MethodPost, "/v1/egress-denied", d, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {

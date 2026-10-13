@@ -100,6 +100,7 @@ func (c *Controller) setPhase(name string, phase api.Phase, failure *api.Failure
 	c.setPhaseLocked(name, phase, failure)
 }
 
+// setPhaseLocked also tells GET /v1/events; the hub has its own lock and never blocks.
 func (c *Controller) setPhaseLocked(name string, phase api.Phase, failure *api.Failure) {
 	r := c.rtLocked(name)
 	if r.phase == phase && (failure == nil) == (r.failure == nil) && (failure == nil || *failure == *r.failure) {
@@ -114,6 +115,9 @@ func (c *Controller) setPhaseLocked(name string, phase api.Phase, failure *api.F
 	r.phase, r.failure = phase, failure
 	if phase != api.PhaseBusy {
 		r.activeTurn = ""
+	}
+	if c.hub != nil {
+		c.publishControllerEvent(name, api.EventPhase, api.PhaseData{Phase: phase, Error: failure}, nil, nil)
 	}
 }
 
@@ -371,6 +375,8 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			c.rtLocked(name).lastEventID = m.ID
 			c.mu.Unlock()
 		}
+		c.hub.publish(hubEvent{name: name, data: eventData(name, m.Data)})
+		c.foldTurn(name, ev)
 		switch ev.Type {
 		case api.EventTurnStarted:
 			c.mu.Lock()

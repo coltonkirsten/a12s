@@ -310,7 +310,14 @@ export class Computer {
           this.saveSession({ sessionId: session, harness: this.cfg.harness.kind, cwd: this.session?.cwd ?? this.cfg.agentHome });
         }
         if (ev.type === 'resume.failed') this.resumePending = true; // the session record stays as it was
-        if (ev.type === 'turn.finished') status = ev.data.status;
+        if (ev.type === 'turn.finished') {
+          status = ev.data.status;
+          const tokens = tokensOf(ev.data.usage);
+          if (tokens) {
+            this.journal.append(ev.type, { ...ev.data, tokens }, { turn: active.turnId, session });
+            continue;
+          }
+        }
         this.journal.append(ev.type, ev.data, { turn: active.turnId, session });
       }
     } catch (err) {
@@ -351,6 +358,12 @@ export class Computer {
   diagnostic(message: string, data: unknown): number {
     const scope = { turn: this.active?.turnId ?? null, session: this.session?.sessionId ?? null };
     return this.journal.append('diagnostic', { message, data, source: 'controller' }, scope).seq;
+  }
+
+  /** The Controller's egress proxy refused a connection: one structured event, in the Turn it happened in. */
+  egressDenied(host: string, port: number, reason: string): number {
+    const scope = { turn: this.active?.turnId ?? null, session: this.session?.sessionId ?? null };
+    return this.journal.append('egress.denied', { host, port, reason }, scope).seq;
   }
 
   /** restart_harness: after the current turn ends, restart, resume the session, and continue. */
@@ -542,4 +555,19 @@ export function loadSessionRecord(path: string): { record: SessionRecord | null;
     // fall through
   }
   return { record: null, damaged: 'session record is damaged (expected {sessionId, harness, cwd})' };
+}
+
+/** The harness's own usage as {input, output, cacheRead, cacheWrite}; input excludes cached input in both. */
+export function tokensOf(usage: Record<string, unknown> | null): Record<string, number> | null {
+  if (!usage) return null;
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  if ('inputTokens' in usage || 'outputTokens' in usage) {
+    return { input: n(usage.inputTokens), output: n(usage.outputTokens), cacheRead: n(usage.cacheReadInputTokens), cacheWrite: n(usage.cacheCreationInputTokens) };
+  }
+  const last = usage.last;
+  if (last && typeof last === 'object') {
+    const l = last as Record<string, unknown>;
+    return { input: Math.max(0, n(l.inputTokens) - n(l.cachedInputTokens)), output: n(l.outputTokens), cacheRead: n(l.cachedInputTokens), cacheWrite: 0 };
+  }
+  return null;
 }

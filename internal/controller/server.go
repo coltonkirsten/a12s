@@ -99,7 +99,9 @@ func (c *Controller) Handler() http.Handler {
 		writeJSON(w, http.StatusGone, api.Error{Code: api.ErrGone, Message: "turns are started from the inbox now (one way in)",
 			Fix: "POST /v1/agent-computers/" + r.PathValue("c") + "/inbox, or a12s prompt / a12s send"})
 	})
+	mux.HandleFunc("GET /v1/events", allow(api.ActionEvents, "", c.handleFleetEvents))
 	mux.HandleFunc("GET /v1/agent-computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/turns", allow(api.ActionEvents, "c", c.handleTurns))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
 	mux.HandleFunc("POST /v1/apply", allow("", "", c.handleApply))

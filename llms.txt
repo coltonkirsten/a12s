@@ -569,7 +569,9 @@ GET /v1/agent-computers/{c}                     status
 PUT /v1/agent-computers/{c}                     owner, or prefix
 PATCH /v1/agent-computers/{c}                   owner, or prefix
 DELETE /v1/agent-computers/{c}                  owner, or prefix
+GET /v1/events                                  events
 GET /v1/agent-computers/{c}/events              events
+GET /v1/agent-computers/{c}/turns               events
 POST /v1/agent-computers/{c}/turns/{id}/stop    stop
 POST /v1/agent-computers/{c}/power              power
 POST /v1/apply                                  owner

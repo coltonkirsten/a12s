@@ -132,6 +132,15 @@
   "diagnosticDataMinimal": {
     "message": "message"
   },
+  "egressDeniedData": {
+    "host": "host",
+    "port": 1,
+    "reason": "reason"
+  },
+  "egressDeniedDataMinimal": {
+    "host": "host",
+    "port": 1
+  },
   "enqueueRequest": {
     "body": "body",
     "sender": "sender",
@@ -181,6 +190,7 @@
   },
   "event": {
     "v": 1,
+    "agentComputer": "agentComputer",
     "computer": "computer",
     "session": "session",
     "turn": "turn",
@@ -191,12 +201,27 @@
   },
   "eventMinimal": {
     "v": 1,
+    "agentComputer": "agentComputer",
     "computer": "computer",
     "session": "session",
     "turn": "turn",
     "seq": 1,
     "ts": "2026-10-12T12:00:00Z",
     "type": "text.delta"
+  },
+  "fleetChangedData": {
+    "version": 1,
+    "by": "by",
+    "names": [
+      "names"
+    ]
+  },
+  "fleetChangedDataMinimal": {
+    "version": 1,
+    "by": "by",
+    "names": [
+      "names"
+    ]
   },
   "fleetResponse": {
     "version": 1,
@@ -483,6 +508,16 @@
     "state": "pending",
     "attempts": 1,
     "bytes": 1
+  },
+  "phaseData": {
+    "phase": "Ready",
+    "error": {
+      "reason": "reason",
+      "retryable": true
+    }
+  },
+  "phaseDataMinimal": {
+    "phase": "Ready"
   },
   "putFleetResponse": {
     "version": 1,
@@ -1083,6 +1118,12 @@
   "turnFinishedData": {
     "status": "completed",
     "usage": {},
+    "tokens": {
+      "input": 1,
+      "output": 1,
+      "cacheRead": 1,
+      "cacheWrite": 1
+    },
     "error": "error"
   },
   "turnFinishedDataMinimal": {
@@ -1126,5 +1167,76 @@
     "resumed": true,
     "prompt": "prompt",
     "cwd": "cwd"
+  },
+  "turnsResponse": {
+    "turns": [
+      {
+        "agentComputer": "agentComputer",
+        "id": "id",
+        "session": "session",
+        "status": "completed",
+        "text": "text",
+        "error": "error",
+        "messages": [
+          {
+            "id": "id",
+            "seq": 1,
+            "sender": "sender",
+            "via": "via",
+            "createdAt": "2026-10-12T12:00:00Z",
+            "bytes": 1,
+            "key": "key",
+            "superseded": 1
+          }
+        ],
+        "tools": [
+          {
+            "id": "id",
+            "name": "name",
+            "input": {},
+            "output": {},
+            "isError": true
+          }
+        ],
+        "usage": {},
+        "tokens": {
+          "input": 1,
+          "output": 1,
+          "cacheRead": 1,
+          "cacheWrite": 1
+        },
+        "startedAt": "2026-10-12T12:00:00Z",
+        "finishedAt": "2026-10-12T12:00:00Z"
+      }
+    ]
+  },
+  "turnsResponseMinimal": {
+    "turns": [
+      {
+        "agentComputer": "agentComputer",
+        "id": "id",
+        "session": "session",
+        "status": "completed",
+        "text": "text",
+        "messages": [
+          {
+            "id": "id",
+            "seq": 1,
+            "sender": "sender",
+            "via": "via",
+            "createdAt": "2026-10-12T12:00:00Z",
+            "bytes": 1
+          }
+        ],
+        "tools": [
+          {
+            "id": "id",
+            "name": "name"
+          }
+        ],
+        "usage": {},
+        "finishedAt": "2026-10-12T12:00:00Z"
+      }
+    ]
   }
 }

@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 
 export interface EventEnvelope {
   v: 1;
+  agentComputer: string;
+  /** agentComputer under its old name, kept one release. */
   computer: string;
   session: string | null;
   turn: string | null;
@@ -60,7 +62,7 @@ export class Journal {
     const r = this.db
       .prepare('INSERT INTO events (turn, session, ts, type, data) VALUES (?, ?, ?, ?, ?)')
       .run(turn, session, ts, type, JSON.stringify(data));
-    return { v: 1, computer: this.computer, session, turn, seq: Number(r.lastInsertRowid), ts, type, data };
+    return { v: 1, agentComputer: this.computer, computer: this.computer, session, turn, seq: Number(r.lastInsertRowid), ts, type, data };
   }
 
   private publish(event: EventEnvelope): void {
@@ -206,6 +208,7 @@ export class Journal {
     ) as unknown as EventRow[];
     return rows.map((r) => ({
       v: 1,
+      agentComputer: this.computer,
       computer: this.computer,
       session: r.session,
       turn: r.turn,

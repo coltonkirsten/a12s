@@ -119,6 +119,7 @@ type computerdClient interface {
 	Stop(ctx context.Context, turnID string) error
 	Events(ctx context.Context, lastEventID, turn string) (*computerd.Stream, error)
 	Diagnostic(ctx context.Context, message string, data any) error
+	EgressDenied(ctx context.Context, d api.EgressDeniedData) error
 	CancelContinuation(ctx context.Context, reason string) (string, error)
 	CloseIdleConnections()
 }
@@ -180,6 +181,9 @@ type Controller struct {
 	revoked map[string]bool
 	// bridgePool is the last verified /16 of the Controller's Fleet bridge.
 	bridgePool netip.Prefix
+	// openTurns are Turns being folded for the history, by "<agent computer>/<turn>".
+	openTurns map[string]*openTurn
+	hub       *hub
 	// inboxBcast is closed and replaced on every inbox change (Message streams).
 	inboxBcast chan struct{}
 	addrsAt    time.Time
@@ -220,6 +224,8 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		srt:       map[string]*serviceRuntime{},
 		auditSubs: map[string][]chan string{},
 		revoked:   map[string]bool{},
+		openTurns: map[string]*openTurn{},
+		hub:       newHub(),
 	}
 	if err := c.loadCreds(); err != nil {
 		store.Close()
@@ -624,8 +630,7 @@ func (c *Controller) denied(name, host string, port int, reason string) {
 	c.logf("%s: egress denied %s (%s)", name, net.JoinHostPort(host, strconv.Itoa(port)), reason)
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
-	data := map[string]any{"host": host, "port": port, "reason": reason}
-	if err := c.client(name).Diagnostic(ctx, "egress denied", data); err != nil {
+	if err := c.client(name).EgressDenied(ctx, api.EgressDeniedData{Host: host, Port: port, Reason: reason}); err != nil {
 		c.logf("%s: journal egress denial: %v", name, err)
 	}
 }
