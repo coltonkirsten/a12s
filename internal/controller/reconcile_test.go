@@ -29,7 +29,7 @@ func hasCall(calls []string, prefix string) bool {
 
 func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	res := h.up(labFleet(t, nil), false)
 	if !slices.Equal(res.Created, lab4) || len(res.Updated)+len(res.Staged)+len(res.Removed) != 0 || res.Errors != nil {
 		t.Fatalf("up = %+v", res)
 	}
@@ -40,10 +40,10 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 	}
 
 	// Missing pins were resolved.
-	l := res.Lock
-	if l.Images["slim"] != "sha256:slim1" || len(l.Images) != 1 || len(l.Seccomp) != 0 || len(l.Presets) != 0 ||
+	l := h.pins()
+	if l.Images[imageRef("slim")] != "sha256:slim1" || len(l.Images) != 1 || len(l.Seccomp) != 0 || len(l.Presets) != 0 ||
 		l.Bundles["claude-code@2.1.280"] != "sha256:claude1" || l.Bundles["codex@0.154.0"] != "sha256:codex1" {
-		t.Fatalf("lock = %+v", l)
+		t.Fatalf("pins = %+v", l)
 	}
 
 	// Specs: pinned IDs run, presets travel, the default seccomp profile applies.
@@ -89,7 +89,7 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 	noSecretsOnDisk(t, h.dir)
 
 	// Re-applying the same Fleet and lock does nothing at all.
-	again := h.up(labFleet(t, nil), res.Lock, false)
+	again := h.up(labFleet(t, nil), false)
 	if len(again.Created)+len(again.Updated)+len(again.Staged)+len(again.Removed) != 0 {
 		t.Fatalf("re-up = %+v", again)
 	}
@@ -106,10 +106,10 @@ func fifth(f *fleet.Fleet) {
 
 func TestFifthIsAddedAloneAndRemovalKeepsDrives(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.d.takeCalls()
 
-	added := h.up(labFleet(t, fifth), res.Lock, false)
+	added := h.up(labFleet(t, fifth), false)
 	if !slices.Equal(added.Created, []string{"fifth"}) || len(added.Updated)+len(added.Staged) != 0 {
 		t.Fatalf("up with a fifth = %+v", added)
 	}
@@ -119,7 +119,7 @@ func TestFifthIsAddedAloneAndRemovalKeepsDrives(t *testing.T) {
 		}
 	}
 
-	removed := h.up(labFleet(t, nil), res.Lock, false)
+	removed := h.up(labFleet(t, nil), false)
 	if !slices.Equal(removed.Removed, []string{"fifth"}) || len(removed.Created)+len(removed.Updated) != 0 {
 		t.Fatalf("up without fifth = %+v", removed)
 	}
@@ -137,7 +137,7 @@ func TestFifthIsAddedAloneAndRemovalKeepsDrives(t *testing.T) {
 
 func TestBusyIsStagedThenAppliedAtIdle(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	scout := h.cds.get("scout")
 	if _, err := scout.StartTurn(context.Background(), api.TurnRequest{Prompt: "work"}); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestBusyIsStagedThenAppliedAtIdle(t *testing.T) {
 		c.Harness.Model = "claude-fable-5-2"
 		f.Computers["scout"] = c
 	}
-	staged := h.up(labFleet(t, bump), res.Lock, false)
+	staged := h.up(labFleet(t, bump), false)
 	if !slices.Equal(staged.Staged, []string{"scout"}) || len(staged.Updated) != 0 {
 		t.Fatalf("up while busy = %+v", staged)
 	}
@@ -178,7 +178,7 @@ func TestBusyIsStagedThenAppliedAtIdle(t *testing.T) {
 
 func TestApplyInterrupt(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	builder.StartTurn(context.Background(), api.TurnRequest{Prompt: "migrate"})
 	h.waitPhase("builder", api.PhaseBusy)
@@ -187,7 +187,7 @@ func TestApplyInterrupt(t *testing.T) {
 		c.Egress.Allow = append(c.Egress.Allow, "proxy.golang.org")
 		f.Computers["builder"] = c
 	}
-	if r := h.up(labFleet(t, change), res.Lock, false); !slices.Equal(r.Staged, []string{"builder"}) {
+	if r := h.up(labFleet(t, change), false); !slices.Equal(r.Staged, []string{"builder"}) {
 		t.Fatalf("up = %+v", r)
 	}
 	r, err := h.c.Apply(context.Background(), api.ApplyRequest{})
@@ -208,7 +208,7 @@ func TestApplyInterrupt(t *testing.T) {
 
 func TestSleepAndWake(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	scout := h.cds.get("scout")
 	scout.StartTurn(context.Background(), api.TurnRequest{Prompt: "remember a word"})
 	h.waitPhase("scout", api.PhaseBusy)
@@ -247,7 +247,7 @@ func TestSleepAndWake(t *testing.T) {
 
 func TestControllerRestartForgetsCredentials(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	if err := h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep}); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestControllerRestartForgetsCredentials(t *testing.T) {
 
 func TestDiedIsRestartedThenErrors(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	for i := 1; i <= 3; i++ {
 		h.d.takeCalls()
 		h.d.kill("reviewer")
@@ -301,9 +301,9 @@ func TestDiedIsRestartedThenErrors(t *testing.T) {
 
 func TestUpAsleepAppliesToNewComputersOnly(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.d.takeCalls()
-	h.up(labFleet(t, fifth), res.Lock, true)
+	h.up(labFleet(t, fifth), true)
 	h.waitPhase("fifth", api.PhaseAsleep)
 	calls := h.d.takeCalls()
 	if !slices.Contains(calls, "stage fifth 1") || hasCall(calls, "power fifth") {
@@ -325,29 +325,25 @@ func TestAdmission(t *testing.T) {
 			t.Errorf("%s: err = %v, want 400 containing %q", what, err, wantMsg)
 		}
 	}
-	lock := fleet.NewLock()
-	lock.Images["slim"] = "sha256:elsewhere"
-	check("pin mismatch", api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: lock, Credentials: labCreds}, "sha256:elsewhere")
 	other := labFleet(t, func(f *fleet.Fleet) { f.Metadata.Name = "other" })
 	check("wrong fleet", api.PutFleetRequest{Fleet: specFor(other), Credentials: labCreds}, "other")
 	if calls := h.d.takeCalls(); len(calls) != 0 {
 		t.Fatalf("admission errors changed things: %v", calls)
 	}
 
-	// An existing pin is kept and is what runs.
+	// A pin is kept while its image exists, even when the tag moves.
+	h.up(labFleet(t, nil), false)
 	h.d.setImage("a12s/slim:dev", "sha256:slim2")
 	h.d.setImage("old", "sha256:slim1")
-	lock = fleet.NewLock()
-	lock.Images["slim"] = "sha256:slim1"
-	res := h.up(labFleet(t, nil), lock, false)
-	if res.Lock.Images["slim"] != "sha256:slim1" || h.d.get("scout").spec.Image != "sha256:slim1" {
-		t.Fatalf("pin changed: %v, runs %s", res.Lock.Images, h.d.get("scout").spec.Image)
+	h.up(labFleet(t, nil), false)
+	if h.pins().Images[imageRef("slim")] != "sha256:slim1" || h.d.get("scout").spec.Image != "sha256:slim1" {
+		t.Fatalf("pin changed: %v, runs %s", h.pins().Images, h.d.get("scout").spec.Image)
 	}
 }
 
 func TestIdleSleepDoesNotWaitForTheFlush(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	start := time.Now()
 	if err := h.c.SetPower(context.Background(), "builder", api.PowerRequest{State: api.PowerAsleep}); err != nil {
 		t.Fatal(err)
@@ -361,7 +357,7 @@ func TestIdleSleepDoesNotWaitForTheFlush(t *testing.T) {
 // sends one request per Computer, concurrently).
 func TestFailingWakeDoesNotDelayOthers(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	ctx := context.Background()
 	for _, name := range lab4 {
 		if err := h.c.SetPower(ctx, name, api.PowerRequest{State: api.PowerAsleep}); err != nil {
@@ -424,11 +420,11 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 			t.Errorf("%s: err = %v", ref, err)
 		}
 	}
-	res := h.up(withImage("me/agent:1"), nil, false)
-	if res.Lock.Images["me/agent:1"] != "sha256:agent" {
-		t.Fatalf("custom image not pinned: %v", res.Lock.Images)
+	res := h.up(withImage("me/agent:1"), false)
+	if h.pins().Images["me/agent:1"] != "sha256:agent" {
+		t.Fatalf("custom image not pinned: %v", h.pins().Images)
 	}
-	if res = h.up(withImage("me/rel:1"), nil, false); !slices.ContainsFunc(res.Warnings, func(w string) bool {
+	if res = h.up(withImage("me/rel:1"), false); !slices.ContainsFunc(res.Warnings, func(w string) bool {
 		return strings.Contains(w, "computers.scout.image: me/rel:1: computerd is from a12s v0.2.3") &&
 			strings.Contains(w, "dev build")
 	}) {
@@ -447,7 +443,7 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 // Editing instructions is the everyday way to change an agent: the files' digest changes and the Computer restages.
 func TestChangedInstructionsAreApplied(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	before := h.d.get("scout").spec.PresetDigest
 	if before == "" {
 		t.Fatal("scout's preset files were not sent to the driver")
@@ -457,7 +453,7 @@ func TestChangedInstructionsAreApplied(t *testing.T) {
 		c.Files, c.Home.Preset = nil, ""
 		c.Instructions = "You are scout, version 2.\n"
 		f.Computers["scout"] = c
-	}), nil, false)
+	}), false)
 	if !slices.Equal(changed.Updated, []string{"scout"}) {
 		t.Fatalf("up = %+v, want scout updated", changed)
 	}
@@ -508,7 +504,7 @@ func TestSeccompProfileIsApplied(t *testing.T) {
 		t.Fatalf("a malformed profile is refused: %v", err)
 	}
 
-	h.up(with(string(chromium)), nil, false)
+	h.up(with(string(chromium)), false)
 	var want, got any
 	_ = json.Unmarshal(chromium, &want)
 	spec := h.d.get("tester").spec
@@ -523,7 +519,7 @@ func TestSeccompProfileIsApplied(t *testing.T) {
 	}
 
 	edited := strings.Replace(string(chromium), `"defaultErrnoRet": 1`, `"defaultErrnoRet": 38`, 1)
-	changed := h.up(with(edited), nil, false)
+	changed := h.up(with(edited), false)
 	if !slices.Equal(changed.Updated, []string{"tester"}) {
 		t.Fatalf("up = %+v", changed)
 	}

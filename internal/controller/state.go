@@ -20,7 +20,7 @@ import (
 // stateFile is the Controller's only persistent record, in the state dir.
 const stateFile = "state.json"
 
-// State is what the Controller persists: the Fleet as written and its Lock, and per
+// State is what the Controller persists: the Fleet as written and the image IDs it pinned, and per
 // Computer what it staged and what power the operator asked for.
 // Credentials are never part of it.
 type State struct {
@@ -28,9 +28,8 @@ type State struct {
 	Spec    *fleet.Spec  `json:"spec,omitempty"`
 	Fleet   *fleet.Fleet `json:"-"`
 	Version int64        `json:"version,omitempty"`
-	// Applied is the Spec of the last whole-Fleet write: what changed since is drift.
-	Applied   *fleet.Spec        `json:"applied,omitempty"`
-	Lock      *fleet.Lock        `json:"lock,omitempty"`
+	// Pins keeps its JSON name from before v0.6.0, so an older Controller's state loads.
+	Pins      *fleet.Pins        `json:"lock,omitempty"`
 	Computers map[string]*Record `json:"computers"`
 	// BundleHosts are the sign-in hosts of each pinned bundle, by
 	// "kind@version", from its manifest.
@@ -101,7 +100,6 @@ func loadState(path string) (*State, error) {
 		if st.Spec, err = migrateLegacy(filepath.Dir(path), st); err != nil {
 			return nil, fmt.Errorf("load state %s: migrate: %w", path, err)
 		}
-		st.Applied = st.Spec.Clone()
 	}
 	st.LegacyFleet, st.LegacySeccomp = nil, nil
 	if st.Spec != nil {
@@ -131,9 +129,9 @@ func migrateLegacy(stateDir string, st *State) (*fleet.Spec, error) {
 	}
 	spec := &fleet.Spec{APIVersion: old.APIVersion, Kind: old.Kind, Metadata: old.Metadata, Egress: old.Egress, Drives: old.Drives,
 		Services: old.Services, AgentComputers: map[string]json.RawMessage{}}
-	lock := st.Lock
+	lock := st.Pins
 	if lock == nil {
-		lock = fleet.NewLock()
+		lock = fleet.NewPins()
 	}
 	for name, raw := range old.Computers {
 		var c fleet.Computer

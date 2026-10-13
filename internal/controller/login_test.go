@@ -19,7 +19,7 @@ func TestServiceLogin(t *testing.T) {
 		s.Manifest = &fleet.ServiceManifest{Login: &fleet.ServiceLogin{Command: []string{"gh-login", "--device"}, Produces: "gh-oauth"}}
 		f.Services["clock"] = s
 	})
-	h.up(f, nil, false)
+	h.up(f, false)
 	waitFor(t, func() bool { return h.c.serviceStatus("clock").Waiting != nil })
 	l, err := h.c.StartLogin(context.Background(), "clock")
 	if err != nil {
@@ -57,7 +57,7 @@ func TestServiceLogin(t *testing.T) {
 	noSecretsOnDisk(t, h.dir)
 	// A manifest without login refuses with a fix.
 	f2 := withServices(t, h.d, nil)
-	h.up(f2, nil, false)
+	h.up(f2, false)
 	if _, err := h.c.StartLogin(context.Background(), "clock"); err == nil || !strings.Contains(err.Error(), "declares no login") {
 		t.Fatalf("no login: %v", err)
 	}

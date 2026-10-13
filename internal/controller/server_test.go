@@ -40,7 +40,7 @@ func apiError(t *testing.T, res *http.Response) api.Error {
 
 func TestAPI(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 
 	if res := h.api("GET", "/v1/status", "", "Authorization", "Bearer wrong"); res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("wrong token = %d", res.StatusCode)
@@ -99,7 +99,7 @@ func TestAPI(t *testing.T) {
 	if e := apiError(t, h.api("DELETE", "/v1/drives/reference", "")); e.Code != api.ErrAttached {
 		t.Fatalf("rm attached = %+v", e)
 	}
-	h.up(labFleet(t, func(f *fleet.Fleet) { delete(f.Computers, "tester") }), nil, false)
+	h.up(labFleet(t, func(f *fleet.Fleet) { delete(f.Computers, "tester") }), false)
 	res = h.api("GET", "/v1/drives", "")
 	var dr api.DrivesResponse
 	json.NewDecoder(res.Body).Decode(&dr)
@@ -119,7 +119,7 @@ func TestAPI(t *testing.T) {
 
 func TestEgressDenialIsJournaled(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	p, ok := h.c.policy("scout")
 	if !ok || p.Check("platform.claude.com", 443) != "" || p.Check("api.openai.com", 443) == "" {
 		t.Fatalf("scout policy = %+v", p)

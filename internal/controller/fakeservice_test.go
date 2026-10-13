@@ -127,15 +127,6 @@ func (d *fakeDriver) ServiceWrite(_ context.Context, name, path, owner, mode, di
 	return nil
 }
 
-func (d *fakeDriver) RefreshImage(_ context.Context, ref string) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if id, ok := d.images[ref]; ok {
-		return id, nil
-	}
-	return "", fmt.Errorf("no image %s", ref)
-}
-
 func (d *fakeDriver) StartLogin(_ context.Context, service string, spec driver.LoginSpec) (driver.Login, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

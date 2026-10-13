@@ -46,8 +46,8 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/credentials` | → `{credentials: [{name, set, usedBy, updatedAt?}]}`: every credential the Fleet names or the Controller stores, never a value (owner; a prefix token sees names inside its prefix) |
 | `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy, updatedAt}`: store it; agent computers and Services that use it get it at once (owner or prefix) |
 | `DELETE /v1/credentials/{name}` | → 204; `409 in_use` while one uses it, `404` if none is stored (owner or prefix) |
-| `GET /v1/fleet` | → `{version, fleet, drift}` with `ETag: "<version>"` (owner only) |
-| `PUT /v1/fleet` | `{fleet, lock?, credentials?, asleep?, refresh?, file?}` → replace the whole Fleet (owner only); `a12s up` sends this |
+| `GET /v1/fleet` | → `{version, fleet}` with `ETag: "<version>"` (owner only) |
+| `PUT /v1/fleet` | `{fleet, credentials?, asleep?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
 The paths of earlier releases, `/v1/computers/...`, are still served as `/v1/agent-computers/...` for one release.
 `GET /v1/status` also still carries `computers`, the same list as `agentComputers`, for one release.
@@ -100,10 +100,8 @@ Content-Type: application/json
 - A PUT or PATCH answers with the written one in `agentComputer` (`service` for a Service), after it is applied.
 - The same three verbs work on `/v1/services/{s}`, with the Service fields.
 
-**The whole Fleet.** `GET /v1/fleet` returns `{version, fleet, drift}` and the version as the `ETag`. `drift` lists
-what changed since the last `PUT /v1/fleet` with `"file": true` (what `a12s up` sends), as a change list; a later
-whole-Fleet write without it counts as drift too. `a12s up` undoes drift, after asking. `PUT /v1/fleet` replaces
-everything:
+**The whole Fleet.** `GET /v1/fleet` returns `{version, fleet}` and the version as the `ETag`. `PUT /v1/fleet`
+replaces everything:
 
 ```http
 PUT /v1/fleet
@@ -134,8 +132,7 @@ update that waits for a busy agent computer's next idle boundary; `fields` names
 `diff`, on an update, lists every leaf that differs with its value before and after:
 `[{"path": "grants.send", "after": ["scout"]}, {"path": "instructions", "before": "a", "after": "b"}]`. `path` is the
 dotted field path in the spec (objects are walked; lists and values are leaves), the values are the spec's with the
-defaults merged in, and `before` or `after` is left out where the field is absent. `GET /v1/fleet`'s `drift` carries
-the same.
+defaults merged in, and `before` or `after` is left out where the field is absent.
 `errors` maps an agent computer or Service that did not converge to why; the rest was still applied.
 
 ### Sending a Message

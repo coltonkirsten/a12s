@@ -14,7 +14,6 @@ import type {
   AgentComputerData,
   AgentComputersResponse,
   AgentComputerSpec,
-  Change,
   ComputerStatus,
   CredentialInfo,
   CredentialsResponse,
@@ -42,8 +41,6 @@ const maxReplaceTries = 5;
 export interface FleetState {
   version: number;
   spec: FleetSpec;
-  /** What changed through the API since the last whole-Fleet write. */
-  drift: Change[];
 }
 
 export interface CreateOptions {
@@ -93,7 +90,7 @@ export class Fleet {
 
   async get(): Promise<FleetState> {
     const r = await this.client.request<FleetResponse>("GET", "/v1/fleet");
-    return { version: r.version, spec: r.fleet ?? emptySpec(), drift: r.drift ?? [] };
+    return { version: r.version, spec: r.fleet ?? emptySpec() };
   }
 
   /**

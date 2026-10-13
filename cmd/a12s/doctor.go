@@ -69,7 +69,6 @@ func doctor(ctx context.Context, g *globals) []check {
 		return out
 	}
 	ok("fleet %s: %d agent computer(s), %d Service(s)", f.Metadata.Name, len(f.Computers), len(f.Services))
-	lock, _ := fleet.LoadLock(g.lockPath())
 
 	dc, err := client.New(client.FromEnv)
 	if err == nil {
@@ -82,16 +81,9 @@ func doctor(ctx context.Context, g *globals) []check {
 	if err != nil {
 		bad("start Docker Desktop (or set DOCKER_HOST)", "docker is not reachable: %v", err)
 	} else {
-		have := func(ref, pin string) bool {
-			for _, r := range []string{pin, ref} {
-				if r == "" {
-					continue
-				}
-				if _, err := dc.ImageInspect(ctx, r); err == nil {
-					return true
-				}
-			}
-			return false
+		have := func(ref string) bool {
+			_, err := dc.ImageInspect(ctx, ref)
+			return err == nil
 		}
 		seen := map[string]bool{}
 		for _, name := range f.ComputerNames() {
@@ -102,7 +94,7 @@ func doctor(ctx context.Context, g *globals) []check {
 				if img == fleet.TierSlim {
 					ref = version.Image(img)
 				}
-				if have(ref, lock.Images[img]) {
+				if have(ref) {
 					ok("image %s", ref)
 				} else {
 					bad(fetchFix("make image-"+img, ref), "image %s is not on this machine", ref)
@@ -111,7 +103,7 @@ func doctor(ctx context.Context, g *globals) []check {
 			if k := c.Harness.BundleKey(); !seen["b"+k] {
 				seen["b"+k] = true
 				ref := version.Bundle(c.Harness.Kind, c.Harness.Version)
-				if have(ref, lock.Bundles[k]) {
+				if have(ref) {
 					ok("bundle %s", k)
 				} else {
 					bad(fetchFix(fmt.Sprintf("make bundle-%s VERSION=%s", c.Harness.Kind, c.Harness.Version), ref), "bundle %s is not on this machine", k)
@@ -120,13 +112,13 @@ func doctor(ctx context.Context, g *globals) []check {
 		}
 		for _, name := range f.ServiceNames() {
 			s := f.Services[name]
-			if have(s.Image, lock.Services[fleet.ServiceKey(name, s.Image)]) {
+			if have(s.Image) {
 				ok("service image %s", s.Image)
 			} else {
 				bad("docker pull "+s.Image, "service image %s is not on this machine", s.Image)
 			}
 		}
-		if have(cli.DefaultControllerImage, "") {
+		if have(cli.DefaultControllerImage) {
 			ok("controller image %s", cli.DefaultControllerImage)
 		} else {
 			bad(fetchFix("make image-controller", cli.DefaultControllerImage), "controller image %s is not on this machine", cli.DefaultControllerImage)
@@ -137,23 +129,7 @@ func doctor(ctx context.Context, g *globals) []check {
 		s := f.Services[name]
 		if fetchesAtStart(s.Config) {
 			warn("bake the server into a derived image and point config.command at it (docs/services.md)",
-				"services.%s.config runs npx at start, which fetches unpinned code and defeats fleet.lock", name)
-		}
-	}
-
-	b, err := cli.LoadBindings(g.bindings())
-	if err != nil {
-		bad("fix "+g.bindings(), "%v", err)
-	} else {
-		if _, err := b.Resolve(cli.Needed(f)); err != nil {
-			bad("a12s creds set <name> for each credential named above", "%v", err)
-		} else if len(cli.Needed(f)) > 0 {
-			ok("bindings: every agent computer credential resolves")
-		}
-		for cred, who := range cli.NeededByServices(f) {
-			if _, ok := b.Credentials[cred]; !ok {
-				warn("a12s creds set "+cred+" (or a12s service login, if a manifest login produces it)", "credential %s (needed by %s) has no binding", cred, strings.Join(who, ", "))
-			}
+				"services.%s.config runs npx at start, which fetches unpinned code at every start", name)
 		}
 	}
 
@@ -169,7 +145,7 @@ func doctor(ctx context.Context, g *globals) []check {
 	}
 	ok("controller answers (fleet %s)", st.Fleet)
 	if !st.CredentialsLoaded {
-		warn("a12s up", "the Controller holds no credentials (it restarted)")
+		warn("a12s creds set <name>", "the Controller holds no credentials (a memory-only Controller restarted)")
 	}
 	if st.EgressEnforcement == fleet.EnforcementUnenforced {
 		warn("set egress.enforcement: enforced on a substrate that can enforce it", "egress is not enforced for this Fleet")

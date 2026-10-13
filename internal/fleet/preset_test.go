@@ -11,96 +11,6 @@ import (
 	"testing"
 )
 
-func TestLockRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), LockFile)
-	l, err := LoadLock(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(l, NewLock()) {
-		t.Fatalf("missing lock should be empty, got %+v", l)
-	}
-
-	if !l.PinImage("slim", "sha256:s1") || !l.PinBundle("claude-code", "2.1.280", "sha256:c1") ||
-		!l.PinBundle("codex", "0.154.0", "sha256:x1") || !l.PinPreset("./presets/scout", "sha256:p1") {
-		t.Fatal("first pins should change the lock")
-	}
-	if l.PinImage("slim", "sha256:other") || l.PinBundle("codex", "0.154.0", "sha256:other") {
-		t.Fatal("an existing pin must never change")
-	}
-	if err := l.Save(path); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `images:
-  slim: sha256:s1
-bundles:
-  claude-code@2.1.280: sha256:c1
-  codex@0.154.0: sha256:x1
-presets:
-  ./presets/scout: sha256:p1
-`
-	if string(data) != want {
-		t.Errorf("lock file:\n%s\nwant:\n%s", data, want)
-	}
-	back, err := LoadLock(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(back, l) {
-		t.Errorf("round trip: got %+v want %+v", back, l)
-	}
-}
-
-func TestLoadLockPlanShape(t *testing.T) {
-	path := filepath.Join(t.TempDir(), LockFile)
-	doc := `images:  { slim: "sha256:a", "me/agent:1": "sha256:b" }
-bundles: { "claude-code@2.1.280": "sha256:c", "codex@0.154.0": "sha256:d" }
-presets: { "./presets/scout": "sha256:e" }   # content hash of the directory
-seccomp: { "./profiles/chromium.json": "sha256:f" }
-`
-	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	l, err := LoadLock(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := &Lock{
-		Images:   map[string]string{"slim": "sha256:a", "me/agent:1": "sha256:b"},
-		Bundles:  map[string]string{"claude-code@2.1.280": "sha256:c", "codex@0.154.0": "sha256:d"},
-		Presets:  map[string]string{"./presets/scout": "sha256:e"},
-		Services: map[string]string{},
-		Seccomp:  map[string]string{"./profiles/chromium.json": "sha256:f"},
-	}
-	if !reflect.DeepEqual(l, want) {
-		t.Errorf("got %+v want %+v", l, want)
-	}
-
-	if err := os.WriteFile(path, []byte("images: {}\nsurprise: 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadLock(path); err == nil {
-		t.Error("unknown lock field should fail")
-	}
-}
-
-func writeTree(t *testing.T, dir string, files map[string]string) {
-	t.Helper()
-	for name, body := range files {
-		p := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestHashPreset(t *testing.T) {
 	files := map[string]string{
 		".claude/settings.json": `{"theme":"dark"}`,
@@ -191,5 +101,18 @@ func TestWritePresetTar(t *testing.T) {
 	want := []string{".claude/", ".claude/settings.json", "hello.txt"}
 	if !reflect.DeepEqual(names, want) {
 		t.Errorf("entries = %v, want %v", names, want)
+	}
+}
+
+func writeTree(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

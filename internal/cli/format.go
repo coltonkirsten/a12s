@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -94,7 +95,7 @@ func SeccompLines(f *fleet.Fleet) []string {
 
 func UpErrors(r *api.PutFleetResponse) []string {
 	var out []string
-	for _, name := range sortedKeys(r.Errors) {
+	for _, name := range slices.Sorted(maps.Keys(r.Errors)) {
 		out = append(out, name+": "+r.Errors[name])
 	}
 	return out
@@ -255,7 +256,7 @@ func StatusWarnings(st *api.StatusResponse) []string {
 		add("egress is UNENFORCED for this Fleet: allowlists are not a firewall here")
 	}
 	if !st.CredentialsLoaded {
-		add("the Controller holds no credentials (it restarted?): run a12s up or a12s wake to send them")
+		add("the Controller holds no credentials (a memory-only Controller restarted?): set them again with a12s creds set")
 	}
 	// A Controller that already lists the orphaned drives in its warnings would be said twice.
 	if !slices.ContainsFunc(st.Warnings, func(w string) bool { return strings.HasPrefix(w, "orphaned drives") }) {

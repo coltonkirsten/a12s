@@ -240,19 +240,16 @@ func capture(t *testing.T, fn func()) (string, string) {
 	return <-chOut, <-chErr
 }
 
-// A partial failure still writes new pins and the summary, lists each
-// failure, and fails the command.
+// A partial failure still prints the summary, lists each failure, and fails the command.
 func TestFinishUpPartialFailure(t *testing.T) {
 	dir := t.TempDir()
 	g := &globals{fleetPath: filepath.Join(dir, "fleet.yaml")}
-	onDisk := fleet.NewLock()
 	resp := &api.PutFleetResponse{
 		Created: []string{"scout", "tester"},
 		Errors:  map[string]string{"tester": "image a12s/browser:dev not found"},
-		Lock:    &fleet.Lock{Images: map[string]string{"slim": "sha256:aa"}},
 	}
 	var out, errOut bytes.Buffer
-	err := g.finishUp(onDisk, fleet.NewLock(), resp, false, &out, &errOut)
+	err := g.finishUp(resp, false, &out, &errOut)
 	if err == nil || !strings.Contains(err.Error(), "1 agent computer(s) or Service(s) did not converge") {
 		t.Fatalf("err = %v", err)
 	}
@@ -262,11 +259,7 @@ func TestFinishUpPartialFailure(t *testing.T) {
 	if !strings.Contains(errOut.String(), "tester: image a12s/browser:dev not found\n") {
 		t.Errorf("stderr %q", errOut.String())
 	}
-	l, err := fleet.LoadLock(g.lockPath())
-	if err != nil || l.Images["slim"] != "sha256:aa" {
-		t.Errorf("lock %+v, %v", l, err)
-	}
-	if code := report(io.Discard, command{name: "up"}, g.finishUp(onDisk, fleet.NewLock(), resp, false, io.Discard, io.Discard)); code != 1 {
+	if code := report(io.Discard, command{name: "up"}, g.finishUp(resp, false, io.Discard, io.Discard)); code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
 }

@@ -1,6 +1,6 @@
 # Extending a12s
 
-a12s is a pinned dependency, installed like Docker. A project never vendors, forks or edits it. Everything a project
+a12s is a dependency, installed like Docker. A project never vendors, forks or edits it. Everything a project
 customizes goes through four surfaces:
 
 | Surface | What you change | Where it lives |
@@ -41,8 +41,8 @@ agent_computers:
     credentials: [anthropic]
 ```
 
-`a12s up` pulls the image if it isn't local (with your `docker login`), pins its ID in `fleet.lock` under its ref,
-and checks it at admission:
+`a12s up` pulls the image if it isn't local (with your `docker login`), pins the image ID its ref resolves to
+([Pins](fleet-file.md#pins)), and checks it at admission:
 
 - it carries the `ai.a12s.computerd.version` label, which the base images set and every image built FROM them
   inherits;
@@ -60,8 +60,9 @@ agent_computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.versio
 What a custom image can't change: a12s always starts computerd as root (your `ENTRYPOINT`, `CMD`, `USER` and
 `HEALTHCHECK` are ignored), the root filesystem is read-only, the harness runs as uid 1000, and the home drive is
 mounted over `/home`. Install tools system-wide (under `/usr` or `/opt`), not into `/home/agent`. To pick up a new
-image, change its tag in `fleet.yaml`: a pinned ref keeps running the pinned ID. When you upgrade a12s to a new minor
-(or, from 1.0, a new major), rebuild FROM the new base; admission refuses the old image until you do.
+image, give it a new tag in `fleet.yaml`: a pinned ref keeps running the pinned ID. When you upgrade a12s to a new
+minor (or, from 1.0, a new major), rebuild FROM the new base under a new tag; admission refuses the old image until
+you do.
 
 An image can't change its own sandbox. If its software needs syscalls Docker's default seccomp profile blocks
 (Chromium's sandbox does), set [`security.seccomp`](security.md#seccomp) on the agent computer in `fleet.yaml`; see
@@ -108,8 +109,8 @@ source (`make bundle-claude-code VERSION=x.y.z`) and tag it with the registry re
 
 ## Extra credentials
 
-Name any credential in the Fleet and bind it on each machine. Names the harness knows (`anthropic`, `openai`,
-`github`) become its environment; any other name is a file at `/run/a12s/secrets/<name>`.
+Name any credential in the Fleet and set it with `a12s creds set <name>`. Names the harness knows (`anthropic`,
+`openai`, `github`) become its environment; any other name is a file at `/run/a12s/secrets/<name>`.
 
 ```yaml
 agent_computers:
@@ -117,12 +118,8 @@ agent_computers:
     credentials: [anthropic, github, stripe-test]
 ```
 
-```yaml
-# a12s.bindings.yaml (never committed)
-credentials:
-  anthropic:   { file: ~/.a12s/anthropic }
-  github:      { env: GH_TOKEN }
-  stripe-test: { file: ~/.secrets/stripe-test }
+```sh
+a12s creds set stripe-test < ~/.secrets/stripe-test
 ```
 
 Prefer a Service when an agent should use a capability without holding the secret: the Service holds the

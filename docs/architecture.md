@@ -24,9 +24,7 @@ host                          a12s-<fleet>-controller (bridge network a12s-<flee
 The Controller runs in a container started by `a12s up` (`ghcr.io/coltonkirsten/a12s/controller:<version>` for a release, `a12s/controller:dev` for a source build). It:
 
 - **Holds the Fleet** as written (defaults and each agent computer before they are merged) with a version that goes
-  up by one per change, and the last Fleet `a12s up` sent, so it can report what the API changed since (`drift`).
-  `a12s up` reads the version, asks before undoing drift, and makes its write conditional on that version.
-  Writes take an exclusive lock: a whole-Fleet write may name the version it read, a write to one agent computer or
+  up by one per change. The live Fleet is the source of truth; `a12s up` makes it match the file. Writes take an exclusive lock: a whole-Fleet write may name the version it read, a write to one agent computer or
   Service touches only that one.
 - **Reconciles** the Fleet against what exists, through the Driver interface. Every mutation carries a
   generation; stale writes are rejected and success is read back, never assumed. Changes to a busy agent computer
@@ -51,7 +49,7 @@ are `{code, message, fix?, details?}` with a stable `code`. The main routes:
 
 | Route | Purpose |
 |---|---|
-| `GET /v1/fleet`, `PUT /v1/fleet` | Read the Fleet and its version; replace it with a lock and credentials (`If-Match`, `?dryRun=true`) |
+| `GET /v1/fleet`, `PUT /v1/fleet` | Read the Fleet and its version; replace it (`If-Match`, `?dryRun=true`) |
 | `GET /v1/status` | Agent computers, Services, inboxes, power |
 | `GET`, `PUT`, `PATCH`, `DELETE /v1/agent-computers/{c}` | Read, create or replace, change, remove one agent computer |
 | `POST /v1/agent-computers/{c}/inbox` | Enqueue (`GET`, `DELETE …/inbox/{id}`, `…/inbox/{id}/events`, `…/inbox/clear`, `…/inbox/hold`, `…/inbox/resume`) |

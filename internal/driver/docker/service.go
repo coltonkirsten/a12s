@@ -583,18 +583,6 @@ func (d *Driver) ServiceWrite(ctx context.Context, name, p, owner, mode, dirMode
 	return nil
 }
 
-// RefreshImage keeps the local ID of a locally built image no registry knows.
-func (d *Driver) RefreshImage(ctx context.Context, ref string) (string, error) {
-	if pull, err := d.cli.ImagePull(ctx, ref, client.ImagePullOptions{}); err == nil {
-		_ = pull.Wait(ctx)
-	}
-	res, err := d.cli.ImageInspect(ctx, ref)
-	if err != nil {
-		return "", fmt.Errorf("refresh image %s: %w", ref, err)
-	}
-	return res.ID, nil
-}
-
 func (d *Driver) LoginName(service string) string { return d.ContainerName(service) + "-login" }
 
 // StartLogin: no capabilities, read-only rootfs, everything writable on tmpfs, and

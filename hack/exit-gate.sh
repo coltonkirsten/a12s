@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The Layer 1 end-to-end check (see CONTRIBUTING.md), run against the local Docker engine with the examples/lab Fleet.
 # Usage: hack/exit-gate.sh <logfile>. Requires: built bin/a12s and a12s/* images,
-# examples/lab/a12s.bindings.yaml, and GH_TOKEN for the builder's github credential.
+# ~/.a12s/anthropic (a setup token), ~/.a12s/lab/openai.json, and GH_TOKEN for the builder's github credential.
 set -uo pipefail
 LOG=${1:?logfile}; : > "$LOG"
 cd "$(dirname "$0")/../examples/lab"
@@ -24,6 +24,8 @@ log "## 1 one file: four Computers, both harnesses"
 check "1 fleet declares four computers" test "$(grep -cE '^  (scout|builder|tester|reviewer):' fleet.yaml)" -eq 4
 
 log "## 2 one command: a12s up brings all four to Ready"
+$A12S creds set anthropic < ~/.a12s/anthropic && $A12S creds set openai < ~/.a12s/lab/openai.json --no-check &&
+  printf %s "$GH_TOKEN" | $A12S creds set github || { log "FAIL setup: creds set"; exit 1; }
 run $A12S up; run $A12S status
 check "2 all four Ready" count_phase Ready
 
@@ -99,10 +101,10 @@ $A12S logs builder --since "$since7" > /tmp/gate7.log; cat /tmp/gate7.log >> "$L
 denied7() { grep -q '^turn t_[0-9a-f]* completed$' /tmp/gate7.out && grep ' diagnostic ' /tmp/gate7.log | grep -q '"host":"example.com"'; }
 check "7 example.com denied with a diagnostic event (this turn)" denied7
 
-log "## 8 bump the harness version in the lock; next turn uses it; no image rebuilt"
+log "## 8 bump the harness version; next turn uses it; no image rebuilt"
 before=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/slim:dev' | sort)
 sed -i.bak 's/version: 2.1.280, model: claude-fable-5-1/version: 2.1.281, model: claude-fable-5-1/' fleet.yaml
-run $A12S up; run cat fleet.lock
+run $A12S up
 $A12S send --wait scout "Reply with the single word pong." > /tmp/gate8.out; cat /tmp/gate8.out >> "$LOG"
 after=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/slim:dev' | sort)
 v281() { grep -q '^turn t_[0-9a-f]* started (claude-code 2.1.281' /tmp/gate8.out && turn_ok /tmp/gate8.out pong; }

@@ -52,7 +52,7 @@ class Fake:
         if req.method == "DELETE" and path == "/v1/agent-computers/hello":
             return httpx.Response(200, json={"version": self.version, "removed": ["hello"]})
         if req.method == "GET" and path == "/v1/fleet":
-            return httpx.Response(200, json={"version": self.version, "fleet": {"agent_computers": {}}, "drift": []})
+            return httpx.Response(200, json={"version": self.version, "fleet": {"agent_computers": {}}})
         if req.method == "PUT" and path == "/v1/fleet":
             if self.conflicts:
                 self.conflicts -= 1

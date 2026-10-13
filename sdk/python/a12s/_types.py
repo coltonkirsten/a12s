@@ -338,7 +338,6 @@ class AgentComputersResponse:
 class FleetResponse:
     version: int
     fleet: dict[str, Any]
-    drift: list[Change]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -28,10 +28,9 @@ type command struct {
 
 func commands() []command {
 	return []command{
-		{"init", "[dir] [--harness claude-code|codex]", "scaffold fleet.yaml, bindings and .gitignore", runInit},
-		{"up", "[--asleep] [--force] [--memory-only-credentials]", "apply the Fleet file: create, update or stage agent computers", runUp},
-		{"diff", "", "the Fleet file against the live Fleet; exit 2 when they differ", runDiff},
-		{"export", "[--force]", "write the live Fleet back to the Fleet file and presets", runExport},
+		{"init", "[dir] [--harness claude-code|codex]", "scaffold fleet.yaml and .gitignore", runInit},
+		{"up", "[--asleep] [--memory-only-credentials]", "apply the Fleet file to the live Fleet: create, update, stage or remove agent computers", runUp},
+		{"export", "", "write the live Fleet back to the Fleet file and presets", runExport},
 		{"apply", "--interrupt [--grace 30s]", "force a staged change onto a busy agent computer", runApply},
 		{"status", "[<name>]", "state, session, active turn, harness version, warnings", runStatus},
 		{"send", "<name> \"…\" [--wait] [--fresh] [--expires d] [--replace k] [--meta k=v]", "enqueue a message (works while asleep); --wait streams the turn that delivers it", runSend},
@@ -45,11 +44,10 @@ func commands() []command {
 		{"ui", "[console args, e.g. --port 7013 --no-open]", "open the web console (a12s-console, via npx; Node.js 20+)", runUI},
 		{"shell", "<name> [--root] [-- command...]", "audited terminal inside an agent computer, outside the harness", runShell},
 		{"service", "ls | status <svc> | logs <svc> [-f] | login <svc>", "list Services, show one, follow its logs, or log it in once", runService},
-		{"creds", "set <name>", "paste a token once; it is stored 0600 and bound", runCreds},
-		{"lock", "update services/<svc>", "move a Service's pin in fleet.lock explicitly", runLock},
+		{"creds", "set <name>", "paste a token once; the Controller keeps it (0600 in its state volume)", runCreds},
 		{"drive", "ls | rm <name> [--yes]", "list drives; rm and down --purge are the only commands that destroy data", runDrive},
 		{"down", "[--purge [--yes]]", "remove agent computers, Controller and network; keep drives (--purge destroys them)", runDown},
-		{"doctor", "", "check Docker, images, bindings, the Controller and Service health; one fix per line", runDoctor},
+		{"doctor", "", "check Docker, images, the Controller, credentials and Service health; one fix per line", runDoctor},
 		{"version", "", "print the a12s release and where its images come from", runVersion},
 		{"completion", "bash|zsh", "print a shell completion script", runCompletion},
 		{"controller", "", "run the Controller (inside its container)", runControllerCmd},
@@ -57,10 +55,9 @@ func commands() []command {
 }
 
 type globals struct {
-	fleetPath    string
-	bindingsPath string
-	json         bool
-	warnedF      bool
+	fleetPath string
+	json      bool
+	warnedF   bool
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
@@ -107,7 +104,7 @@ func run(args []string, stderr io.Writer) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: a12s [--fleet|-F fleet.yaml] [--bindings path] [--json] <command> [args]")
+	fmt.Fprintln(w, "usage: a12s [--fleet|-F fleet.yaml] [--json] <command> [args]")
 	fmt.Fprintln(w)
 	for _, c := range commands() {
 		fmt.Fprintf(w, "  %-10s %-38s %s\n", c.name, c.args, c.summary)
@@ -151,7 +148,7 @@ func (g *globals) register(fs *flag.FlagSet) {
 
 // registerFleet: commands where -f means follow pass withF false.
 func (g *globals) registerFleet(fs *flag.FlagSet, withF bool) {
-	usage := "Fleet file; fleet.lock and " + cli.BindingsFile + " live beside it (default: $A12S_FLEET, then the nearest fleet.yaml upward)"
+	usage := "Fleet file (default: $A12S_FLEET, then the nearest fleet.yaml upward)"
 	fs.StringVar(&g.fleetPath, "fleet", g.fleetPath, usage)
 	fs.StringVar(&g.fleetPath, "F", g.fleetPath, usage)
 	if withF {
@@ -164,7 +161,6 @@ func (g *globals) registerFleet(fs *flag.FlagSet, withF bool) {
 			return nil
 		})
 	}
-	fs.StringVar(&g.bindingsPath, "bindings", g.bindingsPath, "bindings file (default: "+cli.BindingsFile+" beside the Fleet file)")
 	fs.BoolVar(&g.json, "json", g.json, "print the result as JSON (events as JSON lines)")
 }
 
@@ -239,15 +235,6 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 }
 
 func (g *globals) dir() string { return filepath.Dir(g.fleetPath) }
-
-func (g *globals) lockPath() string { return filepath.Join(g.dir(), fleet.LockFile) }
-
-func (g *globals) bindings() string {
-	if g.bindingsPath != "" {
-		return g.bindingsPath
-	}
-	return filepath.Join(g.dir(), cli.BindingsFile)
-}
 
 func (g *globals) presetDir(p string) string {
 	if filepath.IsAbs(p) {

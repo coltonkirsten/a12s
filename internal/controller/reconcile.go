@@ -40,23 +40,20 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest, o wr
 	if req.Fleet == nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "fleet is required")
 	}
-	o.whole, o.file, o.lock, o.creds, o.asleep, o.refresh = true, req.File, req.Lock, req.Credentials, req.Asleep, req.Refresh
+	o.whole, o.creds, o.asleep = true, req.Credentials, req.Asleep
 	return c.applySpec(ctx, func(*fleet.Spec) (*fleet.Spec, error) { return req.Fleet, nil }, o)
 }
 
 // writeOpts says what a write may touch and how it is admitted.
 type writeOpts struct {
 	whole bool // PUT /v1/fleet: may touch everything
-	file  bool // the Fleet comes from a Fleet file: it becomes the Applied spec
 	// only names the agent computers and Services a partial write touches.
 	only    []string
 	dryRun  bool
 	ifMatch *int64
 	by      caller
-	lock    *fleet.Lock // nil: the stored lock
 	creds   api.Credentials
 	asleep  bool
-	refresh []string
 }
 
 func (o writeOpts) touches(name string) bool { return o.whole || slices.Contains(o.only, name) }
@@ -69,7 +66,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 
 	c.mu.Lock()
 	cur, version, oldFleet := c.state.Spec, c.state.Version, c.state.Fleet
-	storedLock := c.state.Lock
+	storedPins := c.state.Pins
 	c.mu.Unlock()
 	if o.ifMatch != nil && *o.ifMatch != version {
 		return api.PutFleetResponse{}, &httpError{status: http.StatusPreconditionFailed, body: api.Error{Code: api.ErrVersionMismatch,
@@ -107,14 +104,10 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	c.mu.Unlock()
 	maps.Copy(creds, o.creds)
 	changes := c.diff(oldFleet, f, o)
-	lockIn := o.lock
-	if lockIn == nil {
-		lockIn = storedLock
-	}
 	// A dry run is admitted like the write, images and their manifests included, so it never says yes to a write
 	// that fails.
 	var admitWarnings []string
-	lock, hosts, manifests, err := c.resolve(ctx, f, lockIn, o.refresh, &admitWarnings)
+	pins, hosts, manifests, err := c.resolve(ctx, f, storedPins, &admitWarnings)
 	if err != nil {
 		return api.PutFleetResponse{}, err
 	}
@@ -153,12 +146,9 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		previous, previousServices = c.state.Fleet.Computers, c.state.Fleet.Services
 	}
 	changed := c.state.Spec == nil || specJSON(c.state.Spec) != specJSON(spec)
-	c.state.Spec, c.state.Fleet, c.state.Lock = spec, f, lock
+	c.state.Spec, c.state.Fleet, c.state.Pins = spec, f, pins
 	if changed {
 		c.state.Version++
-	}
-	if o.file {
-		c.state.Applied = spec.Clone()
 	}
 	version = c.state.Version
 	maps.Copy(c.state.BundleHosts, hosts)
@@ -224,7 +214,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		c.fleetChanged(version, o.by.principal, changes)
 	}
 
-	res := api.PutFleetResponse{Version: version, Changes: changes, Lock: lock, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()),
+	res := api.PutFleetResponse{Version: version, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()),
 		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -332,7 +322,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	c.refreshAddrs(ctx)
 	if o.by.prefix() != "" {
 		// Fleet-wide, so they may name what the token must not see.
-		res.Warnings, res.Lock = nil, nil
+		res.Warnings = nil
 	}
 	res.Warnings = append(res.Warnings, waits...)
 	return res, nil
@@ -961,22 +951,22 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	return err
 }
 
-// resolve checks the Fleet against the substrate and the lock, makes the
-// images and bundles available, and returns the lock with missing pins
+// resolve checks the Fleet against the substrate, makes the images and
+// bundles available, and returns the pins with missing ones
 // added (an existing pin never changes) and each bundle's sign-in hosts.
-func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, refresh []string, warnings *[]string) (*fleet.Lock, map[string][]string, map[string]*fleet.ServiceManifest, error) {
-	lock, hosts, caps, err := c.resolveComputers(ctx, f, in, warnings)
+func (c *Controller) resolve(ctx context.Context, f *fleet.Fleet, in *fleet.Pins, warnings *[]string) (*fleet.Pins, map[string][]string, map[string]*fleet.ServiceManifest, error) {
+	pins, hosts, caps, err := c.resolveComputers(ctx, f, in, warnings)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	manifests, err := c.resolveServices(ctx, f, lock, caps, refresh)
+	manifests, err := c.resolveServices(ctx, f, pins, caps)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return lock, hosts, manifests, nil
+	return pins, hosts, manifests, nil
 }
 
-func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Lock, warnings *[]string) (*fleet.Lock, map[string][]string, driver.Capabilities, error) {
+func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *fleet.Pins, warnings *[]string) (*fleet.Pins, map[string][]string, driver.Capabilities, error) {
 	invalid := func(format string, args ...any) error {
 		return errorf(http.StatusBadRequest, api.ErrInvalid, format, args...)
 	}
@@ -993,11 +983,11 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 		}
 	}
 
-	lock := fleet.NewLock()
+	pins := fleet.NewPins()
 	if in != nil {
-		maps.Copy(lock.Images, in.Images)
-		maps.Copy(lock.Bundles, in.Bundles)
-		maps.Copy(lock.Services, in.Services)
+		maps.Copy(pins.Images, in.Images)
+		maps.Copy(pins.Bundles, in.Bundles)
+		maps.Copy(pins.Services, in.Services)
 	}
 	hosts := map[string][]string{}
 	seen := map[string]bool{}
@@ -1005,7 +995,7 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 		comp := f.Computers[name]
 		if !seen["image "+comp.Image] {
 			seen["image "+comp.Image] = true
-			id, err := ensurePinned(ctx, imageRef(comp.Image), lock.Images[comp.Image], c.drv.EnsureImage)
+			id, err := ensurePinned(ctx, imageRef(comp.Image), pins.Images[imageRef(comp.Image)], c.drv.EnsureImage)
 			if err != nil {
 				return nil, nil, caps, fmt.Errorf("computers.%s.image: %w", name, err)
 			}
@@ -1018,11 +1008,11 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 					*warnings = append(*warnings, fmt.Sprintf("computers.%s.image: %s: %s", name, comp.Image, warn))
 				}
 			}
-			lock.PinImage(comp.Image, id)
+			pins.Images[imageRef(comp.Image)] = id
 		}
 		if key := comp.Harness.BundleKey(); hosts[key] == nil {
 			var b driver.Bundle
-			id, err := ensurePinned(ctx, bundleRef(comp.Harness), lock.Bundles[key], func(ctx context.Context, ref string) (string, error) {
+			id, err := ensurePinned(ctx, bundleRef(comp.Harness), pins.Bundles[key], func(ctx context.Context, ref string) (string, error) {
 				var err error
 				b, err = c.drv.EnsureBundle(ctx, ref)
 				return b.ImageID, err
@@ -1037,16 +1027,15 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 			if m.Arch != "" && !slices.Contains(caps.Architectures, m.Arch) {
 				return nil, nil, caps, invalid("computers.%s.harness: bundle is for %s, the substrate runs %s", name, m.Arch, strings.Join(caps.Architectures, ", "))
 			}
-			lock.PinBundle(m.Kind, m.Version, id)
+			pins.Bundles[key] = id
 			hosts[key] = append([]string{}, m.SignInHosts...)
 		}
 	}
-	return lock, hosts, caps, nil
+	return pins, hosts, caps, nil
 }
 
-// ensurePinned makes ref available and returns its image ID. When the lock
-// pins an ID, that ID is what runs: it must be available locally, or ref
-// must resolve to it.
+// ensurePinned makes ref available and returns its image ID: the pinned ID
+// while it is available, so a running Fleet never moves under a moved tag.
 func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Context, string) (string, error)) (string, error) {
 	if pin == "" {
 		return ensure(ctx, ref)
@@ -1054,32 +1043,26 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 	if id, err := ensure(ctx, pin); err == nil && id == pin {
 		return id, nil
 	}
-	id, err := ensure(ctx, ref)
-	if err != nil {
-		return "", fmt.Errorf("fleet.lock pins %s to %s, which is not available: %w", ref, pin, err)
-	}
-	if id != pin {
-		return "", errorf(http.StatusBadRequest, api.ErrInvalid, "fleet.lock pins %s to %s, which is not available here (%s is %s); build or pull the pinned image, or edit fleet.lock", ref, pin, ref, id)
-	}
-	return id, nil
+	// The pinned image is gone (pruned or rebuilt under the same tag): the ref is what there is now.
+	return ensure(ctx, ref)
 }
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
-// Lock (generation and preset bytes unset), and the hash of what makes a
+// its pins (generation and preset bytes unset), and the hash of what makes a
 // generation: image, bundle, resources, drives, environment, egress, the
 // Fleet's egress enforcement and the preset's and seccomp profile's digests.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	f, lock := c.state.Fleet, c.state.Lock
-	if f == nil || lock == nil {
+	f, pins := c.state.Fleet, c.state.Pins
+	if f == nil || pins == nil {
 		return driver.ComputerSpec{}, "", errors.New("no Fleet applied")
 	}
 	comp, ok := f.Computers[name]
 	if !ok {
 		return driver.ComputerSpec{}, "", fmt.Errorf("no computer %q in the Fleet", name)
 	}
-	image, bundle := lock.Images[comp.Image], lock.Bundles[comp.Harness.BundleKey()]
+	image, bundle := pins.Images[imageRef(comp.Image)], pins.Bundles[comp.Harness.BundleKey()]
 	if image == "" || bundle == "" {
 		return driver.ComputerSpec{}, "", errors.New("image or bundle is not pinned; run a12s up")
 	}

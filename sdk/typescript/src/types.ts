@@ -86,8 +86,6 @@ export interface FieldDiff {
 export interface FleetResponse {
   version: number;
   fleet: FleetSpec | null;
-  /** What changed through the API since the last whole-Fleet write: `a12s up` from the file undoes it. */
-  drift: Change[];
 }
 
 export interface AgentComputerData {
@@ -103,23 +101,11 @@ export interface AgentComputersResponse {
   agentComputers: AgentComputerData[];
 }
 
-export interface Lock {
-  a12s?: string;
-  images: Record<string, string>;
-  bundles: Record<string, string>;
-  presets: Record<string, string>;
-  services?: Record<string, string>;
-  /** Each security.seccomp profile's digest, by its path in the Fleet file. */
-  seccomp?: Record<string, string>;
-}
-
 export interface PutFleetRequest {
   fleet: FleetSpec;
-  lock?: Lock;
   /** Credential values by name, base64-encoded (Go []byte). Kept in the Controller's memory only. */
   credentials?: Record<string, string>;
   asleep?: boolean;
-  refresh?: string[];
 }
 
 export interface ServiceChanges {
@@ -137,7 +123,6 @@ export interface PutFleetResponse {
   updated: string[] | null;
   staged: string[] | null;
   removed: string[] | null;
-  lock: Lock | null;
   errors?: Record<string, string>;
   warnings?: string[];
   services: ServiceChanges;

@@ -11,7 +11,7 @@ fan-out needs.
 ```yaml
 services:
   clock:
-    image: my-org/clock:1           # pinned in fleet.lock as clock@my-org/clock:1
+    image: my-org/clock:1           # the Controller pins the image ID on first use
     grants: { send: [scout] }        # may enqueue to scout's inbox; nothing else
     config: { to: scout, every: 15m }
 agent_computers:
@@ -86,25 +86,24 @@ Every Service image carries `/a12s/service.json`. A stock image can be described
 
 ## Credentials and the one-time login
 
-Static credentials come from the bindings file like an agent computer's (`a12s creds set <name>` writes
-`~/.a12s/<fleet>/<name>` 0600 and binds it). A credential you can't paste uses the manifest's `login`:
+Static credentials are set like an agent computer's, with `a12s creds set <name>`. A credential you can't paste
+uses the manifest's `login`:
 
 ```text
 $ a12s service login gh
 logging in to gh (memory-only container; follow the instructions below)
 ... device code ...
-logged in: gh-oauth saved to ~/.a12s/lab/gh-oauth (0600) and bound; nothing is left in the container.
-$ a12s up
+logged in: gh-oauth set on the Controller; nothing is left in the container, and gh starts with it.
 ```
 
 The login runs in a memory-only container of the pinned image (everything writable is tmpfs, no state drive), on the
-Service's network under its egress policy. The credential comes back over the exec stream and is written on the host,
-not through the Controller; `a12s up` then sends it like any other credential. Until then the Service waits in
-`Provisioning` with `waiting: {credentials: [gh-oauth], fix: "a12s service login gh, then a12s up"}` while the rest of
+Service's network under its egress policy. The credential comes back over the exec stream and the CLI sets it directly
+on the Controller; nothing is written on the host. Until then the Service waits in
+`Provisioning` with `waiting: {credentials: [gh-oauth], fix: "a12s service login gh"}` while the rest of
 the Fleet runs.
 
 Honest limits: a Service program can copy its own secret into its state drive, and a refresh token the vendor rotates
-on use is lost at sleep ("log in again after a sleep"). Secrets at rest are your bound files on the host and the
+on use is lost at sleep ("log in again after a sleep"). The only secrets at rest are in the
 Controller's `credentials.json` (0600, on its state volume; see [Credentials](credentials.md#how-secrets-are-handled)).
 
 ## Commands
@@ -113,8 +112,10 @@ Controller's `credentials.json` (0600, on its state volume; see [Credentials](cr
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
 a12s sleep <svc> / a12s wake <svc>        # --all includes Services
 a12s shell <svc> [--root]                 # audited
-a12s lock update services/<svc>           # move a pin on an unchanged ref
 ```
+
+`a12s service status <svc>` shows the image ID the Service's ref is [pinned](fleet-file.md#pins) to; to roll out a
+rebuilt image, give it a new tag.
 
 ## Write a Service with svckit
 

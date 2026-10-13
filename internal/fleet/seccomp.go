@@ -105,7 +105,7 @@ func ValidateSeccomp(data []byte) (allowByDefault bool, err error) {
 	return p.DefaultAction == "SCMP_ACT_ALLOW", nil
 }
 
-// HashSeccomp is the digest fleet.lock records for a profile.
+// HashSeccomp is a profile's digest, as status reports it.
 func HashSeccomp(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])

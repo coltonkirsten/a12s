@@ -72,19 +72,12 @@ func (c *Controller) write(w http.ResponseWriter, r *http.Request, mutate func(*
 
 func (c *Controller) handleGetFleet(w http.ResponseWriter, r *http.Request) {
 	c.mu.Lock()
-	spec, version, applied := c.state.Spec, c.state.Version, c.state.Applied
+	spec, version := c.state.Spec, c.state.Version
 	c.mu.Unlock()
 	if spec == nil {
 		spec = &fleet.Spec{APIVersion: fleet.APIVersion, Kind: fleet.Kind, Metadata: fleet.Metadata{Name: c.cfg.Fleet}, AgentComputers: map[string]json.RawMessage{}}
 	}
-	res := api.FleetResponse{Version: version, Fleet: *spec, Drift: []api.Change{}}
-	if applied != nil {
-		old, err1 := applied.Effective()
-		cur, err2 := spec.Effective()
-		if err1 == nil && err2 == nil {
-			res.Drift = c.diff(old, cur, writeOpts{whole: true})
-		}
-	}
+	res := api.FleetResponse{Version: version, Fleet: *spec}
 	w.Header().Set("ETag", etag(version))
 	writeJSON(w, http.StatusOK, res)
 }

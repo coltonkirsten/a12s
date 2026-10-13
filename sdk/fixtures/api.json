@@ -345,25 +345,7 @@
           ]
         }
       }
-    },
-    "drift": [
-      {
-        "op": "op",
-        "kind": "kind",
-        "name": "name",
-        "when": "when",
-        "fields": [
-          "fields"
-        ],
-        "diff": [
-          {
-            "path": "path",
-            "before": {},
-            "after": {}
-          }
-        ]
-      }
-    ]
+    }
   },
   "fleetResponseMinimal": {
     "version": 1,
@@ -376,15 +358,7 @@
       "agent_computers": {
         "k": {}
       }
-    },
-    "drift": [
-      {
-        "op": "op",
-        "kind": "kind",
-        "name": "name",
-        "when": "when"
-      }
-    ]
+    }
   },
   "inboxListResponse": {
     "computer": "computer",
@@ -571,24 +545,6 @@
     "removed": [
       "removed"
     ],
-    "lock": {
-      "a12s": "a12s",
-      "images": {
-        "k": "images"
-      },
-      "bundles": {
-        "k": "bundles"
-      },
-      "presets": {
-        "k": "presets"
-      },
-      "services": {
-        "k": "services"
-      },
-      "seccomp": {
-        "k": "seccomp"
-      }
-    },
     "errors": {
       "k": "errors"
     },
@@ -758,7 +714,6 @@
     "removed": [
       "removed"
     ],
-    "lock": null,
     "services": {
       "created": [
         "created"

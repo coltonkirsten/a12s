@@ -184,8 +184,8 @@ func (c *Controller) serviceDesired(ctx context.Context, name string) driver.Pow
 func (c *Controller) controllerHost() string { return "a12s-" + c.cfg.Fleet + "-controller" }
 
 // resolveServices pins each Service's image and reads its manifest from the pinned image.
-// refresh names Services whose ref is resolved afresh.
-func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, lock *fleet.Lock, caps driver.Capabilities, refresh []string) (map[string]*fleet.ServiceManifest, error) {
+// A pin moves only with a new ref: rebuild a Service's image under a new tag.
+func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, pins *fleet.Pins, caps driver.Capabilities) (map[string]*fleet.ServiceManifest, error) {
 	out := map[string]*fleet.ServiceManifest{}
 	if len(f.Services) == 0 {
 		return out, nil
@@ -196,20 +196,11 @@ func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, lock *
 	for _, name := range f.ServiceNames() {
 		s := f.Services[name]
 		key := fleet.ServiceKey(name, s.Image)
-		var id string
-		var err error
-		if slices.Contains(refresh, name) {
-			id, err = c.drv.RefreshImage(ctx, s.Image)
-			if err == nil {
-				lock.Services[key] = id // an explicit move: `a12s lock update services/<svc>`
-			}
-		} else {
-			id, err = ensurePinned(ctx, s.Image, lock.Services[key], c.drv.EnsureImage)
-		}
+		id, err := ensurePinned(ctx, s.Image, pins.Services[key], c.drv.EnsureImage)
 		if err != nil {
 			return nil, fmt.Errorf("services.%s.image: %w", name, err)
 		}
-		lock.PinService(name, s.Image, id)
+		pins.Services[key] = id
 		img, err := c.drv.ServiceImage(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("services.%s.image: %w", name, err)
@@ -242,8 +233,8 @@ func serviceUser(m *fleet.ServiceManifest) string {
 func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	f, lock := c.state.Fleet, c.state.Lock
-	if f == nil || lock == nil {
+	f, pins := c.state.Fleet, c.state.Pins
+	if f == nil || pins == nil {
 		return driver.ServiceSpec{}, "", errors.New("no Fleet applied")
 	}
 	s, ok := f.Services[name]
@@ -251,7 +242,7 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 		return driver.ServiceSpec{}, "", fmt.Errorf("no service %q in the Fleet", name)
 	}
 	m := c.state.Manifests[name]
-	image := lock.Services[fleet.ServiceKey(name, s.Image)]
+	image := pins.Services[fleet.ServiceKey(name, s.Image)]
 	if image == "" || m == nil {
 		return driver.ServiceSpec{}, "", errors.New("image is not pinned or its manifest not read; run a12s up")
 	}
@@ -967,8 +958,8 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	s := f.Services[name]
 	out := api.ServiceStatus{Name: name, Image: s.Image, Send: s.Grants.Send, Uses: fleet.UseNames(s.Uses), Publish: s.Publish}
 	out.Spec, _ = json.Marshal(s)
-	if c.state.Lock != nil {
-		out.Pin = c.state.Lock.Services[fleet.ServiceKey(name, s.Image)]
+	if c.state.Pins != nil {
+		out.Pin = c.state.Pins.Services[fleet.ServiceKey(name, s.Image)]
 	}
 	if rec := c.state.Services[name]; rec != nil {
 		out.Generation, out.Restarts = rec.Generation, rec.Restarts

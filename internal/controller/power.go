@@ -249,7 +249,7 @@ func (c *Controller) judgeWake(ctx context.Context, name string, p fleet.PowerSe
 	case row.SleptBy == api.SleptHeld:
 		v.state, v.reason, v.fix = api.AutoWakeSuppressed, "held", "a12s wake "+name
 	case !c.credsLoaded(name):
-		v.state, v.reason, v.fix = api.AutoWakePaused, "credentials_not_loaded", "a12s up"
+		v.state, v.reason, v.fix = api.AutoWakePaused, "credentials_not_loaded", "a12s creds set <name>"
 	case row.Paused != "":
 		v.state, v.reason, v.fix = api.AutoWakePaused, row.Paused, "a12s wake "+name
 	case len(v.wakes) >= p.MaxWakesPerHour:

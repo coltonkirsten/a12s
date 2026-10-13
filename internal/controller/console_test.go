@@ -100,7 +100,7 @@ func TestServicePhaseEvent(t *testing.T) {
 	h := newHarness(t)
 	owner := sse(t, h, "/v1/events", "test-token-0123456789", "")
 	until(t, owner, "event: head")
-	h.up(withServices(t, h.d, nil), nil, false)
+	h.up(withServices(t, h.d, nil), false)
 	h.waitService("clock", api.PhaseReady)
 	got := until(t, owner, `"service":"clock","phase":"Ready"`)
 	ev := eventOf(t, got[len(got)-1])
@@ -135,10 +135,10 @@ func TestServicePhaseEvent(t *testing.T) {
 	}
 }
 
-// Every update in a change list carries its leaves' values before and after, in a dry run, a write and the drift.
+// Every update in a change list carries its leaves' values before and after, in a dry run and a write.
 func TestChangeDiff(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	if r := h.api("PUT", "/v1/agent-computers/hello", helloSpec); r.StatusCode != 200 {
 		t.Fatalf("create = %d", r.StatusCode)
 	}
@@ -173,21 +173,6 @@ func TestChangeDiff(t *testing.T) {
 		t.Fatalf("patch = %+v", res)
 	}
 	check("patch", res.Changes[0])
-
-	if r := h.api("PATCH", "/v1/agent-computers/tester", `{"resources":{"cpu":4}}`); r.StatusCode != 200 {
-		t.Fatalf("patch tester = %d", r.StatusCode)
-	}
-	for _, ch := range decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Drift {
-		if ch.Name != "tester" {
-			continue
-		}
-		if len(ch.Diff) != 1 || ch.Diff[0].Path != "resources.cpu" || string(ch.Diff[0].Before) != `"2"` || string(ch.Diff[0].After) != `"4"` {
-			b, _ := json.Marshal(ch)
-			t.Fatalf("drift = %s", b)
-		}
-		return
-	}
-	t.Fatal("no drift for tester")
 }
 
 // A credential's updatedAt moves when its value changes and survives a restart; a token's lastUsedAt is recorded
@@ -196,7 +181,7 @@ func TestCredentialAndTokenTimes(t *testing.T) {
 	dir := t.TempDir()
 	persistCreds[dir] = true
 	h := startHarness(t, dir, nil)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	put := decodeBody[api.CredentialInfo](t, h.api("PUT", "/v1/credentials/hubspot", `{"value":"hs-1"}`))
 	if put.UpdatedAt == nil || time.Since(*put.UpdatedAt) > time.Minute {
 		t.Fatalf("put = %+v", put)

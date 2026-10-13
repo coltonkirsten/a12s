@@ -54,12 +54,12 @@ func (h *harness) waitService(name string, want api.Phase) {
 func TestServiceLifecycle(t *testing.T) {
 	h := newHarness(t)
 	f := withServices(t, h.d, nil)
-	res := h.up(f, nil, false)
+	res := h.up(f, false)
 	if !slices.Equal(res.Services.Created, []string{"clock"}) || len(res.Errors) > 0 {
 		t.Fatalf("up: %+v", res)
 	}
-	if res.Lock.Services["clock@a12s/svc-test:0.1"] != "sha256:svctest01aaaaaaaa" {
-		t.Fatalf("lock %v", res.Lock.Services)
+	if h.pins().Services["clock@a12s/svc-test:0.1"] != "sha256:svctest01aaaaaaaa" {
+		t.Fatalf("pins %v", h.pins().Services)
 	}
 	h.waitService("clock", api.PhaseReady)
 	s := h.d.svc("clock")
@@ -140,7 +140,7 @@ func TestServiceLifecycle(t *testing.T) {
 	// Removed from the Fleet: stopped and deleted, its state drive kept as
 	// an orphan; down/up would keep it too (only drive rm destroys it).
 	f2 := withServices(t, h.d, func(f *fleet.Fleet) { f.Services = nil })
-	res = h.up(f2, res.Lock, false)
+	res = h.up(f2, false)
 	if !slices.Equal(res.Services.Removed, []string{"clock"}) {
 		t.Fatalf("removed %+v", res.Services)
 	}
@@ -162,50 +162,48 @@ func TestServiceLifecycle(t *testing.T) {
 func TestServicePinning(t *testing.T) {
 	h := newHarness(t)
 	f := withServices(t, h.d, nil)
-	res := h.up(f, nil, false)
+	res := h.up(f, false)
 	h.waitService("clock", api.PhaseReady)
-	lock := res.Lock
-
 	// A changed ref appends a key; the old pin is never rewritten.
 	f2 := withServices(t, h.d, func(f *fleet.Fleet) {
 		s := f.Services["clock"]
 		s.Image = "a12s/svc-test:0.2"
 		f.Services["clock"] = s
 	})
-	res = h.up(f2, lock, false)
+	res = h.up(f2, false)
 	if !slices.Equal(res.Services.Updated, []string{"clock"}) {
 		t.Fatalf("updated %+v", res.Services)
 	}
-	if res.Lock.Services["clock@a12s/svc-test:0.1"] != "sha256:svctest01aaaaaaaa" || res.Lock.Services["clock@a12s/svc-test:0.2"] != "sha256:svctest02bbbbbbbb" {
-		t.Fatalf("lock %v", res.Lock.Services)
+	if p := h.pins().Services; p["clock@a12s/svc-test:0.1"] != "sha256:svctest01aaaaaaaa" || p["clock@a12s/svc-test:0.2"] != "sha256:svctest02bbbbbbbb" {
+		t.Fatalf("pins %v", p)
 	}
 	h.waitService("clock", api.PhaseReady)
 	if s := h.d.svc("clock"); s.spec.Image != "sha256:svctest02bbbbbbbb" || s.spec.Generation != 2 {
 		t.Fatalf("runs %s gen %d", s.spec.Image, s.spec.Generation)
 	}
 
-	// The tag moves: up keeps the pin; lock update moves it explicitly.
+	// The tag moves while the pinned image exists: up keeps the pin. A new tag is how a rebuilt image rolls out.
 	h.d.mu.Lock()
 	h.d.images["a12s/svc-test:0.2"] = "sha256:svctest03dddddddd"
 	h.d.images["<none>"] = "sha256:svctest02bbbbbbbb" // the old image stays, untagged
 	h.d.svcImages["sha256:svctest03dddddddd"] = driver.ServiceImage{Manifest: []byte(testManifest), HasCommand: true}
 	h.d.mu.Unlock()
-	res = h.up(f2, res.Lock, false)
-	if res.Lock.Services["clock@a12s/svc-test:0.2"] != "sha256:svctest02bbbbbbbb" || len(res.Services.Updated) != 0 {
-		t.Fatalf("up moved a pin: %v %+v", res.Lock.Services, res.Services)
+	res = h.up(f2, false)
+	if h.pins().Services["clock@a12s/svc-test:0.2"] != "sha256:svctest02bbbbbbbb" || len(res.Services.Updated) != 0 {
+		t.Fatalf("up moved a pin: %v %+v", h.pins().Services, res.Services)
 	}
-	lock = res.Lock
-	delete(lock.Services, "clock@a12s/svc-test:0.2")
-	r, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f2), Lock: lock, Credentials: labCreds, Refresh: []string{"clock"}}, writeOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Lock.Services["clock@a12s/svc-test:0.2"] != "sha256:svctest03dddddddd" {
-		t.Fatalf("lock update: %v", r.Lock.Services)
+
+	// The pinned image is gone: the ref is what runs.
+	h.d.mu.Lock()
+	delete(h.d.images, "<none>")
+	h.d.mu.Unlock()
+	res = h.up(f2, false)
+	if h.pins().Services["clock@a12s/svc-test:0.2"] != "sha256:svctest03dddddddd" || !slices.Equal(res.Services.Updated, []string{"clock"}) {
+		t.Fatalf("gone pin: %v %+v", h.pins().Services, res.Services)
 	}
 	h.waitService("clock", api.PhaseReady)
 	if h.d.svc("clock").spec.Image != "sha256:svctest03dddddddd" {
-		t.Fatal("lock update did not run the new digest")
+		t.Fatal("the new image does not run")
 	}
 }
 
@@ -246,19 +244,19 @@ func TestServiceAdmission(t *testing.T) {
 	if err != nil || len(res.Errors) > 0 {
 		t.Fatalf("login credential: %v %+v", err, res.Errors)
 	}
-	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "(a12s service login clock, then a12s up)") }) {
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "(a12s service login clock)") }) {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
 	waitFor(t, func() bool {
 		w := h.c.serviceStatus("clock").Waiting
-		return w != nil && w.Fix == "a12s service login clock, then a12s up"
+		return w != nil && w.Fix == "a12s service login clock"
 	})
 	h.waitPhase("scout", api.PhaseReady) // the rest of the Fleet runs
 }
 
 func TestServiceLogsFollow(t *testing.T) {
 	h := newHarness(t)
-	h.up(withServices(t, h.d, nil), nil, false)
+	h.up(withServices(t, h.d, nil), false)
 	h.waitService("clock", api.PhaseReady)
 	ctx, cancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()

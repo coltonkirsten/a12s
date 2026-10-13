@@ -76,7 +76,7 @@ whose filesystem is `/bundle/{bundle.json, bin/<binary>, …}`:
 - `signInHosts` are added to that agent computer's egress allowlist automatically, so a Fleet lists only the hosts its work
   needs.
 - Default refs are `a12s/bundle-<kind>:<version>` in a source build and
-  `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>` in a release; `fleet.lock` pins the image ID.
+  `ghcr.io/coltonkirsten/a12s/bundle-<kind>:<version>` in a release; the Controller [pins](fleet-file.md#pins) the image ID.
 - Bumping a harness is one edit to `harness.version` and an `a12s up`. No image is rebuilt.
 
 `make bundles` builds the Claude Code and Codex bundles locally. `.github/workflows/bundles.yml` checks daily (or by hand) for a

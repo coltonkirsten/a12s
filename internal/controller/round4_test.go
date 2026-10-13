@@ -19,7 +19,7 @@ import (
 func TestRecycledSubnetsDoNotInheritIdentity(t *testing.T) {
 	h := newHarness(t)
 	h.c.selfAddrs = h.d.controllerAddrs
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	ctx := context.Background()
 	for _, name := range lab4 {
 		if got, ok := h.c.identify(h.d.ip(name)); !ok || got != name {
@@ -54,7 +54,7 @@ func TestRecycledSubnetsDoNotInheritIdentity(t *testing.T) {
 func TestStartFailsClosedWithoutAVerifiedAddress(t *testing.T) {
 	h := newHarness(t)
 	h.c.selfAddrs = h.d.controllerAddrs
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	ctx := context.Background()
 	h.c.SetPower(ctx, "scout", api.PowerRequest{State: api.PowerAsleep})
 	h.d.setAddrErr(errors.New("engine unavailable"))
@@ -88,7 +88,7 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 		}
 		return m, err
 	}
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	ipB := h.d.ip("builder")
 
 	type probe struct{}
@@ -136,7 +136,7 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 func TestUnknownAddressRefusalsAreLogged(t *testing.T) {
 	h := newHarness(t)
 	h.c.selfAddrs = h.d.controllerAddrs
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	unknown := netip.MustParseAddr("10.213.9.9")
 	for range 2 {
 		if _, ok := h.c.identify(unknown); ok {
@@ -153,7 +153,7 @@ func TestUnknownAddressRefusalsAreLogged(t *testing.T) {
 // would re-converge the Fleet behind it.
 func TestApplyWaitsForTheResume(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.stop()
 	gate := make(chan struct{})
 	h.d.mu.Lock()
@@ -169,7 +169,7 @@ func TestApplyWaitsForTheResume(t *testing.T) {
 	}
 	applied := make(chan struct{})
 	go func() {
-		h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: res.Lock, Credentials: labCreds}, writeOpts{})
+		h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Credentials: labCreds}, writeOpts{})
 		close(applied)
 	}()
 	select {

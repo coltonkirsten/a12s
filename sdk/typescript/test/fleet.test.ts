@@ -93,7 +93,7 @@ test("replace retries a stale If-Match, then writes", async () => {
   let version = 6;
   const { fleet, seen, close } = await fake((req, res, body) => {
     if (req.method === "GET") {
-      json(res, 200, { version, fleet: { apiVersion: "a", kind: "Fleet", metadata: { name: "f" }, agent_computers: {} }, drift: [] });
+      json(res, 200, { version, fleet: { apiVersion: "a", kind: "Fleet", metadata: { name: "f" }, agent_computers: {} } });
       return;
     }
     if (req.headers["if-match"] === '"6"') {

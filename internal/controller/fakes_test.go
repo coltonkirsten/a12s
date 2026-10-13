@@ -829,13 +829,20 @@ func specFor(f *fleet.Fleet) *fleet.Spec {
 
 var labCreds = api.Credentials{"anthropic": []byte(`{"claudeAiOauth":{}}`), "openai": []byte("sk-test"), "github": []byte("ghp_test")}
 
-func (h *harness) up(f *fleet.Fleet, lock *fleet.Lock, asleep bool) api.PutFleetResponse {
+func (h *harness) up(f *fleet.Fleet, asleep bool) api.PutFleetResponse {
 	h.t.Helper()
-	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Lock: lock, Credentials: labCreds, Asleep: asleep, File: true}, writeOpts{})
+	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds, Asleep: asleep}, writeOpts{})
 	if err != nil {
 		h.t.Fatalf("PutFleet: %v", err)
 	}
 	return res
+}
+
+// pins are the image IDs the Controller pinned.
+func (h *harness) pins() *fleet.Pins {
+	h.c.mu.Lock()
+	defer h.c.mu.Unlock()
+	return h.c.state.Pins
 }
 
 func (h *harness) phase(name string) api.Phase { return h.c.phase(name) }

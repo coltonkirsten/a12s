@@ -336,24 +336,6 @@ export const putFleetResponse: T.PutFleetResponse = {
   "removed": [
     "removed"
   ],
-  "lock": {
-    "a12s": "a12s",
-    "images": {
-      "k": "images"
-    },
-    "bundles": {
-      "k": "bundles"
-    },
-    "presets": {
-      "k": "presets"
-    },
-    "services": {
-      "k": "services"
-    },
-    "seccomp": {
-      "k": "seccomp"
-    }
-  },
   "errors": {
     "k": "errors"
   },
@@ -524,7 +506,6 @@ export const putFleetResponseMinimal: T.PutFleetResponse = {
   "removed": [
     "removed"
   ],
-  "lock": null,
   "services": {
     "created": [
       "created"
@@ -654,25 +635,7 @@ export const fleetResponse: T.FleetResponse = {
         ]
       }
     }
-  },
-  "drift": [
-    {
-      "op": "op",
-      "kind": "kind",
-      "name": "name",
-      "when": "when",
-      "fields": [
-        "fields"
-      ],
-      "diff": [
-        {
-          "path": "path",
-          "before": {},
-          "after": {}
-        }
-      ]
-    }
-  ]
+  }
 };
 
 export const fleetResponseMinimal: T.FleetResponse = {
@@ -686,15 +649,7 @@ export const fleetResponseMinimal: T.FleetResponse = {
     "agent_computers": {
       "k": {}
     }
-  },
-  "drift": [
-    {
-      "op": "op",
-      "kind": "kind",
-      "name": "name",
-      "when": "when"
-    }
-  ]
+  }
 };
 
 export const agentComputersResponse: T.AgentComputersResponse = {

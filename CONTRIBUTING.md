@@ -34,7 +34,7 @@ make build                     # go build; also writes bin/a12s (version dev: us
 make images bundles            # slim and controller images + Claude Code and Codex bundles
 
 cd examples/quickstart
-cp a12s.bindings.yaml.example a12s.bindings.yaml   # anthropic -> ~/.a12s/anthropic
+../../bin/a12s creds set anthropic < ~/.a12s/anthropic   # a claude setup-token token
 ../../bin/a12s up
 ../../bin/a12s send hello "Reply with the single word pong." --wait
 ../../bin/a12s down --purge
@@ -174,13 +174,13 @@ Trusted publishing works only from the workflow, so locally npm and PyPI need `N
 ```text
 internal/version/          the release version and the image refs it resolves (set by -ldflags)
 cmd/a12s/                  the CLI and, as `a12s controller`, the Controller (one Go binary)
-internal/fleet/            Fleet file: parse, defaults merge, validation, fleet.lock, Service manifests
+internal/fleet/            Fleet file: parse, defaults merge, validation, image pins, Service manifests
 internal/driver/           Driver interface and types
 internal/driver/docker/    Docker driver: containers, internal networks, volumes, bundles
 internal/controller/       reconciler, power, CA and mTLS, credential injection, egress proxy, owner API
 internal/inbox/            inbox store (fleet.db), delivery, Batch rendering, tokens, certificate registry
 internal/api/              CLI ↔ Controller API types (JSON)
-internal/cli/              CLI helpers: client, bindings, creds, SSE, output formatting
+internal/cli/              CLI helpers: client, SSE, output formatting, starting the Controller
 internal/computerd/        Go client for computerd's HTTP+SSE API
 internal/serviceinit/      a12s-init: the Service entrypoint, privilege drop and TCP forwarders
 internal/sse/              SSE reader and writer
@@ -222,7 +222,7 @@ Two scripts run the whole system against the local Docker engine and log one `PA
 hack/exit-gate.sh <logfile>
 #   examples/lab: four Computers up, streamed replies, resume after sleep/wake, scaling, SSE reconnect,
 #   blocked egress, harness version bump. Needs bin/a12s, the images and bundles,
-#   examples/lab/a12s.bindings.yaml and GH_TOKEN.
+#   ~/.a12s/anthropic, ~/.a12s/lab/openai.json and GH_TOKEN.
 
 hack/exit-gate-enhancements.sh <workdir> <logfile> [setup inbox services amendment cli teardown]
 #   hack/gate/fleet.yaml: inbox delivery and crash safety, Services, grants, login, expiry, replace keys,

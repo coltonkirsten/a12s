@@ -23,8 +23,8 @@ func (c *Controller) StartLogin(ctx context.Context, name string) (api.LoginResp
 	}
 	m := c.state.Manifests[name]
 	image := ""
-	if ok && c.state.Lock != nil {
-		image = c.state.Lock.Services[fleet.ServiceKey(name, s.Image)]
+	if ok && c.state.Pins != nil {
+		image = c.state.Pins.Services[fleet.ServiceKey(name, s.Image)]
 	}
 	c.mu.Unlock()
 	if !ok {

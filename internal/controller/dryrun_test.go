@@ -14,7 +14,7 @@ import (
 // included: it never answers OK for a write that then fails.
 func TestDryRunAdmitsLikeTheWrite(t *testing.T) {
 	h := newHarness(t)
-	h.up(withServices(t, h.d, nil), nil, false)
+	h.up(withServices(t, h.d, nil), false)
 	h.d.mu.Lock()
 	h.d.images["t-console-ticker:1"] = "sha256:tickernohealth"
 	h.d.svcImages["sha256:tickernohealth"] = driver.ServiceImage{Manifest: []byte(`{"a12s":1,"name":"ticker","version":"1.0.0","user":1000}`), HasCommand: true}

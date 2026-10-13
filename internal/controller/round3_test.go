@@ -24,10 +24,10 @@ func bumpModel(name string) func(*fleet.Fleet) {
 // apply --interrupt forces it.
 func TestUnknownStatusIsBusy(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.cds.get("builder").mute()
 	h.d.takeCalls()
-	out := h.up(labFleet(t, bumpModel("builder")), res.Lock, false)
+	out := h.up(labFleet(t, bumpModel("builder")), false)
 	if !slices.Equal(out.Staged, []string{"builder"}) {
 		t.Fatalf("up = %+v", out)
 	}
@@ -46,7 +46,7 @@ func TestUnknownStatusIsBusy(t *testing.T) {
 // Ready is published only once Observe shows the generation running.
 func TestReadyIsReadBack(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	ctx := context.Background()
 	if err := h.c.SetPower(ctx, "scout", api.PowerRequest{State: api.PowerAsleep}); err != nil {
 		t.Fatal(err)
@@ -65,11 +65,11 @@ func TestReadyIsReadBack(t *testing.T) {
 // a busy Computer keeps its enforcement until its staged generation applies.
 func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	scout := h.cds.get("scout")
 	scout.StartTurn(context.Background(), api.TurnRequest{RequestID: "r1", Prompt: "x"})
 	h.waitPhase("scout", api.PhaseBusy)
-	out := h.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), res.Lock, false)
+	out := h.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), false)
 	if !slices.Equal(out.Staged, []string{"scout"}) || !slices.Equal(out.Updated, []string{"builder", "reviewer", "tester"}) {
 		t.Fatalf("up = %+v", out)
 	}
@@ -90,13 +90,13 @@ func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
 // the drive the other needs, and no drive ever has two attachments.
 func TestExclusiveDriveSwap(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	swap := func(f *fleet.Fleet) {
 		b, te := f.Computers["builder"], f.Computers["tester"]
 		b.Drives, te.Drives = []fleet.DriveMount{{Name: "ux-scratch", At: "/work/ux"}}, []fleet.DriveMount{{Name: "a12s-repo", At: "/work/a12s"}}
 		f.Computers["builder"], f.Computers["tester"] = b, te
 	}
-	h.up(labFleet(t, swap), res.Lock, false)
+	h.up(labFleet(t, swap), false)
 	t.Cleanup(func() {
 		if t.Failed() {
 			st := readState(t, h.dir)
@@ -122,7 +122,7 @@ func TestExclusiveDriveSwap(t *testing.T) {
 // turns end, with no further command and never two attachments.
 func TestExclusiveDriveSwapWhileBothBusy(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder, tester := h.cds.get("builder"), h.cds.get("tester")
 	builder.StartTurn(context.Background(), api.TurnRequest{RequestID: "b", Prompt: "x"})
 	tester.StartTurn(context.Background(), api.TurnRequest{RequestID: "t", Prompt: "x"})
@@ -133,7 +133,7 @@ func TestExclusiveDriveSwapWhileBothBusy(t *testing.T) {
 		b.Drives, te.Drives = []fleet.DriveMount{{Name: "ux-scratch", At: "/work/ux"}}, []fleet.DriveMount{{Name: "a12s-repo", At: "/work/a12s"}}
 		f.Computers["builder"], f.Computers["tester"] = b, te
 	}
-	if out := h.up(labFleet(t, swap), res.Lock, false); !slices.Equal(out.Staged, []string{"builder", "tester"}) {
+	if out := h.up(labFleet(t, swap), false); !slices.Equal(out.Staged, []string{"builder", "tester"}) {
 		t.Fatalf("up = %+v", out)
 	}
 	builder.finish(api.TurnCompleted)
