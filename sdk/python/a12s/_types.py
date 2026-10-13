@@ -281,8 +281,8 @@ class Turn:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class PromptResult(Turn):
-    """The finished Turn and the Message that started it."""
+class Reply(Turn):
+    """What ``send(...).wait()`` returns: the finished Turn that delivered the Message, and the Message."""
 
     message: EnqueueResponse
 

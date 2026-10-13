@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import json
 import threading
@@ -21,6 +22,7 @@ class Fake:
         self.seen: list[tuple[str, str, dict[str, str], Any]] = []
         self.version = 7
         self.conflicts = 0
+        self.held = False
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         body = json.loads(req.content) if req.content else None
@@ -38,6 +40,15 @@ class Fake:
             return httpx.Response(404, json={"code": "not_found", "message": 'no agent computer "nope" in the Fleet'})
         if req.method == "POST" and path == "/v1/agent-computers/hello/inbox":
             return httpx.Response(201, json={"id": "m_1", "seq": 1, "createdAt": "t", "expiresAt": None, "state": "pending", "position": 1})
+        if req.method == "GET" and path == "/v1/agent-computers/hello/inbox/m_1/events":
+            snap = {"message": {"id": "m_1", "state": "pending" if self.held else "delivered", "turn": "t_1"}, "held": self.held}
+            return sse({"type": "snapshot", "data": snap})
+        if req.method == "GET" and path == "/v1/agent-computers/hello/events?turn=t_1":
+            ev = {"v": 1, "computer": "hello", "session": "s", "turn": "t_1", "ts": "t"}
+            return sse(
+                {**ev, "seq": 1, "type": "text.delta", "data": {"text": "out of credit"}},
+                {**ev, "seq": 2, "type": "turn.finished", "data": {"status": "failed", "error": "billing", "usage": None}},
+            )
         if req.method == "DELETE" and path == "/v1/agent-computers/hello":
             return httpx.Response(200, json={"version": self.version, "removed": ["hello"]})
         if req.method == "GET" and path == "/v1/fleet":
@@ -49,6 +60,11 @@ class Fake:
                 return httpx.Response(412, json={"code": "version_mismatch", "message": "stale"})
             return httpx.Response(200, json={"version": self.version + 1})
         return httpx.Response(500, json={"code": "unexpected", "message": f"{req.method} {path}"})
+
+
+def sse(*events: dict[str, Any]) -> httpx.Response:
+    body = "".join(f"data: {json.dumps(e)}\n\n" for e in events)
+    return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
 
 
 def fleet_for(fake: Fake) -> a12s.Fleet:
@@ -79,6 +95,23 @@ def test_create_update_send_remove() -> None:
     assert fake.seen[-1][:2] == ("DELETE", "/v1/agent-computers/hello")
 
 
+def test_wait_after_the_turn_ended_returns_it_failed_turns_included() -> None:
+    fake = Fake()
+    hello = fleet_for(fake).agent_computers.create("hello")
+    m = hello.send("hi", fresh=True)
+    assert isinstance(m, a12s.EnqueueResponse) and (m.id, m.state) == ("m_1", "pending")
+    assert dataclasses.asdict(m)["id"] == "m_1"
+    seen: list[str] = []
+    r = m.wait(on_event=lambda e: seen.append(e.type))
+    assert (r.id, r.status, r.text, r.message.id) == ("t_1", "failed", "out of credit", "m_1")
+    assert seen == ["text.delta", "turn.finished"]
+    assert hello.send("again").wait().id == "t_1"
+    fake.held = True
+    with pytest.raises(a12s.A12sError) as e:
+        hello.send("held").wait()
+    assert e.value.code == "held"
+
+
 def test_get_missing_raises_not_found() -> None:
     with pytest.raises(a12s.NotFound) as e:
         fleet_for(Fake()).agent_computers.get("nope")
@@ -102,6 +135,9 @@ async def test_async_fleet_has_the_same_shape() -> None:
     hello = await fleet.agent_computers.create("hello", instructions="Be helpful")
     assert fake.seen[-1][2]["if-none-match"] == "*"
     assert (await hello.send("hi")).id == "m_1"
+    assert (await hello.send("hi").wait()).status == "failed"
+    m = await hello.send("hi")
+    assert (await m.wait()).message.id == "m_1"
     await hello.remove()
     assert fake.seen[-1][:2] == ("DELETE", "/v1/agent-computers/hello")
     await fleet.aclose()

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import builtins
 import os
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Sequence
+from dataclasses import fields
 from typing import TYPE_CHECKING, Any, overload
 
 import httpx
@@ -23,7 +24,7 @@ from ._types import (
     Event,
     InboxList,
     Message,
-    PromptResult,
+    Reply,
     ServiceStatus,
     Status,
     Token,
@@ -34,6 +35,46 @@ from ._fleet import _REPLACE_TRIES, FleetState, ac_path, fleet_state, service_pa
 
 if TYPE_CHECKING:
     from typing_extensions import Unpack
+
+
+class AsyncSentMessage(EnqueueResponse):
+    """A queued Message: the fields of EnqueueResponse, and ``await wait()`` for the Turn that delivers it."""
+
+    __slots__ = ("_client", "_to")
+    _client: AsyncClient
+    _to: str
+
+    def __init__(self, message: EnqueueResponse, client: AsyncClient, to: str) -> None:
+        super().__init__(**{f.name: getattr(message, f.name) for f in fields(message)})
+        object.__setattr__(self, "_client", client)
+        object.__setattr__(self, "_to", to)
+
+    async def wait(self, *, on_event: Callable[[Event], None] | None = None) -> Reply:
+        """See SentMessage.wait."""
+        return await self._client._reply(self._to, self, on_event)
+
+
+class AsyncSending:
+    """What AsyncAgentComputer.send returns: await it for the AsyncSentMessage, or ``await ….wait()`` for the Turn."""
+
+    __slots__ = ("_send", "_sent")
+
+    def __init__(self, send: Coroutine[Any, Any, AsyncSentMessage]) -> None:
+        self._send = send
+        self._sent: AsyncSentMessage | None = None
+
+    async def _message(self) -> AsyncSentMessage:
+        # A coroutine can be awaited once; a second await or a wait() after awaiting reuses the Message.
+        if self._sent is None:
+            self._sent = await self._send
+        return self._sent
+
+    def __await__(self) -> Generator[Any, None, AsyncSentMessage]:
+        return self._message().__await__()
+
+    async def wait(self, *, on_event: Callable[[Event], None] | None = None) -> Reply:
+        """See SentMessage.wait."""
+        return await (await self._message()).wait(on_event=on_event)
 
 
 class AsyncAgentComputer:
@@ -57,44 +98,32 @@ class AsyncAgentComputer:
         self._set(await self._fleet._client._request("GET", ac_path(self.name)))
         return self
 
-    async def prompt(
+    def send(
         self,
         text: str,
         *,
-        on_event: Callable[[Event], None] | None = None,
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
         idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
-    ) -> PromptResult:
-        """Sends ``text`` and returns the Turn that delivers it, once it ends. ``on_event`` gets its events live."""
-        return await self._fleet._client.prompt(
-            self.name,
-            text,
-            on_event=on_event,
-            sender=sender,
-            metadata=metadata,
-            fresh=fresh,
-            idempotency_key=idempotency_key,
-            expires=expires,
-            replace_key=replace_key,
-        )
+    ) -> AsyncSending:
+        """Queues ``text``; it is delivered at the next idle moment, even if busy or asleep. Await the result for the
+        queued Message, or call ``await ….wait()`` on it (or on that Message, later) for the Turn that delivers it."""
+        return AsyncSending(self._send(text, sender, metadata, fresh, idempotency_key, expires, replace_key))
 
-    async def send(
+    async def _send(
         self,
         text: str,
-        *,
-        sender: str | None = None,
-        metadata: dict[str, str] | None = None,
-        fresh: bool = False,
-        idempotency_key: str | None = None,
-        expires: int | None = None,
-        replace_key: str | None = None,
-    ) -> EnqueueResponse:
-        """Queues ``text`` and returns at once; it is delivered at the next idle moment, even if busy or asleep."""
-        return await self._fleet._client.send(
+        sender: str | None,
+        metadata: dict[str, str] | None,
+        fresh: bool,
+        idempotency_key: str | None,
+        expires: int | None,
+        replace_key: str | None,
+    ) -> AsyncSentMessage:
+        message = await self._fleet._client.send(
             self.name,
             text,
             sender=sender,
@@ -104,6 +133,7 @@ class AsyncAgentComputer:
             expires=expires,
             replace_key=replace_key,
         )
+        return AsyncSentMessage(message, self._fleet._client, self.name)
 
     def events(self, *, turn: str | None = None, on_gap: core.OnGap = "yield") -> AsyncFleetEventStream | AsyncEventStream:
         """Its events, live, from the Fleet's shared connection; ``turn`` replays one Turn from its start instead."""

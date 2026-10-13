@@ -99,14 +99,14 @@ export interface EventsOptions {
 
 export type SharedEventsOptions = Omit<EventsOptions, "turn" | "after">;
 
-export interface PromptOptions extends Omit<EnqueueRequest, "body"> {
+export interface WaitOptions {
   signal?: AbortSignal;
   /** Every event of the Turn, as it streams. */
   onEvent?: (ev: A12sEvent) => void;
 }
 
-/** What `prompt()` resolves with: the finished Turn and the Message that started it. */
-export interface PromptResult extends Turn {
+/** What `send(...).wait()` resolves with: the finished Turn that delivered the Message, and the Message. */
+export interface Reply extends Turn {
   message: EnqueueResponse;
 }
 
@@ -171,10 +171,18 @@ export class A12sClient {
     return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox`, m);
   }
 
-  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends: what `a12s prompt` does. */
-  async prompt(computer: string, body: string, opts: PromptOptions = {}): Promise<PromptResult> {
+  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends. */
+  async prompt(computer: string, body: string, opts: Omit<EnqueueRequest, "body"> & WaitOptions = {}): Promise<Reply> {
     const { signal, onEvent, ...msg } = opts;
-    const message = await this.send(computer, { ...msg, body });
+    return this.reply(computer, await this.send(computer, { ...msg, body }), { signal, onEvent });
+  }
+
+  /**
+   * @internal Waits for the Turn that delivers the Message and resolves when it ends. Delivery is read from the
+   * Message's own snapshot and the Turn is replayed from its start, so it works however late it is called.
+   */
+  async reply(computer: string, message: EnqueueResponse, opts: WaitOptions = {}): Promise<Reply> {
+    const { signal, onEvent } = opts;
     const turn = await this.deliveredIn(computer, message.id, signal);
     const builder = new TurnBuilder();
     // A gap mid-Turn would silently drop text: fail loudly instead.

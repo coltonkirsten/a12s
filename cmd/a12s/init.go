@@ -146,5 +146,5 @@ func starterReadme(name string) string {
 	return "# " + name + "\n\n" +
 		"An a12s Fleet. a12s is a pinned dependency (" + pin + "), installed like Docker: never vendor or edit its source here.\n" +
 		"Extend it through fleet.yaml, your own images and Services, and the client SDK.\n\n" +
-		"```sh\na12s creds set anthropic   # once per machine\na12s up\na12s prompt assistant \"hi\"\na12s down\n```\n"
+		"```sh\na12s creds set anthropic   # once per machine\na12s up\na12s send assistant \"hi\" --wait\na12s down\n```\n"
 }

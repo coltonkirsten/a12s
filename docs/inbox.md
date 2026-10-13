@@ -6,7 +6,7 @@ everything pending is delivered as one Turn.
 
 ```sh
 a12s send builder "Run the dependency audit"            # enqueue and exit
-a12s prompt builder "Add a health check endpoint"       # enqueue and stream the Turn that carries it
+a12s send builder "Add a health check endpoint" --wait # enqueue and stream the Turn that carries it
 a12s inbox builder                                      # list pending Messages, limits and usage
 ```
 
@@ -16,7 +16,7 @@ a12s inbox builder                                      # list pending Messages,
 2. Anyone with API access, or a Service or agent computer holding `grants.send`, can enqueue. Bodies are untrusted data.
 3. When the agent computer is idle, the Controller drains **all** pending Messages, in order, into **one** Turn. Messages
    that arrive during the Turn wait for the next one.
-4. A Batch continues the current session by default. A Message sent with `--fresh` (or `prompt --new`) starts a new
+4. A Batch continues the current session by default. A Message sent with `--fresh` starts a new
    session; it begins a new Batch, so it never drags another sender's Message out of the conversation it was written
    for.
 5. A Message wakes a sleeping agent computer only if its [power policy](#power-policy) says so.
@@ -24,13 +24,13 @@ a12s inbox builder                                      # list pending Messages,
    milliseconds between receipt and the journal write can deliver it twice; nothing is ever dropped silently.
 7. Strict FIFO in commit order. There are no priorities and no delayed delivery.
 
-`a12s prompt` is enqueue-and-stream: it waits in line if the agent computer is busy (`queued: builder is busy with turn
+`a12s send --wait` is enqueue-and-stream: it waits in line if the agent computer is busy (`queued: builder is busy with turn
 t_41 (2 messages ahead)`), and its Turn may carry other senders' Messages too. Ctrl-C withdraws the Message while it
 is pending and stops its Turn once delivered; a second Ctrl-C stops waiting.
 
 ## What the agent sees
 
-Every inbox Turn, including a single `a12s prompt`, renders the same way. The tags carry a per-Batch random nonce,
+Every inbox Turn, including a single `a12s send --wait`, renders the same way. The tags carry a per-Batch random nonce,
 so a body can't forge a closing tag:
 
 ```text

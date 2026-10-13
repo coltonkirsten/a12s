@@ -11,7 +11,7 @@ Five ideas are enough to build with a12s:
 | **Event** | What an agent computer journals while it works: `turn.started`, streamed `text.delta`, `tool.started`, `turn.finished`, … Your app follows them live. |
 
 The everyday loop: **edit `fleet.yaml` or an agent computer's instructions → `a12s up` → send a Message → follow its
-Turn.** From code: **create an agent computer → prompt it → remove it.**
+Turn.** From code: **create an agent computer → `send(...).wait()` → remove it.**
 
 ```text
             send                   delivered as a Turn            events
@@ -31,7 +31,7 @@ puts this together.
 
 | Name | What it is |
 |---|---|
-| **Session** | The harness's own conversation, under its own id. It survives sleep; a12s resumes it on the next Turn. `fresh` (or `prompt --new`) starts a new one. |
+| **Session** | The harness's own conversation, under its own id. It survives sleep; a12s resumes it on the next Turn. `fresh` (or `send --fresh`) starts a new one. |
 | **Batch** | The pending Messages one Turn delivers together. |
 | **Principal** (`via`) | Who really sent a Message: `local` (you, with the owner token), `token:<name>`, `service:<name>` or `computer:<name>`. Agents should trust `via`, not the sender's own label. |
 | **Grant** | A permission written on the side that acts: `grants.send` (may send to these agent computers), `uses` (may reach these Services). |
@@ -74,7 +74,7 @@ Codex). Where a session can be checked without running a model turn, a precheck 
 
 **If resume fails,** a12s never silently starts a fresh session: an instruction like "continue the approved
 migration" must not run without its context. The old session id and drives are kept and `resume.failed` is
-emitted. Recover with an explicit new session (`a12s prompt <name> --new`, or `a12s inbox resume <name> --new`) or
+emitted. Recover with an explicit new session (`a12s send <name> --fresh "…"`, or `a12s inbox resume <name> --new`) or
 repair the cause (for example roll back the bundle) and retry.
 
 **Interrupted Turns stay interrupted.** Side effects may already have happened, so nothing is replayed

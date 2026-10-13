@@ -47,7 +47,7 @@ const reviewer = await fleet.agentComputers.create(`review-${Date.now()}`, {
   instructions: "You review pull requests. Clone the repo, read the diff, answer with at most five findings.",
 });
 try {
-  const r = await reviewer.prompt(`Review ${process.argv[2]}`);
+  const r = await reviewer.send(`Review ${process.argv[2]}`).wait();
   console.log(r.text);
 } finally {
   await reviewer.remove();
@@ -65,7 +65,7 @@ with a12s.Fleet() as fleet:
         instructions="You review pull requests. Clone the repo, read the diff, answer with at most five findings.",
     )
     try:
-        print(reviewer.prompt(f"Review {sys.argv[1]}").text)
+        print(reviewer.send(f"Review {sys.argv[1]}").wait().text)
     finally:
         reviewer.remove()
 ```
@@ -296,7 +296,7 @@ fleet.agent_computers.get("helper").update(instructions="Answer in one sentence.
 ```
 
 The agent computer restarts between Turns, never in the middle of one, and keeps its conversation. To also start a
-fresh conversation, send the next Message with `fresh: true` (`a12s prompt lead --new "…"`).
+fresh conversation, send the next Message with `fresh: true` (`a12s send lead --fresh "…"`).
 
 `files` (or a preset directory) can hold anything Claude Code reads from the home directory: `.claude/skills/`,
 `.claude/settings.json`, `.mcp.json`. They overwrite the agent's copies; other files on the home drive stay.

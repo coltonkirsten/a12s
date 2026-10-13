@@ -17,7 +17,8 @@ its own fleet.yaml, presets, images, Services and app code.
 - agent computer (`AgentComputer` in code): one agent (harness + home drive + session + inbox). Survives sleep and
   restarts.
 - Message: work in an agent computer's inbox. `send` puts one there; it is delivered at the agent computer's next
-  idle moment, batched with anything else pending. Works while it is busy or asleep. Two Messages sent back to back
+  idle moment, batched with anything else pending. Works while it is busy or asleep. `send(...).wait()` (CLI:
+  `a12s send <c> "…" --wait`) returns the Turn that delivered it, once that Turn ends. Two Messages sent back to back
   to an idle agent computer usually run as two Turns (the first starts at once, the second waits for the next idle
   moment), so count results across Turns, never expect them in one.
 - Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted.
@@ -75,7 +76,7 @@ API key (`sk-ant-api…`). Not a copy of your interactive Claude login. Codex: `
 a12s init myproj && cd myproj         # fleet.yaml (defaults + one agent computer "assistant"), fleet.lock, bindings, .gitignore
 a12s creds set anthropic              # see Setup for pasting the token
 a12s up                               # creates the agent computers, returns when they are Ready
-a12s prompt assistant "Reply with the single word pong."
+a12s send assistant "Reply with the single word pong." --wait
 ```
 
 Order: `creds set` runs in the Fleet's directory (after `a12s init dir`, cd into dir first) and BEFORE the first
@@ -184,8 +185,8 @@ a12s diff                             # fleet.yaml vs the live Fleet, changes no
                                       #   (in make/set -e, exit 2 aborts: `a12s diff; test $$? -eq 2` expects drift)
 a12s export [--force]                 # write the live Fleet back to fleet.yaml, presets/ and profiles/
 a12s status                           # phase, inbox, power, warnings (--json for machines)
-a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
 a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # enqueue and exit; busy or asleep
+a12s send <c> "…" --wait              # and stream the Turn that delivers it; exit 0 if it completed, 1 if not
 a12s logs <c> [--follow]              # its journal, one "<seq> <type> <data JSON>" line per event, then exits;
                                       #   --follow keeps following (Ctrl-C). Types as in Words: turn.finished, …
 a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2] [--no-open]
@@ -216,7 +217,7 @@ true/false, pending a number); `a12s --json send desk "hi" | jq -r .id` gives a 
 ```ts
 const fleet = await Fleet.connect();
 const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
-await hello.prompt("hi");
+const reply = await hello.send("hi").wait();
 await hello.remove();
 ```
 
@@ -236,14 +237,14 @@ const lead = await fleet.agentComputers.get("lead");   // throws NotFound if the
 lead.name; lead.spec; lead.effective; lead.status.phase  // as written, with defaults merged, status: a snapshot
 await lead.reload();                                     // refreshes the snapshot
 
-// Send and wait for the answer; onEvent streams that Turn's events as they happen:
-const r = await lead.prompt("Explain TCP in two sentences.", {
-  onEvent: (ev) => { if (ev.type === "text.delta") process.stdout.write(ev.data.text); },
-});                                   // also takes send options: fresh, sender, metadata, expires, signal
-r.status; r.text; r.id; r.error; r.messages; r.tools; r.message.id   // a Turn plus the Message that started it
-
 const m = await lead.send("…");                     // or send("…", { sender, metadata, fresh, expires (seconds),
 m.id; m.state;                                      //   replaceKey, idempotencyKey }); returns at once
+
+// Send and wait for the answer; onEvent streams that Turn's events as they happen:
+const r = await lead.send("Explain TCP in two sentences.").wait({
+  onEvent: (ev) => { if (ev.type === "text.delta") process.stdout.write(ev.data.text); },
+});                                   // wait({ signal }) too; m.wait() works on a sent Message, even after its Turn ended
+r.status; r.text; r.id; r.error; r.messages; r.tools; r.message.id   // a Turn plus the Message it delivered
 
 const turns = fleet.turns(["lead", "worker1"]);     // Turns as they end; no argument = every agent computer
 await turns.ready();                                // connected: nothing after this is missed
@@ -278,7 +279,7 @@ await fleet.credentials.set("stripe", key);         // agent computers using it 
 await fleet.credentials.list();                     // [{name, set, usedBy}]; remove(name): 409 in_use while used
 await fleet.replace((f) => { f.defaults!.power = { sleepAfterIdle: "15m" }; });  // If-Match, retried on conflict
 // errors: A12sError {status, code, message, fix}, NotFound (a 404, subclass of A12sError); streams:
-// A12sStreamError, A12sGapError (onGap: "throw"). A failed Turn is not an error: prompt() returns it, status "failed".
+// A12sStreamError, A12sGapError (onGap: "throw"). A failed Turn is not an error: wait() returns it, status "failed".
 // A write's warnings (a grant to a missing agent computer, a missing harness credential) go to console.warn.
 ```
 
@@ -288,14 +289,14 @@ session, status, text (everything the agent said in the Turn, concatenated), err
 tools: [{id, name, input, output, isError}], usage, tokens?, startedAt?, finishedAt}. tool input/output and usage are `unknown`: cast,
 e.g. `(t.tools[0].input as { body: string }).body`. Streams end with `break` or `.close()`; both also take
 `{ signal }`. The spec types are `AgentComputerSpec` and `FleetSpec`. `connect()` and `A12sClient` (name-first calls
-such as `a12s.prompt("hello", "…")`) still work for one release, deprecated.
+such as `a12s.send("hello", "…")`) still work for one release, deprecated.
 
 ## Python SDK (pip install a12s; Python 3.10+)
 
 ```python
 fleet = a12s.Fleet()            # connects to the running fleet (or url=, token=)
 hello = fleet.agent_computers.create("hello", instructions="Be helpful")
-hello.prompt("hi")
+reply = hello.send("hi").wait()
 hello.remove()
 ```
 
@@ -308,10 +309,10 @@ coder = fleet.agent_computers.create("coder", instructions="You write and run Py
 # keyword arguments are agent computer fields; nested keys camelCase as in fleet.yaml; replace=True overwrites
 lead = fleet.agent_computers.get("lead")   # raises a12s.NotFound; fleet.agent_computers.list()
 lead.name, lead.spec, lead.effective, lead.status.phase   # a snapshot; lead.reload() refreshes it
-r = lead.prompt("…", on_event=lambda ev: ev.type == "text.delta" and print(ev.data["text"], end="", flush=True))
-r.text, r.status, r.id, r.error, r.messages, r.tools, r.message.id
 m = lead.send("…", sender="app", metadata={"k": "v"}, fresh=False, expires=None, replace_key=None)
-m.id, m.state                         # body is a str; options are keyword-only
+m.id, m.state                         # body is a str; options are keyword-only; returns at once
+r = lead.send("…").wait(on_event=lambda ev: ev.type == "text.delta" and print(ev.data["text"], end="", flush=True))
+r.text, r.status, r.id, r.error, r.messages, r.tools, r.message.id   # m.wait() works later too, even after the Turn
 with fleet.turns(["lead", "worker1"]) as turns:   # entering waits until connected
     lead.send("task")
     for t in turns:                   # t.agent_computer, t.text, t.status, t.error, t.tokens, t.messages[0].via
@@ -340,7 +341,8 @@ fleet.credentials.set("stripe", key)  # agent computers using it get it at once;
 fleet.credentials.list()              # [CredentialInfo(name, set, used_by)]; remove(name) raises in_use while used
 fleet.replace(lambda f: f.defaults.update(power={"sleepAfterIdle": "15m"}))   # If-Match, retried on conflict
 fleet.close()                         # or: with a12s.Fleet() as fleet:
-# async: fleet = a12s.AsyncFleet(); the same objects with await / async for / async with. Close it with
+# async: fleet = a12s.AsyncFleet(); the same objects with await / async for / async with:
+# r = await lead.send("…").wait(), or m = await lead.send("…") then r = await m.wait(). Close it with
 # `await fleet.aclose()` (AsyncFleet has no close()), or use `async with a12s.AsyncFleet() as fleet:`
 # errors: a12s.A12sError (status, code, fix; a12s.NotFound is one), a12s.A12sStreamError, a12s.A12sGapError;
 # a failed Turn is returned with status "failed", not raised. A write's warnings arrive as warnings.warn(A12sWarning).
@@ -349,7 +351,7 @@ fleet.close()                         # or: with a12s.Fleet() as fleet:
 
 Iteration blocks until the next Turn or event; it has no timeout. To bound it, run it in a thread or use
 AsyncFleet with asyncio.wait_for. `a12s.connect()` and `Client` (name-first calls such as
-`client.prompt("hello", "…")`) still work for one release, deprecated.
+`client.send("hello", "…")`) still work for one release, deprecated.
 
 ## Recipe: hand work from one agent to another
 
@@ -378,7 +380,7 @@ agent_computers:
 import sys, a12s
 fleet = a12s.Fleet()
 lead = fleet.agent_computers.get("lead")
-with fleet.turns(["lead", "worker1"]) as turns:       # watch first, then send
+with fleet.turns(["lead", "worker1"]) as turns:       # watch first: the answer comes in a later Turn of lead
     lead.send(sys.argv[1], fresh=True)                # fresh: a new conversation per task
     for t in turns:
         if t.status != "completed":
@@ -685,7 +687,7 @@ SDK objects (Python names; TypeScript is camelCase):
 
 - Fleet: TypeScript get, replace, events, turns, status; Python close, status, events, turns, get, replace; Python AsyncFleet aclose, status, events, turns, get, replace
 - AgentComputers: TypeScript create, get, list; Python create, get, list
-- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, hold, resume, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, update, sleep, wake, hold, resume, stop, inbox, message, withdraw, remove
+- AgentComputer: TypeScript reload, update, remove, send, events, turns, sleep, wake, hold, resume, stop, inbox, message, withdraw; Python reload, send, events, turns, update, sleep, wake, hold, resume, stop, inbox, message, withdraw, remove
 - Services: TypeScript create, get, list; Python create, get, list
 - Service: TypeScript reload, update, remove, sleep, wake; Python reload, update, sleep, wake, remove
 - Tokens: TypeScript create, list, remove; Python create, list, remove
@@ -696,8 +698,9 @@ Deprecated one release (name-first): TypeScript A12sClient status, computer, sen
 
 ## Patterns and gotchas
 
-- Watch first, then send (`await turns.ready()` / `with fleet.turns(...)`), or you can miss fast Turns. Or use
-  prompt(), which follows the Turn of its own Message.
+- For the Turn that delivers your own Message, use `send(...).wait()`: it can't miss it, however late you call it.
+  To follow Turns your Message causes on OTHER agent computers (lead's final answer in the hand-off recipe comes in
+  a later Turn), open `fleet.turns()` first (`await turns.ready()` / `with fleet.turns(...)`), then send.
 - A plain `sleep()` / `a12s sleep <c>` leaves wakeOnMessage in charge: a Message from a listed sender wakes it (so
   you can test wakeOnMessage by sleeping it and sending). To keep it asleep until `wake()` whatever is sent, use
   `sleep(hold=True)` (Python), `sleep({ hold: true })` (TypeScript) or `a12s sleep <c> --hold`.
@@ -705,8 +708,8 @@ Deprecated one release (name-first): TypeScript A12sClient status, computer, sen
 - A seccomp profile's archMap/architectures take libseccomp names only (SCMP_ARCH_X86_64, SCMP_ARCH_X86,
   SCMP_ARCH_X32, SCMP_ARCH_AARCH64, SCMP_ARCH_ARM, …); the simplest valid profile that runs everything is
   `{"defaultAction": "SCMP_ACT_ALLOW"}` (a12s warns that it allows every syscall).
-- Agent computers made from code are for work that comes and goes (one per task, user or branch): create, prompt,
-  remove. Keep long-lived roles in fleet.yaml; `a12s up` removes what the file doesn't list.
+- Agent computers made from code are for work that comes and goes (one per task, user or branch): create,
+  send(...).wait(), remove. Keep long-lived roles in fleet.yaml; `a12s up` removes what the file doesn't list.
 - `spec`, `effective` and `status` on an AgentComputer are a snapshot: `reload()` before reading the phase again.
 - Two programs editing the same agent computer: the last write wins. Whole-Fleet edits go through `fleet.replace`,
   which retries on 412 version_mismatch.

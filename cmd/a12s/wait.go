@@ -19,23 +19,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/cli"
 )
 
-func runPrompt(g *globals, args []string) error {
-	fs := g.flags("prompt")
-	fresh := fs.Bool("new", false, "start a fresh session instead of continuing")
-	pos, err := parse(fs, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) < 2 {
-		return usageError("prompt needs an agent computer name and the prompt text")
-	}
-	name, text := pos[0], strings.Join(pos[1:], " ")
-	c, f, err := g.connect()
-	if err != nil {
-		return err
-	}
-	kind := f.Computers[name].Harness.Kind
-
+func sendAndWait(g *globals, c *cli.Client, kind, name string, req api.EnqueueRequest) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// An interactive command shouldn't hang until somebody wakes the Computer.
@@ -64,17 +48,7 @@ func runPrompt(g *globals, args []string) error {
 		}
 	}
 
-	// The idempotency key makes a retry after a lost response safe.
-	req := api.EnqueueRequest{Body: text, Fresh: *fresh, IdempotencyKey: cli.NewRequestID()}
-	var res api.EnqueueResponse
-	for attempt := 1; ; attempt++ {
-		err = c.Do(ctx, "POST", computerPath(name, "/inbox"), req, &res)
-		var apiErr *api.Error
-		if err == nil || errors.As(err, &apiErr) || ctx.Err() != nil || attempt == 3 {
-			break
-		}
-		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-	}
+	res, err := enqueue(ctx, c, name, req)
 	if err != nil {
 		return err
 	}
@@ -88,7 +62,7 @@ func runPrompt(g *globals, args []string) error {
 
 	// Ctrl-C latches a cancel intent: withdraw while pending (again on every
 	// return), stop the Turn once delivered; a second Ctrl-C stops waiting.
-	f2 := &promptFollow{c: c, name: name, id: res.ID}
+	f2 := &waitFollow{c: c, name: name, id: res.ID}
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)
@@ -131,7 +105,7 @@ func runPrompt(g *globals, args []string) error {
 	return exitCode(1)
 }
 
-type promptFollow struct {
+type waitFollow struct {
 	c    *cli.Client
 	name string
 	id   string
@@ -142,7 +116,7 @@ type promptFollow struct {
 	presses     int
 }
 
-func (p *promptFollow) interrupt() bool {
+func (p *waitFollow) interrupt() bool {
 	p.mu.Lock()
 	p.presses++
 	p.interrupted = true
@@ -166,7 +140,7 @@ func (p *promptFollow) interrupt() bool {
 	return true
 }
 
-func (p *promptFollow) withdraw(ctx context.Context) {
+func (p *waitFollow) withdraw(ctx context.Context) {
 	err := p.c.Do(ctx, "DELETE", computerPath(p.name, "/inbox/"+url.PathEscape(p.id)), nil, nil)
 	switch {
 	case err == nil:
@@ -178,13 +152,13 @@ func (p *promptFollow) withdraw(ctx context.Context) {
 	}
 }
 
-func (p *promptFollow) wasInterrupted() bool {
+func (p *waitFollow) wasInterrupted() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.interrupted
 }
 
-func (p *promptFollow) waitDelivered(ctx context.Context) (string, error) {
+func (p *waitFollow) waitDelivered(ctx context.Context) (string, error) {
 	var turn string
 	var end error
 	s := &cli.Stream{Client: p.c, Path: computerPath(p.name, "/inbox/"+url.PathEscape(p.id)+"/events")}

@@ -6,9 +6,9 @@ import {
   type EventsOptions,
   TurnStream,
   type EventStream,
-  type PromptOptions,
-  type PromptResult,
+  type Reply,
   type SharedEventsOptions,
+  type WaitOptions,
 } from "./client.js";
 import type {
   AgentComputerData,
@@ -58,7 +58,7 @@ export interface CreateOptions {
  * ```ts
  * const fleet = await Fleet.connect();
  * const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
- * await hello.prompt("hi");
+ * const reply = await hello.send("hi").wait();
  * await hello.remove();
  * ```
  */
@@ -220,14 +220,17 @@ export class AgentComputer {
     await this.client.request("DELETE", this.path);
   }
 
-  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends. */
-  prompt(text: string, opts: PromptOptions = {}): Promise<PromptResult> {
-    return this.client.prompt(this.name, text, opts);
-  }
-
-  /** Puts a Message in the inbox and returns at once; it is delivered at the next idle moment. */
-  send(text: string, opts: Omit<EnqueueRequest, "body"> = {}): Promise<EnqueueResponse> {
-    return this.client.send(this.name, { ...opts, body: text });
+  /**
+   * Puts a Message in the inbox; it is delivered at the next idle moment. Await it for the queued Message, or call
+   * `wait()` on it (or on the awaited Message, at any time later) for the Turn that delivers it.
+   */
+  send(text: string, opts: Omit<EnqueueRequest, "body"> = {}): Sending {
+    return new Sending(
+      this.client.send(this.name, { ...opts, body: text }).then((message) => ({
+        ...message,
+        wait: (w?: WaitOptions) => this.client.reply(this.name, message, w),
+      })),
+    );
   }
 
   /** Its events, live, from the Fleet's shared connection; `turn` replays one Turn from its start instead. */
@@ -291,6 +294,42 @@ export class AgentComputer {
   /** Withdraws a pending Message; a 409 A12sError names its state if it is too late. */
   withdraw(id: string): Promise<Message> {
     return this.client.withdraw(this.name, id);
+  }
+}
+
+/** A queued Message. */
+export interface SentMessage extends EnqueueResponse {
+  /**
+   * Waits for the Turn that delivers this Message and resolves with it once it ends, also if it already has. A failed
+   * Turn resolves with status "failed"; a Message that is withdrawn, expired, replaced or held throws A12sError.
+   */
+  wait(opts?: WaitOptions): Promise<Reply>;
+}
+
+/** What `send()` returns: a promise of the {@link SentMessage}, with its `wait()` one call away. */
+export class Sending implements Promise<SentMessage> {
+  readonly [Symbol.toStringTag] = "Sending";
+
+  constructor(private readonly sent: Promise<SentMessage>) {}
+
+  then<A = SentMessage, B = never>(
+    onfulfilled?: ((m: SentMessage) => A | PromiseLike<A>) | null,
+    onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
+  ): Promise<A | B> {
+    return this.sent.then(onfulfilled, onrejected);
+  }
+
+  catch<B = never>(onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null): Promise<SentMessage | B> {
+    return this.sent.catch(onrejected);
+  }
+
+  finally(onfinally?: (() => void) | null): Promise<SentMessage> {
+    return this.sent.finally(onfinally);
+  }
+
+  /** See {@link SentMessage.wait}. */
+  async wait(opts?: WaitOptions): Promise<Reply> {
+    return (await this.sent).wait(opts);
   }
 }
 
