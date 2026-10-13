@@ -77,22 +77,17 @@ func TestDockerIntegration(t *testing.T) {
 
 	caps, err := d.Capabilities(ctx)
 	must(t, err)
-	if !caps.EgressEnforcement || caps.DriveQuota || !caps.SharedWriteDrives || len(caps.Architectures) != 1 {
+	if !caps.EgressEnforcement || caps.DriveQuota || len(caps.Architectures) != 1 {
 		t.Errorf("capabilities = %+v", caps)
 	}
 	t.Logf("capabilities: %+v", caps)
 
 	home := driver.DriveSpec{ID: driver.HomeDriveID("c"), Kind: driver.DriveHome, Computer: "c", Size: 1 << 30}
-	data := driver.DriveSpec{ID: driver.WorkDriveID("data"), Kind: driver.DriveWork}
-	ref := driver.DriveSpec{ID: driver.WorkDriveID("ref"), Kind: driver.DriveWork}
-	for _, spec := range []driver.DriveSpec{home, data, ref} {
-		created, err := d.EnsureDrive(ctx, spec)
-		if err != nil || !created {
-			t.Fatalf("EnsureDrive %s = %v, %v; want created", spec.ID, created, err)
-		}
-		if created, err = d.EnsureDrive(ctx, spec); err != nil || created {
-			t.Fatalf("EnsureDrive %s again = %v, %v; want existing", spec.ID, created, err)
-		}
+	if created, err := d.EnsureDrive(ctx, home); err != nil || !created {
+		t.Fatalf("EnsureDrive %s = %v, %v; want created", home.ID, created, err)
+	}
+	if created, err := d.EnsureDrive(ctx, home); err != nil || created {
+		t.Fatalf("EnsureDrive %s again = %v, %v; want existing", home.ID, created, err)
 	}
 
 	b, err := d.EnsureBundle(ctx, bundleRef)
@@ -125,7 +120,6 @@ func TestDockerIntegration(t *testing.T) {
 		Bundle:    driver.BundleRef{Kind: "codex", Version: "0.0.0-test", Image: b.ImageID},
 		CPUMillis: 500, Memory: 256 << 20,
 		HomeDrive:   home.ID,
-		Drives:      []driver.Mount{{DriveID: data.ID, At: "/work/data"}, {DriveID: ref.ID, At: "/work/ref", ReadOnly: true}},
 		Credentials: []string{"openai"},
 	}
 
@@ -144,7 +138,7 @@ func TestDockerIntegration(t *testing.T) {
 	_, err = cli.NetworkCreate(ctx, d.NetworkName("rogue"), client.NetworkCreateOptions{Driver: "bridge", Labels: map[string]string{LabelFleet: fleetName}})
 	must(t, err)
 	rogue := spec
-	rogue.Name, rogue.HomeDrive, rogue.Drives, rogue.Files = "rogue", home.ID, nil, nil
+	rogue.Name, rogue.HomeDrive, rogue.Files = "rogue", home.ID, nil
 	if err := d.StageComputer(ctx, rogue); err == nil || !strings.Contains(err.Error(), "not internal") {
 		t.Errorf("stage on a non-isolated network = %v", err)
 	}
@@ -176,10 +170,10 @@ func TestDockerIntegration(t *testing.T) {
 	if st.Generation != 1 || st.Power != driver.PowerAsleep || st.Running || st.Failure != "" {
 		t.Errorf("staged state = %+v", st)
 	}
-	if got := obs.Drives[data.ID].AttachedTo; !slices.Equal(got, []string{"c"}) {
-		t.Errorf("data attachedTo = %v", got)
+	if got := obs.Drives[home.ID].AttachedTo; !slices.Equal(got, []string{"c"}) {
+		t.Errorf("home attachedTo = %v", got)
 	}
-	if err := d.RemoveDrive(ctx, data.ID); !errors.Is(err, driver.ErrDriveAttached) {
+	if err := d.RemoveDrive(ctx, home.ID); !errors.Is(err, driver.ErrDriveAttached) {
 		t.Errorf("RemoveDrive attached = %v, want ErrDriveAttached", err)
 	}
 
@@ -269,11 +263,9 @@ func TestDockerIntegration(t *testing.T) {
 	}
 	obs, err = d.Observe(ctx)
 	must(t, err)
-	if len(obs.Computers) != 0 || len(obs.Drives) != 3 || len(obs.Drives[home.ID].AttachedTo) != 0 {
+	if len(obs.Computers) != 0 || len(obs.Drives) != 1 || len(obs.Drives[home.ID].AttachedTo) != 0 {
 		t.Errorf("after remove: %+v", obs)
 	}
-	must(t, d.RemoveDrive(ctx, data.ID))
-	must(t, d.RemoveDrive(ctx, ref.ID))
 	must(t, d.RemoveDrive(ctx, home.ID))
 	must(t, d.RemoveDrive(ctx, home.ID)) // idempotent
 }
@@ -314,8 +306,6 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 	want := map[string]string{
 		"/home":             d.VolumeName(driver.HomeDriveID("c")) + ":rw",
 		"/opt/a12s/bundles": d.BundleVolume() + ":ro",
-		"/work/data":        d.VolumeName(driver.WorkDriveID("data")) + ":rw",
-		"/work/ref":         d.VolumeName(driver.WorkDriveID("ref")) + ":ro",
 	}
 	if !equalMaps(got, want) {
 		t.Errorf("mounts = %v, want %v", got, want)
@@ -359,7 +349,7 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePa
 	// Capabilities: exactly CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID; no new privileges.
 	expect(true, "CapEff:\t00000000000000eb", "grep", "CapEff", "/proc/1/status")
 	expect(true, "NoNewPrivs:\t1", "grep", "NoNewPrivs", "/proc/1/status")
-	// Read-only rootfs and bundle cache; writable tmpfs and drives.
+	// Read-only rootfs and bundle cache; writable tmpfs.
 	if code, _ := run(true, "", "touch", "/etc/a12s-test"); code == 0 {
 		t.Error("rootfs is writable")
 	}
@@ -368,19 +358,7 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePa
 	}
 	expect(false, bundleJSON, "cat", bundlePath+"/bundle.json")
 	expect(false, "echo fake codex", "sed", "-n", "2p", bundlePath+"/bin/codex")
-	expect(true, "", "touch", "/run/a12s/x", "/tmp/x", "/work/data/x")
-	// Fresh work drives: A12S_DRIVES tells computerd which empty, root-owned
-	// rw roots to hand to the agent. The stand-in has no computerd, so the
-	// test does that chown through Exec, then writes as the agent.
-	expect(false, "/work/data:rw,/work/ref:ro", "sh", "-c", "echo $A12S_DRIVES")
-	if code, _ := run(false, "", "touch", "/work/data/agent-file"); code == 0 {
-		t.Error("fresh drive root is writable by the agent before computerd's chown")
-	}
-	expect(true, "", "chown", "1000:1000", "/work/data")
-	expect(false, "1000", "sh", "-c", "echo hi > /work/data/agent-file && stat -c %u /work/data/agent-file")
-	if code, _ := run(true, "", "touch", "/work/ref/x"); code == 0 {
-		t.Error("readOnly drive is writable")
-	}
+	expect(true, "", "touch", "/run/a12s/x", "/tmp/x")
 	expect(true, "applied sha256:p1", "cat", filesMarker)
 	expect(true, "docker-init", "sh", "-c", "cat /proc/1/comm")
 	expect(true, "tmpfs 700", "sh", "-c", "echo $(stat -f -c %T /run/a12s) $(stat -c %a /run/a12s)")

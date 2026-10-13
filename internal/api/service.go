@@ -27,8 +27,7 @@ type ServiceStatus struct {
 	Send        []string `json:"send,omitempty"`   // grants.send
 	Uses        []string `json:"uses,omitempty"`   // Services it uses
 	UsedBy      []string `json:"usedBy,omitempty"` // Computers and Services that use it
-	Publish     []string `json:"publish,omitempty"`
-	Ports       []string `json:"ports,omitempty"` // "name:port/proto"
+	Ports       []string `json:"ports,omitempty"`  // "name:port/proto"
 	StateDrive  string   `json:"stateDrive,omitempty"`
 	EgressMode  string   `json:"egressMode,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
@@ -44,13 +43,4 @@ type ServicesResponse struct {
 type ServicePowerRequest struct {
 	State       Power       `json:"state"`
 	Credentials Credentials `json:"credentials,omitempty"`
-}
-
-// LoginResponse names the memory-only login container the CLI attaches to.
-type LoginResponse struct {
-	Container string   `json:"container"`
-	User      string   `json:"user"`
-	Command   []string `json:"command"`
-	Read      []string `json:"read"`
-	Produces  string   `json:"produces"`
 }

@@ -90,42 +90,6 @@ func TestRestageClosesAdmission(t *testing.T) {
 	}
 }
 
-// An exclusive drive moved from a busy Computer waits until the old
-// holder's generation is gone; there are never two attachments.
-func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	tester := h.cds.get("tester")
-	tester.StartTurn(context.Background(), api.TurnRequest{RequestID: "r1", Prompt: "ux"})
-	h.waitPhase("tester", api.PhaseBusy)
-
-	move := func(f *fleet.Fleet) {
-		tc, sc := f.Computers["tester"], f.Computers["scout"]
-		sc.Drives = append(sc.Drives, tc.Drives...)
-		tc.Drives = nil
-		f.Computers["tester"], f.Computers["scout"] = tc, sc
-	}
-	staged := h.up(labFleet(t, move), false)
-	if !slices.Equal(staged.Staged, []string{"scout", "tester"}) {
-		t.Fatalf("up = %+v", staged)
-	}
-	if m := h.d.mounts("drive-ux-scratch"); !slices.Equal(m, []string{"tester"}) {
-		t.Fatalf("ux-scratch attached to %v while tester is busy", m)
-	}
-	tester.finish(api.TurnCompleted)
-	waitFor(t, func() bool { return slices.Equal(h.d.mounts("drive-ux-scratch"), []string{"scout"}) })
-	h.waitPhase("scout", api.PhaseReady)
-	h.waitPhase("tester", api.PhaseReady)
-	for _, name := range []string{"scout", "tester"} {
-		if readState(t, h.dir).Computers[name].pending() {
-			t.Errorf("%s still pending", name)
-		}
-	}
-	if v := h.d.twoWriters(); len(v) > 0 {
-		t.Fatalf("two writers: %v", v)
-	}
-}
-
 // A stage the Driver reports but Observe does not show is not
 // recorded as done.
 func TestStageIsReadBack(t *testing.T) {
@@ -264,11 +228,5 @@ func TestStatusEgressMode(t *testing.T) {
 	}
 	if got["tester"] != api.EgressAllowAll || got["scout"] != api.EgressEnforced {
 		t.Fatalf("egress = %v", got)
-	}
-
-	u := newHarness(t)
-	u.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), false)
-	if cs := u.c.computerStatus(context.Background(), "scout"); cs.EgressMode != api.EgressUnenforced {
-		t.Fatalf("unenforced = %q", cs.EgressMode)
 	}
 }

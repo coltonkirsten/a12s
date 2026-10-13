@@ -233,24 +233,6 @@ func TestServiceAdmission(t *testing.T) {
 	if s := h.c.serviceStatus("clock"); s.Phase != api.PhaseProvisioning || s.Waiting == nil || s.Waiting.Fix != "a12s creds set postgres" {
 		t.Fatalf("clock = %+v", s)
 	}
-	// ...and one the Service's own login produces names the login.
-	f = withServices(t, h.d, func(f *fleet.Fleet) {
-		s := f.Services["clock"]
-		s.Credentials = []string{"gh-oauth"}
-		s.Manifest = &fleet.ServiceManifest{Login: &fleet.ServiceLogin{Command: []string{"login"}, Produces: "gh-oauth"}}
-		f.Services["clock"] = s
-	})
-	res, err = h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
-	if err != nil || len(res.Errors) > 0 {
-		t.Fatalf("login credential: %v %+v", err, res.Errors)
-	}
-	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "(a12s service login clock)") }) {
-		t.Fatalf("warnings %v", res.Warnings)
-	}
-	waitFor(t, func() bool {
-		w := h.c.serviceStatus("clock").Waiting
-		return w != nil && w.Fix == "a12s service login clock"
-	})
 	h.waitPhase("scout", api.PhaseReady) // the rest of the Fleet runs
 }
 

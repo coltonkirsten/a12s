@@ -17,7 +17,7 @@ import (
 )
 
 func TestPolicyCheck(t *testing.T) {
-	p := NewPolicy([]string{"api.openai.com", "GitHub.com."}, []string{"platform.claude.com"}, false)
+	p := NewPolicy([]string{"api.openai.com", "GitHub.com."}, []string{"platform.claude.com"})
 	for _, tc := range []struct {
 		host string
 		port int
@@ -36,13 +36,12 @@ func TestPolicyCheck(t *testing.T) {
 			t.Errorf("Check(%s, %d) allowed=%v, want %v", tc.host, tc.port, got, tc.ok)
 		}
 	}
-	all := NewPolicy([]string{"*"}, nil, false)
+	all := NewPolicy([]string{"*"}, nil)
 	if all.Check("anything.example", 22) != "" {
 		t.Error(`"*" must allow any host and port`)
 	}
-	open := NewPolicy(nil, nil, true)
-	if open.Check("anything.example", 5432) != "" {
-		t.Error("unenforced must allow any host")
+	if NewPolicy(nil, nil).Check("anything.example", 443) == "" {
+		t.Error("an empty allowlist must deny every host")
 	}
 }
 
@@ -133,7 +132,7 @@ func TestProxyConnectDialsTheValidatedAddress(t *testing.T) {
 			c.Close()
 		}
 	}()
-	h := newProxyHarness(t, NewPolicy([]string{"api.openai.com"}, nil, false),
+	h := newProxyHarness(t, NewPolicy([]string{"api.openai.com"}, nil),
 		map[string][]string{"api.openai.com": {"93.184.216.34"}}, echo.Addr().String())
 	code, c := h.connect(t, "api.openai.com:443")
 	defer c.Close()
@@ -151,7 +150,7 @@ func TestProxyConnectDialsTheValidatedAddress(t *testing.T) {
 }
 
 func TestProxyDenies(t *testing.T) {
-	h := newProxyHarness(t, NewPolicy([]string{"api.openai.com", "rebind.example"}, nil, false),
+	h := newProxyHarness(t, NewPolicy([]string{"api.openai.com", "rebind.example"}, nil),
 		map[string][]string{"api.openai.com": {"93.184.216.34"}, "rebind.example": {"93.184.216.34", "169.254.169.254"}}, "127.0.0.1:1")
 	for _, target := range []string{"evil.example:443", "api.openai.com:22", "rebind.example:443"} {
 		code, c := h.connect(t, target)
@@ -164,7 +163,7 @@ func TestProxyDenies(t *testing.T) {
 		t.Errorf("dialed %v", h.dialed)
 	}
 	// "*" still never reaches private or metadata addresses, by name or literal.
-	all := newProxyHarness(t, NewPolicy([]string{"*"}, nil, false), map[string][]string{"internal.example": {"10.0.0.5"}}, "127.0.0.1:1")
+	all := newProxyHarness(t, NewPolicy([]string{"*"}, nil), map[string][]string{"internal.example": {"10.0.0.5"}}, "127.0.0.1:1")
 	for _, target := range []string{"internal.example:443", "169.254.169.254:80", "[::1]:443"} {
 		code, c := all.connect(t, target)
 		c.Close()
@@ -188,7 +187,7 @@ func waitFor(t *testing.T, cond func() bool) {
 }
 
 func TestProxyRefusesPlainHTTP(t *testing.T) {
-	h := newProxyHarness(t, NewPolicy([]string{"deb.example"}, nil, false),
+	h := newProxyHarness(t, NewPolicy([]string{"deb.example"}, nil),
 		map[string][]string{"deb.example": {"93.184.216.34"}}, "127.0.0.1:1")
 	proxyURL, _ := url.Parse(h.srv.URL)
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
@@ -208,7 +207,7 @@ func TestProxyRefusesPlainHTTP(t *testing.T) {
 }
 
 func TestProxyRefusesZonedLiterals(t *testing.T) {
-	h := newProxyHarness(t, NewPolicy([]string{"*"}, nil, false), nil, "127.0.0.1:1")
+	h := newProxyHarness(t, NewPolicy([]string{"*"}, nil), nil, "127.0.0.1:1")
 	for _, target := range []string{"[fd00:ec2::254%25eth0]:443", "[fe80::1%eth0]:80", "[2606:4700:4700::1111%eth0]:443"} {
 		code, c := h.connect(t, target)
 		c.Close()
@@ -221,7 +220,7 @@ func TestProxyRefusesZonedLiterals(t *testing.T) {
 		t.Fatalf("dialed %v", h.dialed)
 	}
 	// Zones in resolver answers are refused too.
-	z := newProxyHarness(t, NewPolicy([]string{"*"}, nil, false), map[string][]string{"zoned.example": {"2606:4700:4700::1111%eth0"}}, "127.0.0.1:1")
+	z := newProxyHarness(t, NewPolicy([]string{"*"}, nil), map[string][]string{"zoned.example": {"2606:4700:4700::1111%eth0"}}, "127.0.0.1:1")
 	if code, c := z.connect(t, "zoned.example:443"); code != http.StatusForbidden {
 		t.Errorf("zoned answer = %d", code)
 	} else {

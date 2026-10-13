@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net"
 	"net/http"
@@ -40,15 +39,11 @@ type ServiceRecord struct {
 // ServiceActive is the part of a Service generation enforced outside the
 // substrate: its egress policy.
 type ServiceActive struct {
-	Allow      []string `json:"allow,omitempty"`
-	Unenforced bool     `json:"unenforced,omitempty"`
-	// Send, Uses and TCP are what it may do; Ports what it may be reached
-	// on; AllowPrivate the Fleet's egress.allowPrivate for its TCP egress.
-	Send         []string                     `json:"send,omitempty"`
-	Uses         []driver.Endpoint            `json:"uses,omitempty"`
-	TCP          []fleet.TCPEgress            `json:"tcp,omitempty"`
-	Ports        map[string]fleet.ServicePort `json:"ports,omitempty"`
-	AllowPrivate []string                     `json:"allowPrivate,omitempty"`
+	Allow []string `json:"allow,omitempty"`
+	// Send and Uses are what it may do; Ports what it may be reached on.
+	Send  []string                     `json:"send,omitempty"`
+	Uses  []driver.Endpoint            `json:"uses,omitempty"`
+	Ports map[string]fleet.ServicePort `json:"ports,omitempty"`
 }
 
 type serviceRuntime struct {
@@ -257,7 +252,7 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 		Env: []string{
 			"A12S_SERVICE=" + name,
 			"A12S_FLEET=" + c.cfg.Fleet,
-			"A12S_API=https://" + ctl + ":" + strconv.Itoa(LeasePort),
+			"A12S_API=https://" + ctl + ":" + strconv.Itoa(MTLSPort),
 			"A12S_CREDENTIALS=" + strings.Join(s.Credentials, ","),
 			"A12S_PROXY=" + proxy,
 			"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy, "http_proxy=" + proxy, "https_proxy=" + proxy,
@@ -270,10 +265,6 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 	if uses := c.endpointsLocked(s.Uses); len(uses) > 0 {
 		b, _ := json.Marshal(uses)
 		spec.Env = append(spec.Env, "A12S_USES="+string(b))
-	}
-	if tcp := tcpEgressOf(s); len(tcp) > 0 {
-		b, _ := json.Marshal(tcp)
-		spec.Env = append(spec.Env, "A12S_EGRESS_TCP="+string(b))
 	}
 	if m.Resources != nil {
 		spec.CPUMillis, spec.Memory = m.Resources.CPU.Millis(), int64(m.Resources.Memory)
@@ -292,11 +283,6 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 			stateSize = s.State.Size
 		}
 	}
-	for _, p := range s.Publish {
-		if pub, err := fleet.ParsePublish(p); err == nil {
-			spec.Publish = append(spec.Publish, driver.PublishSpec{IP: pub.IP.String(), HostPort: pub.HostPort, Port: pub.Port})
-		}
-	}
 	b, err := json.Marshal(struct {
 		Image       string
 		Manifest    *fleet.ServiceManifest
@@ -306,8 +292,7 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 		CPU, Memory int64
 		State       fleet.Bytes
 		Spec        driver.ServiceSpec
-		Unenforced  bool `json:",omitempty"`
-	}{image, m, s.Config, s.Credentials, s.Egress, spec.CPUMillis, spec.Memory, stateSize, spec, f.Egress.Unenforced()})
+	}{image, m, s.Config, s.Credentials, s.Egress, spec.CPUMillis, spec.Memory, stateSize, spec})
 	if err != nil {
 		return spec, "", err
 	}
@@ -317,11 +302,7 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 
 func (c *Controller) activeServiceLocked(name string) ServiceActive {
 	s := c.state.Fleet.Services[name]
-	a := ServiceActive{
-		Allow: slices.Clone(s.Egress.Allow), Unenforced: c.state.Fleet.Egress.Unenforced(),
-		Send: slices.Clone(s.Grants.Send), Uses: c.endpointsLocked(s.Uses), TCP: slices.Clone(s.Egress.TCP),
-		AllowPrivate: slices.Clone(c.state.Fleet.Egress.AllowPrivate),
-	}
+	a := ServiceActive{Allow: slices.Clone(s.Egress.Allow), Send: slices.Clone(s.Grants.Send), Uses: c.endpointsLocked(s.Uses)}
 	if m := c.state.Manifests[name]; m != nil {
 		a.Ports = maps.Clone(m.Ports)
 	}
@@ -502,14 +483,6 @@ func (c *Controller) stopService(ctx context.Context, name string, gen int64) er
 	})
 }
 
-func serviceWait(name string, m *fleet.ServiceManifest, missing []string) *api.Waiting {
-	produces := ""
-	if m != nil && m.Login != nil {
-		produces = m.Login.Produces
-	}
-	return credentialWait(missing, name, produces)
-}
-
 // startService powers on the staged generation, injects its credentials
 // and config, and waits for its health check: Starting -> Ready, or
 // Unhealthy once the startup grace has passed.
@@ -519,7 +492,7 @@ func (c *Controller) startService(ctx context.Context, name string) error {
 	gen := c.state.Services[name].Generation
 	var w *api.Waiting
 	if missing := missingCredentials(s.Credentials, c.creds); len(missing) > 0 {
-		w = serviceWait(name, c.state.Manifests[name], missing)
+		w = credentialWait(missing)
 		c.setServiceStateLocked(name, api.PhaseProvisioning, nil, w)
 	}
 	c.mu.Unlock()
@@ -578,7 +551,7 @@ func (c *Controller) injectService(ctx context.Context, name string, withCert bo
 		return err
 	}
 	if missing := missingCredentials(s.Credentials, material); len(missing) > 0 {
-		return &credentialsMissing{credentialWait(missing, "", "")}
+		return &credentialsMissing{credentialWait(missing)}
 	}
 	for _, cred := range s.Credentials {
 		if err := c.drv.ServiceWrite(ctx, name, secretsDir+"/"+cred, user, "0400", secretsDirMode, material[cred]); err != nil {
@@ -651,11 +624,7 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 		if err != nil {
 			return fmt.Errorf("health: %v", unwrapNet(err))
 		}
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		res.Body.Close()
-		if reauth(body) {
-			return fmt.Errorf("credential: reauth  fix: a12s service login %s", name)
-		}
 		if res.StatusCode >= 400 {
 			return fmt.Errorf("health: HTTP %d", res.StatusCode)
 		}
@@ -673,15 +642,6 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 		return fmt.Errorf("health: exit %d: %s", code, out)
 	}
 	return nil
-}
-
-// reauth reports a {"credential": "reauth"} health answer: the session is gone and needs
-// `a12s service login`.
-func reauth(body []byte) bool {
-	var h struct {
-		Credential string `json:"credential"`
-	}
-	return json.Unmarshal(bytes.TrimSpace(body), &h) == nil && h.Credential == "reauth"
 }
 
 func unwrapNet(err error) error {
@@ -956,20 +916,16 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	defer c.mu.Unlock()
 	f := c.state.Fleet
 	s := f.Services[name]
-	out := api.ServiceStatus{Name: name, Image: s.Image, Send: s.Grants.Send, Uses: fleet.UseNames(s.Uses), Publish: s.Publish}
+	out := api.ServiceStatus{Name: name, Image: s.Image, Send: s.Grants.Send, Uses: fleet.UseNames(s.Uses)}
 	out.Spec, _ = json.Marshal(s)
 	if c.state.Pins != nil {
 		out.Pin = c.state.Pins.Services[fleet.ServiceKey(name, s.Image)]
 	}
 	if rec := c.state.Services[name]; rec != nil {
 		out.Generation, out.Restarts = rec.Generation, rec.Restarts
-		switch {
-		case rec.Active.Unenforced:
-			out.EgressMode = api.EgressUnenforced
-		case slices.Contains(rec.Active.Allow, fleet.AllowAll):
+		out.EgressMode = api.EgressEnforced
+		if slices.Contains(rec.Active.Allow, fleet.AllowAll) {
 			out.EgressMode = api.EgressAllowAll
-		default:
-			out.EgressMode = api.EgressEnforced
 		}
 	}
 	for _, other := range f.ComputerNames() {
@@ -995,11 +951,6 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	out.Phase, out.Error, out.Waiting, out.Health = r.phase, r.failure, r.waiting, r.health
 	if !r.healthSince.IsZero() {
 		out.HealthSince = r.healthSince.UTC().Format(time.RFC3339)
-	}
-	for _, p := range s.Publish {
-		if pub, err := fleet.ParsePublish(p); err == nil {
-			out.Warnings = append(out.Warnings, fmt.Sprintf("published: %s:%d (reachable outside uses)", pub.IP, pub.HostPort))
-		}
 	}
 	if out.EgressMode == api.EgressAllowAll {
 		out.Warnings = append(out.Warnings, `egress allows any public host ("*")`)

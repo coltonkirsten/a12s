@@ -6,15 +6,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const socketPath = process.env.A12S_SOCK ?? '/run/a12s/sock/computerd.sock';
-const drivePath = {
-  type: 'object',
-  properties: {
-    drive: { type: 'string', description: 'Name of a shared-write drive' },
-    path: { type: 'string', description: 'Path inside the drive to lock' },
-  },
-  required: ['drive', 'path'],
-} as const;
-
 const sendTo = (process.env.A12S_SEND ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 
 const tools: { name: string; description: string; inputSchema: Record<string, unknown> }[] = [
@@ -24,8 +15,6 @@ const tools: { name: string; description: string; inputSchema: Record<string, un
       'Restart your harness when this turn ends, resume this same session, and continue with a new turn. Use it to load skills or MCP servers you just wrote.',
     inputSchema: { type: 'object', properties: {} },
   },
-  { name: 'lock', description: 'Take an advisory lock on a path in a shared-write drive (a lease renewed while held).', inputSchema: drivePath },
-  { name: 'release', description: 'Release an advisory lock taken with lock.', inputSchema: drivePath },
 ];
 if (sendTo.length) {
   tools.push({
@@ -69,7 +58,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (!tools.some((t) => t.name === name)) return { isError: true, content: [{ type: 'text', text: `unknown tool ${name}` }] };
   try {
     const args = req.params.arguments ?? {};
-    const payload = name === 'restart_harness' ? {} : name === 'send' ? args : { drive: args.drive, path: args.path };
+    const payload = name === 'send' ? args : {};
     const out = await call(`/v1/system/${name}`, payload);
     const controllerStatus = (JSON.parse(out) as { status?: unknown }).status;
     const refused = typeof controllerStatus === 'number' && controllerStatus >= 300;

@@ -8,28 +8,17 @@ import (
 
 type DriveKind string
 
-const (
-	DriveHome DriveKind = "home"
-	DriveWork DriveKind = "work"
-)
+const DriveHome DriveKind = "home"
 
 func HomeDriveID(computer string) string { return "home-" + computer }
 
-func WorkDriveID(drive string) string { return "drive-" + drive }
-
 type DriveSpec struct {
-	ID   string    `json:"id"` // HomeDriveID or WorkDriveID
+	ID   string    `json:"id"` // HomeDriveID or StateDriveID
 	Kind DriveKind `json:"kind"`
-	// Computer is the owning Computer or Service; empty for work drives.
+	// Computer is the owning Computer or Service.
 	Computer string `json:"computer,omitempty"`
 	// Size is enforced only where Capabilities.DriveQuota.
 	Size int64 `json:"size,omitempty"`
-}
-
-type Mount struct {
-	DriveID  string `json:"driveId"`
-	At       string `json:"at"`
-	ReadOnly bool   `json:"readOnly,omitempty"`
 }
 
 type BundleRef struct {
@@ -91,7 +80,6 @@ type ComputerSpec struct {
 	CPUMillis  int64     `json:"cpuMillis,omitempty"`   // 0 = no limit
 	Memory     int64     `json:"memoryBytes,omitempty"` // 0 = no limit
 	HomeDrive  string    `json:"homeDrive"`             // HomeDriveID(Name)
-	Drives     []Mount   `json:"drives,omitempty"`
 	// Credentials are names only, never values.
 	Credentials   []string `json:"credentials,omitempty"`
 	ProxyURL      string   `json:"proxyUrl,omitempty"`
@@ -115,7 +103,6 @@ func (s ComputerSpec) Env(fleet string) []string {
 		"A12S_HARNESS_VERSION=" + s.Bundle.Version,
 		"A12S_IMAGE_TIER=" + s.Tier,
 		"A12S_BUNDLE=" + s.Bundle.Path(),
-		"A12S_DRIVES=" + s.drivesEnv(),
 		"A12S_CREDENTIALS=" + strings.Join(s.Credentials, ","),
 		"A12S_PROXY=" + s.ProxyURL,
 		"A12S_CONTROLLER=" + s.ControllerURL,
@@ -131,17 +118,4 @@ func (s ComputerSpec) Env(fleet string) []string {
 		env = append(env, "A12S_SEND="+strings.Join(s.Send, ","))
 	}
 	return env
-}
-
-// drivesEnv lets computerd hand empty, root-owned writable drive roots to the agent.
-func (s ComputerSpec) drivesEnv() string {
-	parts := make([]string, len(s.Drives))
-	for i, m := range s.Drives {
-		mode := "rw"
-		if m.ReadOnly {
-			mode = "ro"
-		}
-		parts[i] = m.At + ":" + mode
-	}
-	return strings.Join(parts, ",")
 }

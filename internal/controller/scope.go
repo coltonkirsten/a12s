@@ -11,8 +11,8 @@ import (
 )
 
 // A prefix token is the owner inside its prefix and nobody outside it: it sees, writes and uses only agent
-// computers, Services and credentials whose names start with the prefix, and what those point at (grants, uses,
-// drives) must start with it too. Credentials are the exception on the way in: its specs may name any. It never sets
+// computers, Services and credentials whose names start with the prefix, and what those point at (grants and uses)
+// must start with it too. Credentials are the exception on the way in: its specs may name any. It never sets
 // a seccomp profile: that loosens the sandbox, which is the owner's call alone.
 
 func (k caller) prefix() string {
@@ -59,7 +59,7 @@ func allowOwnerOrPrefix(param string, h http.HandlerFunc) http.HandlerFunc {
 }
 
 // checkScope keeps a prefix token's write inside its prefix, defaults included: everything the written agent
-// computers and Services send to, use or attach must be inside it, and an agent computer it writes (rather than
+// computers and Services send to or use must be inside it, and an agent computer it writes (rather than
 // removes) keeps the security.seccomp it had in before.
 func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts) error {
 	if k.prefix() == "" {
@@ -81,11 +81,6 @@ func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts
 		var uses []fleet.Use
 		if comp, ok := f.Computers[name]; ok {
 			send, uses = comp.Grants.Send, comp.Uses
-			for _, d := range comp.Drives {
-				if !k.inPrefix(d.Name) {
-					return outOfPrefix(k, name+"'s drive "+d.Name)
-				}
-			}
 		}
 		if svc, ok := f.Services[name]; ok {
 			send, uses = svc.Grants.Send, svc.Uses

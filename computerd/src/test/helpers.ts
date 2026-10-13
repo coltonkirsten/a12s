@@ -22,7 +22,6 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     imageTier: 'slim',
     bundle: join(root, 'bundle'),
     credentials: [],
-    drives: [],
     proxy: null,
     send: [],
     uses: '',

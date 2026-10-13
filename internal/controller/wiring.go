@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/netip"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 
@@ -54,27 +52,17 @@ func sortedPortNames(m *fleet.ServiceManifest) []string {
 	return names
 }
 
-func tcpEgressOf(s fleet.Service) []driver.TCPEgress {
-	var out []driver.TCPEgress
-	for _, t := range s.Egress.TCP {
-		out = append(out, driver.TCPEgress{Name: t.Name, Port: t.Port, Env: driver.EnvName("EGRESS", t.Name)})
-	}
-	return out
-}
-
 // reach is what the proxy needs to decide a .a12s connection.
 type reach struct {
 	uses    []driver.Endpoint // the caller's active uses
-	tcp     []fleet.TCPEgress // the caller's named TCP egress (Services)
 	service bool              // the caller is a Service
-	private []string          // the Fleet's egress.allowPrivate when staged
 }
 
 func (c *Controller) reachOf(name string) (reach, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if s := c.state.Services[name]; s != nil {
-		return reach{uses: s.Active.Uses, tcp: s.Active.TCP, service: true, private: s.Active.AllowPrivate}, true
+		return reach{uses: s.Active.Uses, service: true}, true
 	}
 	if r := c.state.Computers[name]; r != nil {
 		return reach{uses: r.Active.Uses}, true
@@ -104,9 +92,6 @@ func (c *Controller) internalTarget(ctx context.Context, caller, host string, po
 	rc, ok := c.reachOf(caller)
 	if !ok {
 		return netip.AddrPort{}, http.StatusForbidden, "unknown caller"
-	}
-	if eg, ok := strings.CutSuffix(name, ".egress"); ok {
-		return c.egressTarget(ctx, caller, rc, eg, port)
 	}
 	if strings.Contains(name, ".") || name == "" {
 		return netip.AddrPort{}, http.StatusForbidden, host + " is not a Service name"
@@ -157,108 +142,4 @@ func (c *Controller) serviceAddr(ctx context.Context, name string) (netip.Addr, 
 		return netip.Addr{}, errors.New("not running")
 	}
 	return netip.ParseAddr(st.Address)
-}
-
-// alwaysDenied are never reachable through named TCP egress, whatever
-// allowPrivate says: loopback, link-local and metadata, unspecified,
-// multicast.
-var alwaysDenied = func() []netip.Prefix {
-	var out []netip.Prefix
-	for _, s := range []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4", "::/128", "::1/128", "fe80::/10", "ff00::/8", "fd00:ec2::254/128"} {
-		out = append(out, netip.MustParsePrefix(s))
-	}
-	return out
-}()
-
-// fleetPools are the Fleet's own networks: the internal-network pool and
-// the Controller bridge. No Fleet field opens them.
-// It fails closed: without the bridge's identity (an engine error), no named
-// egress is dialed. The last verified bridge is remembered.
-func (c *Controller) fleetPools(ctx context.Context) ([]netip.Prefix, bool) {
-	pools := []netip.Prefix{c.cfg.SubnetPool}
-	if c.selfAddrs == nil {
-		return pools, true // not on Docker (tests): no bridge to protect
-	}
-	if addrs, err := c.selfAddrs(ctx); err == nil {
-		if ip, ok := addrs["a12s-"+c.cfg.Fleet]; ok && ip.Is4() {
-			p, _ := ip.Prefix(16)
-			c.mu.Lock()
-			c.bridgePool = p
-			c.mu.Unlock()
-		}
-	}
-	c.mu.Lock()
-	bridge := c.bridgePool
-	c.mu.Unlock()
-	if !bridge.IsValid() {
-		return nil, false
-	}
-	return append(pools, bridge), true
-}
-
-// egressTarget resolves a Service's named TCP egress and validates the
-// address it will dial: the Fleet's pools and loopback/link-local/metadata
-// first (no Fleet field reads), then private ranges only within
-// egress.allowPrivate, then pinned for this connection.
-func (c *Controller) egressTarget(ctx context.Context, caller string, rc reach, name string, port int) (netip.AddrPort, int, string) {
-	if !rc.service {
-		return netip.AddrPort{}, http.StatusForbidden, "only a Service has named TCP egress"
-	}
-	var t *fleet.TCPEgress
-	for i := range rc.tcp {
-		if rc.tcp[i].Name == name {
-			t = &rc.tcp[i]
-		}
-	}
-	if t == nil || t.Port != port {
-		return netip.AddrPort{}, http.StatusForbidden, fmt.Sprintf("%s has no egress.tcp entry %s on port %d", caller, name, port)
-	}
-	var addrs []netip.Addr
-	if a, err := netip.ParseAddr(t.Host); err == nil {
-		addrs = []netip.Addr{a}
-	} else {
-		rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		found, err := net.DefaultResolver.LookupNetIP(rctx, "ip", t.Host)
-		if err != nil || len(found) == 0 {
-			return netip.AddrPort{}, http.StatusBadGateway, t.Host + " does not resolve"
-		}
-		addrs = found
-	}
-	pools, ok := c.fleetPools(ctx)
-	if !ok {
-		return netip.AddrPort{}, http.StatusServiceUnavailable, "the Controller cannot verify the Fleet's own networks right now; named egress is refused until it can"
-	}
-	for _, a := range addrs {
-		a = a.Unmap()
-		if why := egressAddrDenied(a, pools, rc.private); why != "" {
-			return netip.AddrPort{}, http.StatusForbidden, t.Host + ": " + why
-		}
-	}
-	return netip.AddrPortFrom(addrs[0].Unmap(), uint16(port)), 0, ""
-}
-
-func egressAddrDenied(a netip.Addr, pools []netip.Prefix, allowPrivate []string) string {
-	if !a.IsValid() || a.Zone() != "" {
-		return "invalid address"
-	}
-	for _, p := range alwaysDenied {
-		if p.Contains(a) {
-			return "address " + a.String() + " is never reachable (" + p.String() + ")"
-		}
-	}
-	for _, p := range pools {
-		if p.Contains(a) {
-			return "address " + a.String() + " is inside the Fleet's own networks"
-		}
-	}
-	if BlockedAddr(a) == "" {
-		return ""
-	}
-	for _, s := range allowPrivate {
-		if p, err := netip.ParsePrefix(s); err == nil && p.Contains(a) {
-			return ""
-		}
-	}
-	return "address " + a.String() + " is private  fix: add a range covering it to egress.allowPrivate"
 }

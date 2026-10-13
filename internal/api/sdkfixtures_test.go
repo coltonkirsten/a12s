@@ -103,7 +103,7 @@ func TestSDKFixtures(t *testing.T) {
 var fixtureStrings = map[string]string{
 	"api.Phase":     string(PhaseReady),
 	"api.EventType": string(EventTextDelta),
-	"api.DriveKind": string(DriveWork),
+	"api.DriveKind": string(DriveHome),
 	"state":         MsgPending,
 	"status":        TurnCompleted,
 	"actions":       ActionSend,

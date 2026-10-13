@@ -37,7 +37,6 @@ export interface AgentComputerSpec {
   resources?: { cpu?: string | number; memory?: string | number };
   /** Credential names, added to the defaults' list; their values come from `a12s creds set` or the credentials API. */
   credentials?: string[];
-  drives?: Array<{ name: string; at: string; readOnly?: boolean }>;
   egress?: { allow?: string[] };
   /** `seccomp` is the profile JSON itself. */
   security?: { seccomp?: Record<string, unknown> };
@@ -55,9 +54,7 @@ export interface FleetSpec {
   apiVersion: string;
   kind: string;
   metadata: { name: string };
-  egress?: { enforcement?: string; allowPrivate?: string[] };
   defaults?: AgentComputerSpec;
-  drives?: Record<string, { size?: string | number; access: string }>;
   agent_computers: Record<string, AgentComputerSpec>;
   services?: Record<string, Record<string, unknown>>;
 }
@@ -178,7 +175,6 @@ export interface ComputerStatus {
   generation: number;
   stagedGeneration?: number;
   credentialGeneration?: number;
-  drives?: string[];
   egressMode?: string;
   warnings?: string[];
   inbox?: InboxSummary;
@@ -187,12 +183,11 @@ export interface ComputerStatus {
 
 export interface DriveRow {
   name: string;
-  kind: "home" | "work" | "state";
+  kind: "home" | "state";
   computer?: string;
   service?: string;
   /** A quantity such as "10Gi". */
   size?: string;
-  access?: string;
   attachedTo?: string[];
   orphaned?: boolean;
 }
@@ -211,7 +206,6 @@ export interface ServiceStatus {
   send?: string[];
   uses?: string[];
   usedBy?: string[];
-  publish?: string[];
   ports?: string[];
   stateDrive?: string;
   egressMode?: string;
@@ -222,7 +216,6 @@ export interface ServiceStatus {
 
 export interface StatusResponse {
   fleet: string;
-  egressEnforcement: string;
   agentComputers: ComputerStatus[];
   orphanedDrives?: DriveRow[];
   warnings?: string[];

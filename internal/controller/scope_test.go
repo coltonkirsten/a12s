@@ -85,14 +85,12 @@ func TestPrefixTokenCannotLeaveItsLane(t *testing.T) {
 	wantForbidden(t, "whole-Fleet write", biz("PUT", "/v1/fleet", `{"fleet":{"apiVersion":"a12s.ai/v1alpha1","kind":"Fleet","metadata":{"name":"lab"},"agent_computers":{}}}`))
 	wantForbidden(t, "mint a token", biz("POST", "/v1/tokens", `{"name":"more","prefix":"biz-"}`))
 	wantForbidden(t, "read the Fleet", biz("GET", "/v1/fleet", ""))
-	wantForbidden(t, "apply", biz("POST", "/v1/apply", `{}`))
-	wantForbidden(t, "remove a drive", biz("DELETE", "/v1/drives/reference", ""))
+	wantForbidden(t, "remove a drive", biz("DELETE", "/v1/drives/home-scout", ""))
 
 	// Send, uses and grants pointing outside.
 	wantOutOfPrefix(t, "send to scout", biz("POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`))
 	wantOutOfPrefix(t, "grant send to scout", biz("PUT", "/v1/agent-computers/biz-b", bizSpec+`,"grants":{"send":["scout"]}}`))
 	wantOutOfPrefix(t, "use a Service outside", biz("PUT", "/v1/agent-computers/biz-b", bizSpec+`,"uses":["db"]}`))
-	wantOutOfPrefix(t, "attach a drive outside", biz("PUT", "/v1/agent-computers/biz-b", bizSpec+`,"drives":[{"name":"reference","at":"/work/ref","readOnly":true}]}`))
 	wantOutOfPrefix(t, "a Service granting outside", biz("PUT", "/v1/services/biz-clock", `{"image":"x/y:1","grants":{"send":["scout"]}}`))
 	wantOutOfPrefix(t, "set a credential outside", biz("PUT", "/v1/credentials/anthropic", `{"value":"stolen"}`))
 	wantOutOfPrefix(t, "remove a credential outside", biz("DELETE", "/v1/credentials/github", ""))

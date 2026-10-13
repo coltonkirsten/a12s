@@ -126,35 +126,6 @@ func TestBundleDir(t *testing.T) {
 	}
 }
 
-func TestCheckSpecMountPoints(t *testing.T) {
-	base := driver.ComputerSpec{Name: "c", Generation: 1, Image: "x", HomeDrive: "home-c",
-		Bundle: driver.BundleRef{Kind: "codex", Version: "1", Image: "sha256:0123456789abcdef"}}
-	for at, ok := range map[string]bool{
-		"/work/data":          true,
-		"/work/A-z_0.9":       true,
-		"/work/v,/home/.a12s": false,
-		"/work/v:rw":          false,
-		"/work/my dir":        false,
-		"work":                false,
-		"/work/../home":       false,
-		"/":                   false,
-		"/home/agent/x":       false,
-		"/run/a12s":           false,
-		"/opt/a12s/bundles/x": false,
-		"/tmp/x":              false,
-		"/proc/x":             false,
-		"/sys":                false,
-		"/dev/shm":            false,
-		"/homework":           true,
-	} {
-		s := base
-		s.Drives = []driver.Mount{{DriveID: "drive-d", At: at}}
-		if err := checkSpec(s); (err == nil) != ok {
-			t.Errorf("checkSpec(at=%q) = %v, want ok=%v", at, err, ok)
-		}
-	}
-}
-
 func TestCheckNetwork(t *testing.T) {
 	d := &Driver{fleet: "lab"}
 	good := network.Network{
@@ -220,11 +191,7 @@ func TestCreateOptions(t *testing.T) {
 		Bundle:    driver.BundleRef{Kind: "claude-code", Version: "2.1.280", Image: "sha256:0123456789abcdef0123"},
 		Model:     "claude-fable-5-1",
 		CPUMillis: 1500, Memory: 2 << 30,
-		HomeDrive: driver.HomeDriveID("scout"),
-		Drives: []driver.Mount{
-			{DriveID: driver.WorkDriveID("reference"), At: "/work/ref", ReadOnly: true},
-			{DriveID: driver.WorkDriveID("scratch"), At: "/work/scratch"},
-		},
+		HomeDrive:   driver.HomeDriveID("scout"),
 		Credentials: []string{"anthropic", "github"},
 	}
 	o := d.createOptions(spec)
@@ -239,7 +206,6 @@ func TestCreateOptions(t *testing.T) {
 		"A12S_COMPUTER=scout", "A12S_FLEET=lab", "A12S_GENERATION=3",
 		"A12S_HARNESS_KIND=claude-code", "A12S_HARNESS_VERSION=2.1.280",
 		"A12S_IMAGE_TIER=slim", "A12S_BUNDLE=/opt/a12s/bundles/claude-code-2.1.280-0123456789ab",
-		"A12S_DRIVES=/work/ref:ro,/work/scratch:rw",
 		"A12S_CREDENTIALS=anthropic,github",
 		"A12S_PROXY=http://a12s-lab-controller:3128", "A12S_CONTROLLER=https://a12s-lab-controller:7443",
 		"A12S_MODEL=claude-fable-5-1",
@@ -285,8 +251,6 @@ func TestCreateOptions(t *testing.T) {
 	wantMounts := []m{
 		{"a12s-lab-home-scout", "/home", false},
 		{"a12s-lab-bundles", "/opt/a12s/bundles", true},
-		{"a12s-lab-drive-reference", "/work/ref", true},
-		{"a12s-lab-drive-scratch", "/work/scratch", false},
 	}
 	if !reflect.DeepEqual(mounts, wantMounts) {
 		t.Errorf("mounts = %+v", mounts)
@@ -309,8 +273,8 @@ func TestToEventRoles(t *testing.T) {
 	if ev, ok := toEvent(msg(RoleService, "clock")); !ok || !ev.Service || ev.Computer != "clock" {
 		t.Fatalf("service: %+v %v", ev, ok)
 	}
-	if _, ok := toEvent(msg(RolePublish, "clock")); ok {
-		t.Fatal("a publish forwarder is not a Service")
+	if _, ok := toEvent(msg(RoleController, "clock")); ok {
+		t.Fatal("the Controller is neither a Computer nor a Service")
 	}
 }
 

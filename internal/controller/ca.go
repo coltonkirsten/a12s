@@ -131,7 +131,7 @@ func (l Leaf) TLS() (tls.Certificate, error) { return tls.X509KeyPair(l.CertPEM,
 const ControllerCN = "controller"
 
 // ComputerCert has no client-auth usage, so a Computer cannot call another computerd;
-// only the Controller's lease listener accepts it from a client (see ServerTLS).
+// only the Controller's mTLS listener accepts it from a client (see ServerTLS).
 func (ca *CA) ComputerCert(computer string, generation int64) (Leaf, error) {
 	return ca.issueTyped(computer, []string{computer}, Principal{Kind: KindComputer, Name: computer, Generation: generation})
 }

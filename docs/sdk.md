@@ -60,7 +60,7 @@ In Python, `with a12s.Fleet() as fleet:` closes the connection at the end (or ca
 
 `create` takes a name and any [agent computer field](fleet-file.md#agent-computer-fields) of the Fleet file:
 keyword arguments in Python, an object in TypeScript. Nested keys are the Fleet file's own (`sleepAfterIdle`,
-`readOnly`) in both languages. Whatever you leave out comes from the Fleet's `defaults`, so with harness, image and
+`maxWakesPerHour`) in both languages. Whatever you leave out comes from the Fleet's `defaults`, so with harness, image and
 credentials in `defaults` a name and instructions are enough. It returns once the agent computer is up.
 
 ```ts
@@ -450,7 +450,7 @@ a12s token create dashboard --actions status,events --agent-computers '*'   # re
 
 - A **prefix token** may do everything the owner can with agent computers, Services and credentials whose names start
   with its prefix: `fleet.agentComputers.create("biz-a", …)`, send, events, sleep, remove. Lists show only those
-  names; anything outside, or a spec whose `grants.send`, `uses` or drives (also from `defaults`) point outside,
+  names; anything outside, or a spec whose `grants.send` or `uses` (also from `defaults`) point outside,
   raises `out_of_prefix`. It can't call `fleet.get()`, `fleet.replace()` or `fleet.tokens`, or set
   `security.seccomp` (`forbidden`). See
   [Security: Tokens](security.md#tokens).

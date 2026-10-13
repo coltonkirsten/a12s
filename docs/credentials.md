@@ -43,8 +43,7 @@ Use a setup token or an API key, not a copy of your interactive Claude login.
 - Credential rotation restarts the harness process, so a long-lived Codex server doesn't keep a revoked key.
   computerd reports the credential generation it has actually loaded (`a12s status`).
 
-Services receive their credentials the same way, at `/run/a12s/secrets/<name>` owned by the Service's user. A Service
-that needs an interactive sign-in uses [`a12s service login`](services.md#credentials-and-the-one-time-login).
+Services receive their credentials the same way, at `/run/a12s/secrets/<name>` owned by the Service's user.
 
 ## From code and the API
 

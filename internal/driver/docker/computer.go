@@ -11,7 +11,6 @@ import (
 	"path"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -127,17 +126,7 @@ func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driv
 	return state == appliedMarker(spec.FilesDigest), nil
 }
 
-// mountPointRE excludes ',' and ':', which A12S_DRIVES uses as separators.
 var mountPointRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-
-func reservedMount(at string) bool {
-	for _, r := range []string{"/", homeMount, "/run", "/opt/a12s", "/tmp", "/proc", "/sys", "/dev"} {
-		if at == r || (r != "/" && strings.HasPrefix(at, r+"/")) {
-			return true
-		}
-	}
-	return false
-}
 
 func checkSpec(s driver.ComputerSpec) error {
 	switch {
@@ -153,11 +142,6 @@ func checkSpec(s driver.ComputerSpec) error {
 		return errors.New("bundle kind and version are required")
 	case driver.ShortImageID(s.Bundle.Image) == "":
 		return fmt.Errorf("bundle image %q must be the image ID EnsureBundle returned", s.Bundle.Image)
-	}
-	for _, m := range s.Drives {
-		if !mountPointRE.MatchString(m.At) || path.Clean(m.At) != m.At || !path.IsAbs(m.At) || reservedMount(m.At) {
-			return fmt.Errorf("drive %s: invalid mount point %q", m.DriveID, m.At)
-		}
 	}
 	return nil
 }
@@ -180,9 +164,6 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 	mounts := []mount.Mount{
 		volume(d.VolumeName(spec.HomeDrive), homeMount, false),
 		volume(d.BundleVolume(), driver.BundleRoot, true),
-	}
-	for _, m := range spec.Drives {
-		mounts = append(mounts, volume(d.VolumeName(m.DriveID), m.At, m.ReadOnly))
 	}
 	security := []string{"no-new-privileges:true"}
 	if spec.Seccomp != "" {

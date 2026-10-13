@@ -4,7 +4,6 @@ import type * as T from "../src/types.js";
 
 export const statusResponse: T.StatusResponse = {
   "fleet": "fleet",
-  "egressEnforcement": "egressEnforcement",
   "agentComputers": [
     {
       "name": "name",
@@ -32,9 +31,6 @@ export const statusResponse: T.StatusResponse = {
       "generation": 1,
       "stagedGeneration": 1,
       "credentialGeneration": 1,
-      "drives": [
-        "drives"
-      ],
       "egressMode": "egressMode",
       "warnings": [
         "warnings"
@@ -90,11 +86,10 @@ export const statusResponse: T.StatusResponse = {
   "orphanedDrives": [
     {
       "name": "name",
-      "kind": "work",
+      "kind": "home",
       "computer": "computer",
       "service": "service",
       "size": "1",
-      "access": "access",
       "attachedTo": [
         "attachedTo"
       ],
@@ -166,9 +161,6 @@ export const statusResponse: T.StatusResponse = {
       "usedBy": [
         "usedBy"
       ],
-      "publish": [
-        "publish"
-      ],
       "ports": [
         "ports"
       ],
@@ -184,7 +176,6 @@ export const statusResponse: T.StatusResponse = {
 
 export const statusResponseMinimal: T.StatusResponse = {
   "fleet": "fleet",
-  "egressEnforcement": "egressEnforcement",
   "agentComputers": [
     {
       "name": "name",
@@ -279,9 +270,6 @@ export const putFleetResponse: T.PutFleetResponse = {
       "generation": 1,
       "stagedGeneration": 1,
       "credentialGeneration": 1,
-      "drives": [
-        "drives"
-      ],
       "egressMode": "egressMode",
       "warnings": [
         "warnings"
@@ -362,9 +350,6 @@ export const putFleetResponse: T.PutFleetResponse = {
     "usedBy": [
       "usedBy"
     ],
-    "publish": [
-      "publish"
-    ],
     "ports": [
       "ports"
     ],
@@ -420,19 +405,7 @@ export const fleetResponse: T.FleetResponse = {
     "metadata": {
       "name": "name"
     },
-    "egress": {
-      "enforcement": "enforcement",
-      "allowPrivate": [
-        "allowPrivate"
-      ]
-    },
     "defaults": {},
-    "drives": {
-      "k": {
-        "size": "1",
-        "access": "access"
-      }
-    },
     "agent_computers": {
       "k": {}
     },
@@ -469,12 +442,6 @@ export const fleetResponse: T.FleetResponse = {
               "required": true
             }
           ],
-          "login": {
-            "command": [
-              ""
-            ],
-            "produces": "produces"
-          },
           "state": {
             "at": "at",
             "size": "1"
@@ -496,13 +463,6 @@ export const fleetResponse: T.FleetResponse = {
         "egress": {
           "allow": [
             "allow"
-          ],
-          "tcp": [
-            {
-              "name": "name",
-              "host": "host",
-              "port": 1
-            }
           ]
         },
         "grants": {
@@ -522,10 +482,7 @@ export const fleetResponse: T.FleetResponse = {
         },
         "state": {
           "size": "1"
-        },
-        "publish": [
-          "publish"
-        ]
+        }
       }
     }
   }
@@ -577,9 +534,6 @@ export const agentComputersResponse: T.AgentComputersResponse = {
         "generation": 1,
         "stagedGeneration": 1,
         "credentialGeneration": 1,
-        "drives": [
-          "drives"
-        ],
         "egressMode": "egressMode",
         "warnings": [
           "warnings"
@@ -1026,9 +980,6 @@ export const servicesResponse: { services: T.ServiceStatus[] } = {
       ],
       "usedBy": [
         "usedBy"
-      ],
-      "publish": [
-        "publish"
       ],
       "ports": [
         "ports"

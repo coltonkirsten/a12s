@@ -10,7 +10,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -108,7 +107,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		return api.PutFleetResponse{}, err
 	}
 	admitSeccomp(f, &admitWarnings)
-	waits := credentialWaits(f, manifests, creds, o)
+	waits := credentialWaits(f, creds, o)
 	if o.dryRun {
 		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
 			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
@@ -203,13 +202,6 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if err != nil {
 		return res, err
 	}
-	for _, d := range f.DriveNames() {
-		spec := driver.DriveSpec{ID: driver.WorkDriveID(d), Kind: driver.DriveWork, Size: int64(f.Drives[d].Size)}
-		if _, err := c.drv.EnsureDrive(ctx, spec); err != nil {
-			return res, err
-		}
-	}
-
 	// Services first: nothing about a Computer waits on them, but a
 	// Computer that uses one should find it running.
 	goneSvc := map[string]bool{}
@@ -312,16 +304,16 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 }
 
 // credentialWaits names what this write touches that will wait for a credential with no value yet.
-func credentialWaits(f *fleet.Fleet, manifests map[string]*fleet.ServiceManifest, creds api.Credentials, o writeOpts) []string {
+func credentialWaits(f *fleet.Fleet, creds api.Credentials, o writeOpts) []string {
 	var out []string
 	for _, name := range f.ComputerNames() {
 		if missing := missingCredentials(f.Computers[name].Credentials, creds); o.touches(name) && len(missing) > 0 {
-			out = append(out, "agent_computers."+name+": "+credentialWait(missing, "", "").String())
+			out = append(out, "agent_computers."+name+": "+credentialWait(missing).String())
 		}
 	}
 	for _, name := range f.ServiceNames() {
 		if missing := missingCredentials(f.Services[name].Credentials, creds); o.touches(name) && len(missing) > 0 {
-			out = append(out, "services."+name+": "+serviceWait(name, manifests[name], missing).String())
+			out = append(out, "services."+name+": "+credentialWait(missing).String())
 		}
 	}
 	return out
@@ -435,7 +427,7 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 		if rec.StagedGeneration != 0 { // the Fleet went back to what runs
 			rec.StagedGeneration, rec.StagedHash = 0, ""
 		}
-		// Same spec hash, so the same egress, bundle and drives: this only
+		// Same spec hash, so the same egress and bundle: this only
 		// fills in state written before Active existed.
 		rec.Active = c.activeLocked(name)
 		_ = c.saveLocked()
@@ -450,26 +442,7 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 			return staged, c.stageLater(name, hash, obs.Generation, "applies when the current turn ends")
 		}
 	}
-	err = c.restage(ctx, name)
-	var held *driveHeld
-	if errors.As(err, &held) {
-		c.openAdmission(name)
-		err := c.stageLater(name, hash, obs.Generation, held.Error())
-		c.retryIfFreed(ctx, name)
-		return staged, err
-	}
-	return restaged, err
-}
-
-// retryIfFreed re-checks, after the Computer's staged generation is
-// recorded, whether the drive it waits for is still held. A holder kicks
-// pending Computers only after its detachment is observed, so if that kick
-// came before this Computer was recorded pending, this check sees the
-// drive free and retries: no wakeup is lost.
-func (c *Controller) retryIfFreed(ctx context.Context, name string) {
-	if held, err := c.exclusiveHolder(ctx, name); err == nil && held == nil {
-		c.spawn(func() { c.applyStaged(name) })
-	}
+	return restaged, c.restage(ctx, name)
 }
 
 func (c *Controller) stageLater(name, hash string, observed int64, why string) error {
@@ -489,105 +462,9 @@ func (c *Controller) activeLocked(name string) Active {
 	return Active{
 		Allow:       slices.Clone(comp.Egress.Allow),
 		SignInHosts: slices.Clone(c.state.BundleHosts[comp.Harness.BundleKey()]),
-		Drives:      slices.Clone(comp.Drives),
-		Unenforced:  c.state.Fleet.Egress.Unenforced(),
 		Send:        slices.Clone(comp.Grants.Send),
 		Uses:        c.endpointsLocked(comp.Uses),
 		Seccomp:     comp.Security.Seccomp.Digest(),
-	}
-}
-
-// driveHeld means an exclusive drive the new generation attaches is still
-// attached to another Computer (whose own change waits for its idle
-// boundary). It is a dependency, not a failure.
-type driveHeld struct{ drive, holder string }
-
-func (e *driveHeld) Error() string {
-	return "waits for " + e.holder + " to release exclusive drive " + e.drive
-}
-
-func (c *Controller) exclusiveHolder(ctx context.Context, name string) (*driveHeld, error) {
-	c.mu.Lock()
-	f := c.state.Fleet
-	comp := f.Computers[name]
-	c.mu.Unlock()
-	var exclusive []string
-	for _, m := range comp.Drives {
-		if f.Drives[m.Name].Access == fleet.AccessExclusive {
-			exclusive = append(exclusive, m.Name)
-		}
-	}
-	if len(exclusive) == 0 {
-		return nil, nil
-	}
-	obs, err := c.drv.Observe(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, d := range exclusive {
-		for _, other := range obs.Drives[driver.WorkDriveID(d)].AttachedTo {
-			if other != name {
-				return &driveHeld{drive: d, holder: other}, nil
-			}
-		}
-	}
-	return nil, nil
-}
-
-func (c *Controller) holdsObsolete(name string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	f, rec := c.state.Fleet, c.state.Computers[name]
-	comp := f.Computers[name]
-	for _, old := range rec.Active.Drives {
-		if d, ok := f.Drives[old.Name]; ok && d.Access != fleet.AccessExclusive {
-			continue
-		}
-		if !slices.ContainsFunc(comp.Drives, func(m fleet.DriveMount) bool { return m.Name == old.Name }) {
-			return true
-		}
-	}
-	return false
-}
-
-// release stops and removes an idle Computer's old generation, which
-// detaches its drives, and reads that back; its new generation stays
-// staged until the drives it needs are free. The caller has closed
-// admission and found the Computer idle.
-func (c *Controller) release(ctx context.Context, name string, obs driver.ComputerState) error {
-	c.setTransition(name, true)
-	defer c.setTransition(name, false)
-	c.mu.Lock()
-	c.rtLocked(name).released = true
-	c.mu.Unlock()
-	if obs.Power == driver.PowerAwake {
-		c.setPhase(name, api.PhaseStopping, nil)
-		c.finalStatus(ctx, name)
-		c.stopEvents(name)
-		if err := c.stop(ctx, name, obs.Generation); err != nil {
-			return c.fail(name, err, true)
-		}
-	}
-	if err := c.removeNetworked(ctx, name, "release of the old generation"); err != nil {
-		return c.fail(name, err, true)
-	}
-	c.setPhase(name, api.PhaseProvisioning, nil)
-	c.logf("%s: generation %d removed to release its drives (drives kept)", name, obs.Generation)
-	c.kickPending(name)
-	return nil
-}
-
-func (c *Controller) kickPending(except string) {
-	c.mu.Lock()
-	var names []string
-	for name, rec := range c.state.Computers {
-		if name != except && rec.pending() {
-			names = append(names, name)
-		}
-	}
-	c.mu.Unlock()
-	for _, name := range names {
-		c.spawn(func() { c.applyStaged(name) })
 	}
 }
 
@@ -632,8 +509,7 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 }
 
 // busy asks a running Computer's computerd whether a turn is running. A
-// computerd that does not answer may be running one: unknown is busy (only
-// `apply --interrupt` overrides it). The cached phase is never trusted:
+// computerd that does not answer may be running one: unknown is busy. The cached phase is never trusted:
 // a just-accepted turn's events may not have arrived.
 func (c *Controller) busy(ctx context.Context, name string) bool {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -667,18 +543,6 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	obs, exists, err := c.observeOne(ctx, name)
 	if err != nil {
 		return c.fail(name, err, true)
-	}
-	if held, err := c.exclusiveHolder(ctx, name); err != nil {
-		return c.fail(name, err, true)
-	} else if held != nil {
-		// The holder may itself wait for a drive this Computer attaches
-		// (a swap): release that one first, so the holder can proceed.
-		if exists && c.holdsObsolete(name) {
-			if err := c.release(ctx, name, obs); err != nil {
-				return err
-			}
-		}
-		return held
 	}
 	c.setTransition(name, true)
 	defer c.setTransition(name, false)
@@ -715,9 +579,8 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	c.mu.Lock()
 	rec.Generation, rec.SpecHash = spec.Generation, hash
 	rec.StagedGeneration, rec.StagedHash = 0, ""
-	// The new generation's egress policy and drives take effect now.
+	// The new generation's egress policy takes effect now.
 	rec.Active = c.activeLocked(name)
-	c.rtLocked(name).released = false
 	desired := rec.DesiredPower
 	err = c.saveLocked()
 	c.mu.Unlock()
@@ -726,7 +589,6 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	}
 	c.logf("%s: generation %d staged", name, spec.Generation)
 	c.setTransition(name, false)
-	c.kickPending(name)
 	if desired == driver.PowerAwake {
 		return c.start(ctx, name)
 	}
@@ -743,82 +605,15 @@ func (c *Controller) applyStaged(name string) {
 	if !due {
 		return
 	}
-	// No holder check here: restage itself waits for a held drive, and
-	// first releases one this Computer holds that the holder needs (a swap
-	// whose turns have both ended).
 	c.closeAdmission(name)
 	if !c.idle(c.ctx, name) {
 		c.openAdmission(name)
 		return
 	}
-	err := c.restage(c.ctx, name)
-	if err != nil {
+	if err := c.restage(c.ctx, name); err != nil {
 		c.openAdmission(name)
 	}
 	c.kick(name)
-	var held *driveHeld
-	if errors.As(err, &held) {
-		c.retryIfFreed(c.ctx, name)
-	}
-}
-
-// Apply is `a12s apply [--interrupt --grace D]`: apply staged generations
-// now on idle Computers and, with interrupt, on busy ones after stopping
-// their turn and waiting up to grace.
-func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.ApplyResponse, error) {
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
-	res := api.ApplyResponse{Applied: []string{}, Pending: []string{}}
-	c.mu.Lock()
-	var names []string
-	for name, rec := range c.state.Computers {
-		if rec.pending() {
-			names = append(names, name)
-		}
-	}
-	c.mu.Unlock()
-	sort.Strings(names)
-	applied := make([]bool, len(names))
-	errs := make([]error, len(names))
-	var wg sync.WaitGroup
-	for i, name := range names {
-		wg.Go(func() {
-			c.closeAdmission(name)
-			if !c.idle(ctx, name) {
-				if !req.Interrupt {
-					c.openAdmission(name)
-					return
-				}
-				c.logf("%s: interrupting the active turn to apply the staged generation", name)
-				c.interrupt(ctx, name, time.Duration(req.Grace))
-			}
-			err := c.restage(ctx, name)
-			var held *driveHeld
-			if errors.As(err, &held) {
-				c.openAdmission(name)
-				c.logf("%s: %v", name, err)
-				c.retryIfFreed(ctx, name)
-				return
-			}
-			if errors.As(err, new(*credentialsMissing)) {
-				err = nil
-			}
-			errs[i] = err
-			applied[i] = err == nil
-		})
-	}
-	wg.Wait()
-	for i, name := range names {
-		if applied[i] {
-			res.Applied = append(res.Applied, name)
-		} else if errs[i] == nil {
-			res.Pending = append(res.Pending, name)
-		}
-	}
-	if err := errors.Join(errs...); err != nil {
-		return res, err
-	}
-	return res, nil
 }
 
 // SetPower is `a12s sleep` and `a12s wake`.
@@ -911,7 +706,6 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 		}
 	}
 	c.logf("%s: removed (drives kept)", name)
-	c.kickPending(name)
 	return err
 }
 
@@ -938,13 +732,8 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 	if err != nil {
 		return nil, nil, caps, err
 	}
-	if !caps.EgressEnforcement && !f.Egress.Unenforced() {
-		return nil, nil, caps, invalid("this substrate cannot enforce egress; set egress.enforcement: unenforced to run anyway")
-	}
-	for _, d := range f.DriveNames() {
-		if f.Drives[d].Access == fleet.AccessSharedWrite && !caps.SharedWriteDrives {
-			return nil, nil, caps, invalid("drives.%s: this substrate has no shared-write storage", d)
-		}
+	if !caps.EgressEnforcement {
+		return nil, nil, caps, invalid("this substrate cannot enforce egress  fix: upgrade Docker Engine to 28 or later")
 	}
 
 	pins := fleet.NewPins()
@@ -1013,8 +802,7 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
 // its pins (generation and files bytes unset), and the hash of what makes a
-// generation: image, bundle, resources, drives, environment, egress, the
-// Fleet's egress enforcement and the files' and seccomp profile's digests.
+// generation: image, bundle, resources, environment, egress and the files' and seccomp profile's digests.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1051,21 +839,15 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 	}
 	seccompDigest := comp.Security.Seccomp.Digest()
 	spec.Seccomp = string(comp.Security.Seccomp.Profile)
-	for _, m := range comp.Drives {
-		spec.Drives = append(spec.Drives, driver.Mount{DriveID: driver.WorkDriveID(m.Name), At: m.At, ReadOnly: m.ReadOnly})
-	}
 	egress := slices.Sorted(slices.Values(comp.Egress.Allow))
 	b, err := json.Marshal(struct {
 		Image, Bundle string
 		CPU, Memory   int64
-		Drives        []driver.Mount
 		Env           []string
 		Egress        []string
-		// Omitted when enforced, so enforced generations keep their hash.
-		Unenforced bool   `json:",omitempty"`
-		Files      string `json:",omitempty"`
-		Seccomp    string `json:",omitempty"`
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced(), spec.FilesDigest, seccompDigest})
+		Files         string `json:",omitempty"`
+		Seccomp       string `json:",omitempty"`
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Env(c.cfg.Fleet), egress, spec.FilesDigest, seccompDigest})
 	if err != nil {
 		return spec, "", err
 	}

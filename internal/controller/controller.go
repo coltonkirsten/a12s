@@ -177,8 +177,6 @@ type Controller struct {
 	// revoked are principals whose certificate was withdrawn (fail closed
 	// even if the registry write failed); a new registration clears it.
 	revoked map[string]bool
-	// bridgePool is the last verified /16 of the Controller's Fleet bridge.
-	bridgePool netip.Prefix
 	// openTurns are Turns being folded for the history, by "<agent computer>/<turn>".
 	openTurns map[string]*openTurn
 	hub       *hub
@@ -427,7 +425,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	leaseLn, err := net.Listen("tcp", ":"+strconv.Itoa(LeasePort))
+	mtlsLn, err := net.Listen("tcp", ":"+strconv.Itoa(MTLSPort))
 	if err != nil {
 		return err
 	}
@@ -437,15 +435,15 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	servers := []*http.Server{
 		{Handler: c.Handler(), ReadHeaderTimeout: 10 * time.Second},
-		{Handler: c.MTLSHandler(NewLeases(c.authorizeLease).Handler()), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
+		{Handler: c.MTLSHandler(), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
 		{Handler: c.newProxy(), ReadHeaderTimeout: 10 * time.Second},
 	}
 	c.Start(ctx)
 	errc := make(chan error, 3)
 	go func() { errc <- servers[0].Serve(apiLn) }()
-	go func() { errc <- servers[1].Serve(tls.NewListener(leaseLn, serverTLS)) }()
+	go func() { errc <- servers[1].Serve(tls.NewListener(mtlsLn, serverTLS)) }()
 	go func() { errc <- servers[2].Serve(proxyLn) }()
-	c.logf("fleet %s: API on %s, mTLS listener on :%d, egress proxy on :%d", cfg.Fleet, apiAddr, LeasePort, ProxyPort)
+	c.logf("fleet %s: API on %s, mTLS listener on :%d, egress proxy on :%d", cfg.Fleet, apiAddr, MTLSPort, ProxyPort)
 
 	select {
 	case <-ctx.Done():
@@ -583,43 +581,20 @@ func (c *Controller) policy(name string) (Policy, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if srec := c.state.Services[name]; c.state.Fleet != nil && srec != nil {
-		return NewPolicy(srec.Active.Allow, nil, srec.Active.Unenforced), true
+		return NewPolicy(srec.Active.Allow, nil), true
 	}
 	rec := c.state.Computers[name]
 	if c.state.Fleet == nil || rec == nil {
 		return Policy{}, false
 	}
-	return NewPolicy(rec.Active.Allow, rec.Active.SignInHosts, rec.Active.Unenforced), true
+	return NewPolicy(rec.Active.Allow, rec.Active.SignInHosts), true
 }
 
 func (c *Controller) egressModeLocked(rec *Record) string {
-	switch {
-	case rec.Active.Unenforced:
-		return api.EgressUnenforced
-	case slices.Contains(rec.Active.Allow, fleet.AllowAll):
+	if slices.Contains(rec.Active.Allow, fleet.AllowAll) {
 		return api.EgressAllowAll
 	}
 	return api.EgressEnforced
-}
-
-// authorizeLease allows a lease only on a shared-write drive the Computer's
-// active generation attaches writable.
-func (c *Controller) authorizeLease(computer, drive string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	rec := c.state.Computers[computer]
-	if c.state.Fleet == nil || rec == nil {
-		return fmt.Errorf("%s is not an agent computer of this Fleet", computer)
-	}
-	if d, ok := c.state.Fleet.Drives[drive]; !ok || d.Access != fleet.AccessSharedWrite {
-		return fmt.Errorf("drive %s is not a shared-write drive", drive)
-	}
-	for _, m := range rec.Active.Drives {
-		if m.Name == drive && !m.ReadOnly {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s does not attach drive %s writable", computer, drive)
 }
 
 func (c *Controller) denied(name, host string, port int, reason string) {

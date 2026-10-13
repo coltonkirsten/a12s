@@ -3,7 +3,6 @@ import type { TLSSocket } from 'node:tls';
 import { HttpError, type Computer, type TurnRequest } from './computer.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { SendReply, SendRequest } from './send.js';
-import type { Leases } from './leases.js';
 
 const MAX_BODY = 2 << 20; // a 1 MiB render plus 2,000 inbox entries
 const KEEPALIVE_MS = 15_000;
@@ -212,7 +211,7 @@ export function streamEvents(
 }
 
 /** System tools endpoints on the local unix socket (the agent's MCP server calls these). */
-export function localHandler(computer: Computer, leases: Leases | null, sendTo: ((req: SendRequest) => Promise<SendReply>) | null = null): Handler {
+export function localHandler(computer: Computer, sendTo: ((req: SendRequest) => Promise<SendReply>) | null = null): Handler {
   return wrap(async (req, res, url) => {
     if (req.method !== 'POST') throw new HttpError(405, 'POST only');
     if (url.pathname === '/v1/system/restart_harness') return send(res, 200, { message: computer.requestRestart() });
@@ -224,15 +223,6 @@ export function localHandler(computer: Computer, leases: Leases | null, sendTo: 
       if (typeof body.expires === 'number') r.expires = body.expires;
       if (typeof body.replaceKey === 'string' && body.replaceKey) r.replaceKey = body.replaceKey;
       return send(res, 200, await sendTo(r));
-    }
-    const lease = /^\/v1\/system\/(lock|release)$/.exec(url.pathname);
-    if (lease) {
-      if (!leases) throw new HttpError(503, 'leases are unavailable (no controller TLS)');
-      const body = await readJson(req);
-      const drive = str(body, 'drive');
-      const path = str(body, 'path');
-      const reply = lease[1] === 'lock' ? await leases.lock(drive, path) : await leases.release(drive, path);
-      return send(res, 200, reply);
     }
     throw new HttpError(404, 'not found');
   });

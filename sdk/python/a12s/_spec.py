@@ -18,12 +18,6 @@ class ResourcesSpec(TypedDict, total=False):
     memory: str
 
 
-class DriveMountSpec(TypedDict, total=False):
-    name: str
-    at: str
-    readOnly: bool
-
-
 class EgressSpec(TypedDict, total=False):
     allow: list[str]
 
@@ -64,7 +58,6 @@ class AgentComputerSpec(TypedDict, total=False):
     """More text files for the home drive, by path relative to it; up to 1 MiB with the instructions."""
     resources: ResourcesSpec
     credentials: list[str]
-    drives: list[DriveMountSpec]
     egress: EgressSpec
     security: SecuritySpec
     inbox: InboxSpec
@@ -96,14 +89,6 @@ class FleetSpec(dict[str, Any]):
     @property
     def services(self) -> dict[str, Any]:
         return self._section("services")
-
-    @property
-    def drives(self) -> dict[str, Any]:
-        return self._section("drives")
-
-    @property
-    def egress(self) -> dict[str, Any]:
-        return self._section("egress")
 
     @property
     def metadata(self) -> dict[str, Any]:

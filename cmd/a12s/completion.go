@@ -9,9 +9,8 @@ var subcommands = map[string][]string{
 	"inbox":   {"rm", "clear", "hold", "resume"},
 	"token":   {"create", "ls", "rm"},
 	"drive":   {"ls", "rm"},
-	"service": {"ls", "status", "logs", "login"},
+	"service": {"ls", "status", "logs"},
 	"creds":   {"set"},
-	"lock":    {"update"},
 }
 
 func runCompletion(_ *globals, args []string) error {

@@ -19,9 +19,7 @@ type rawFleet struct {
 	APIVersion     string               `yaml:"apiVersion"`
 	Kind           string               `yaml:"kind"`
 	Metadata       Metadata             `yaml:"metadata"`
-	Egress         FleetEgress          `yaml:"egress"`
 	Defaults       yaml.Node            `yaml:"defaults"`
-	Drives         map[string]Drive     `yaml:"drives"`
 	AgentComputers map[string]yaml.Node `yaml:"agent_computers"`
 	Services       map[string]yaml.Node `yaml:"services"`
 }
@@ -85,21 +83,10 @@ func DecodeSpec(data []byte) (*Spec, error) {
 		APIVersion:     raw.APIVersion,
 		Kind:           raw.Kind,
 		Metadata:       raw.Metadata,
-		Egress:         raw.Egress,
-		Drives:         raw.Drives,
 		AgentComputers: map[string]json.RawMessage{},
 	}
 	nodes := raw.AgentComputers
 	var errs []error
-	if err := computerOnlyEgress("defaults", &raw.Defaults); err != nil {
-		errs = append(errs, err)
-	}
-	for _, name := range sortedKeys(nodes) {
-		node := nodes[name]
-		if err := computerOnlyEgress(name, &node); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if len(raw.Services) > 0 {
 		s.Services = make(map[string]Service, len(raw.Services))
 	}

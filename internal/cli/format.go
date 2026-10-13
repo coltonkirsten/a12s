@@ -19,7 +19,7 @@ import (
 //
 //	created scout, builder
 //	updated tester
-//	staged reviewer (applies when idle; a12s apply --interrupt to force)
+//	staged reviewer (applies when idle)
 //	removed old (drives kept)
 //
 // ChangeLines prints a change list: + create, ~ update (with its fields), - remove.
@@ -55,7 +55,7 @@ func UpSummary(r *api.PutFleetResponse) []string {
 		lines = append(lines, "updated "+strings.Join(r.Updated, ", "))
 	}
 	if len(r.Staged) > 0 {
-		lines = append(lines, "staged "+strings.Join(r.Staged, ", ")+" (applies when idle; a12s apply --interrupt to force)")
+		lines = append(lines, "staged "+strings.Join(r.Staged, ", ")+" (applies when idle)")
 	}
 	if len(r.Removed) > 0 {
 		lines = append(lines, "removed "+strings.Join(r.Removed, ", ")+" (drives kept)")
@@ -122,19 +122,14 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		}
 		cells = append(cells, h)
 		var extra []string
-		if len(c.Drives) == 1 {
-			extra = append(extra, "drive "+c.Drives[0])
-		} else if len(c.Drives) > 1 {
-			extra = append(extra, "drives "+strings.Join(c.Drives, ","))
-		}
 		if c.ActiveTurn != "" {
 			extra = append(extra, "turn "+c.ActiveTurn)
 		}
 		if c.StagedGeneration > c.Generation {
 			extra = append(extra, fmt.Sprintf("staged gen %d", c.StagedGeneration))
 		}
-		if m := egressMarker(st, c); m != "" {
-			extra = append(extra, m)
+		if c.EgressMode == api.EgressAllowAll {
+			extra = append(extra, `EGRESS ALLOW "*"`)
 		}
 		if c.Seccomp != "" {
 			extra = append(extra, "seccomp "+c.Seccomp)
@@ -159,7 +154,7 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 }
 
 func WriteServices(w io.Writer, services []api.ServiceStatus) {
-	rows := [][]string{{"SERVICE", "PHASE", "IMAGE", "PIN", "RESTARTS", "SEND", "USED BY", "PUBLISH"}}
+	rows := [][]string{{"SERVICE", "PHASE", "IMAGE", "PIN", "RESTARTS", "SEND", "USED BY"}}
 	dash := func(xs []string) string {
 		if len(xs) == 0 {
 			return "-"
@@ -171,10 +166,6 @@ func WriteServices(w io.Writer, services []api.ServiceStatus) {
 		if p := ShortImage(s.Pin); p != "" {
 			pin = p
 		}
-		pub := "-"
-		if len(s.Publish) > 0 {
-			pub = "PUBLISHED " + strings.Join(s.Publish, ",") + " (reachable outside uses)"
-		}
 		ph := string(s.Phase)
 		if s.Waiting != nil {
 			ph += " (waiting for " + strings.Join(s.Waiting.Credentials, ", ") + ")"
@@ -182,7 +173,7 @@ func WriteServices(w io.Writer, services []api.ServiceStatus) {
 		if s.EgressMode == api.EgressAllowAll {
 			ph += `  EGRESS ALLOW "*"`
 		}
-		rows = append(rows, []string{s.Name, ph, s.Image, pin, fmt.Sprint(s.Restarts), dash(s.Send), dash(s.UsedBy), pub})
+		rows = append(rows, []string{s.Name, ph, s.Image, pin, fmt.Sprint(s.Restarts), dash(s.Send), dash(s.UsedBy)})
 	}
 	writeTable(w, rows)
 }
@@ -220,20 +211,6 @@ func phase(c api.ComputerStatus) string {
 	return p
 }
 
-func egressMarker(st *api.StatusResponse, c api.ComputerStatus) string {
-	mode := c.EgressMode
-	if mode == "" && st.EgressEnforcement == fleet.EnforcementUnenforced {
-		mode = api.EgressUnenforced
-	}
-	switch mode {
-	case api.EgressAllowAll:
-		return `EGRESS ALLOW "*"`
-	case api.EgressUnenforced:
-		return "EGRESS UNENFORCED"
-	}
-	return ""
-}
-
 func StatusWarnings(st *api.StatusResponse) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -242,9 +219,6 @@ func StatusWarnings(st *api.StatusResponse) []string {
 			seen[s] = true
 			out = append(out, s)
 		}
-	}
-	if st.EgressEnforcement == fleet.EnforcementUnenforced {
-		add("egress is UNENFORCED for this Fleet: allowlists are not a firewall here")
 	}
 	// A Controller that already lists the orphaned drives in its warnings would be said twice.
 	if !slices.ContainsFunc(st.Warnings, func(w string) bool { return strings.HasPrefix(w, "orphaned drives") }) {
@@ -285,14 +259,11 @@ func StatusWarnings(st *api.StatusResponse) []string {
 }
 
 func WriteDrives(w io.Writer, drives []api.DriveRow) {
-	rows := [][]string{{"NAME", "KIND", "SIZE", "ACCESS", "ATTACHED"}}
+	rows := [][]string{{"NAME", "KIND", "SIZE", "ATTACHED"}}
 	for _, d := range drives {
-		size, access, attached := "-", "-", "-"
+		size, attached := "-", "-"
 		if d.Size != 0 {
 			size = d.Size.String()
-		}
-		if d.Access != "" {
-			access = d.Access
 		}
 		if len(d.AttachedTo) > 0 {
 			attached = strings.Join(d.AttachedTo, ",")
@@ -300,10 +271,7 @@ func WriteDrives(w io.Writer, drives []api.DriveRow) {
 		if d.Orphaned {
 			attached += "  ORPHANED"
 		}
-		if d.Kind == api.DriveState && access == "-" {
-			access = "exclusive"
-		}
-		rows = append(rows, []string{d.Name, string(d.Kind), size, access, attached})
+		rows = append(rows, []string{d.Name, string(d.Kind), size, attached})
 	}
 	writeTable(w, rows)
 }
@@ -558,7 +526,6 @@ func WriteServiceDetail(w io.Writer, s api.ServiceStatus) {
 		{"send", dash(s.Send)},
 		{"uses", dash(s.Uses)},
 		{"used by", dash(s.UsedBy)},
-		{"publish", dash(s.Publish)},
 		{"state drive", s.StateDrive},
 	}
 	if s.Waiting != nil {

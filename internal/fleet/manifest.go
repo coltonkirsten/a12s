@@ -31,7 +31,6 @@ type ServiceManifest struct {
 	Health      *ServiceHealth         `yaml:"health,omitempty" json:"health,omitempty"`
 	Ports       map[string]ServicePort `yaml:"ports,omitempty" json:"ports,omitempty"`
 	Credentials []ManifestCredential   `yaml:"credentials,omitempty" json:"credentials,omitempty"`
-	Login       *ServiceLogin          `yaml:"login,omitempty" json:"login,omitempty"`
 	State       *ManifestState         `yaml:"state,omitempty" json:"state,omitempty"`
 	Tmpfs       []string               `yaml:"tmpfs,omitempty" json:"tmpfs,omitempty"`
 	Resources   *Resources             `yaml:"resources,omitempty" json:"resources,omitempty"`
@@ -151,11 +150,6 @@ type ManifestCredential struct {
 	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
 }
 
-type ServiceLogin struct {
-	Command  []string `yaml:"command" json:"command"`
-	Produces string   `yaml:"produces" json:"produces"`
-}
-
 type ManifestState struct {
 	At   string `yaml:"at" json:"at"`
 	Size Bytes  `yaml:"size,omitempty" json:"size,omitzero"`
@@ -197,9 +191,6 @@ func MergeManifest(image, inline *ServiceManifest) *ServiceManifest {
 	}
 	if in.Credentials != nil {
 		out.Credentials = in.Credentials
-	}
-	if in.Login != nil {
-		out.Login = in.Login
 	}
 	if in.State != nil {
 		out.State = in.State
@@ -289,14 +280,6 @@ func (m *ServiceManifest) validatePartial(field string) []error {
 		}
 		seen[c.Name] = true
 	}
-	if l := m.Login; l != nil {
-		if len(l.Command) == 0 {
-			bad("login.command", "", "is required")
-		}
-		if !credentialRE.MatchString(l.Produces) {
-			bad("login.produces", "", "%q is not a valid credential name", l.Produces)
-		}
-	}
 	if st := m.State; st != nil {
 		if err := checkServicePath(st.At); err != nil {
 			bad("state.at", "", "%v", err)
@@ -336,16 +319,6 @@ func ValidateService(name string, s Service, m *ServiceManifest, image string, v
 	if m.Health == nil {
 		bad("manifest.health", "set health.http {port, path} or health.exec [command...]", "is required")
 	}
-	declared := map[int]bool{}
-	for _, p := range m.Ports {
-		declared[p.Port] = true
-	}
-	for _, p := range s.Publish {
-		pub, err := ParsePublish(p)
-		if err == nil && !declared[pub.Port] {
-			bad("publish", "declare the port in the manifest's ports, or remove it", "port %d is not a declared port of %s", pub.Port, name)
-		}
-	}
 	have := map[string]bool{}
 	for _, c := range s.Credentials {
 		have[c] = true
@@ -354,9 +327,6 @@ func ValidateService(name string, s Service, m *ServiceManifest, image string, v
 		if c.Required && !have[c.Name] {
 			bad("credentials", "add "+c.Name+" to "+field+".credentials", "the image requires credential %s", c.Name)
 		}
-	}
-	if m.Login != nil && !have[m.Login.Produces] {
-		bad("credentials", "add "+m.Login.Produces+" to "+field+".credentials", "the manifest's login produces %s, which the Service does not list", m.Login.Produces)
 	}
 	for _, v := range volumes {
 		v = path.Clean(v)

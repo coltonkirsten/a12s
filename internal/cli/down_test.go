@@ -78,7 +78,7 @@ func newFake() *fakeDocker {
 	addV("a12s-qs-controller", labels("qs", "controller"))
 	addV("a12s-qs-bundles", labels("qs", ""))
 	addV("a12s-qs-home-hello", labels("qs", "", "a12s.drive", "home-hello", "a12s.computer", "hello"))
-	addV("a12s-qs-drive-notes", labels("qs", "", "a12s.drive", "drive-notes"))
+	addV("a12s-qs-state-notes", labels("qs", "", "a12s.drive", "state-notes"))
 	addV("a12s-qs-data", labels("qs", "", "a12s.data", "fleet.db"))
 	addV("a12s-other-home-hello", labels("other", "", "a12s.drive", "home-hello"))
 	addV("a12s-other-controller", labels("other", "controller"))
@@ -275,7 +275,7 @@ func TestDownKeepsDrives(t *testing.T) {
 			t.Errorf("list without the fleet label filter: %v", flt)
 		}
 	}
-	wantDrives := []Drive{{ID: "home-hello", Name: "home-hello", Volume: "a12s-qs-home-hello"}, {ID: "drive-notes", Name: "notes", Volume: "a12s-qs-drive-notes"}}
+	wantDrives := []Drive{{ID: "home-hello", Name: "home-hello", Volume: "a12s-qs-home-hello"}, {ID: "state-notes", Name: "notes-state", Volume: "a12s-qs-state-notes"}}
 	if !slices.Equal(plan.Drives, wantDrives) {
 		t.Errorf("drives %+v", plan.Drives)
 	}
@@ -304,7 +304,7 @@ func TestDownKeepsDrives(t *testing.T) {
 	if !slices.Equal(ns, []string{"a12s-other"}) {
 		t.Errorf("networks left %v", ns)
 	}
-	if !slices.Equal(vs, []string{"a12s-other-controller", "a12s-other-home-hello", "a12s-qs-data", "a12s-qs-drive-notes", "a12s-qs-home-hello", "unrelated"}) {
+	if !slices.Equal(vs, []string{"a12s-other-controller", "a12s-other-home-hello", "a12s-qs-data", "a12s-qs-home-hello", "a12s-qs-state-notes", "unrelated"}) {
 		t.Errorf("volumes left %v", vs)
 	}
 	if !slices.Equal(plan.Data, []string{"a12s-qs-data"}) || !slices.Equal(res.DataKept, []string{"a12s-qs-data"}) {
@@ -562,7 +562,7 @@ func TestDownRevalidatesVolumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.volumes["a12s-qs-home-hello"] = volume.Volume{Name: "a12s-qs-home-hello", Labels: labels("other", "")}
-	f.volumes["a12s-qs-late"] = volume.Volume{Name: "a12s-qs-late", Labels: labels("qs", "", "a12s.drive", "drive-late")}
+	f.volumes["a12s-qs-late"] = volume.Volume{Name: "a12s-qs-late", Labels: labels("qs", "", "a12s.drive", "state-late")}
 	res, err := Down(ctx, f, plan, true)
 	if err != nil {
 		t.Fatal(err)
@@ -573,10 +573,10 @@ func TestDownRevalidatesVolumes(t *testing.T) {
 			t.Errorf("%s removed; left %v", want, vs)
 		}
 	}
-	if len(res.Destroyed) != 1 || res.Destroyed[0].Name != "notes" {
+	if len(res.Destroyed) != 1 || res.Destroyed[0].Name != "notes-state" {
 		t.Errorf("destroyed %+v", res.Destroyed)
 	}
-	if !slices.Contains(res.Kept, Drive{ID: "drive-late", Name: "late", Volume: "a12s-qs-late"}) {
+	if !slices.Contains(res.Kept, Drive{ID: "state-late", Name: "late-state", Volume: "a12s-qs-late"}) {
 		t.Errorf("kept %+v", res.Kept)
 	}
 
@@ -652,7 +652,7 @@ func TestDownControllerStartedAfterThePlan(t *testing.T) {
 	}
 	ctrl.ID = "id-ctrl-new"
 	f.containers["a12s-qs-controller"] = ctrl
-	f.volumes["a12s-qs-new"] = volume.Volume{Name: "a12s-qs-new", Labels: labels("qs", "", "a12s.drive", "drive-new")}
+	f.volumes["a12s-qs-new"] = volume.Volume{Name: "a12s-qs-new", Labels: labels("qs", "", "a12s.drive", "state-new")}
 	for _, n := range f.networks {
 		delete(n.Containers, "id-a12s-qs-controller")
 	}
@@ -686,7 +686,7 @@ func TestDownControllerKeepsReappearing(t *testing.T) {
 }
 
 func TestDriveName(t *testing.T) {
-	for id, want := range map[string]string{"home-hello": "home-hello", "drive-notes": "notes", "drive-home-x": "home-x"} {
+	for id, want := range map[string]string{"home-hello": "home-hello", "state-notes": "notes-state", "state-home-x": "home-x-state"} {
 		if got := DriveName(id); got != want {
 			t.Errorf("DriveName(%q) = %q, want %q", id, got, want)
 		}

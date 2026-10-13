@@ -12,6 +12,9 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
+// MTLSPort serves the agent computers' and Services' calls to the Controller, authenticated by their certificates.
+const MTLSPort = 7443
+
 type peerKey struct{}
 
 func peerOf(r *http.Request) (Principal, bool) {
@@ -20,21 +23,9 @@ func peerOf(r *http.Request) (Principal, bool) {
 }
 
 // MTLSHandler: identity counts only while the certificate's serial is the live one in the
-// registry. Senders may enqueue only to granted Computers; leases stay Computer-only.
-func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
+// registry. Senders may enqueue only to granted Computers.
+func (c *Controller) MTLSHandler() http.Handler {
 	mux := http.NewServeMux()
-	computerOnly := func(h http.Handler) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if p, _ := peerOf(r); p.Kind != KindComputer {
-				writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: p.String() + " may not use leases", Fix: "leases are for agent computers"})
-				return
-			}
-			h.ServeHTTP(w, r)
-		}
-	}
-	mux.HandleFunc("POST /v1/leases", computerOnly(leases))
-	mux.HandleFunc("DELETE /v1/leases", computerOnly(leases))
-	mux.HandleFunc("DELETE /v1/leases/{id}", computerOnly(leases))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox", c.granted(c.handleEnqueue))
 	mux.HandleFunc("GET /v1/agent-computers/{c}/inbox/{id}", c.ownMessages(c.handleInboxGet))
 	mux.HandleFunc("DELETE /v1/agent-computers/{c}/inbox/{id}", c.ownMessages(c.handleWithdraw))
@@ -42,7 +33,7 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 		p, _ := peerOf(r)
 		writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden,
 			Message: fmt.Sprintf("%s may not call %s %s on the mTLS listener", p, r.Method, r.URL.Path),
-			Fix:     "the mTLS listener serves inbox sends (with a grant) and leases only; owner calls go to the owner API"})
+			Fix:     "the mTLS listener serves inbox sends (with a grant) only; owner calls go to the owner API"})
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, entry, err := c.livePeer(r)

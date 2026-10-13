@@ -132,18 +132,12 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 	}
 	_ = add("kind", spec.Kind)
 	_ = add("metadata", spec.Metadata)
-	if spec.Egress.Enforcement != "" || len(spec.Egress.AllowPrivate) > 0 {
-		_ = add("egress", spec.Egress)
-	}
 	if len(spec.Defaults) > 0 {
 		d, err := one("defaults", spec.Defaults)
 		if err != nil {
 			return nil, fmt.Errorf("defaults: %w", err)
 		}
 		_ = add("defaults", d)
-	}
-	if len(spec.Drives) > 0 {
-		_ = add("drives", spec.Drives)
 	}
 	acs := yamlMap()
 	for _, name := range spec.Names() {

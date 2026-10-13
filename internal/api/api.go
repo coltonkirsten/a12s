@@ -158,14 +158,12 @@ type Harness struct {
 
 // StatusResponse is GET /v1/status.
 type StatusResponse struct {
-	Fleet string `json:"fleet"`
-	// EgressEnforcement is "enforced" or "unenforced".
-	EgressEnforcement string           `json:"egressEnforcement"`
-	AgentComputers    []ComputerStatus `json:"agentComputers"`
-	OrphanedDrives    []DriveRow       `json:"orphanedDrives,omitempty"`
-	Warnings          []string         `json:"warnings,omitempty"`
-	OrphanedInboxes   []InboxSummary   `json:"orphanedInboxes,omitempty"`
-	Services          []ServiceStatus  `json:"services,omitempty"`
+	Fleet           string           `json:"fleet"`
+	AgentComputers  []ComputerStatus `json:"agentComputers"`
+	OrphanedDrives  []DriveRow       `json:"orphanedDrives,omitempty"`
+	Warnings        []string         `json:"warnings,omitempty"`
+	OrphanedInboxes []InboxSummary   `json:"orphanedInboxes,omitempty"`
+	Services        []ServiceStatus  `json:"services,omitempty"`
 }
 
 type ComputerStatus struct {
@@ -182,11 +180,9 @@ type ComputerStatus struct {
 	Seccomp    string `json:"seccomp,omitempty"`
 	Generation int64  `json:"generation"`
 	// StagedGeneration is greater than Generation while a change waits for idle.
-	StagedGeneration     int64    `json:"stagedGeneration,omitempty"`
-	CredentialGeneration int64    `json:"credentialGeneration,omitempty"`
-	Drives               []string `json:"drives,omitempty"`
-	// EgressMode is EgressEnforced, EgressUnenforced or EgressAllowAll, for
-	// the active generation.
+	StagedGeneration     int64 `json:"stagedGeneration,omitempty"`
+	CredentialGeneration int64 `json:"credentialGeneration,omitempty"`
+	// EgressMode is EgressEnforced or EgressAllowAll, for the active generation.
 	EgressMode string        `json:"egressMode,omitempty"`
 	Warnings   []string      `json:"warnings,omitempty"`
 	Inbox      *InboxSummary `json:"inbox,omitempty"`
@@ -194,9 +190,8 @@ type ComputerStatus struct {
 }
 
 const (
-	EgressEnforced   = "enforced"   // only the declared hosts, over CONNECT to 443
-	EgressUnenforced = "unenforced" // the Fleet accepts unenforced egress: any public host
-	EgressAllowAll   = "allow-all"  // allow: ["*"]: any public host on any port
+	EgressEnforced = "enforced"  // only the declared hosts, over CONNECT to 443
+	EgressAllowAll = "allow-all" // allow: ["*"]: any public host on any port
 )
 
 // Session values for TurnRequest.Session besides an explicit session id.
@@ -241,16 +236,6 @@ type PowerRequest struct {
 	Hold bool `json:"hold,omitempty"`
 }
 
-type ApplyRequest struct {
-	Interrupt bool     `json:"interrupt"`
-	Grace     Duration `json:"grace,omitzero"`
-}
-
-type ApplyResponse struct {
-	Applied []string `json:"applied"`
-	Pending []string `json:"pending"`
-}
-
 // ShellRequest lets the Controller journal the shell before the CLI runs
 // `docker exec` itself.
 type ShellRequest struct {
@@ -270,19 +255,17 @@ type DriveKind string
 
 const (
 	DriveHome  DriveKind = "home"
-	DriveWork  DriveKind = "work"
 	DriveState DriveKind = "state" // a Service's state drive: "<svc>-state"
 )
 
-// DriveRow.Name is what `a12s drive rm` takes: the drive name for work
-// drives, "home-<computer>" for home drives.
+// DriveRow.Name is what `a12s drive rm` takes: "home-<computer>" for home drives, "<service>-state" for state
+// drives.
 type DriveRow struct {
 	Name       string      `json:"name"`
 	Kind       DriveKind   `json:"kind"`
 	Computer   string      `json:"computer,omitempty"` // owner of a home drive
 	Service    string      `json:"service,omitempty"`  // owner of a state drive
 	Size       fleet.Bytes `json:"size,omitzero"`
-	Access     string      `json:"access,omitempty"` // work drives
 	AttachedTo []string    `json:"attachedTo,omitempty"`
 	Orphaned   bool        `json:"orphaned,omitempty"`
 }
@@ -341,20 +324,6 @@ const (
 	ErrVersionMismatch ErrorCode = "version_mismatch" // 412: If-Match on a whole-Fleet write is stale
 	ErrInUse           ErrorCode = "in_use"           // 409: deleting a credential that is still used
 )
-
-// Duration is a time.Duration written as a Go duration string ("30s").
-type Duration time.Duration
-
-func (d Duration) MarshalText() ([]byte, error) { return []byte(time.Duration(d).String()), nil }
-
-func (d *Duration) UnmarshalText(b []byte) error {
-	v, err := time.ParseDuration(string(b))
-	if err != nil {
-		return err
-	}
-	*d = Duration(v)
-	return nil
-}
 
 // MarshalWire skips HTML escaping so '<', '>' and '&' stay one byte each and
 // a Batch's size on the wire is what the inbox reserved.

@@ -33,9 +33,6 @@ type runtime struct {
 	// by Controller.mu) stops admission while the Controller stops or restages the Computer.
 	admit  sync.Mutex
 	closed bool
-	// released is set while the old generation was removed to free its
-	// drives and the new one is not staged yet.
-	released bool
 	// idleSince is when the current idle run began (zero: not idle); powerBusy marks a
 	// power-policy action in flight.
 	idleSince time.Time
@@ -129,7 +126,7 @@ func (c *Controller) setStateLocked(name string, phase api.Phase, failure *api.F
 
 // waitForCredentials leaves the Computer stopped in Provisioning; setting the credentials starts it.
 func (c *Controller) waitForCredentials(name string, missing []string) error {
-	w := credentialWait(missing, "", "")
+	w := credentialWait(missing)
 	c.mu.Lock()
 	c.setStateLocked(name, api.PhaseProvisioning, nil, w)
 	c.mu.Unlock()
@@ -605,7 +602,7 @@ func (c *Controller) unexpected(ev driver.Event) bool {
 	defer c.mu.Unlock()
 	rec := c.state.Computers[ev.Computer]
 	r := c.rt[ev.Computer]
-	return rec != nil && r != nil && !r.transition && !r.released && rec.DesiredPower == driver.PowerAwake && ev.Generation == rec.Generation
+	return rec != nil && r != nil && !r.transition && rec.DesiredPower == driver.PowerAwake && ev.Generation == rec.Generation
 }
 
 func (c *Controller) removed(ev driver.Event) {

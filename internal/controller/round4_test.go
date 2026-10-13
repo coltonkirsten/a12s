@@ -12,6 +12,20 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
+// removeContainer stops a Computer and removes its container and network, as a restage does before it stages the
+// new generation; the Computer stays in transition, so nothing restarts it.
+func removeContainer(ctx context.Context, h *harness, name string) error {
+	obs, _, err := h.c.observeOne(ctx, name)
+	if err != nil {
+		return err
+	}
+	h.c.setTransition(name, true)
+	if err := h.c.stop(ctx, name, obs.Generation); err != nil {
+		return err
+	}
+	return h.c.removeNetworked(ctx, name, "removal")
+}
+
 // When two Computers' networks are removed and their replacements
 // reuse the subnets in reverse, a connection is never attributed to the
 // old owner of its address: the mapping is dropped with the network, and
@@ -28,8 +42,7 @@ func TestRecycledSubnetsDoNotInheritIdentity(t *testing.T) {
 	}
 	ipB, ipT := h.d.ip("builder"), h.d.ip("tester")
 	for _, name := range []string{"builder", "tester"} {
-		obs, _, _ := h.c.observeOne(ctx, name)
-		if err := h.c.release(ctx, name, obs); err != nil {
+		if err := removeContainer(ctx, h, name); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -110,8 +123,7 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 		case <-contended:
 		}
 	}
-	obs, _, _ := h.c.observeOne(ctx, "builder")
-	if err := h.c.release(ctx, "builder", obs); err != nil {
+	if err := removeContainer(ctx, h, "builder"); err != nil {
 		t.Fatal(err)
 	}
 	armed.Store(false)

@@ -38,8 +38,8 @@ type DownDocker interface {
 var _ DownDocker = (*client.Client)(nil)
 
 type Drive struct {
-	ID     string // the a12s.drive label: "home-<computer>" or "drive-<name>"
-	Name   string // "home-<computer>" or the work drive's name
+	ID     string // the a12s.drive label: "home-<computer>" or "state-<service>"
+	Name   string // "home-<computer>" or "<service>-state"
 	Volume string // the Docker volume
 }
 
@@ -165,13 +165,10 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 }
 
 func DriveName(id string) string {
-	if strings.HasPrefix(id, "home-") {
-		return id
-	}
 	if svc, ok := driver.ServiceOfStateDrive(id); ok {
 		return driver.StateDriveName(svc)
 	}
-	return strings.TrimPrefix(id, "drive-")
+	return id
 }
 
 const computerStopTimeout = docker.StopTimeout

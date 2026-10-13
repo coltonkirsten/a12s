@@ -88,7 +88,6 @@ const (
 )
 
 type Capabilities struct {
-	SharedWriteDrives bool     `json:"sharedWriteDrives"`
 	EgressEnforcement bool     `json:"egressEnforcement"`
 	DriveQuota        bool     `json:"driveQuota"`
 	Architectures     []string `json:"architectures"` // GOARCH names: "arm64", "amd64"

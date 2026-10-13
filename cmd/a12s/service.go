@@ -14,7 +14,7 @@ import (
 
 func runService(g *globals, args []string) error {
 	if len(args) == 0 {
-		return usageError("service needs a subcommand: ls, status, logs, login")
+		return usageError("service needs a subcommand: ls, status, logs")
 	}
 	switch args[0] {
 	case "ls":
@@ -23,8 +23,6 @@ func runService(g *globals, args []string) error {
 		return serviceStatus(g, args[1:])
 	case "logs":
 		return serviceLogs(g, args[1:])
-	case "login":
-		return serviceLogin(g, args[1:])
 	}
 	return usageError("unknown service subcommand " + args[0])
 }

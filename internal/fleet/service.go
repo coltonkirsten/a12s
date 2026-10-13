@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/netip"
 	"path"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/distribution/reference"
@@ -29,23 +26,13 @@ type Service struct {
 	Uses        []Use          `yaml:"uses,omitempty" json:"uses,omitempty"`
 	Resources   Resources      `yaml:"resources,omitempty" json:"resources,omitzero"`
 	State       ServiceState   `yaml:"state,omitempty" json:"state,omitzero"`
-	// Publish entries are "<ip>:<hostPort>:<port>": the only ingress a12s has.
-	Publish []string `yaml:"publish,omitempty" json:"publish,omitempty"`
 }
 
 type ServiceEgress struct {
-	Allow []string    `yaml:"allow" json:"allow"`
-	TCP   []TCPEgress `yaml:"tcp,omitempty" json:"tcp,omitempty"`
+	Allow []string `yaml:"allow" json:"allow"`
 }
 
 func (e ServiceEgress) AllowsAll() bool { return Egress{Allow: e.Allow}.AllowsAll() }
-
-// TCPEgress is reachable from the Service as <name>.egress.a12s:<port>.
-type TCPEgress struct {
-	Name string `yaml:"name" json:"name"`
-	Host string `yaml:"host" json:"host"`
-	Port int    `yaml:"port" json:"port"`
-}
 
 // Grants are written on the side that acts.
 type Grants struct {
@@ -139,7 +126,6 @@ var serviceForbidden = []struct{ key, why, fix string }{
 	{"harness", "a Service runs no harness", "remove it; a Service that wants a harness is an agent computer"},
 	{"inbox", "a Service has no inbox", "remove it"},
 	{"power", "a Service has no power policy (no auto-sleep, no wake on message)", "remove it; a12s sleep and a12s wake still work on Services"},
-	{"drives", "a Service attaches no Fleet drives", "remove it; use the manifest's state drive"},
 }
 
 // decodeService refuses Computer-only fields with a fix line rather than yaml's
@@ -167,51 +153,7 @@ func decodeService(name string, n *yaml.Node, s *Service) error {
 	return nil
 }
 
-func computerOnlyEgress(name string, n *yaml.Node) error {
-	n = mapping(n)
-	if n.Kind != yaml.MappingNode {
-		return nil
-	}
-	i := indexKey(n, "egress")
-	if i < 0 {
-		return nil
-	}
-	if e := mapping(n.Content[i+1]); e.Kind == yaml.MappingNode && indexKey(e, "tcp") >= 0 {
-		return fmt.Errorf("agent_computers.%s.egress.tcp: only a Service can declare TCP egress  fix: put the login in a Service that holds it and add it to agent_computers.%s.uses", name, name)
-	}
-	return nil
-}
-
-var (
-	publishRE  = regexp.MustCompile(`^([0-9.]+):([0-9]{1,5}):([0-9]{1,5})$`)
-	tcpNameRE  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
-	reservedFn = map[string]bool{"controller": true}
-)
-
-type Publish struct {
-	IP       netip.Addr
-	HostPort int
-	Port     int
-}
-
-// ParsePublish requires the address written out, so exposing on 0.0.0.0 is
-// always explicit.
-func ParsePublish(s string) (Publish, error) {
-	m := publishRE.FindStringSubmatch(s)
-	if m == nil {
-		return Publish{}, fmt.Errorf("%q must be \"127.0.0.1:<hostPort>:<port>\"", s)
-	}
-	ip, err := netip.ParseAddr(m[1])
-	if err != nil || !ip.Is4() {
-		return Publish{}, fmt.Errorf("%q: %q is not an IPv4 address", s, m[1])
-	}
-	hp, _ := strconv.Atoi(m[2])
-	p, _ := strconv.Atoi(m[3])
-	if hp < 1 || hp > 65535 || p < 1 || p > 65535 {
-		return Publish{}, fmt.Errorf("%q: ports must be 1 to 65535", s)
-	}
-	return Publish{IP: ip, HostPort: hp, Port: p}, nil
-}
+var reservedFn = map[string]bool{"controller": true}
 
 func (f *Fleet) validateServices() []error {
 	var errs []error
@@ -259,40 +201,8 @@ func (f *Fleet) validateServices() []error {
 				bad(field+".egress.allow", "", "%q must be a lowercase host name (no scheme, port or wildcard) or %q", h, AllowAll)
 			}
 		}
-		seenTCP := map[string]bool{}
-		for i, t := range s.Egress.TCP {
-			sub := fmt.Sprintf("%s.egress.tcp[%d]", field, i)
-			if !tcpNameRE.MatchString(t.Name) {
-				bad(sub+".name", "", "%q must be a lowercase DNS label", t.Name)
-			}
-			if seenTCP[t.Name] {
-				bad(sub+".name", "", "%q is used twice", t.Name)
-			}
-			seenTCP[t.Name] = true
-			if _, err := netip.ParseAddr(t.Host); err != nil && !hostRE.MatchString(t.Host) {
-				bad(sub+".host", "", "%q must be a host name or an IP address", t.Host)
-			}
-			if t.Port < 1 || t.Port > 65535 {
-				bad(sub+".port", "", "%d must be 1 to 65535", t.Port)
-			}
-			if a, err := netip.ParseAddr(t.Host); err == nil && isPrivate(a) && !f.allowsPrivate(a) {
-				bad(sub+".host", "add a range covering it to egress.allowPrivate (top level), or use a public host", "%s is a private address", t.Host)
-			}
-		}
 		errs = append(errs, f.validateGrants(field, s.Grants)...)
 		errs = append(errs, f.validateUses(field, name, s.Uses)...)
-		seenHost := map[int]bool{}
-		for _, p := range s.Publish {
-			pub, err := ParsePublish(p)
-			if err != nil {
-				bad(field+".publish", "write it as \"127.0.0.1:<hostPort>:<port>\"", "%v", err)
-				continue
-			}
-			if seenHost[pub.HostPort] {
-				bad(field+".publish", "", "host port %d is published twice", pub.HostPort)
-			}
-			seenHost[pub.HostPort] = true
-		}
 		if s.Manifest != nil {
 			errs = append(errs, s.Manifest.validatePartial(field+".manifest")...)
 		}
@@ -358,35 +268,6 @@ func checkServicePath(p string) error {
 	return nil
 }
 
-func isPrivate(a netip.Addr) bool {
-	a = a.Unmap()
-	return a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() ||
-		netip.MustParsePrefix("100.64.0.0/10").Contains(a)
-}
-
-func (f *Fleet) allowsPrivate(a netip.Addr) bool {
-	for _, s := range f.Egress.AllowPrivate {
-		if p, err := netip.ParsePrefix(s); err == nil && p.Contains(a.Unmap()) {
-			return true
-		}
-	}
-	return false
-}
-
-func (f *Fleet) validateAllowPrivate() []error {
-	var errs []error
-	for _, s := range f.Egress.AllowPrivate {
-		p, err := netip.ParsePrefix(s)
-		switch {
-		case err != nil:
-			errs = append(errs, fmt.Errorf("egress.allowPrivate: %q is not a CIDR  fix: write it as 10.0.0.0/8", s))
-		case p.Bits() == 0:
-			errs = append(errs, fmt.Errorf("egress.allowPrivate: %q opens everything  fix: name the private range the Service needs", s))
-		}
-	}
-	return errs
-}
-
 // GrantWarnings: a principal in a power policy that can't send to the
 // Computer never wakes it.
 func (f *Fleet) GrantWarnings() []string {
@@ -427,9 +308,6 @@ func (f *Fleet) GrantWarnings() []string {
 				out = append(out, fmt.Sprintf("%s.power.wakeOnMessage.from: %s can't send to %s, so it never wakes it  fix: add %s to %s, or remove it", name, pr, name, name, field))
 			}
 		}
-	}
-	if len(f.Egress.AllowPrivate) > 0 {
-		out = append(out, fmt.Sprintf("egress.allowPrivate %s: Services' named TCP egress may reach these private ranges", strings.Join(f.Egress.AllowPrivate, ", ")))
 	}
 	return out
 }

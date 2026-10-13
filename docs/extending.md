@@ -5,7 +5,7 @@ customizes goes through four surfaces:
 
 | Surface | What you change | Where it lives |
 |---|---|---|
-| The Fleet file | Agent computers, instructions, harness versions and models, credentials, drives, egress, grants, Services | your `fleet.yaml` |
+| The Fleet file | Agent computers, instructions, harness versions and models, credentials, egress, grants, Services | your `fleet.yaml` |
 | Images | Agent images built FROM an a12s base; any image as a Service | your Dockerfiles and registry |
 | The SDK | Apps that create agent computers, send work, read inboxes and stream events | `@coltonkirsten/a12s` on npm, `a12s` on PyPI ([SDK](sdk.md)) |
 | `svckit` | Custom Services written in Go ([Services: Write a Service with svckit](services.md#write-a-service-with-svckit)) | `github.com/coltonkirsten/a12s/services/svckit` |
@@ -125,21 +125,6 @@ a12s creds set stripe-test < ~/.secrets/stripe-test
 Prefer a Service when an agent should use a capability without holding the secret: the Service holds the
 credential and the agent `uses:` it. See [Credentials](credentials.md).
 
-## Drives
-
-```yaml
-drives:
-  repo:      { size: 20Gi, access: exclusive }     # one writer
-  reference: { size: 5Gi,  access: shared }        # many readers
-  scratch:   { size: 5Gi,  access: shared-write }  # many writers; coordinate with the lock/release tools
-agent_computers:
-  analyst:
-    drives: [{ name: repo, at: /work/repo }, { name: reference, at: /work/ref, readOnly: true }]
-```
-
-Drives outlive agent computers; only `a12s drive rm` and `a12s down --purge` destroy them.
-[Fleet file: Drives](fleet-file.md#drives).
-
 ## Egress
 
 Every agent computer is deny-by-default. List the hosts it needs; the harness's sign-in hosts are added for you.
@@ -153,7 +138,7 @@ agent_computers:
 ```
 
 Lists replace rather than merge, so an agent computer's list replaces the default. `["*"]` allows any public host and shows
-a warning on every status line. Services reach external TCP hosts with `egress.tcp`. See [Security](security.md).
+a warning on every status line. See [Security](security.md).
 
 ## Apps: the SDK
 

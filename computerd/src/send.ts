@@ -1,7 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { request } from 'node:https';
 import type { Config } from './config.js';
-import type { TlsMaterial } from './leases.js';
+
+export interface TlsMaterial {
+  ca: Buffer;
+  cert: Buffer;
+  key: Buffer;
+}
 
 export interface SendRequest {
   computer: string;

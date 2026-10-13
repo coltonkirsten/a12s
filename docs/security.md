@@ -6,7 +6,7 @@ change.
 ## Isolation
 
 - The agent runs as uid 1000 on a read-only root filesystem with no privilege escalation, no added capabilities, no
-  Docker socket and no host mounts. Only the home drive, work drives and tmpfs are writable.
+  Docker socket and no host mounts. Only the home drive and tmpfs are writable.
 - computerd runs as root with a minimal capability set (`CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`) and
   `no-new-privileges`. Nothing else in the container runs as root.
 - The journal and session record live in `/home/.a12s`, which the agent can neither open nor rename, so an agent
@@ -14,8 +14,7 @@ change.
 - The harness comes from a read-only bundle. A prompt injection can't patch the harness and keep the patch across a
   sleep.
 - Each agent computer and Service has its own isolated internal Docker network with isolated gateway mode. There is
-  no path to host services, to other agent computers or to the Controller's owner API. Containers publish no ports, except a
-  Service's explicit `publish:`.
+  no path to host services, to other agent computers or to the Controller's owner API. Containers publish no ports.
 - Agent computers and Services run under Docker's default seccomp profile, unless the Fleet sets
   `security.seccomp` on an agent computer (below).
 
@@ -71,8 +70,6 @@ Every agent computer's and Service's only route out is the Controller's validati
 - A denied request becomes a `diagnostic` event in the agent computer's journal, so you see exactly what was blocked.
 - `allow: ["*"]` permits any public host on any port, for experiments. Private and metadata addresses stay blocked.
   It's shown on every status line.
-- `egress.enforcement: unenforced` exists for substrates that can't enforce egress, and is shown on every status
-  line.
 - Services reach other Services only through `uses:`, checked by the proxy before and independently of egress
   policy; see [Services](services.md#grants-and-reachability).
 
@@ -97,15 +94,15 @@ Three kinds of bearer token call the owner API:
 - **The owner token** (the CLI, the console, `~/.a12s/<fleet>/controller.json`) may do everything.
 - **A prefix token** (`a12s token create bizapp --prefix biz-`) gives an app its own lane. For agent computers,
   Services and credentials whose names start with `biz-` it may do everything the owner can: create, read, change,
-  remove, send, read inboxes and events, sleep, wake, stop, shell, logs and Service login. Outside the prefix it
+  remove, send, read inboxes and events, sleep, wake, stop, shell and logs. Outside the prefix it
   sees and does nothing:
   - Reads are filtered: status, the agent computer and Service lists and the credential list show only names inside
     the prefix (status drops Fleet-wide warnings and orphans). Naming anything outside is `403 out_of_prefix`.
-  - What its agent computers and Services point at must be inside the prefix too: `grants.send`, `uses` and
-    `drives`, including what they inherit from `defaults`. A default that points outside makes the write fail with
+  - What its agent computers and Services point at must be inside the prefix too: `grants.send` and `uses`,
+    including what they inherit from `defaults`. A default that points outside makes the write fail with
     `out_of_prefix`; the agent computer's own value (`grants: {send: []}`) overrides it.
-  - It can't read or change the whole Fleet (`GET`/`PUT /v1/fleet`, `/v1/apply`), so not `defaults`, drives or
-    top-level egress, and it can't remove drives or create, list or remove tokens.
+  - It can't read or change the whole Fleet (`GET`/`PUT /v1/fleet`), so not `defaults`, and it can't remove
+    drives or create, list or remove tokens.
   - Its specs may name any credential, so its agent computers can use the owner's keys without seeing them. It may
     set and remove only credentials whose names start with its prefix.
   - It can't set a seccomp profile (`security.seccomp`): that loosens the sandbox, so only the owner sets one. A

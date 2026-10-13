@@ -19,8 +19,6 @@ var (
 	hostRE       = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
-var reservedPaths = []string{"/home", "/opt/a12s", "/run", "/tmp", "/proc", "/sys", "/dev", "/etc", "/usr", "/bin", "/sbin", "/lib", "/var"}
-
 func ValidName(s string) bool { return nameRE.MatchString(s) }
 
 func ValidCredential(s string) bool { return credentialRE.MatchString(s) }
@@ -40,31 +38,11 @@ func (f *Fleet) Validate() error {
 	if !nameRE.MatchString(f.Metadata.Name) {
 		bad("metadata.name", "%q must be a lowercase DNS label of at most 40 characters", f.Metadata.Name)
 	}
-	switch f.Egress.Enforcement {
-	case "", EnforcementEnforced, EnforcementUnenforced:
-	default:
-		bad("egress.enforcement", "must be %q or %q, got %q", EnforcementEnforced, EnforcementUnenforced, f.Egress.Enforcement)
-	}
-
-	for _, name := range f.DriveNames() {
-		d := f.Drives[name]
-		field := "drives." + name
-		if !nameRE.MatchString(name) {
-			bad(field, "name must be a lowercase DNS label of at most 40 characters")
-		}
-		switch d.Access {
-		case AccessExclusive, AccessShared, AccessSharedWrite:
-		default:
-			bad(field+".access", "must be %s, %s or %s, got %q", AccessExclusive, AccessShared, AccessSharedWrite, d.Access)
-		}
-	}
-
 	errs = append(errs, validateInbox("defaults.inbox", f.Defaults.Inbox)...)
 	isComputer := func(n string) bool { _, ok := f.Computers[n]; return ok }
 	isService := f.hasService
 	errs = append(errs, validatePower("defaults.power", f.Defaults.Power, isComputer, isService)...)
 
-	attached := map[string][]string{} // drive -> computers
 	for _, name := range f.ComputerNames() {
 		c := f.Computers[name]
 		field := "agent_computers." + name
@@ -74,24 +52,13 @@ func (f *Fleet) Validate() error {
 		if name == "controller" {
 			bad(field, "\"controller\" is reserved for the Controller's certificate identity")
 		}
-		errs = append(errs, c.validate(field, f.Drives)...)
+		errs = append(errs, c.validate(field)...)
 		errs = append(errs, validateInbox(field+".inbox", c.Inbox)...)
 		errs = append(errs, validatePower(field+".power", c.Power, isComputer, isService)...)
 		errs = append(errs, f.validateUses(field, "", c.Uses)...)
 		errs = append(errs, f.validateGrants(field, c.Grants)...)
-		for _, m := range c.Drives {
-			if _, ok := f.Drives[m.Name]; ok {
-				attached[m.Name] = append(attached[m.Name], name)
-			}
-		}
 	}
 	errs = append(errs, f.validateServices()...)
-	errs = append(errs, f.validateAllowPrivate()...)
-	for _, d := range f.DriveNames() {
-		if f.Drives[d].Access == AccessExclusive && len(attached[d]) > 1 {
-			bad("drives."+d, "exclusive drive is attached to more than one agent computer: %s", strings.Join(attached[d], ", "))
-		}
-	}
 	return errors.Join(errs...)
 }
 
@@ -99,7 +66,7 @@ func (f *Fleet) Validate() error {
 // docker.io/library/browser.
 const removedBrowserTier = "browser"
 
-func (c Computer) validate(field string, drives map[string]Drive) []error {
+func (c Computer) validate(field string) []error {
 	var errs []error
 	bad := func(sub, format string, args ...any) {
 		errs = append(errs, fmt.Errorf("%s.%s: %s", field, sub, fmt.Sprintf(format, args...)))
@@ -146,51 +113,10 @@ func (c Computer) validate(field string, drives map[string]Drive) []error {
 		seenCred[cred] = true
 	}
 
-	seenDrive, seenAt := map[string]bool{}, map[string]bool{}
-	for i, m := range c.Drives {
-		sub := fmt.Sprintf("drives[%d]", i)
-		d, ok := drives[m.Name]
-		switch {
-		case !ok:
-			bad(sub+".name", "drive %q is not declared under drives", m.Name)
-		case d.Access == AccessShared && !m.ReadOnly:
-			bad(sub, "shared drive %q must be attached readOnly", m.Name)
-		}
-		if seenDrive[m.Name] {
-			bad(sub+".name", "drive %q is attached twice", m.Name)
-		}
-		seenDrive[m.Name] = true
-		if err := checkMountPoint(m.At); err != nil {
-			bad(sub+".at", "%v", err)
-		} else if seenAt[m.At] {
-			bad(sub+".at", "%q is used twice", m.At)
-		}
-		seenAt[m.At] = true
-	}
-
 	for _, h := range c.Egress.Allow {
 		if h != AllowAll && !hostRE.MatchString(h) {
 			bad("egress.allow", "%q must be a lowercase host name (no scheme, port or wildcard) or %q", h, AllowAll)
 		}
 	}
 	return errs
-}
-
-func checkMountPoint(at string) error {
-	if !mountRE.MatchString(at) {
-		// Mount points travel in A12S_DRIVES as "<at>:<mode>,..."; ',' and ':' would forge entries.
-		return fmt.Errorf("%q may only contain letters, digits, '.', '_', '-' and '/'", at)
-	}
-	if !path.IsAbs(at) || path.Clean(at) != at {
-		return fmt.Errorf("%q must be a clean absolute path", at)
-	}
-	if at == "/" {
-		return fmt.Errorf("%q is reserved", at)
-	}
-	for _, r := range reservedPaths {
-		if at == r || strings.HasPrefix(at, r+"/") {
-			return fmt.Errorf("%q is under reserved path %s", at, r)
-		}
-	}
-	return nil
 }

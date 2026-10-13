@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,7 +13,6 @@ import (
 // API error's fix field.
 func TestErrorTable(t *testing.T) {
 	h := newHarness(t)
-	ctx := context.Background()
 	f := withServices(t, h.d, nil)
 	h.up(f, false)
 	h.waitService("clock", api.PhaseReady)
@@ -49,23 +46,12 @@ func TestErrorTable(t *testing.T) {
 		{"grant to a Service", func() string {
 			return parse(head + "    grants: { send: [db] }\nservices:\n  db:\n    image: x/y:1\n")
 		}},
-		{"egress.tcp on a Computer", func() string {
-			return parse(head + "    egress: { allow: [], tcp: [{name: a, host: b.example, port: 1}] }\n")
-		}},
 		{"no manifest in the image", func() string {
 			return fleet.ValidateService("db", fleet.Service{Image: "x/y"}, nil, "x/y", nil).Error()
 		}},
 		{"uncovered VOLUME", func() string {
 			m := &fleet.ServiceManifest{User: &fleet.ServiceUser{UID: 9, GID: 9}, Health: &fleet.ServiceHealth{Exec: []string{"true"}}}
 			return fleet.ValidateService("pg", fleet.Service{Image: "postgres:17"}, m, "postgres:17", []string{"/data"}).Error()
-		}},
-		{"service without login", func() string {
-			_, err := h.c.StartLogin(ctx, "clock")
-			var he *httpError
-			if errors.As(err, &he) {
-				return he.body.Message + "  fix: " + he.body.Fix
-			}
-			return err.Error()
 		}},
 		{"the old turns endpoint", func() string { return apiErr(h.api("POST", "/v1/agent-computers/scout/turns", "{}")) }},
 		{"a wrong bearer token", func() string {
