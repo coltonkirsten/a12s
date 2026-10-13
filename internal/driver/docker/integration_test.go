@@ -23,10 +23,10 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// The stand-in Computer image: alpine, a TCP listener on computerd's port,
-// and a clean exit on SIGTERM.
+// The stand-in Computer image: alpine, a TCP listener on computerd's port, and a clean exit on SIGTERM. The driver
+// always runs `node <computerd>`, so `node` is the stand-in.
 const standinDockerfile = `FROM alpine
-CMD ["sh", "-c", "trap 'exit 0' TERM; nc -lk -p 7443 -e echo computerd & wait"]
+RUN printf '#!/bin/sh\ntrap "exit 0" TERM\nnc -lk -p 7443 -e echo computerd &\nwait\n' > /usr/local/bin/node && chmod +x /usr/local/bin/node
 `
 
 // A HarnessBundle image FROM scratch: no shell, just /bundle.
