@@ -233,9 +233,13 @@ export class CodexAdapter implements Adapter {
 
   private finish(t: ActiveTurn, status: TurnStatus, error?: string): void {
     if (t.timer) clearTimeout(t.timer);
-    for (const [id, description] of this.commands) {
-      this.tasks.set(id, { threadId: t.threadId, description });
-      t.out.push({ type: 'task.started', data: { id, kind: 'shell', description } });
+    // Only a completed turn leaves background terminals: after a failed or interrupted one nothing guarantees a late
+    // item/completed, and a task that never ends would keep the computer awake forever.
+    if (status === 'completed') {
+      for (const [id, description] of this.commands) {
+        this.tasks.set(id, { threadId: t.threadId, description });
+        t.out.push({ type: 'task.started', data: { id, kind: 'shell', description } });
+      }
     }
     this.commands.clear();
     t.out.push({ type: 'turn.finished', data: { status, usage: t.usage, ...(error ? { error } : {}) } });

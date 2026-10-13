@@ -18,7 +18,7 @@ function runTurn(threadId: string, turnId: string, prompt: string): void {
     // A command still running when the turn ends stays a background terminal; its completion names the old turn.
     const item = { type: 'commandExecution', id: `item_bg_${turnId}`, command: 'sleep 1; make', cwd: '/', status: 'inProgress' };
     notify('item/started', { threadId, turnId, item });
-    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+    notify('turn/completed', { threadId, turn: { id: turnId, status: process.env.FAKE_BG_STATUS ?? 'completed', items: [] } });
     current = null;
     setTimeout(() => notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', exitCode: 0 } }), Number(process.env.FAKE_BG_MS ?? 200));
     return;

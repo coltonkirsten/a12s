@@ -137,3 +137,11 @@ test('codex: stop and a new thread end the background terminals with the app-ser
   assert.equal(adapter.backgroundTasks(), 0);
   assert.equal(log().filter((m) => Array.isArray(m.argv)).length, 3, 'one app-server per session with background work');
 });
+
+test('codex: a failed turn leaves no background tasks behind', async () => {
+  const { adapter, input, tasks } = setup('normal', { FAKE_BG_MS: '60000', FAKE_BG_STATUS: 'failed' });
+  const evs = await collect((await adapter.startTurn({ ...input, prompt: 'bg' })).events);
+  assert.equal(finished(evs).status, 'failed');
+  assert.ok(!evs.some((e) => e.type === 'task.started'));
+  assert.deepEqual([adapter.backgroundTasks(), tasks.length], [0, 0]);
+});
