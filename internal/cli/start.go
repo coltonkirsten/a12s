@@ -241,9 +241,11 @@ func createController(ctx context.Context, dc *client.Client, n ControllerNames,
 	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
 		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
 	}
+	// Any command may start the Controller first (creds set before up on a new install), so each one pulls it.
+	PullMissing(ctx, []string{o.Image}, os.Stderr)
 	_, err = dc.ContainerCreate(ctx, opts)
 	if cerrdefs.IsNotFound(err) {
-		return fmt.Errorf("controller image %s not found locally: build it or pass --controller-image", o.Image)
+		return fmt.Errorf("controller image %s not found: pull it or pass --controller-image", o.Image)
 	}
 	if err != nil {
 		return fmt.Errorf("create %s: %w", n.Container, err)

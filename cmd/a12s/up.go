@@ -53,7 +53,7 @@ func (g *globals) up(o upOptions) error {
 	}
 	ctx, cancel := interruptible()
 	defer cancel()
-	cli.PullMissing(ctx, cli.FleetImages(f, o.image), os.Stderr)
+	cli.PullMissing(ctx, cli.FleetImages(f), os.Stderr)
 	c, err := cli.EnsureController(ctx, cli.StartOptions{
 		Fleet: f.Metadata.Name,
 		Image: o.image,

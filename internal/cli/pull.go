@@ -13,8 +13,8 @@ import (
 	"github.com/coltonkirsten/a12s/internal/version"
 )
 
-// FleetImages is every image ref `up` needs: the Controller, Computer images, harness bundles and Services.
-func FleetImages(f *fleet.Fleet, controllerImage string) []string {
+// FleetImages is every image ref the Controller needs for a Fleet: Computer images, harness bundles and Services.
+func FleetImages(f *fleet.Fleet) []string {
 	seen := map[string]bool{}
 	var refs []string
 	add := func(r string) {
@@ -23,7 +23,6 @@ func FleetImages(f *fleet.Fleet, controllerImage string) []string {
 			refs = append(refs, r)
 		}
 	}
-	add(controllerImage)
 	for _, name := range f.ComputerNames() {
 		c := f.Computers[name]
 		switch c.Image {
