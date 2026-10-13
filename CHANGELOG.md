@@ -20,6 +20,11 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - **`a12s ui`** opens the web console (`npx github:coltonkirsten/a12s-console --fleet <fleet>`; `A12S_CONSOLE`
   overrides the package). Needs Node.js 20+.
 
+### Fixed
+- **`?dryRun=true` admits a write as the write does**: it resolves images and reads a Service's manifest from its
+  image, so a dry run fails with the same `400 invalid` (e.g. `services.<s>.manifest.health: is required`) instead
+  of listing a change the write then refuses. `a12s diff` may pull images it needs.
+
 ### Changed
 - **The Controller's port is stable**: a new Controller container publishes a fixed loopback port (the one in
   `controller.json` if it is free), so `docker restart` keeps the port clients read from `controller.json`. A
