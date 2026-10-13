@@ -12,14 +12,14 @@ pip install a12s                # Python 3.10+ (uv add a12s)
 ```python
 fleet = a12s.Fleet()            # connects to the running fleet (or url=, token=)
 hello = fleet.agent_computers.create("hello", instructions="Be helpful")
-hello.prompt("hi")
+print(hello.send("hi").wait().text)
 hello.remove()
 ```
 
 ```ts
 const fleet = await Fleet.connect();
 const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
-await hello.prompt("hi");
+console.log((await hello.send("hi").wait()).text);
 await hello.remove();
 ```
 
@@ -131,22 +131,40 @@ and create the short-lived ones (one per task, user or branch) from code.
 
 ```ts
 const analyst = await fleet.agentComputers.get("analyst");
-const r = await analyst.prompt("Summarize the open issues in three bullets.");
+const r = await analyst.send("Summarize the open issues in three bullets.").wait();
 console.log(r.status, r.text);
 ```
 
 ```python
 analyst = fleet.agent_computers.get("analyst")
-r = analyst.prompt("Summarize the open issues in three bullets.")
+r = analyst.send("Summarize the open issues in three bullets.").wait()
 print(r.status, r.text)
 ```
 
-`prompt()` puts a Message in the agent computer's inbox, waits until a Turn delivers it, follows that Turn and
-returns when it ends. If the agent computer is busy, the Message waits its turn. The result is a [Turn](#turns) plus
-`message`. `onEvent` (`on_event`) gets that Turn's events as they happen.
+`send()` puts a Message in the agent computer's inbox and returns the queued Message (`id`, `state`, …). Its
+`wait()` waits until a Turn delivers the Message, follows that Turn and returns when it ends; if the agent computer
+is busy, the Message waits its turn. The result is a [Turn](#turns) plus `message`. `onEvent` (`on_event`) gets that
+Turn's events as they happen. `wait()` is keyed on the Message, so it can't miss the Turn: call it right away or
+later, even after the Turn ended.
 
-`send()` only puts the Message in the inbox and returns. Use it to hand off work and move on, or when the answer
-arrives some other way (from another agent computer, say):
+```ts
+const m = await analyst.send("Summarize the open issues.");   // m.id, m.state
+// …
+const r = await m.wait({ onEvent: (ev) => ev.type === "text.delta" && process.stdout.write(ev.data.text) });
+```
+
+```python
+m = analyst.send("Summarize the open issues.")   # m.id, m.state
+# …
+r = m.wait(on_event=lambda ev: print(ev.data.get("text", ""), end=""))
+# AsyncFleet: r = await lead.send("…").wait(), or m = await lead.send("…") then r = await m.wait()
+```
+
+A failed Turn is returned with status `failed`. A Message that is withdrawn, expired or replaced before delivery,
+or waits in a held inbox, raises `A12sError` with that code.
+
+Without `wait()`, `send()` hands off work and moves on, for when the answer arrives some other way (from another
+agent computer, say):
 
 ```ts
 await analyst.send("Run the nightly audit.");
@@ -230,8 +248,8 @@ In TypeScript, events are a typed union: narrow on `ev.type` and `ev.data` has t
 
 ### Don't miss the start
 
-Streams start live. To see everything a piece of work causes, start watching, wait until the stream is connected,
-then send:
+Streams start live. For the Turn of your own Message, `send(...).wait()` is enough. To see everything a piece of
+work causes on other agent computers, start watching, wait until the stream is connected, then send:
 
 ```ts
 const turns = fleet.turns(["lead", "worker1", "worker2"]);
@@ -400,7 +418,7 @@ way: in a browser, `Fleet.connect()` talks to the page's own origin.
 | AgentComputer | `hold({ reason? })`, `resume()` | `hold(reason=)`, `resume()` | Hold delivery (Messages still queue); release it. |
 
 `connect()` and the client it returns (`A12sClient` in TypeScript, `Client` and `AsyncClient` in Python), whose
-methods take the agent computer's name first (`a12s.prompt("hello", "…")`), still work for one release and are
+methods take the agent computer's name first (`a12s.send("hello", "…")`), still work for one release and are
 deprecated. In TypeScript the spec types are `AgentComputerSpec` and `FleetSpec`.
 
 ## Errors
@@ -422,7 +440,7 @@ except a12s.A12sError as err:
 ```
 
 The codes are listed in [HTTP API](api.md#errors). Streams also raise `A12sStreamError` for a malformed event and,
-with `onGap: "throw"`, `A12sGapError`. A failed Turn is not an error: `prompt()` returns it with status `failed`.
+with `onGap: "throw"`, `A12sGapError`. A failed Turn is not an error: `wait()` returns it with status `failed`.
 
 ## Least privilege
 

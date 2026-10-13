@@ -30,7 +30,7 @@ import a12s
 
 fleet = a12s.Fleet()            # connects to the running fleet (or url=, token=)
 hello = fleet.agent_computers.create("hello", instructions="Be helpful")
-hello.prompt("hi")
+print(hello.send("hi").wait().text)
 hello.remove()
 ```
 
@@ -41,7 +41,7 @@ import { Fleet } from "@coltonkirsten/a12s";
 
 const fleet = await Fleet.connect();
 const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
-await hello.prompt("hi");
+console.log((await hello.send("hi").wait()).text);
 await hello.remove();
 ```
 
@@ -87,11 +87,11 @@ Start it:
 claude setup-token                       # prints a long-lived token; or use an API key
 a12s creds set anthropic                 # paste it
 a12s up                                  # the first run downloads the images (about 1.5 GB)
-a12s prompt pong "ping"
+a12s send pong "ping" --wait
 ```
 
 Then run the code above in the same folder (`python hello.py`, or `node hello.mjs`): it creates the agent computer
-`hello` from the defaults, prompts it and removes it. `a12s down` stops everything and keeps the disks. `a12s init`
+`hello` from the defaults, sends it a message, prints its reply and removes it. `a12s down` stops everything and keeps the disks. `a12s init`
 writes a starter Fleet like this one if you'd rather not type it.
 
 ## How it works

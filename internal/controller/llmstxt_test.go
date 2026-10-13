@@ -101,8 +101,8 @@ func methods(t *testing.T, path, start, end string, re *regexp.Regexp) []string 
 	}
 	var out []string
 	for _, m := range re.FindAllStringSubmatch(body, -1) {
-		// Overloads repeat a name; sharedEvents is the TypeScript client's internal hook for Fleet.
-		if m[1] != "constructor" && m[1] != "sharedEvents" && !slices.Contains(out, m[1]) {
+		// Overloads repeat a name; sharedEvents and reply are the TypeScript client's internal hooks for Fleet.
+		if m[1] != "constructor" && m[1] != "sharedEvents" && m[1] != "reply" && !slices.Contains(out, m[1]) {
 			out = append(out, m[1])
 		}
 	}

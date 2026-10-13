@@ -17,7 +17,7 @@ import httpx
 from ._errors import A12sError, A12sGapError, A12sStreamError, A12sWarning, NotFound
 from ._parse import from_json
 from ._sse import SSEFrame
-from ._types import EnqueueResponse, Event, PromptResult, TokenUsage, ToolCall, Turn, TurnInboxMessage
+from ._types import EnqueueResponse, Event, Reply, TokenUsage, ToolCall, Turn, TurnInboxMessage
 
 OnGap = Literal["yield", "throw"]
 
@@ -276,8 +276,8 @@ class TurnBuilder:
         return None
 
 
-def prompt_result(turn: Turn, message: EnqueueResponse) -> PromptResult:
-    return PromptResult(**{f.name: getattr(turn, f.name) for f in fields(turn)}, message=message)
+def reply(turn: Turn, message: EnqueueResponse) -> Reply:
+    return Reply(**{f.name: getattr(turn, f.name) for f in fields(turn)}, message=message)
 
 
 def _parse_json(text: str) -> Any:

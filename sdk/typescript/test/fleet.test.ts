@@ -115,7 +115,7 @@ test("replace retries a stale If-Match, then writes", async () => {
   }
 });
 
-test("north star: create, prompt, remove", async () => {
+test("north star: create, send(...).wait(), remove", async () => {
   const ev = (seq: number, type: string, data: unknown) =>
     `id: ${seq}\ndata: ${JSON.stringify({ v: 1, computer: "hello", session: "s", turn: "t_1", seq, ts: "", type, data })}\n\n`;
   const { fleet, seen, close } = await fake((req, res) => {
@@ -129,7 +129,7 @@ test("north star: create, prompt, remove", async () => {
   });
   try {
     const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
-    const turn = await hello.prompt("hi");
+    const turn = await hello.send("hi").wait();
     assert.equal(turn.text, "hi there");
     await hello.remove();
     assert.deepEqual(seen.map((s) => `${s.method} ${s.url}`), [
@@ -140,6 +140,58 @@ test("north star: create, prompt, remove", async () => {
       "DELETE /v1/agent-computers/hello",
     ]);
     assert.ok(seen.every((s) => s.headers.authorization === "Bearer tok"));
+  } finally {
+    close();
+  }
+});
+
+test("wait() after the Turn already ended replays it from the Message's own snapshot", async () => {
+  const ev = (seq: number, type: string, data: unknown) =>
+    `id: ${seq}\ndata: ${JSON.stringify({ v: 1, computer: "hello", session: "s", turn: "t_1", seq, ts: "", type, data })}\n\n`;
+  let finished = false;
+  const { fleet, seen, close } = await fake((req, res) => {
+    if (req.method === "GET" && req.url === "/v1/agent-computers/hello") return json(res, 200, view("hello"));
+    if (req.method === "POST") {
+      finished = true;
+      return json(res, 201, { id: "m_1", seq: 1, state: "pending" });
+    }
+    assert.ok(finished, "nothing is watched before the Message is sent");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    if (req.url!.includes("/inbox/")) {
+      return res.end(`data: ${JSON.stringify({ type: "snapshot", data: { message: { id: "m_1", state: "delivered", turn: "t_1" } } })}\n\n`);
+    }
+    res.write(ev(1, "text.delta", { text: "out of credit" }));
+    res.end(ev(2, "turn.finished", { status: "failed", error: "billing", usage: null }));
+  });
+  try {
+    const hello = await fleet.agentComputers.get("hello");
+    const m = await hello.send("hi", { fresh: true });
+    assert.deepEqual([m.id, m.state], ["m_1", "pending"]);
+    const seenTypes: string[] = [];
+    const r = await m.wait({ onEvent: (e) => seenTypes.push(e.type) });
+    assert.deepEqual([r.id, r.status, r.text, r.message.id], ["t_1", "failed", "out of credit", "m_1"]);
+    assert.deepEqual(seenTypes, ["text.delta", "turn.finished"]);
+    assert.deepEqual(seen.slice(1).map((s) => `${s.method} ${s.url}`), [
+      "POST /v1/agent-computers/hello/inbox",
+      "GET /v1/agent-computers/hello/inbox/m_1/events",
+      "GET /v1/agent-computers/hello/events?turn=t_1",
+    ]);
+    assert.equal(JSON.parse(seen[1]!.body).fresh, true);
+  } finally {
+    close();
+  }
+});
+
+test("wait() on a held inbox throws A12sError held", async () => {
+  const { fleet, close } = await fake((req, res) => {
+    if (req.method === "GET" && req.url === "/v1/agent-computers/hello") return json(res, 200, view("hello"));
+    if (req.method === "POST") return json(res, 201, { id: "m_1", seq: 1, state: "pending" });
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ type: "snapshot", data: { message: { id: "m_1", state: "pending" }, held: true, holdReason: "paused" } })}\n\n`);
+  });
+  try {
+    const hello = await fleet.agentComputers.get("hello");
+    await assert.rejects(hello.send("hi").wait(), (e: unknown) => e instanceof A12sError && e.code === "held");
   } finally {
     close();
   }

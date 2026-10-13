@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +60,7 @@ func runSend(g *globals, args []string) error {
 	key := fs.String("key", "", "idempotency key (default: a random one, so a retry never queues twice)")
 	replace := fs.String("replace", "", "replace key: supersede your pending message with this key")
 	expires := fs.String("expires", "", "0 (now or never), or a window: 90s, 15m, 1h, 7d")
+	wait := fs.Bool("wait", false, "stream the turn that delivers it; exit 0 only if that turn completes")
 	asJSON := &g.json
 	meta := metaFlag{}
 	fs.Var(meta, "meta", "metadata key=value (repeatable)")
@@ -92,22 +94,16 @@ func runSend(g *globals, args []string) error {
 		}
 		req.Expires = &n
 	}
-	c, _, err := g.connect()
+	c, f, err := g.connect()
 	if err != nil {
 		return err
 	}
+	if *wait {
+		return sendAndWait(g, c, f.Computers[name].Harness.Kind, name, req)
+	}
 	ctx, cancel := interruptible()
 	defer cancel()
-	var res api.EnqueueResponse
-	// The idempotency key makes a retry after a lost response safe.
-	for attempt := 1; ; attempt++ {
-		err = c.Do(ctx, "POST", computerPath(name, "/inbox"), req, &res)
-		var apiErr *api.Error
-		if err == nil || errors.As(err, &apiErr) || ctx.Err() != nil || attempt == 3 {
-			break
-		}
-		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-	}
+	res, err := enqueue(ctx, c, name, req)
 	if err != nil {
 		return err
 	}
@@ -135,6 +131,20 @@ func runSend(g *globals, args []string) error {
 		}
 	}
 	return nil
+}
+
+func enqueue(ctx context.Context, c *cli.Client, name string, req api.EnqueueRequest) (api.EnqueueResponse, error) {
+	var res api.EnqueueResponse
+	var err error
+	// The idempotency key makes a retry after a lost response safe.
+	for attempt := 1; ; attempt++ {
+		err = c.Do(ctx, "POST", computerPath(name, "/inbox"), req, &res)
+		var apiErr *api.Error
+		if err == nil || errors.As(err, &apiErr) || ctx.Err() != nil || attempt == 3 {
+			return res, err
+		}
+		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+	}
 }
 
 func runInbox(g *globals, args []string) error {

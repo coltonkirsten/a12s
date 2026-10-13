@@ -24,7 +24,7 @@ send_id() { a send --json "$@" | python3 -c "import json,sys; print(json.load(sy
 idle() { for _ in $(seq 1 ${2:-180}); do a status --json | python3 -c "
 import json,sys; d=json.load(sys.stdin); c=next(c for c in d['computers'] if c['name']=='$1'); sys.exit(0 if c['phase']=='Ready' and not c.get('activeTurn') else 1)" && return 0; sleep 1; done; return 1; }
 # A Turn that stays busy: the agent waits 40 s in its shell tool (Claude Code refuses a bare `sleep`).
-long_turn() { a prompt "$1" "Use your Bash tool to run exactly this command: python3 -c 'import time; time.sleep(40)'. Then reply with the single word done." > /tmp/gate.long.$1 2>&1 & sleep 8; }
+long_turn() { a send --wait "$1" "Use your Bash tool to run exactly this command: python3 -c 'import time; time.sleep(40)'. Then reply with the single word done." > /tmp/gate.long.$1 2>&1 & sleep 8; }
 
 if [[ " $SECTIONS " == *" setup "* ]]; then
   log "== enhancements exit gate on $(docker version --format '{{.Server.Version}} {{.Server.Arch}}'), a12s $(git -C "$REPO" rev-parse --short HEAD) =="
@@ -76,9 +76,9 @@ PY
   }
   check "1 one Turn carries the three sends in seq order, rendered per 4.8" batch3
 
-  log "## 9 prompt keeps its UX: busy prints queued, then streams"
+  log "## 9 send --wait keeps its UX: busy prints queued, then streams"
   long_turn builder
-  a prompt builder "Reply with the single word pong." > /tmp/gate9 2>&1; cat /tmp/gate9 >> "$LOG"
+  a send --wait builder "Reply with the single word pong." > /tmp/gate9 2>&1; cat /tmp/gate9 >> "$LOG"
   check "9 queued, then streamed to completion" eval "grep -q '^queued: builder' /tmp/gate9 && grep -q 'pong' /tmp/gate9 && grep -q 'completed' /tmp/gate9"
   idle builder 300
 
@@ -172,7 +172,7 @@ PY
 
   log "## 12 capability without the secret"
   wait_phase db Ready 120
-  a prompt scout "Use the a12s-db tool to list the tables in the database, then reply with the word DONE and how many tables there are." > /tmp/gate12 2>&1; cat /tmp/gate12 >> "$LOG"
+  a send --wait scout "Use the a12s-db tool to list the tables in the database, then reply with the word DONE and how many tables there are." > /tmp/gate12 2>&1; cat /tmp/gate12 >> "$LOG"
   check "12 the a12s-db tool ran through the bridge" eval "grep -q 'a12s-db' /tmp/gate12 && grep -q 'completed' /tmp/gate12"
   a shell scout -- sh -c 'cat /run/a12s/secrets/postgres 2>&1; getent hosts db.a12s || echo NODNS-db; getent hosts pg.a12s || echo NODNS-pg; curl -s -m5 -x http://a12s-gate-controller:3128 https://pg.a12s:5432 -o /dev/null -w "pg:%{http_code}\n"' > /tmp/gate12s 2>&1; cat /tmp/gate12s >> "$LOG"
   check "12 scout can't read the secret or resolve .a12s; CONNECT pg.a12s is denied" eval "! grep -q \"\$(cat ~/.a12s/gate/postgres)\" /tmp/gate12s && grep -q NODNS-db /tmp/gate12s && grep -q NODNS-pg /tmp/gate12s && grep -q 'pg:000\|pg:403' /tmp/gate12s"
@@ -210,7 +210,7 @@ PY
   check "15 doctor warns on npx" grep -q 'runs npx at start' /tmp/gate15d
 
   log "## 16 agent-to-agent"
-  a prompt builder "Use your a12s send tool to send the message 'please review PR 42' to reviewer. Then try sending 'hi' to scout and tell me exactly what error came back." > /tmp/gate16 2>&1; cat /tmp/gate16 >> "$LOG"
+  a send --wait builder "Use your a12s send tool to send the message 'please review PR 42' to reviewer. Then try sending 'hi' to scout and tell me exactly what error came back." > /tmp/gate16 2>&1; cat /tmp/gate16 >> "$LOG"
   check "16 reviewer got a message via computer:builder" eval "$A12S inbox reviewer --all --json | grep -q '\"via\": \"computer:builder\"'"
   check "16 send to scout refused with the fix, journaled" eval "grep -q 'add scout to computers.builder.grants.send' /tmp/gate16 && $A12S logs builder | grep -q 'builder may not send to scout'"
 
@@ -277,11 +277,11 @@ print(len(pend), pend[0]['superseded'] if pend else -1, len(repl), pend[0]['seq'
   run a wake scout; wait_phase scout Ready; idle scout
   check "23 scout auto-sleeps after its idle time" wait_phase scout Asleep 90
   a sleep scout --hold >/dev/null; wait_phase scout Asleep
-  a prompt scout "hi" > /tmp/gate23a 2>&1
-  check "23 prompt to a scout slept with --hold fails with the reason" eval "grep -q 'asleep' /tmp/gate23a"
+  a send --wait scout "hi" > /tmp/gate23a 2>&1
+  check "23 send --wait to a scout slept with --hold fails with the reason" eval "grep -q 'asleep' /tmp/gate23a"
   a sleep scout >/dev/null
-  a prompt scout "Reply with the single word wren." > /tmp/gate23b 2>&1; cat /tmp/gate23b >> "$LOG"
-  check "23 after a plain sleep, local wakes it: prompt prints waking and streams" eval "grep -q 'waking scout' /tmp/gate23b && grep -qi wren /tmp/gate23b"
+  a send --wait scout "Reply with the single word wren." > /tmp/gate23b 2>&1; cat /tmp/gate23b >> "$LOG"
+  check "23 after a plain sleep, local wakes it: send --wait prints waking and streams" eval "grep -q 'waking scout' /tmp/gate23b && grep -qi wren /tmp/gate23b"
 fi
 
 if [[ " $SECTIONS " == *" cli "* ]]; then

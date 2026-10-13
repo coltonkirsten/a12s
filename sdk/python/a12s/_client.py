@@ -21,7 +21,7 @@ from ._types import (
     Event,
     InboxList,
     Message,
-    PromptResult,
+    Reply,
     ServiceStatus,
     Status,
     Token,
@@ -133,7 +133,7 @@ class Client:
         idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
-    ) -> PromptResult:
+    ) -> Reply:
         """Sends a Message, waits for the Turn that delivers it and returns when that Turn ends.
 
         ``on_event`` gets every event of the Turn as it streams.
@@ -148,6 +148,13 @@ class Client:
             expires=expires,
             replace_key=replace_key,
         )
+        return self._reply(computer, message, on_event)
+
+    def _reply(
+        self, computer: str, message: EnqueueResponse, on_event: Callable[[Event], None] | None = None
+    ) -> Reply:
+        """Waits for the Turn that delivers ``message`` and returns it once it ends. Delivery is read from the
+        Message's own snapshot and the Turn is replayed from its start, so it works however late it is called."""
         turn = self._delivered_in(computer, message.id)
         builder = core.TurnBuilder()
         # A gap mid-Turn would silently drop text: fail loudly instead.
@@ -158,7 +165,7 @@ class Client:
                     on_event(ev)
                 done = builder.add(ev)
                 if done is not None and done.id == turn:
-                    return core.prompt_result(done, message)
+                    return core.reply(done, message)
         raise A12sStreamError(f"event stream for turn {turn} ended early")
 
     def events(

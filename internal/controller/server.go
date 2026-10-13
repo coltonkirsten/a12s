@@ -97,7 +97,7 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/agent-computers/{c}", allowOwnerOrPrefix("c", c.handleDeleteAgentComputer))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/turns", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, api.Error{Code: api.ErrGone, Message: "turns are started from the inbox now (one way in)",
-			Fix: "POST /v1/agent-computers/" + r.PathValue("c") + "/inbox, or a12s prompt / a12s send"})
+			Fix: "POST /v1/agent-computers/" + r.PathValue("c") + "/inbox, or a12s send --wait"})
 	})
 	mux.HandleFunc("GET /v1/events", allow(api.ActionEvents, "", c.handleFleetEvents))
 	mux.HandleFunc("GET /v1/agent-computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))

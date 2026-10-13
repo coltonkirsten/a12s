@@ -19,7 +19,7 @@ from ._types import (
     Event,
     InboxList,
     Message,
-    PromptResult,
+    Reply,
     ServiceStatus,
     Status,
     Token,
@@ -88,7 +88,7 @@ class AsyncClient:
         idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
-    ) -> PromptResult:
+    ) -> Reply:
         """See Client.prompt."""
         message = await self.send(
             computer,
@@ -100,6 +100,12 @@ class AsyncClient:
             expires=expires,
             replace_key=replace_key,
         )
+        return await self._reply(computer, message, on_event)
+
+    async def _reply(
+        self, computer: str, message: EnqueueResponse, on_event: Callable[[Event], None] | None = None
+    ) -> Reply:
+        """See Client._reply."""
         turn = await self._delivered_in(computer, message.id)
         builder = core.TurnBuilder()
         # A gap mid-Turn would silently drop text: fail loudly instead.
@@ -110,7 +116,7 @@ class AsyncClient:
                     on_event(ev)
                 done = builder.add(ev)
                 if done is not None and done.id == turn:
-                    return core.prompt_result(done, message)
+                    return core.reply(done, message)
         raise A12sStreamError(f"event stream for turn {turn} ended early")
 
     def events(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import builtins
 import os
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, overload
 
 import httpx
@@ -25,7 +25,7 @@ from ._types import (
     Event,
     InboxList,
     Message,
-    PromptResult,
+    Reply,
     ServiceStatus,
     Status,
     Token,
@@ -68,6 +68,27 @@ def fleet_state(data: Any) -> FleetState:
     )
 
 
+class SentMessage(EnqueueResponse):
+    """A queued Message: the fields of EnqueueResponse, and ``wait()`` for the Turn that delivers it."""
+
+    __slots__ = ("_client", "_to")
+    _client: Client
+    _to: str
+
+    def __init__(self, message: EnqueueResponse, client: Client, to: str) -> None:
+        super().__init__(**{f.name: getattr(message, f.name) for f in fields(message)})
+        object.__setattr__(self, "_client", client)
+        object.__setattr__(self, "_to", to)
+
+    def wait(self, *, on_event: Callable[[Event], None] | None = None) -> Reply:
+        """Waits for the Turn that delivers this Message and returns it once it ends, also if it already has.
+
+        ``on_event`` gets its events. A failed Turn is returned with status "failed"; a Message that is withdrawn,
+        expired, replaced or held raises A12sError.
+        """
+        return self._client._reply(self._to, self, on_event)
+
+
 class AgentComputer:
     """A handle on one agent computer. Methods always call the Controller; ``spec``, ``effective`` and ``status`` are
     a snapshot from the last create, get, reload or update."""
@@ -89,31 +110,6 @@ class AgentComputer:
         self._set(self._fleet._client._request("GET", ac_path(self.name)))
         return self
 
-    def prompt(
-        self,
-        text: str,
-        *,
-        on_event: Callable[[Event], None] | None = None,
-        sender: str | None = None,
-        metadata: dict[str, str] | None = None,
-        fresh: bool = False,
-        idempotency_key: str | None = None,
-        expires: int | None = None,
-        replace_key: str | None = None,
-    ) -> PromptResult:
-        """Sends ``text`` and returns the Turn that delivers it, once it ends. ``on_event`` gets its events live."""
-        return self._fleet._client.prompt(
-            self.name,
-            text,
-            on_event=on_event,
-            sender=sender,
-            metadata=metadata,
-            fresh=fresh,
-            idempotency_key=idempotency_key,
-            expires=expires,
-            replace_key=replace_key,
-        )
-
     def send(
         self,
         text: str,
@@ -124,9 +120,10 @@ class AgentComputer:
         idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
-    ) -> EnqueueResponse:
-        """Queues ``text`` and returns at once; it is delivered at the next idle moment, even if busy or asleep."""
-        return self._fleet._client.send(
+    ) -> SentMessage:
+        """Queues ``text`` and returns at once; it is delivered at the next idle moment, even if busy or asleep.
+        ``wait()`` on the result returns the Turn that delivers it."""
+        message = self._fleet._client.send(
             self.name,
             text,
             sender=sender,
@@ -136,6 +133,7 @@ class AgentComputer:
             expires=expires,
             replace_key=replace_key,
         )
+        return SentMessage(message, self._fleet._client, self.name)
 
     def events(self, *, turn: str | None = None, on_gap: core.OnGap = "yield") -> FleetEventStream | EventStream:
         """Its events, live, from the Fleet's shared connection; ``turn`` replays one Turn from its start instead."""

@@ -20,14 +20,14 @@ import (
 
 func TestParseInterspersed(t *testing.T) {
 	g := &globals{fleetPath: "fleet.yaml"}
-	fs := g.flags("prompt")
-	fresh := fs.Bool("new", false, "")
-	pos, err := parse(fs, []string{"scout", "--new", "-f", "x/fleet.yaml", "hello there", "--", "--not-a-flag"})
+	fs := g.flags("send")
+	fresh := fs.Bool("fresh", false, "")
+	pos, err := parse(fs, []string{"scout", "--fresh", "-f", "x/fleet.yaml", "hello there", "--", "--not-a-flag"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !*fresh || g.fleetPath != "x/fleet.yaml" || fmt.Sprint(pos) != "[scout hello there --not-a-flag]" {
-		t.Errorf("new=%v fleet=%s pos=%q", *fresh, g.fleetPath, pos)
+		t.Errorf("fresh=%v fleet=%s pos=%q", *fresh, g.fleetPath, pos)
 	}
 	if _, err := parse(g.flags("x"), []string{"--bogus"}); err == nil {
 		t.Error("unknown flag accepted")
@@ -128,9 +128,9 @@ func TestTurnPrinter(t *testing.T) {
 	}
 }
 
-// TestPromptEndToEnd runs `a12s prompt` against a fake Controller that drops
+// TestSendWaitEndToEnd runs `a12s send --wait` against a fake Controller that drops
 // the event stream mid-turn: the output has every delta exactly once.
-func TestPromptEndToEnd(t *testing.T) {
+func TestSendWaitEndToEnd(t *testing.T) {
 	var mu sync.Mutex
 	var enq api.EnqueueRequest
 	conns := 0
@@ -198,7 +198,7 @@ func TestPromptEndToEnd(t *testing.T) {
 	}
 
 	stdout, stderr := capture(t, func() {
-		code := run([]string{"-f", "../../internal/fleet/testdata/lab.yaml", "prompt", "scout", "what", "was", "the", "word?"}, os.Stderr)
+		code := run([]string{"-f", "../../internal/fleet/testdata/lab.yaml", "send", "scout", "--wait", "--fresh", "what", "was", "the", "word?"}, os.Stderr)
 		if code != 0 {
 			t.Errorf("exit %d", code)
 		}
@@ -210,7 +210,7 @@ func TestPromptEndToEnd(t *testing.T) {
 	if !strings.Contains(stderr, "[stream] reconnecting after seq 2") || !strings.Contains(stderr, "queued: scout is busy with turn t_6 (0 messages ahead)") {
 		t.Errorf("stderr %q", stderr)
 	}
-	if enq.Body != "what was the word?" || enq.Fresh || len(enq.IdempotencyKey) != 36 {
+	if enq.Body != "what was the word?" || !enq.Fresh || len(enq.IdempotencyKey) != 36 {
 		t.Errorf("enqueue %+v", enq)
 	}
 }

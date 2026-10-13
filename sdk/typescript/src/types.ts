@@ -512,7 +512,7 @@ export interface ToolCall {
   isError: boolean;
 }
 
-/** A finished Turn: what `turns()` yields and `prompt()` returns. */
+/** A finished Turn: what `turns()` yields and `wait()` returns. */
 export interface Turn {
   agentComputer: string;
   /** `agentComputer` under its old name, for one release. */

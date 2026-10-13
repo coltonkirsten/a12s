@@ -121,10 +121,17 @@ var A12sClient = class {
     m.idempotencyKey ??= globalThis.crypto.randomUUID();
     return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox`, m);
   }
-  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends: what `a12s prompt` does. */
+  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends. */
   async prompt(computer, body, opts = {}) {
     const { signal, onEvent, ...msg } = opts;
-    const message = await this.send(computer, { ...msg, body });
+    return this.reply(computer, await this.send(computer, { ...msg, body }), { signal, onEvent });
+  }
+  /**
+   * @internal Waits for the Turn that delivers the Message and resolves when it ends. Delivery is read from the
+   * Message's own snapshot and the Turn is replayed from its start, so it works however late it is called.
+   */
+  async reply(computer, message, opts = {}) {
+    const { signal, onEvent } = opts;
     const turn = await this.deliveredIn(computer, message.id, signal);
     const builder = new TurnBuilder();
     for await (const ev of this.events(computer, { turn, signal, onGap: "throw" })) {

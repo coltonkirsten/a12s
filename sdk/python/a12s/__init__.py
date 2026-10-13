@@ -2,7 +2,7 @@
 
     fleet = a12s.Fleet()
     hello = fleet.agent_computers.create("hello", instructions="Be helpful")
-    hello.prompt("hi")
+    reply = hello.send("hi").wait()
     hello.remove()
 """
 
@@ -14,12 +14,24 @@ from ._afleet import (
     AsyncAgentComputers,
     AsyncCredentials,
     AsyncFleet,
+    AsyncSending,
+    AsyncSentMessage,
     AsyncService,
     AsyncServices,
     AsyncTokens,
 )
 from ._errors import A12sError, A12sGapError, A12sStreamError, A12sWarning, NotFound
-from ._fleet import AgentComputer, AgentComputers, Credentials, Fleet, FleetState, Service, Services, Tokens
+from ._fleet import (
+    AgentComputer,
+    AgentComputers,
+    Credentials,
+    Fleet,
+    FleetState,
+    SentMessage,
+    Service,
+    Services,
+    Tokens,
+)
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
     AgentComputerInfo,
@@ -40,7 +52,7 @@ from ._types import (
     LimitValue,
     Message,
     PowerStatus,
-    PromptResult,
+    Reply,
     ServiceStatus,
     Status,
     Token,
@@ -65,6 +77,8 @@ __all__ = [
     "AsyncClient",
     "AsyncEventStream",
     "AsyncFleet",
+    "AsyncSending",
+    "AsyncSentMessage",
     "AsyncService",
     "AsyncServices",
     "AsyncTokens",
@@ -93,7 +107,8 @@ __all__ = [
     "Message",
     "NotFound",
     "PowerStatus",
-    "PromptResult",
+    "Reply",
+    "SentMessage",
     "Service",
     "ServiceStatus",
     "Services",

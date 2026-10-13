@@ -36,7 +36,7 @@ make images bundles            # slim and controller images + Claude Code and Co
 cd examples/quickstart
 cp a12s.bindings.yaml.example a12s.bindings.yaml   # anthropic -> ~/.a12s/anthropic
 ../../bin/a12s up
-../../bin/a12s prompt hello "Reply with the single word pong."
+../../bin/a12s send hello "Reply with the single word pong." --wait
 ../../bin/a12s down --purge
 ```
 
