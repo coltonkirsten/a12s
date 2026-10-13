@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 )
@@ -23,20 +22,6 @@ func TestEventEnvelope(t *testing.T) {
 	out, err := json.Marshal(ev)
 	if err != nil || string(out) != raw {
 		t.Errorf("round trip:\n%s\n%s", out, raw)
-	}
-}
-
-func TestApplyRequestGrace(t *testing.T) {
-	var r ApplyRequest
-	if err := json.Unmarshal([]byte(`{"interrupt":true,"grace":"30s"}`), &r); err != nil {
-		t.Fatal(err)
-	}
-	if !r.Interrupt || time.Duration(r.Grace) != 30*time.Second {
-		t.Fatalf("got %+v", r)
-	}
-	out, _ := json.Marshal(r)
-	if !strings.Contains(string(out), `"grace":"30s"`) {
-		t.Errorf("marshal = %s", out)
 	}
 }
 

@@ -48,7 +48,7 @@ func TestAPI(t *testing.T) {
 	res := h.api("GET", "/v1/status", "")
 	var st api.StatusResponse
 	json.NewDecoder(res.Body).Decode(&st)
-	if res.StatusCode != 200 || len(st.AgentComputers) != 4 || st.AgentComputers[2].Name != "scout" || st.AgentComputers[2].Session != "s_scout" || st.EgressEnforcement != "enforced" {
+	if res.StatusCode != 200 || len(st.AgentComputers) != 4 || st.AgentComputers[2].Name != "scout" || st.AgentComputers[2].Session != "s_scout" {
 		t.Fatalf("status = %d %+v", res.StatusCode, st)
 	}
 
@@ -96,7 +96,7 @@ func TestAPI(t *testing.T) {
 	}
 
 	// Drives: an attached drive is refused; a detached one is destroyed.
-	if e := apiError(t, h.api("DELETE", "/v1/drives/reference", "")); e.Code != api.ErrAttached {
+	if e := apiError(t, h.api("DELETE", "/v1/drives/home-scout", "")); e.Code != api.ErrAttached {
 		t.Fatalf("rm attached = %+v", e)
 	}
 	h.up(labFleet(t, func(f *fleet.Fleet) { delete(f.Computers, "tester") }), false)

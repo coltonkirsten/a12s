@@ -48,7 +48,7 @@ func mtlsServer(t *testing.T, h *harness) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewUnstartedServer(h.c.MTLSHandler(NewLeases(h.c.authorizeLease).Handler()))
+	srv := httptest.NewUnstartedServer(h.c.MTLSHandler())
 	srv.TLS = serverTLS
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
@@ -119,7 +119,7 @@ func TestMTLSGrantsAndRegistry(t *testing.T) {
 		_ = h.c.writeServiceLogs(ctx, "clock", false, 0, func(s string) error { b.WriteString(s); return nil })
 		return strings.Contains(b.String(), "denied: send to reviewer (no grant)")
 	})
-	for _, c := range []struct{ method, path string }{{"POST", "/v1/leases"}, {"PUT", "/v1/fleet"}, {"GET", "/v1/status"}} {
+	for _, c := range []struct{ method, path string }{{"PUT", "/v1/fleet"}, {"GET", "/v1/status"}} {
 		if code, _ := mtlsDo(t, srv, h.c.ca, leaf, c.method, c.path, `{}`); code != http.StatusForbidden {
 			t.Fatalf("%s %s by a Service: %d", c.method, c.path, code)
 		}
@@ -172,27 +172,5 @@ func TestProxyInternalNames(t *testing.T) {
 	}
 	if _, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, false); status != http.StatusServiceUnavailable || reason != "db is Asleep" {
 		t.Fatalf("asleep: %d %s", status, reason)
-	}
-}
-
-func TestEgressAddrDenied(t *testing.T) {
-	pools := []netip.Prefix{netip.MustParsePrefix("10.213.0.0/16"), netip.MustParsePrefix("172.18.0.0/16")}
-	cases := []struct {
-		addr, want string
-		allow      []string
-	}{
-		{"93.184.216.34", "", nil},
-		{"10.0.5.5", "private", nil},
-		{"10.0.5.5", "", []string{"10.0.0.0/8"}},
-		{"10.213.0.2", "inside the Fleet's own networks", []string{"10.0.0.0/8"}},
-		{"172.18.0.3", "inside the Fleet's own networks", []string{"172.16.0.0/12"}},
-		{"127.0.0.1", "never reachable", []string{"127.0.0.0/8"}},
-		{"169.254.169.254", "never reachable", []string{"169.254.0.0/16"}},
-	}
-	for _, c := range cases {
-		got := egressAddrDenied(netip.MustParseAddr(c.addr), pools, c.allow)
-		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
-			t.Errorf("%s allow %v: %q, want %q", c.addr, c.allow, got, c.want)
-		}
 	}
 }

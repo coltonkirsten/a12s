@@ -93,7 +93,7 @@ func TestCARoundTrip(t *testing.T) {
 	}
 }
 
-func TestComputerCertIsALeaseClient(t *testing.T) {
+func TestComputerCertIsAnMTLSClient(t *testing.T) {
 	ca, _ := LoadCA(t.TempDir(), "lab")
 	serverTLS, err := ca.ServerTLS("a12s-lab-controller")
 	if err != nil {
@@ -122,7 +122,7 @@ func TestComputerCertIsALeaseClient(t *testing.T) {
 }
 
 // A Computer certificate cannot call another computerd (it has no
-// client-auth usage), and the lease listener refuses the Controller's own
+// client-auth usage), and the mTLS listener refuses the Controller's own
 // client certificate: each identity works only where it belongs.
 func TestCertificateRoles(t *testing.T) {
 	ca, _ := LoadCA(t.TempDir(), "lab")
@@ -144,21 +144,21 @@ func TestCertificateRoles(t *testing.T) {
 	}
 
 	serverTLS, _ := ca.ServerTLS("a12s-lab-controller")
-	lease := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	lease.Config.ErrorLog = log.New(io.Discard, "", 0)
-	lease.TLS = serverTLS
-	lease.StartTLS()
-	defer lease.Close()
+	mtls := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	mtls.Config.ErrorLog = log.New(io.Discard, "", 0)
+	mtls.TLS = serverTLS
+	mtls.StartTLS()
+	defer mtls.Close()
 	controllerTLS, _ := ca.ClientTLS()
 	controllerTLS.ServerName = "a12s-lab-controller"
-	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: controllerTLS}}).Get(lease.URL); err == nil {
-		t.Fatal("the lease listener accepted the Controller's client certificate")
+	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: controllerTLS}}).Get(mtls.URL); err == nil {
+		t.Fatal("the mTLS listener accepted the Controller's client certificate")
 	}
 	other, _ := LoadCA(t.TempDir(), "lab")
 	foreign, _ := other.ComputerCert("scout", 1)
 	fc, _ := foreign.TLS()
 	foreignTLS := &tls.Config{Certificates: []tls.Certificate{fc}, RootCAs: ca.Pool(), ServerName: "a12s-lab-controller"}
-	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: foreignTLS}}).Get(lease.URL); err == nil {
-		t.Fatal("the lease listener accepted a foreign CA's certificate")
+	if _, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: foreignTLS}}).Get(mtls.URL); err == nil {
+		t.Fatal("the mTLS listener accepted a foreign CA's certificate")
 	}
 }

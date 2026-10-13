@@ -24,12 +24,6 @@ func hidden(name string, args []string) (error, bool) {
 			return usageError("service-forward <proxy> <target>..."), true
 		}
 		return serviceinit.ServeForwards(args[0], args[1:], os.Stderr), true
-	case "login-hold":
-		return serviceinit.LoginHold(), true
-	case "login-read":
-		return serviceinit.LoginRead(os.Stdout), true
-	case "publish-forward":
-		return serviceinit.Forward(args, os.Stderr), true
 	}
 	return nil, false
 }

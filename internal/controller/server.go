@@ -104,7 +104,6 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/agent-computers/{c}/turns", allow(api.ActionEvents, "c", c.handleTurns))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
-	mux.HandleFunc("POST /v1/apply", allow("", "", c.handleApply))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/shell", allowOwnerOrPrefix("c", c.handleShell))
 	mux.HandleFunc("GET /v1/drives", allow("", "", c.handleDrives))
 	mux.HandleFunc("DELETE /v1/drives/{d}", allow("", "", c.handleRemoveDrive))
@@ -132,8 +131,6 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/services/{s}/logs", allowOwnerOrPrefix("s", c.handleServiceLogs))
 	mux.HandleFunc("POST /v1/services/{s}/power", allowOwnerOrPrefix("s", c.handleServicePower))
 	mux.HandleFunc("POST /v1/services/{s}/shell", allowOwnerOrPrefix("s", c.handleServiceShell))
-	mux.HandleFunc("POST /v1/services/{s}/login", allowOwnerOrPrefix("s", c.handleLogin))
-	mux.HandleFunc("DELETE /v1/services/{s}/login", allowOwnerOrPrefix("s", c.handleLoginEnd))
 	mux.HandleFunc("GET /v1/credentials", allowOwnerOrPrefix("", c.handleCredentials))
 	mux.HandleFunc("PUT /v1/credentials/{name}", allowOwnerOrPrefix("name", c.handlePutCredential))
 	mux.HandleFunc("DELETE /v1/credentials/{name}", allowOwnerOrPrefix("name", c.handleDeleteCredential))
@@ -165,22 +162,6 @@ func detached[T any](c *Controller, r *http.Request, fn func(ctx context.Context
 		var zero T
 		return zero, r.Context().Err(), false
 	}
-}
-
-func (c *Controller) handleApply(w http.ResponseWriter, r *http.Request) {
-	var req api.ApplyRequest
-	if !decode(w, r, 1<<20, &req) {
-		return
-	}
-	res, err, ok := detached(c, r, func(ctx context.Context) (api.ApplyResponse, error) { return c.Apply(ctx, req) })
-	if !ok {
-		return
-	}
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
 }
 
 func (c *Controller) handlePower(w http.ResponseWriter, r *http.Request) {
@@ -334,11 +315,7 @@ func (c *Controller) handleShell(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	c.mu.Lock()
 	f := c.state.Fleet
-	res = api.StatusResponse{Fleet: c.cfg.Fleet, EgressEnforcement: fleet.EnforcementEnforced, AgentComputers: []api.ComputerStatus{}}
-	unenforced := false // in any Computer's active generation
-	for _, rec := range c.state.Computers {
-		unenforced = unenforced || rec.Active.Unenforced
-	}
+	res = api.StatusResponse{Fleet: c.cfg.Fleet, AgentComputers: []api.ComputerStatus{}}
 	c.mu.Unlock()
 	if n := c.timeScaleNote(); n != "" {
 		res.Warnings = append(res.Warnings, n)
@@ -346,10 +323,6 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	if f == nil {
 		res.Warnings = append(res.Warnings, "no Fleet applied; run a12s up")
 		return res
-	}
-	if unenforced {
-		res.EgressEnforcement = fleet.EnforcementUnenforced
-		res.Warnings = append(res.Warnings, "egress is NOT enforced (egress.enforcement: unenforced)")
 	}
 
 	names := f.ComputerNames()
@@ -385,11 +358,6 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	}
 
 	res.Services = c.Services()
-	for _, s := range res.Services {
-		if s.EgressMode == api.EgressUnenforced {
-			res.EgressEnforcement = fleet.EnforcementUnenforced
-		}
-	}
 
 	if drives, err := c.drives(ctx); err == nil {
 		var orphans []string
@@ -414,9 +382,6 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 		Harness: api.Harness{Kind: comp.Harness.Kind, Version: comp.Harness.Version, Model: comp.Harness.Model},
 		Image:   comp.Image,
 	}
-	for _, d := range comp.Drives {
-		cs.Drives = append(cs.Drives, d.Name)
-	}
 	if rec := c.state.Computers[name]; rec != nil {
 		cs.Generation, cs.Session, cs.CredentialGeneration = rec.Generation, rec.Session, rec.CredentialGeneration
 		cs.ResumePending = rec.ResumePending
@@ -424,7 +389,7 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 		cs.Seccomp = rec.Active.Seccomp
 		if rec.pending() {
 			cs.StagedGeneration = rec.StagedGeneration
-			cs.Warnings = append(cs.Warnings, fmt.Sprintf("generation %d staged; applies when idle (a12s apply --interrupt to force)", rec.StagedGeneration))
+			cs.Warnings = append(cs.Warnings, fmt.Sprintf("generation %d staged; applies when idle", rec.StagedGeneration))
 		}
 	}
 	r := c.rtLocked(name)
@@ -497,10 +462,7 @@ func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 			_, declared := f.Computers[owner]
 			row.Orphaned = !declared
 		} else {
-			name := strings.TrimPrefix(id, "drive-")
-			row.Name, row.Kind = name, api.DriveWork
-			fd, declared := f.Drives[name]
-			row.Size, row.Access, row.Orphaned = fd.Size, fd.Access, !declared
+			continue
 		}
 		rows = append(rows, row)
 	}
@@ -518,14 +480,11 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	id := driver.WorkDriveID(name)
-	if _, ok := obs.Drives[id]; !ok && strings.HasPrefix(name, "home-") {
+	var id string
+	if strings.HasPrefix(name, "home-") {
 		id = name
-	}
-	if svc, ok := strings.CutSuffix(name, "-state"); ok {
-		if _, isWork := obs.Drives[id]; !isWork {
-			id = driver.StateDriveID(svc)
-		}
+	} else if svc, ok := strings.CutSuffix(name, "-state"); ok {
+		id = driver.StateDriveID(svc)
 	}
 	d, ok := obs.Drives[id]
 	if !ok {

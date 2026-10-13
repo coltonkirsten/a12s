@@ -102,7 +102,7 @@ flowchart LR
   App["Your app<br/>TS, Python, HTTP"] -- "create agent computers,<br/>send work, stream events" --> C
   C --> A["Agent computer<br/>Claude Code"]
   C --> B["Agent computer<br/>Codex"]
-  C --> S["Service<br/>cron, webhook, MCP"]
+  C --> S["Service<br/>cron, database, MCP"]
   S -. "puts work in an inbox" .-> A
 ```
 
@@ -111,7 +111,7 @@ flowchart LR
 - **Controller:** a small server on your machine that starts the containers, holds the credentials and queues work.
 - **Agent computer:** one agent with its own disk, conversation and inbox. Its network is closed except for the hosts
   you allow.
-- **Service:** a non-agent container, such as a clock, a webhook receiver or a database, that may only do what the
+- **Service:** a non-agent container, such as a clock, an MCP server or a database, that may only do what the
   Fleet grants it.
 
 ## Examples

@@ -36,7 +36,7 @@ func TestDownRefusesBadFleetName(t *testing.T) {
 }
 
 func TestConfirmPurge(t *testing.T) {
-	drives := []cli.Drive{{Name: "home-hello", Volume: "a12s-qs-home-hello"}, {Name: "notes", Volume: "a12s-qs-drive-notes"}}
+	drives := []cli.Drive{{Name: "home-hello", Volume: "a12s-qs-home-hello"}, {Name: "notes-state", Volume: "a12s-qs-state-notes"}}
 	for in, want := range map[string]bool{"y\n": true, "YES\n": true, "\n": false, "n\n": false, "": false, "yep\n": false} {
 		var out bytes.Buffer
 		if got := confirmPurge(strings.NewReader(in), &out, "qs", drives, nil, ""); got != want {
@@ -79,9 +79,9 @@ func TestWriteDown(t *testing.T) {
 		t.Errorf("got %q", b.String())
 	}
 	b.Reset()
-	d := cli.Drive{Name: "notes", Volume: "a12s-qs-drive-notes"}
+	d := cli.Drive{Name: "notes-state", Volume: "a12s-qs-state-notes"}
 	writeDown(&b, "qs", &cli.DownPlan{Fleet: "qs", Drives: []cli.Drive{d}}, &cli.DownResult{Destroyed: []cli.Drive{d}})
-	if s := b.String(); !strings.Contains(s, "destroyed") || !strings.Contains(s, "a12s-qs-drive-notes") || strings.Contains(s, "kept") {
+	if s := b.String(); !strings.Contains(s, "destroyed") || !strings.Contains(s, "a12s-qs-state-notes") || strings.Contains(s, "kept") {
 		t.Errorf("got %q", b.String())
 	}
 }

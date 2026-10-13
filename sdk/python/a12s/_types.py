@@ -102,7 +102,6 @@ class ComputerStatus:
     generation: int
     staged_generation: int | None = None
     credential_generation: int | None = None
-    drives: list[str] | None = None
     egress_mode: str | None = None
     warnings: list[str] | None = None
     inbox: InboxSummary | None = None
@@ -116,7 +115,6 @@ class DriveRow:
     computer: str | None = None
     service: str | None = None
     size: str | None = None
-    access: str | None = None
     attached_to: list[str] | None = None
     orphaned: bool | None = None
 
@@ -136,7 +134,6 @@ class ServiceStatus:
     send: list[str] | None = None
     uses: list[str] | None = None
     used_by: list[str] | None = None
-    publish: list[str] | None = None
     ports: list[str] | None = None
     state_drive: str | None = None
     egress_mode: str | None = None
@@ -147,7 +144,6 @@ class ServiceStatus:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Status:
     fleet: str
-    egress_enforcement: str
     agent_computers: list[ComputerStatus]
     orphaned_drives: list[DriveRow] | None = None
     warnings: list[str] | None = None

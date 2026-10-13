@@ -35,8 +35,8 @@ puts this together.
 | **Batch** | The pending Messages one Turn delivers together. |
 | **Principal** (`via`) | Who really sent a Message: `local` (you, with the owner token), `token:<name>`, `service:<name>` or `computer:<name>`. Agents should trust `via`, not the sender's own label. |
 | **Grant** | A permission written on the side that acts: `grants.send` (may send to these agent computers), `uses` (may reach these Services). |
-| **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server, a webhook bridge. See [Services](services.md). |
-| **Drive** | A persistent volume: each agent computer's home drive, plus shared work drives. |
+| **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server. See [Services](services.md). |
+| **Drive** | A persistent volume: each agent computer's home drive, and a Service's state drive. |
 | **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds skills, settings and anything else. |
 | **Harness**, **HarnessBundle** | The agent program (Claude Code or Codex), shipped as a pinned read-only bundle per version. |
 | **Controller** | The process `a12s up` starts in a container: it holds the Fleet and its version, reconciles it, owns the inboxes and serves the API. |
@@ -66,7 +66,7 @@ container. An asleep agent computer uses no CPU or RAM.
 
 | Survives sleep | Does not survive |
 |---|---|
-| The home drive: session files (`~/.claude/projects`, `~/.codex/sessions`), the journal, tools the agent installed, the browser profile. Work drives. The session id. The inbox. | RAM, background processes, `/tmp`, injected credentials, certificates. |
+| The home drive: session files (`~/.claude/projects`, `~/.codex/sessions`), the journal, tools the agent installed, the browser profile. The session id. The inbox. | RAM, background processes, `/tmp`, injected credentials, certificates. |
 
 **Wake** starts the container, re-injects credentials and a fresh certificate, and reports `Ready (resumePending)`.
 Resume is lazy: the next Turn reopens the native session (`--resume <id>` for Claude Code, `thread/resume` for
@@ -95,7 +95,7 @@ database; the next `a12s up` reattaches them. Only two commands destroy data, an
 
 A change to an agent computer, from `a12s up` or from the SDK's `update()`, is staged right away and applied at its
 next idle boundary, with no automatic deadline, so a running six-hour job is never killed by a config edit. For an urgent change (a CVE in an image),
-`a12s apply --interrupt --grace 30s` ends the active Turns. Services have no idle boundary, so a changed Service is
+`a12s stop <name>` ends the active Turn, and the change applies right after. Services have no idle boundary, so a changed Service is
 restarted at once.
 
 Every change to the Fleet adds one to its version. A whole-Fleet write can name the version it read (`If-Match`)
@@ -138,8 +138,6 @@ computerd gives the agent a small MCP server, `a12s`, for managing its own envir
 
 - `restart_harness`: restart the harness when the current Turn ends, resume the same session and continue. Use it
   after writing new skills or MCP config to the home drive.
-- `lock` / `release`: an advisory lock on a path in a `shared-write` drive, held as a Controller lease that
-  expires if the holder dies. Plain file writes ignore it.
 - `send` (`computer`, `body`, and optionally `fresh`, `expires`, `replaceKey`): put a Message in another agent
   computer's inbox. Present only when the agent computer has `grants.send`, and only for those agent computers. It returns a receipt, not
   an answer: the reply, if any, comes back as a new Message in a later Turn.

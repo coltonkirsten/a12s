@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// endpoint and tcpEgress mirror driver types locally so a12s-init stays small.
+// endpoint mirrors driver.Endpoint locally so a12s-init stays small.
 type endpoint struct {
 	Service  string `json:"service"`
 	Number   int    `json:"number"`
@@ -27,25 +27,13 @@ type endpoint struct {
 	Env      string `json:"env"`
 }
 
-type tcpEgress struct {
-	Name string `json:"name"`
-	Port int    `json:"port"`
-	Env  string `json:"env"`
-}
-
-// wire: TCP ports and egress get a loopback forwarder bridged by CONNECT through
-// the proxy; the forwarder runs as a child at the manifest uid, never as root.
+// wire: TCP ports get a loopback forwarder bridged by CONNECT through the proxy;
+// the forwarder runs as a child at the manifest uid, never as root.
 func wire(uid, gid int) error {
 	var uses []endpoint
-	var egress []tcpEgress
 	if s := os.Getenv("A12S_USES"); s != "" {
 		if err := json.Unmarshal([]byte(s), &uses); err != nil {
 			return fmt.Errorf("a12s-init: A12S_USES: %w", err)
-		}
-	}
-	if s := os.Getenv("A12S_EGRESS_TCP"); s != "" {
-		if err := json.Unmarshal([]byte(s), &egress); err != nil {
-			return fmt.Errorf("a12s-init: A12S_EGRESS_TCP: %w", err)
 		}
 	}
 	var files []*os.File
@@ -73,11 +61,6 @@ func wire(uid, gid int) error {
 			continue
 		}
 		os.Setenv(e.Env, "http://"+e.Service+".a12s:"+strconv.Itoa(e.Number))
-	}
-	for _, t := range egress {
-		if err := listen(t.Env, net.JoinHostPort(t.Name+".egress.a12s", strconv.Itoa(t.Port))); err != nil {
-			return err
-		}
 	}
 	if len(files) == 0 {
 		return nil

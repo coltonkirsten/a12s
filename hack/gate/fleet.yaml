@@ -1,6 +1,6 @@
 # The enhancements exit gate Fleet: three Computers and the v0.2.1 reference Services (hack/gate/services.sh).
-# Service images are built locally from the v0.2.1 source; the gh Service
-# demonstrates a one-time login. Image names are local tags; the Controller pins the image each tag names when first used.
+# Service images are built locally from the v0.2.1 source. Image names are local tags; the Controller pins the image
+# each tag names when first used.
 apiVersion: a12s.ai/v1alpha1
 kind: Fleet
 metadata: { name: lab }
@@ -9,9 +9,6 @@ defaults:
   resources: { cpu: 1, memory: 1Gi }
   egress: { allow: [] }
   inbox: { maxMessages: 200, maxBytes: 320Ki }
-
-drives:
-  reference: { size: 5Gi, access: shared }
 
 agent_computers:
   scout:
@@ -36,7 +33,6 @@ agent_computers:
     harness: { kind: claude-code, version: 2.1.280, model: claude-haiku-4-5 }
     image: slim
     credentials: [anthropic]
-    drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
 
 services:
@@ -70,10 +66,3 @@ services:
       args: ["postgresql://postgres@${PGHOST}:${PGPORT}/postgres"]
       envFrom: { PGPASSWORD: postgres }
       hostPortFrom: { A12S_SERVICE_PG_DB: [PGHOST, PGPORT] }
-
-  hooks:
-    image: a12s/svc-webhook:0.1
-    grants: { send: [builder] }
-    publish: ["127.0.0.1:8787:8080"]
-    config: { routes: [{ path: /github, to: builder, secretFrom: gh-webhook }] }
-    credentials: [gh-webhook]

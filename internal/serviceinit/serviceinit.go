@@ -12,12 +12,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
@@ -244,48 +242,6 @@ func parseOwner(s string) (int, int, error) {
 	return uid, gid, nil
 }
 
-func Forward(specs []string, stderr io.Writer) error {
-	if len(specs) == 0 {
-		return errors.New("publish-forward: nothing to forward")
-	}
-	errc := make(chan error, len(specs))
-	for _, s := range specs {
-		port, target, ok := strings.Cut(s, "=")
-		if _, err := strconv.Atoi(port); !ok || err != nil {
-			return fmt.Errorf("publish-forward: %q: want <port>=<host>:<port>", s)
-		}
-		ln, err := net.Listen("tcp", ":"+port)
-		if err != nil {
-			return fmt.Errorf("publish-forward: %w", err)
-		}
-		go func() { errc <- serve(ln, target, stderr) }()
-	}
-	return <-errc
-}
-
-func serve(ln net.Listener, target string, stderr io.Writer) error {
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		go func() {
-			defer c.Close()
-			u, err := net.DialTimeout("tcp", target, 10*time.Second)
-			if err != nil {
-				fmt.Fprintf(stderr, "publish-forward: %s: %v\n", target, err)
-				return
-			}
-			defer u.Close()
-			var wg sync.WaitGroup
-			wg.Add(2)
-			go func() { defer wg.Done(); io.Copy(u, c); closeWrite(u) }()
-			go func() { defer wg.Done(); io.Copy(c, u); closeWrite(c) }()
-			wg.Wait()
-		}()
-	}
-}
-
 func closeWrite(c net.Conn) {
 	if b, ok := c.(*bufferedConn); ok {
 		c = b.Conn
@@ -293,29 +249,4 @@ func closeWrite(c net.Conn) {
 	if tc, ok := c.(*net.TCPConn); ok {
 		_ = tc.CloseWrite()
 	}
-}
-
-func LoginHold() error {
-	for _, d := range []string{"home", "config", "cache", "data", "state", "out"} {
-		if err := os.MkdirAll(filepath.Join(RunDir, "login", d), 0o700); err != nil {
-			return err
-		}
-	}
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	<-sig
-	return nil
-}
-
-func LoginRead(w io.Writer) error {
-	p := filepath.Join(RunDir, "login", "out", "credential")
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return fmt.Errorf("the login command wrote nothing to $A12S_LOGIN_OUT (%s): %w", p, err)
-	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return fmt.Errorf("$A12S_LOGIN_OUT (%s) is empty", p)
-	}
-	_, err = w.Write(data)
-	return err
 }

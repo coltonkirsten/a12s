@@ -18,8 +18,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (harness, `image: slim` and the credential in `defaults`, and one agent computer, `assistant`) and a README. |
 | `a12s up [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `security.seccomp` file and sends the profile. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). |
 | `a12s export` | Write the live Fleet back to the Fleet file's directory. See [Keeping changes made from code](#keeping-changes-made-from-code). |
-| `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy agent computers now, interrupting their Turns after the grace period. |
-| `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
+| `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, `allow: ["*"]`). |
 | `a12s down [--purge [--yes]]` | Remove the Fleet's containers, networks and Controller; keep drives and the inbox database. `--purge` also destroys them after listing them and asking. Credential values the Controller stored go with its state volume. |
 | `a12s doctor` | Check the Fleet file, Docker, images and bundles, the Controller, egress and every agent computer's and Service's health. One line per check with the fix; exits 1 on any failure. |
 | `a12s version` | The a12s release and the registry its images come from. |
@@ -71,10 +70,9 @@ the Fleet file's directory:
 
 | Command | What it does |
 |---|---|
-| `a12s service ls` | Name, phase, image and pin, grants, users, published ports, restarts. |
+| `a12s service ls` | Name, phase, image and pin, grants, users, restarts. |
 | `a12s service status <svc>` | One Service in detail, including the image ID its ref is pinned to. |
 | `a12s service logs <svc> [-f] [--tail N]` | Container output plus the Controller's audit lines for that Service. |
-| `a12s service login <svc>` | Run the Service's one-time interactive login. See [Services](services.md#credentials-and-the-one-time-login). |
 
 ## Credentials, tokens and drives
 
@@ -84,7 +82,7 @@ the Fleet file's directory:
 | `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-` except set a seccomp profile, and nothing outside. See [Security: Tokens](security.md#tokens). |
 | `a12s token create <name> --actions a,b --agent-computers c,d` | Create a narrow token for those agent computers (or `'*'`), printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
-| `a12s drive ls` | Drives, sizes, what's attached, orphans. |
+| `a12s drive ls` | Home drives (`home-<name>`) and Service state drives (`<svc>-state`): sizes, what's attached, orphans. |
 | `a12s drive rm <name> [--yes]` | Destroy one drive (asks first). With `down --purge`, the only commands that destroy data. |
 
 ## Other

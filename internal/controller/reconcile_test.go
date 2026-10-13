@@ -81,7 +81,7 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 	if len(scoutWrites) != 5 || scoutWrites[4] != generationFile || scoutWrites[0] != "/run/a12s/secrets/anthropic" {
 		t.Errorf("scout writes = %v", scoutWrites)
 	}
-	for _, d := range []string{"drive-a12s-repo", "drive-reference", "drive-ux-scratch", "home-scout"} {
+	for _, d := range []string{"home-builder", "home-reviewer", "home-scout", "home-tester"} {
 		if !h.d.hasDrive(d) {
 			t.Errorf("drive %s not created", d)
 		}
@@ -99,9 +99,7 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 }
 
 func fifth(f *fleet.Fleet) {
-	c := f.Computers["reviewer"]
-	c.Drives = nil
-	f.Computers["fifth"] = c
+	f.Computers["fifth"] = f.Computers["reviewer"]
 }
 
 func TestFifthIsAddedAloneAndRemovalKeepsDrives(t *testing.T) {
@@ -173,36 +171,6 @@ func TestBusyIsStagedThenAppliedAtIdle(t *testing.T) {
 	}
 	if h.d.get("scout").spec.Model != "claude-fable-5-2" {
 		t.Error("the new generation does not carry the change")
-	}
-}
-
-func TestApplyInterrupt(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	builder := h.cds.get("builder")
-	builder.StartTurn(context.Background(), api.TurnRequest{Prompt: "migrate"})
-	h.waitPhase("builder", api.PhaseBusy)
-	change := func(f *fleet.Fleet) {
-		c := f.Computers["builder"]
-		c.Egress.Allow = append(c.Egress.Allow, "proxy.golang.org")
-		f.Computers["builder"] = c
-	}
-	if r := h.up(labFleet(t, change), false); !slices.Equal(r.Staged, []string{"builder"}) {
-		t.Fatalf("up = %+v", r)
-	}
-	r, err := h.c.Apply(context.Background(), api.ApplyRequest{})
-	if err != nil || !slices.Equal(r.Pending, []string{"builder"}) || len(r.Applied) != 0 {
-		t.Fatalf("apply = %+v, %v", r, err)
-	}
-	r, err = h.c.Apply(context.Background(), api.ApplyRequest{Interrupt: true, Grace: api.Duration(time.Second)})
-	if err != nil || !slices.Equal(r.Applied, []string{"builder"}) {
-		t.Fatalf("apply --interrupt = %+v, %v", r, err)
-	}
-	if !slices.Equal(builder.stopped(), []string{"t_1"}) || h.phase("builder") != api.PhaseReady {
-		t.Fatalf("stops %v, phase %s", builder.stopped(), h.phase("builder"))
-	}
-	if g := readState(t, h.dir).Computers["builder"].Generation; g != 2 {
-		t.Fatalf("generation = %d", g)
 	}
 }
 

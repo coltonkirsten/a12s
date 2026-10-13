@@ -22,13 +22,10 @@ type Policy struct {
 	Hosts map[string]bool
 	// AllowAll is `allow: ["*"]`: any public host on any port.
 	AllowAll bool
-	// Unenforced is the Fleet's `egress.enforcement: unenforced`: the
-	// proxy still runs but allows every public destination.
-	Unenforced bool
 }
 
-func NewPolicy(allow, signIn []string, unenforced bool) Policy {
-	p := Policy{Hosts: map[string]bool{}, Unenforced: unenforced}
+func NewPolicy(allow, signIn []string) Policy {
+	p := Policy{Hosts: map[string]bool{}}
 	for _, h := range append(append([]string(nil), allow...), signIn...) {
 		if h == fleet.AllowAll {
 			p.AllowAll = true
@@ -44,7 +41,7 @@ func normalizeHost(h string) string { return strings.TrimSuffix(strings.ToLower(
 // Check returns why a CONNECT tunnel to host:port is denied, or "" when it
 // is allowed. Addresses are checked separately, after resolution.
 func (p Policy) Check(host string, port int) string {
-	if p.AllowAll || p.Unenforced {
+	if p.AllowAll {
 		return ""
 	}
 	if !p.Hosts[normalizeHost(host)] {

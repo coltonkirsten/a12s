@@ -14,7 +14,7 @@ host                          a12s-<fleet>-controller (bridge network a12s-<flee
                 │ agent computer              │          │ Service a12s-<fleet>-db │
                 │ a12s-<fleet>-scout          │          │                         │
                 │ computerd ─▶ harness        │          │ a12s-init ─▶ image      │
-                │ home drive, work drives     │          │ state drive             │
+                │ home drive                  │          │ state drive             │
                 └─────────────────────────────┘          └────────────────────────┘
                   one isolated internal network per agent computer and per Service
 ```
@@ -55,28 +55,26 @@ are `{code, message, fix?, details?}` with a stable `code`. The main routes:
 | `GET /v1/agent-computers/{c}/events` | The agent computer's event stream (SSE, `Last-Event-ID`, `?turn=`) |
 | `POST /v1/agent-computers/{c}/turns/{id}/stop` | Stop a Turn |
 | `POST /v1/agent-computers/{c}/power` | Sleep or wake |
-| `POST /v1/apply` | Apply staged changes with `interrupt` and `grace` |
-| `GET /v1/drives`, `DELETE /v1/drives/{d}` | Drives |
+| `GET /v1/drives`, `DELETE /v1/drives/{d}` | Home and state drives |
 | `/v1/tokens` | Scoped tokens |
 | `GET /v1/credentials`, `PUT`, `DELETE /v1/credentials/{name}` | List credential names, set or remove a value |
-| `/v1/services/…` | Service list, status, create, change, remove, logs, power, login |
+| `/v1/services/…` | Service list, status, create, change, remove, logs, power |
 
 ### mTLS listener
 
 Agent computers and Services call the Controller with their certificates. Only the live certificate for a running
 container is accepted. Services and agent computers with `grants.send` may enqueue and read or withdraw their own
-Messages; agent computers also take leases (for `lock`/`release`) and write diagnostics. Nothing else exists on this listener.
+Messages. Nothing else exists on this listener.
 
 ## Docker driver
 
 | Thing | Docker resource |
 |---|---|
 | Agent computer `C` | Container and internal network `a12s-<fleet>-C`; home drive volume `a12s-<fleet>-home-C` |
-| Work drive `D` | Volume `a12s-<fleet>-drive-D` |
 | Harness bundles | Read-only cache volume `a12s-<fleet>-bundles` |
 | Controller | Container `a12s-<fleet>-controller`, its state volume, bridge network `a12s-<fleet>` |
 | Inboxes | Volume `a12s-<fleet>-data` |
-| Service `S` | Container and network `a12s-<fleet>-S`; state drive `S-state`; `a12s-<fleet>-S-publish` forwarder when it publishes a port |
+| Service `S` | Container and network `a12s-<fleet>-S`; state drive `S-state` |
 
 Resources carry `a12s.*` labels. Internal networks are small subnets from a pool (default `10.213.0.0/16`, a /29
 each), so many agent computers don't exhaust Docker's default pool. There are no host ports. Containers run with Docker's
@@ -85,7 +83,7 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
 ## Inside an agent computer
 
 - **Mounts:** the home drive at `/home` (`/home/agent` for the agent; `/home/.a12s` root-only for the journal and
-  session record), work drives at their `at:`, the bundle cache read-only at `/opt/a12s/bundles`, tmpfs
+  session record), the bundle cache read-only at `/opt/a12s/bundles`, tmpfs
   `/run/a12s` (secrets, TLS, computerd's socket) and `/tmp`.
 - **Instructions and files** are copied onto the home drive as one tar before the first start and again when they
   change, with a root-owned marker in `/home/.a12s-files` naming the applied digest. A copy overwrites those files
@@ -93,7 +91,7 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
 - **computerd** (`/opt/a12s/computerd`) waits for its TLS files, listens with mTLS on `:7443`, keeps the journal
   (`/home/.a12s/journal.db`, SQLite) and runs the harness as uid 1000.
 - **Environment** set by the driver includes `A12S_COMPUTER`, `A12S_FLEET`, `A12S_HARNESS_KIND`,
-  `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_BUNDLE`, `A12S_CREDENTIALS`, `A12S_DRIVES`,
+  `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_BUNDLE`, `A12S_CREDENTIALS`,
   `A12S_PROXY` and `A12S_CONTROLLER`, plus `A12S_SERVICE_<SVC>_<PORT>` for each used Service port.
 
 ### computerd API

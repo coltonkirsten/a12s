@@ -1,6 +1,6 @@
 # Fleet file reference
 
-`fleet.yaml` declares a Fleet: agent computers, drives, Services, grants. It is optional: the live Fleet is the source
+`fleet.yaml` declares a Fleet: agent computers, Services, grants. It is optional: the live Fleet is the source
 of truth, and the file is one way to write it. `a12s init` scaffolds `fleet.yaml` and a README.
 
 The CLI finds the Fleet file from `--fleet`/`-F`, then `$A12S_FLEET`, then the nearest `fleet.yaml` in the current
@@ -21,23 +21,18 @@ defaults:
   resources: { cpu: 1, memory: 2Gi }
   egress: { allow: [] }              # deny by default
 
-drives:
-  a12s-repo: { size: 20Gi, access: exclusive }
-  reference: { size: 5Gi,  access: shared }
-
 agent_computers:
   scout:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim
     credentials: [anthropic]
-    instructions: You are scout. Read /work/ref and answer questions about it.
+    instructions: You are scout. Answer questions about the a12s docs.
     files:                                     # more files for its home drive; edit them and a12s up to update
       .claude/skills/cite/SKILL.md: |
         ---
         name: cite
         description: Cite the file and line for every claim.
         ---
-    drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
     power:
       sleepAfterIdle: 15m
@@ -47,9 +42,8 @@ agent_computers:
     harness: { kind: codex, version: 0.154.0 }
     image: slim
     instructions: |                            # its AGENTS.md (CLAUDE.md for claude-code)
-      You build and test changes to the a12s repo in /work/a12s.
+      You build and test changes to the a12s repo in ~/a12s.
     credentials: [openai, github]
-    drives: [{ name: a12s-repo, at: /work/a12s }]
     egress: { allow: [api.openai.com, github.com, registry.npmjs.org] }
     grants: { send: [scout] }                  # builder may enqueue to scout's inbox
 ```
@@ -82,27 +76,9 @@ agent_computers:
 | `apiVersion` | `a12s.ai/v1alpha1` |
 | `kind` | `Fleet` |
 | `metadata.name` | The Fleet name, a DNS label. Docker resources are named `a12s-<fleet>-…`. |
-| `egress.enforcement` | `enforced` (default) or `unenforced`, for substrates that can't enforce egress. Printed on every status line. |
-| `egress.allowPrivate` | CIDRs of private ranges that Services' `egress.tcp` may reach. Printed on every status line. |
 | `defaults` | Any agent computer field, applied to every agent computer. |
-| `drives` | Work drives, by name. |
 | `agent_computers` | Agent computers, by name (DNS labels). |
 | `services` | Services, by name. See [Services](services.md). |
-
-## Drives
-
-```yaml
-drives:
-  <name>: { size: 20Gi, access: exclusive | shared | shared-write }
-```
-
-| `access` | Meaning |
-|---|---|
-| `exclusive` | One agent computer attaches it, read-write. |
-| `shared` | Any number attach it, all `readOnly: true`. |
-| `shared-write` | Any number attach and write. Writers can coordinate with the `lock`/`release` system tools. |
-
-On Docker, drives are named volumes. Docker can't enforce a quota on them, so `size` is recorded but not enforced.
 
 ## Agent computer fields
 
@@ -116,7 +92,6 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.claude/skills/x/SKILL.md`, `.mcp.json`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB; `instructions` and a `files` entry for the same `CLAUDE.md` (`AGENTS.md` for codex) is an error. |
 | `resources` | `{cpu, memory}`, e.g. `{ cpu: 2, memory: 4Gi }`. Zero means no limit. |
 | `credentials` | Credential names, added to `defaults.credentials`; set each value with `a12s creds set <name>`. See [Credentials](credentials.md). |
-| `drives` | `[{name, at, readOnly?}]`: work drives and their absolute mount paths. |
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Only the owner sets it: a prefix token can't. Default: Docker's default profile. |
 | `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |

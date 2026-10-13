@@ -21,9 +21,7 @@ type Spec struct {
 	APIVersion     string                     `json:"apiVersion"`
 	Kind           string                     `json:"kind"`
 	Metadata       Metadata                   `json:"metadata"`
-	Egress         FleetEgress                `json:"egress,omitzero"`
 	Defaults       json.RawMessage            `json:"defaults,omitempty"`
-	Drives         map[string]Drive           `json:"drives,omitempty"`
 	AgentComputers map[string]json.RawMessage `json:"agent_computers"`
 	Services       map[string]Service         `json:"services,omitempty"`
 }
@@ -67,8 +65,6 @@ func (s *Spec) Effective() (*Fleet, error) {
 		APIVersion: s.APIVersion,
 		Kind:       s.Kind,
 		Metadata:   s.Metadata,
-		Egress:     s.Egress,
-		Drives:     s.Drives,
 		Services:   s.Services,
 		Computers:  make(map[string]Computer, len(s.AgentComputers)),
 	}

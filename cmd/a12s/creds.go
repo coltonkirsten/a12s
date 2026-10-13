@@ -90,59 +90,6 @@ func setCredential(fleetName, name string, value []byte) error {
 	return c.Do(ctx, "PUT", "/v1/credentials/"+name, api.CredentialRequest{Value: string(value)}, nil)
 }
 
-// serviceLogin runs the login in a memory-only container so the credential
-// never touches disk there or on the host; it goes straight to the Controller.
-func serviceLogin(g *globals, args []string) error {
-	pos, err := parse(g.flags("service login"), args)
-	if err != nil {
-		return err
-	}
-	if len(pos) != 1 {
-		return usageError("service login needs one Service name")
-	}
-	name := pos[0]
-	docker, err := exec.LookPath("docker")
-	if err != nil {
-		return fmt.Errorf("a12s service login runs the docker CLI: %w", err)
-	}
-	c, _, err := g.connect()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := interruptible()
-	defer cancel()
-	var l api.LoginResponse
-	if err := c.Do(ctx, "POST", servicePath(name, "/login"), nil, &l); err != nil {
-		return err
-	}
-	defer func() { _ = c.Do(ctx, "DELETE", servicePath(name, "/login"), nil, nil) }()
-	fmt.Fprintf(os.Stderr, "logging in to %s (memory-only container; follow the instructions below)\n", name)
-	argv := []string{"exec", "-i"}
-	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
-		argv = append(argv, "-t")
-	}
-	argv = append(append(argv, "-u", l.User, l.Container), l.Command...)
-	run := exec.CommandContext(ctx, docker, argv...)
-	run.Stdin, run.Stdout, run.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := run.Run(); err != nil {
-		return fmt.Errorf("the login command failed: %w", err)
-	}
-	read := exec.CommandContext(ctx, docker, append([]string{"exec", "-u", l.User, l.Container}, l.Read...)...)
-	var out, errb bytes.Buffer
-	read.Stdout, read.Stderr = &out, &errb
-	if err := read.Run(); err != nil {
-		return fmt.Errorf("reading the credential: %v: %s", err, bytes.TrimSpace(errb.Bytes()))
-	}
-	if err := c.Do(ctx, "PUT", "/v1/credentials/"+l.Produces, api.CredentialRequest{Value: string(bytes.TrimSpace(out.Bytes()))}, nil); err != nil {
-		return err
-	}
-	if g.json {
-		return printJSON(map[string]string{"service": name, "credential": l.Produces})
-	}
-	fmt.Printf("logged in: %s set on the Controller; nothing is left in the container, and %s starts with it.\n", l.Produces, name)
-	return nil
-}
-
 // checkCredentialShape catches the common paste mistakes (a wrapped setup token stored in pieces, a stray quote,
 // the wrong secret) before a Turn fails with a bare 401.
 func checkCredentialShape(name string, value []byte) error {

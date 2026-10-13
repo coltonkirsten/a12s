@@ -14,15 +14,14 @@ func TestParseLabExample(t *testing.T) {
 	}
 	// The contract fields only; TestDefaultsMerge owns the merge rules, and a
 	// new defaulted field must not break this test.
-	if f.Metadata.Name != "lab" || len(f.Drives) != 3 || f.Drives["reference"].Access != AccessShared || f.Drives["a12s-repo"].Access != AccessExclusive {
-		t.Fatalf("fleet %+v drives %+v", f.Metadata, f.Drives)
+	if f.Metadata.Name != "lab" {
+		t.Fatalf("fleet %+v", f.Metadata)
 	}
 	if got := f.ComputerNames(); !reflect.DeepEqual(got, []string{"builder", "reviewer", "scout", "tester"}) {
 		t.Errorf("ComputerNames = %v", got)
 	}
 	scout, builder, tester := f.Computers["scout"], f.Computers["builder"], f.Computers["tester"]
 	if scout.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"}) || scout.Instructions != "You are scout.\n" ||
-		!reflect.DeepEqual(scout.Drives, []DriveMount{{Name: "reference", At: "/work/ref", ReadOnly: true}}) ||
 		!reflect.DeepEqual(scout.Egress.Allow, []string{"api.anthropic.com"}) || !reflect.DeepEqual(scout.Credentials, []string{"anthropic"}) {
 		t.Errorf("scout %+v", scout)
 	}
@@ -173,41 +172,14 @@ agent_computers:
 		{"egress url", base + c + "    egress: { allow: ['https://github.com'] }\n", "egress.allow"},
 		{"egress port", base + c + "    egress: { allow: ['github.com:22'] }\n", "egress.allow"},
 		{"egress wildcard", base + c + "    egress: { allow: ['*.github.com'] }\n", "egress.allow"},
-		{"unenforced", base + "egress: { enforcement: unenforced }\n" + c, ""},
-		{"bad enforcement", base + "egress: { enforcement: maybe }\n" + c, "egress.enforcement"},
+		{"no fleet egress", base + "egress: { enforcement: unenforced }\n" + c, "field egress not found"},
 		{"resources", base + c + "    resources: { cpu: 0.5, memory: 512Mi }\n", ""},
 		{"bad memory", base + c + "    resources: { memory: 2GB }\n", "invalid size"},
 		{"bad cpu", base + c + "    resources: { cpu: lots }\n", "invalid cpu"},
 		{"credentials", base + c + "    credentials: [openai, github]\n", ""},
 		{"duplicate credential", base + c + "    credentials: [openai, openai]\n", "listed twice"},
-		{"undeclared drive", base + c + "    drives: [{ name: nope, at: /work/x }]\n", "not declared"},
-		{"bad access", base + "drives: { d: { access: public } }\n" + c, "drives.d.access"},
-		{"relative mount", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: work }]\n", "absolute"},
-		{"reserved mount", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /home/agent/x }]\n", "reserved"},
-		{"mount comma", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: '/work/v,/home/.a12s' }]\n", "may only contain"},
-		{"mount colon", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: '/work/v:rw' }]\n", "may only contain"},
-		{"mount space", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: '/work/my dir' }]\n", "may only contain"},
-		{"mount unicode", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/café }]\n", "may only contain"},
-		{"mount unclean", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/../home }]\n", "clean absolute"},
-		{"mount trailing slash", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/ }]\n", "clean absolute"},
-		{"mount root", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: / }]\n", "reserved"},
-		{"mount allowed chars", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /work/A-z_0.9 }]\n", ""},
-		{"reserved /home", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /home/x }]\n", "reserved"},
-		{"reserved /run/a12s", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /run/a12s/x }]\n", "reserved"},
-		{"reserved /opt/a12s", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /opt/a12s/x }]\n", "reserved"},
-		{"reserved /tmp", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /tmp/x }]\n", "reserved"},
-		{"reserved /proc", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /proc/x }]\n", "reserved"},
-		{"reserved /sys", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /sys/x }]\n", "reserved"},
-		{"reserved /dev", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /dev/x }]\n", "reserved"},
-		{"shared readOnly", base + "drives: { d: { access: shared } }\n" + c + "    drives: [{ name: d, at: /w, readOnly: true }]\n", ""},
-		{"shared writable", base + "drives: { d: { access: shared } }\n" + c + "    drives: [{ name: d, at: /w }]\n", "must be attached readOnly"},
-		{"shared-write writable", base + "drives: { d: { access: shared-write } }\n" + c + "    drives: [{ name: d, at: /w }]\n", ""},
-		{"same drive twice", base + "drives: { d: { access: shared } }\n" + c + "    drives: [{ name: d, at: /a, readOnly: true }, { name: d, at: /b, readOnly: true }]\n", "attached twice"},
-		{"exclusive on two computers", base + "drives: { d: { access: exclusive } }\n" + c + "    drives: [{ name: d, at: /w }]\n" + `  e:
-    harness: { kind: codex, version: 0.154.0 }
-    image: slim
-    drives: [{ name: d, at: /w, readOnly: true }]
-`, "attached to more than one agent computer: c, e"},
+		{"no fleet drives", base + "drives: { d: { access: exclusive } }\n" + c, "field drives not found"},
+		{"no drive mounts", base + c + "    drives: [{ name: d, at: /w }]\n", "field drives not found"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

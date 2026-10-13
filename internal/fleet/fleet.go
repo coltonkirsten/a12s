@@ -20,17 +20,6 @@ const (
 	TierCustom = "custom"
 )
 
-const (
-	AccessExclusive   = "exclusive"
-	AccessShared      = "shared"
-	AccessSharedWrite = "shared-write"
-)
-
-const (
-	EnforcementEnforced   = "enforced"
-	EnforcementUnenforced = "unenforced"
-)
-
 // AllowAll is the egress host that permits any public host on any port.
 const AllowAll = "*"
 
@@ -39,30 +28,13 @@ type Fleet struct {
 	APIVersion string              `json:"apiVersion"`
 	Kind       string              `json:"kind"`
 	Metadata   Metadata            `json:"metadata"`
-	Egress     FleetEgress         `json:"egress,omitzero"`
 	Defaults   Computer            `json:"defaults,omitzero"`
-	Drives     map[string]Drive    `json:"drives,omitempty"`
 	Computers  map[string]Computer `json:"agent_computers"`
 	Services   map[string]Service  `json:"services,omitempty"`
 }
 
 type Metadata struct {
 	Name string `yaml:"name" json:"name"`
-}
-
-type FleetEgress struct {
-	// Enforcement is "" (enforced), "enforced" or "unenforced".
-	Enforcement string `yaml:"enforcement,omitempty" json:"enforcement,omitempty"`
-	// AllowPrivate lets Services' egress.tcp reach these private ranges; it never
-	// covers the Fleet's own pools, loopback, link-local or metadata addresses.
-	AllowPrivate []string `yaml:"allowPrivate,omitempty" json:"allowPrivate,omitempty"`
-}
-
-func (e FleetEgress) Unenforced() bool { return e.Enforcement == EnforcementUnenforced }
-
-type Drive struct {
-	Size   Bytes  `yaml:"size,omitempty" json:"size,omitzero"`
-	Access string `yaml:"access" json:"access"`
 }
 
 // Computer is one agent computer's spec. In a Fleet it has the defaults merged in; in a Spec it is as written.
@@ -77,7 +49,6 @@ type Computer struct {
 	Files       map[string]string `yaml:"files,omitempty" json:"files,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty" json:"resources,omitzero"`
 	Credentials []string          `yaml:"credentials,omitempty" json:"credentials,omitzero"`
-	Drives      []DriveMount      `yaml:"drives,omitempty" json:"drives,omitzero"`
 	Egress      Egress            `yaml:"egress,omitempty" json:"egress,omitzero"`
 	Security    Security          `yaml:"security,omitempty" json:"security,omitzero"`
 	// Inbox is Controller state, not container config: never hashed into a generation.
@@ -136,12 +107,6 @@ type Resources struct {
 	Memory Bytes `yaml:"memory,omitempty" json:"memory,omitzero"`
 }
 
-type DriveMount struct {
-	Name     string `yaml:"name" json:"name"`
-	At       string `yaml:"at" json:"at"`
-	ReadOnly bool   `yaml:"readOnly,omitempty" json:"readOnly,omitempty"`
-}
-
 type Egress struct {
 	Allow []string `yaml:"allow" json:"allow,omitzero"`
 }
@@ -156,8 +121,6 @@ func (e Egress) AllowsAll() bool {
 }
 
 func (f *Fleet) ComputerNames() []string { return sortedKeys(f.Computers) }
-
-func (f *Fleet) DriveNames() []string { return sortedKeys(f.Drives) }
 
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))

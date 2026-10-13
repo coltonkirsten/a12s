@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -20,8 +19,7 @@ func bumpModel(name string) func(*fleet.Fleet) {
 }
 
 // A running Computer whose computerd does not answer is not idle: a
-// change is staged, not applied over a turn that may be running; only
-// apply --interrupt forces it.
+// change is staged, not applied over a turn that may be running.
 func TestUnknownStatusIsBusy(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
@@ -33,13 +31,6 @@ func TestUnknownStatusIsBusy(t *testing.T) {
 	}
 	if calls := h.d.takeCalls(); hasCall(calls, "stage builder") || hasCall(calls, "power builder") {
 		t.Fatalf("builder was restaged: %v", calls)
-	}
-	if r, err := h.c.Apply(context.Background(), api.ApplyRequest{}); err != nil || !slices.Equal(r.Pending, []string{"builder"}) {
-		t.Fatalf("apply = %+v, %v", r, err)
-	}
-	r, err := h.c.Apply(context.Background(), api.ApplyRequest{Interrupt: true, Grace: api.Duration(10 * time.Millisecond)})
-	if err != nil || !slices.Equal(r.Applied, []string{"builder"}) {
-		t.Fatalf("apply --interrupt = %+v, %v", r, err)
 	}
 }
 
@@ -58,93 +49,5 @@ func TestReadyIsReadBack(t *testing.T) {
 	}
 	if h.phase("scout") != api.PhaseError {
 		t.Fatalf("scout = %s, want Error", h.phase("scout"))
-	}
-}
-
-// The Fleet's egress enforcement is part of a Computer's generation:
-// a busy Computer keeps its enforcement until its staged generation applies.
-func TestEnforcementFollowsTheActiveGeneration(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	scout := h.cds.get("scout")
-	scout.StartTurn(context.Background(), api.TurnRequest{RequestID: "r1", Prompt: "x"})
-	h.waitPhase("scout", api.PhaseBusy)
-	out := h.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), false)
-	if !slices.Equal(out.Staged, []string{"scout"}) || !slices.Equal(out.Updated, []string{"builder", "reviewer", "tester"}) {
-		t.Fatalf("up = %+v", out)
-	}
-	if p, _ := h.c.policy("scout"); p.Check("anything.example", 443) == "" {
-		t.Fatal("busy scout became unenforced before its generation applied")
-	}
-	if p, _ := h.c.policy("builder"); p.Check("anything.example", 443) != "" {
-		t.Fatal("idle builder did not become unenforced")
-	}
-	if cs := h.c.computerStatus(context.Background(), "scout"); cs.EgressMode != api.EgressEnforced {
-		t.Fatalf("scout mode = %q", cs.EgressMode)
-	}
-	scout.finish(api.TurnCompleted)
-	waitFor(t, func() bool { p, _ := h.c.policy("scout"); return p.Check("anything.example", 443) == "" })
-}
-
-// Two idle Computers swapping exclusive drives converge: each releases
-// the drive the other needs, and no drive ever has two attachments.
-func TestExclusiveDriveSwap(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	swap := func(f *fleet.Fleet) {
-		b, te := f.Computers["builder"], f.Computers["tester"]
-		b.Drives, te.Drives = []fleet.DriveMount{{Name: "ux-scratch", At: "/work/ux"}}, []fleet.DriveMount{{Name: "a12s-repo", At: "/work/a12s"}}
-		f.Computers["builder"], f.Computers["tester"] = b, te
-	}
-	h.up(labFleet(t, swap), false)
-	t.Cleanup(func() {
-		if t.Failed() {
-			st := readState(t, h.dir)
-			t.Logf("builder %+v\ntester %+v\nlog:\n%s", *st.Computers["builder"], *st.Computers["tester"], h.log.String())
-		}
-	})
-	waitFor(t, func() bool {
-		return slices.Equal(h.d.mounts("drive-ux-scratch"), []string{"builder"}) && slices.Equal(h.d.mounts("drive-a12s-repo"), []string{"tester"})
-	})
-	h.waitPhase("builder", api.PhaseReady)
-	h.waitPhase("tester", api.PhaseReady)
-	for _, name := range []string{"builder", "tester"} {
-		if rec := readState(t, h.dir).Computers[name]; rec.pending() || rec.Generation < 2 {
-			t.Errorf("%s: %+v", name, rec)
-		}
-	}
-	if v := h.d.twoWriters(); len(v) > 0 {
-		t.Fatalf("two writers: %v", v)
-	}
-}
-
-// A swap submitted while both holders are busy converges once both
-// turns end, with no further command and never two attachments.
-func TestExclusiveDriveSwapWhileBothBusy(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	builder, tester := h.cds.get("builder"), h.cds.get("tester")
-	builder.StartTurn(context.Background(), api.TurnRequest{RequestID: "b", Prompt: "x"})
-	tester.StartTurn(context.Background(), api.TurnRequest{RequestID: "t", Prompt: "x"})
-	h.waitPhase("builder", api.PhaseBusy)
-	h.waitPhase("tester", api.PhaseBusy)
-	swap := func(f *fleet.Fleet) {
-		b, te := f.Computers["builder"], f.Computers["tester"]
-		b.Drives, te.Drives = []fleet.DriveMount{{Name: "ux-scratch", At: "/work/ux"}}, []fleet.DriveMount{{Name: "a12s-repo", At: "/work/a12s"}}
-		f.Computers["builder"], f.Computers["tester"] = b, te
-	}
-	if out := h.up(labFleet(t, swap), false); !slices.Equal(out.Staged, []string{"builder", "tester"}) {
-		t.Fatalf("up = %+v", out)
-	}
-	builder.finish(api.TurnCompleted)
-	time.Sleep(30 * time.Millisecond) // builder releases a12s-repo and waits for ux-scratch
-	tester.finish(api.TurnCompleted)
-	waitFor(t, func() bool {
-		return slices.Equal(h.d.mounts("drive-ux-scratch"), []string{"builder"}) && slices.Equal(h.d.mounts("drive-a12s-repo"), []string{"tester"})
-	})
-	h.waitPhase("builder", api.PhaseReady)
-	h.waitPhase("tester", api.PhaseReady)
-	if v := h.d.twoWriters(); len(v) > 0 {
-		t.Fatalf("two writers: %v", v)
 	}
 }

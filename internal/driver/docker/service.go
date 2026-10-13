@@ -39,8 +39,6 @@ var noHealthcheck = &container.HealthConfig{Test: []string{"NONE"}}
 
 func (d *Driver) InitVolume() string { return "a12s-" + d.fleet + "-init" }
 
-func (d *Driver) PublishName(service string) string { return d.ContainerName(service) + "-publish" }
-
 func (d *Driver) serviceFilter() client.Filters {
 	return d.fleetFilter().Add("label", LabelRole+"="+RoleService)
 }
@@ -189,9 +187,6 @@ func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) erro
 			return fmt.Errorf("stage service %s: remove generation %d: %w", spec.Name, staged, err)
 		}
 	}
-	if err := d.removePublish(ctx, spec.Name); err != nil {
-		return fmt.Errorf("stage service %s: %w", spec.Name, err)
-	}
 	img, err := d.cli.ImageInspect(ctx, spec.Image)
 	if err != nil {
 		return fmt.Errorf("stage service %s: image %s: %w", spec.Name, spec.Image, err)
@@ -232,11 +227,6 @@ func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) erro
 	opts := d.serviceCreateOptions(spec, initExec, program)
 	if _, err := d.cli.ContainerCreate(ctx, opts); err != nil {
 		return fmt.Errorf("stage service %s: create container: %w", spec.Name, err)
-	}
-	if len(spec.Publish) > 0 {
-		if err := d.createPublish(ctx, spec, initExec); err != nil {
-			return fmt.Errorf("stage service %s: %w", spec.Name, err)
-		}
 	}
 	return nil
 }
@@ -333,80 +323,6 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 	}
 }
 
-// createPublish runs only a12s's forwarder (never Service code) on the bridge,
-// so the Service stays on its internal network and publishing gives it no route out.
-func (d *Driver) createPublish(ctx context.Context, spec driver.ServiceSpec, initExec string) error {
-	ports := network.PortMap{}
-	exposed := network.PortSet{}
-	cmd := []string{initExec, "publish-forward"}
-	for _, p := range spec.Publish {
-		cp, err := network.ParsePort(strconv.Itoa(p.Port) + "/tcp")
-		if err != nil {
-			return err
-		}
-		ip, err := netip.ParseAddr(p.IP)
-		if err != nil {
-			return fmt.Errorf("publish %s: %w", p.IP, err)
-		}
-		exposed[cp] = struct{}{}
-		ports[cp] = append(ports[cp], network.PortBinding{HostIP: ip, HostPort: strconv.Itoa(p.HostPort)})
-		cmd = append(cmd, fmt.Sprintf("%d=%s:%d", p.Port, d.ContainerName(spec.Name), p.Port))
-	}
-	bridge := "a12s-" + d.fleet
-	useInit := true
-	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name: d.PublishName(spec.Name),
-		Config: &container.Config{
-			Image:        spec.Image, // never runs the image's code: the entrypoint is a12s
-			Entrypoint:   cmd,
-			Healthcheck:  noHealthcheck,
-			User:         "65534:65534",
-			ExposedPorts: exposed,
-			Labels: map[string]string{
-				LabelFleet: d.fleet, LabelService: spec.Name, LabelRole: RolePublish,
-				LabelGeneration: strconv.FormatInt(spec.Generation, 10),
-			},
-		},
-		HostConfig: &container.HostConfig{
-			NetworkMode:    container.NetworkMode(bridge),
-			PortBindings:   ports,
-			RestartPolicy:  container.RestartPolicy{Name: container.RestartPolicyDisabled},
-			Init:           &useInit,
-			ReadonlyRootfs: true,
-			CapDrop:        []string{"ALL"},
-			SecurityOpt:    []string{"no-new-privileges:true"},
-			Mounts: []mount.Mount{{
-				Type: mount.TypeVolume, Source: d.InitVolume(), Target: driver.InitDir, ReadOnly: true,
-				VolumeOptions: &mount.VolumeOptions{NoCopy: true},
-			}},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("create publish forwarder: %w", err)
-	}
-	if _, err := d.cli.NetworkConnect(ctx, d.NetworkName(spec.Name), client.NetworkConnectOptions{Container: created.ID}); err != nil {
-		return fmt.Errorf("connect publish forwarder: %w", err)
-	}
-	return nil
-}
-
-func (d *Driver) removePublish(ctx context.Context, service string) error {
-	res, err := d.cli.ContainerInspect(ctx, d.PublishName(service), client.ContainerInspectOptions{})
-	if isNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RolePublish {
-		return fmt.Errorf("container %s is not a publish forwarder of fleet %s", d.PublishName(service), d.fleet)
-	}
-	if _, err := d.cli.ContainerRemove(ctx, res.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
-		return fmt.Errorf("remove publish forwarder: %w", err)
-	}
-	return nil
-}
-
 func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.Power, generation int64) error {
 	c, err := d.serviceContainer(ctx, name)
 	if isNotFound(err) || errors.Is(err, driver.ErrNotFound) {
@@ -422,8 +338,6 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 		return fmt.Errorf("power service %s generation %d: generation %d is staged: %w", name, generation, staged, driver.ErrNotStaged)
 	}
 	running := c.State != nil && (c.State.Running || c.State.Restarting || c.State.Paused)
-	pub, perr := d.cli.ContainerInspect(ctx, d.PublishName(name), client.ContainerInspectOptions{})
-	hasPub := perr == nil && pub.Container.Config.Labels[LabelRole] == RolePublish && pub.Container.Config.Labels[LabelFleet] == d.fleet
 	switch power {
 	case driver.PowerAwake:
 		if !running {
@@ -431,17 +345,8 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 				return fmt.Errorf("power service %s awake: %w", name, err)
 			}
 		}
-		if hasPub && (pub.Container.State == nil || !pub.Container.State.Running) {
-			if _, err := d.cli.ContainerStart(ctx, pub.Container.ID, client.ContainerStartOptions{}); err != nil {
-				return fmt.Errorf("power service %s awake: publish forwarder: %w", name, err)
-			}
-		}
 	case driver.PowerAsleep:
 		timeout := StopTimeout
-		if hasPub && pub.Container.State != nil && pub.Container.State.Running {
-			t := 2
-			_, _ = d.cli.ContainerStop(ctx, pub.Container.ID, client.ContainerStopOptions{Timeout: &t})
-		}
 		if running {
 			if _, err := d.cli.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 				return fmt.Errorf("power service %s asleep: %w", name, err)
@@ -454,9 +359,6 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 }
 
 func (d *Driver) RemoveService(ctx context.Context, name string) error {
-	if err := d.removePublish(ctx, name); err != nil {
-		return fmt.Errorf("remove service %s: %w", name, err)
-	}
 	c, err := d.serviceContainer(ctx, name)
 	switch {
 	case isNotFound(err) || errors.Is(err, driver.ErrNotFound):
@@ -579,101 +481,6 @@ func (d *Driver) ServiceWrite(ctx context.Context, name, p, owner, mode, dirMode
 	}
 	if code != 0 {
 		return fmt.Errorf("write %s in %s: exit %d: %s", p, name, code, strings.TrimSpace(out))
-	}
-	return nil
-}
-
-func (d *Driver) LoginName(service string) string { return d.ContainerName(service) + "-login" }
-
-// StartLogin: no capabilities, read-only rootfs, everything writable on tmpfs, and
-// the Service's own network so the proxy applies the Service's egress policy.
-func (d *Driver) StartLogin(ctx context.Context, service string, spec driver.LoginSpec) (driver.Login, error) {
-	if spec.User == "" || strings.HasPrefix(spec.User, "0:") {
-		return driver.Login{}, fmt.Errorf("login %s: a login never runs as root", service)
-	}
-	if err := d.RemoveLogin(ctx, service); err != nil {
-		return driver.Login{}, err
-	}
-	if err := d.ensureInit(ctx, spec.Image); err != nil {
-		return driver.Login{}, fmt.Errorf("login %s: %w", service, err)
-	}
-	initExec, err := d.initExec()
-	if err != nil {
-		return driver.Login{}, err
-	}
-	netName, err := d.ensureNetworkFor(ctx, service, RoleService)
-	if err != nil {
-		return driver.Login{}, fmt.Errorf("login %s: %w", service, err)
-	}
-	if err := d.ConnectController(ctx, netName); err != nil {
-		return driver.Login{}, fmt.Errorf("login %s: %w", service, err)
-	}
-	uid, gid, _ := strings.Cut(spec.User, ":")
-	own := ",uid=" + uid + ",gid=" + gid
-	tmpfs := map[string]string{
-		"/tmp":      "rw,nosuid,nodev,mode=1777",
-		"/run/a12s": "rw,nosuid,nodev,noexec,mode=0700,size=16m" + own,
-	}
-	for _, p := range append(append([]string(nil), spec.Volumes...), spec.Tmpfs...) {
-		if p != "/tmp" && p != "/run/a12s" {
-			tmpfs[p] = "rw,nosuid,nodev,mode=0700" + own
-		}
-	}
-	env := append([]string{
-		"HOME=" + driver.LoginDir + "/home",
-		"XDG_CONFIG_HOME=" + driver.LoginDir + "/config",
-		"XDG_CACHE_HOME=" + driver.LoginDir + "/cache",
-		"XDG_DATA_HOME=" + driver.LoginDir + "/data",
-		"XDG_STATE_HOME=" + driver.LoginDir + "/state",
-		"A12S_LOGIN_OUT=" + driver.LoginOut,
-	}, spec.Env...)
-	created, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name: d.LoginName(service),
-		Config: &container.Config{
-			Image:       spec.Image,
-			User:        spec.User,
-			Entrypoint:  []string{initExec, "login-hold"},
-			Cmd:         []string{},
-			Healthcheck: noHealthcheck,
-			Env:         env,
-			Labels:      map[string]string{LabelFleet: d.fleet, LabelService: service, LabelRole: RoleLogin},
-		},
-		HostConfig: &container.HostConfig{
-			NetworkMode:    container.NetworkMode(netName),
-			RestartPolicy:  container.RestartPolicy{Name: container.RestartPolicyDisabled},
-			ReadonlyRootfs: true,
-			CapDrop:        []string{"ALL"},
-			SecurityOpt:    []string{"no-new-privileges:true"},
-			Tmpfs:          tmpfs,
-			Mounts: []mount.Mount{{
-				Type: mount.TypeVolume, Source: d.InitVolume(), Target: driver.InitDir, ReadOnly: true,
-				VolumeOptions: &mount.VolumeOptions{NoCopy: true},
-			}},
-		},
-		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{netName: {}}},
-	})
-	if err != nil {
-		return driver.Login{}, fmt.Errorf("login %s: create: %w", service, err)
-	}
-	if _, err := d.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
-		return driver.Login{}, fmt.Errorf("login %s: start: %w", service, d.discard(ctx, created.ID, err))
-	}
-	return driver.Login{Container: d.LoginName(service), User: spec.User, Read: []string{initExec, "login-read"}}, nil
-}
-
-func (d *Driver) RemoveLogin(ctx context.Context, service string) error {
-	res, err := d.cli.ContainerInspect(ctx, d.LoginName(service), client.ContainerInspectOptions{})
-	if isNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RoleLogin {
-		return fmt.Errorf("container %s is not a login container of fleet %s", d.LoginName(service), d.fleet)
-	}
-	if _, err := d.cli.ContainerRemove(ctx, res.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
-		return fmt.Errorf("remove login %s: %w", service, err)
 	}
 	return nil
 }

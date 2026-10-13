@@ -30,9 +30,7 @@ const (
 	RoleController = "controller"
 	RoleComputer   = "computer"
 	RoleService    = "service"
-	RolePublish    = "publish"
 	RoleInit       = "init"
-	RoleLogin      = "login"
 	LabelService   = "a12s.service"
 )
 
@@ -121,7 +119,6 @@ func (d *Driver) Capabilities(ctx context.Context) (driver.Capabilities, error) 
 		}
 	}
 	return driver.Capabilities{
-		SharedWriteDrives: true,
 		// gateway_mode_ipv4=isolated needs Engine 28 or later.
 		EgressEnforcement: majorVersion(info.Info.ServerVersion) >= 28,
 		DriveQuota:        false,

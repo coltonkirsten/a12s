@@ -2,16 +2,12 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"net/netip"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/coltonkirsten/a12s/internal/api"
-	"github.com/coltonkirsten/a12s/internal/fleet"
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
@@ -54,41 +50,6 @@ func TestCertificateRefusedWhileServiceIsDown(t *testing.T) {
 	h.c.setServicePhase("clock", api.PhaseError, &api.Failure{Reason: "down"})
 	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != 403 {
 		t.Fatalf("down: %d", code)
-	}
-}
-
-// Named egress fails closed until the Controller has
-// verified its own bridge, then remembers the last verified one, so an
-// engine read error never drops the bridge from the deny list.
-func TestNamedEgressFailsClosedWithoutBridge(t *testing.T) {
-	ctx := context.Background()
-	engineErr := errors.New("engine unavailable")
-	var addrs map[string]netip.Addr
-	c := &Controller{cfg: Config{Fleet: "lab", SubnetPool: netip.MustParsePrefix("10.213.0.0/16")}}
-	c.selfAddrs = func(context.Context) (map[string]netip.Addr, error) {
-		if addrs == nil {
-			return nil, engineErr
-		}
-		return addrs, nil
-	}
-	rc := reach{service: true, private: []string{"172.16.0.0/12"}, tcp: []fleet.TCPEgress{
-		{Name: "pg", Host: "1.1.1.1", Port: 5432},
-		{Name: "bridge", Host: "172.20.0.9", Port: 80},
-	}}
-	if _, code, why := c.egressTarget(ctx, "db", rc, "pg", 5432); code != http.StatusServiceUnavailable {
-		t.Fatalf("no bridge verified: %d %s", code, why)
-	}
-	addrs = map[string]netip.Addr{"a12s-lab": netip.MustParseAddr("172.20.0.2")}
-	if _, code, why := c.egressTarget(ctx, "db", rc, "pg", 5432); code != 0 {
-		t.Fatalf("verified: %d %s", code, why)
-	}
-	addrs = nil // the engine read fails again: the last verified bridge still applies
-	if _, code, why := c.egressTarget(ctx, "db", rc, "pg", 5432); code != 0 {
-		t.Fatalf("remembered: %d %s", code, why)
-	}
-	// allowPrivate covers the bridge, but the Fleet's own bridge is never dialed.
-	if _, code, why := c.egressTarget(ctx, "db", rc, "bridge", 80); code != http.StatusForbidden || !strings.Contains(why, "own networks") {
-		t.Fatalf("bridge address: %d %s", code, why)
 	}
 }
 

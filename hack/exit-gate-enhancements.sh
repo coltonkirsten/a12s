@@ -39,12 +39,11 @@ open('fleet.yaml','w').write(s)
 PY
   mkdir -p ~/.a12s/gate
   umask 077; [ -s ~/.a12s/gate/postgres ] || head -c 18 /dev/urandom | base64 | tr -d '/+=' > ~/.a12s/gate/postgres
-  [ -s ~/.a12s/gate/gh-webhook ] || head -c 18 /dev/urandom | base64 | tr -d '/+=' > ~/.a12s/gate/gh-webhook
-  for c in anthropic gate/postgres gate/gh-webhook; do a creds set "${c#gate/}" < ~/.a12s/$c || { log "FAIL setup: creds set $c"; exit 1; }; done
+  for c in anthropic gate/postgres; do a creds set "${c#gate/}" < ~/.a12s/$c || { log "FAIL setup: creds set $c"; exit 1; }; done
   A12S_TEST_TIME_SCALE=60 run a up || { log "FAIL setup: a12s up"; exit 1; }
   run a status
   for s in scout builder reviewer; do check "setup $s Ready" wait_phase $s Ready 180; done
-  for s in clock pg db hooks; do check "setup service $s Ready" wait_phase $s Ready 180; done
+  for s in clock pg db; do check "setup service $s Ready" wait_phase $s Ready 180; done
 fi
 
 if [[ " $SECTIONS " == *" inbox "* ]]; then
@@ -206,15 +205,6 @@ PY
   check "16 reviewer got a message via computer:builder" eval "$A12S inbox reviewer --all --json | grep -q '\"via\": \"computer:builder\"'"
   check "16 send to scout refused with the fix, journaled" eval "grep -q 'add scout to agent_computers.builder.grants.send' /tmp/gate16 && $A12S logs builder | grep -q 'builder may not send to scout'"
 
-  log "## 17 webhook"
-  body='{"action":"opened","repository":{"full_name":"c/a12s"},"pull_request":{"title":"Gate","html_url":"https://x/1"}}'
-  sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$(cat ~/.a12s/gate/gh-webhook)" | sed 's/^.*= //')
-  code1=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/github -H "X-GitHub-Event: pull_request" -H "X-Hub-Signature-256: sha256=$sig" -d "$body")
-  code2=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/github -H "X-GitHub-Event: pull_request" -d "$body")
-  log "signed: $code1, unsigned: $code2"
-  check "17 signed post enqueued, unsigned rejected" eval "[ $code1 = 202 ] && [ $code2 = 401 ] && $A12S inbox builder --all --json | grep -q 'webhook:github'"
-  check "17 status prints the publish warning" eval "$A12S status | grep -q 'reachable outside uses'"
-
   log "## 18 no escalation from inside a Service"
   a shell clock -- sh -c 'wget -q -T 3 -O- http://a12s-gate-controller:7000/v1/status 2>&1 | head -1; ls /var/run/docker.sock 2>&1' > /tmp/gate18 2>&1; cat /tmp/gate18 >> "$LOG"
   check "18 owner API unreachable, no Docker socket" eval "! grep -q fleet /tmp/gate18 && grep -q 'No such file' /tmp/gate18"
@@ -223,9 +213,9 @@ PY
     docker exec -u 0 a12s-gate-clock cat /run/a12s/tls/$f | docker exec -i -u 0 a12s-gate-builder sh -c "mkdir -p /tmp/cert && cat > /tmp/cert/$f"
   done
   mt() { docker exec -u 0 a12s-gate-builder sh -c "curl -s -o /dev/null -w '%{http_code}' --cacert /tmp/cert/ca.crt --cert /tmp/cert/cert.pem --key /tmp/cert/key.pem -X $1 https://a12s-gate-controller:7443$2 -H 'content-type: application/json' -d '$3'"; }
-  r1=$(mt PUT /v1/fleet '{}'); r2=$(mt POST /v1/leases '{}'); r3=$(mt POST /v1/agent-computers/scout/inbox '{"body":"from a copied clock key"}')
-  log "with the clock's copied key: PUT /v1/fleet $r1, POST /v1/leases $r2, send to scout (granted) $r3"
-  check "18 PUT /v1/fleet and POST /v1/leases are 403 over mTLS; the granted send works" eval "[ '$r1' = 403 ] && [ '$r2' = 403 ] && [ '$r3' = 201 ]"
+  r1=$(mt PUT /v1/fleet '{}'); r3=$(mt POST /v1/agent-computers/scout/inbox '{"body":"from a copied clock key"}')
+  log "with the clock's copied key: PUT /v1/fleet $r1, send to scout (granted) $r3"
+  check "18 PUT /v1/fleet is 403 over mTLS; the granted send works" eval "[ '$r1' = 403 ] && [ '$r3' = 201 ]"
   run a sleep clock; wait_phase clock Asleep
   r4=$(mt POST /v1/agent-computers/scout/inbox '{"body":"after sleep"}')
   log "after a12s sleep clock: $r4"

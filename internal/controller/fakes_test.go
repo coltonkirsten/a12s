@@ -42,10 +42,6 @@ type fakeDriver struct {
 	// ghostStarts makes Observe never show a container running (a start
 	// the substrate reported but that did not take).
 	lostStages, ghostStarts bool
-	// exclusive drives (as in the lab Fleet); staging a second attachment
-	// of one is recorded in violations.
-	exclusive  map[string]bool
-	violations []string
 	// ips is the Controller's address on each Computer network (by
 	// Computer), allocated when a network first appears, freed with it.
 	ips     map[string]netip.Addr
@@ -62,7 +58,6 @@ type fakeDriver struct {
 	services     map[string]*fakeService
 	svcImages    map[string]driver.ServiceImage
 	svcUnhealthy map[string]bool
-	logins       map[string]driver.LoginSpec
 }
 
 type fakeContainer struct {
@@ -85,7 +80,6 @@ func newFakeDriver(cds *fakeComputerds) *fakeDriver {
 		},
 		events:       make(chan driver.Event, 16),
 		cds:          cds,
-		exclusive:    map[string]bool{"drive-a12s-repo": true, "drive-ux-scratch": true},
 		services:     map[string]*fakeService{},
 		svcImages:    map[string]driver.ServiceImage{},
 		svcUnhealthy: map[string]bool{},
@@ -106,7 +100,7 @@ func (d *fakeDriver) takeCalls() []string {
 }
 
 func (d *fakeDriver) Capabilities(context.Context) (driver.Capabilities, error) {
-	return driver.Capabilities{SharedWriteDrives: true, EgressEnforcement: true, Architectures: []string{"arm64"}, Services: true}, nil
+	return driver.Capabilities{EgressEnforcement: true, Architectures: []string{"arm64"}, Services: true}, nil
 }
 
 func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
@@ -137,9 +131,6 @@ func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
 		}
 		obs.Computers[name] = st
 		attached[c.spec.HomeDrive] = append(attached[c.spec.HomeDrive], name)
-		for _, m := range c.spec.Drives {
-			attached[m.DriveID] = append(attached[m.DriveID], name)
-		}
 	}
 	for name, sv := range d.services {
 		if sv.spec.StateDrive != "" {
@@ -235,13 +226,6 @@ func (d *fakeDriver) StageComputer(_ context.Context, spec driver.ComputerSpec) 
 	}
 	if d.lostStages {
 		return nil
-	}
-	for _, m := range spec.Drives {
-		for other, c := range d.computers {
-			if other != spec.Name && d.exclusive[m.DriveID] && slices.ContainsFunc(c.spec.Drives, func(o driver.Mount) bool { return o.DriveID == m.DriveID }) {
-				d.violations = append(d.violations, fmt.Sprintf("%s staged with %s while %s attaches it", spec.Name, m.DriveID, other))
-			}
-		}
 	}
 	d.computers[spec.Name] = &fakeContainer{spec: spec, files: map[string][]byte{}}
 	d.record("stage %s %d", spec.Name, spec.Generation)
@@ -802,8 +786,7 @@ func labFleet(t *testing.T, edit func(f *fleet.Fleet)) *fleet.Fleet {
 
 // specFor is what a12s up sends for f: each agent computer as written is its merged form.
 func specFor(f *fleet.Fleet) *fleet.Spec {
-	s := &fleet.Spec{APIVersion: f.APIVersion, Kind: f.Kind, Metadata: f.Metadata, Egress: f.Egress, Drives: f.Drives,
-		Services: f.Services, AgentComputers: map[string]json.RawMessage{}}
+	s := &fleet.Spec{APIVersion: f.APIVersion, Kind: f.Kind, Metadata: f.Metadata, Services: f.Services, AgentComputers: map[string]json.RawMessage{}}
 	if raw := fleet.SpecOf(f.Defaults); string(raw) != "{}" {
 		s.Defaults = raw
 	}
@@ -907,12 +890,6 @@ func (d *fakeDriver) setLostStages(b bool) {
 	d.lostStages = b
 }
 
-// mounts reports which containers attach a drive.
-func (d *fakeDriver) mounts(driveID string) []string {
-	obs, _ := d.Observe(context.Background())
-	return obs.Drives[driveID].AttachedTo
-}
-
 func (d *fakeDriver) setGhostStarts(b bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -924,12 +901,6 @@ func (f *fakeComputerd) mute() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.up = false
-}
-
-func (d *fakeDriver) twoWriters() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return slices.Clone(d.violations)
 }
 
 // controllerAddrs is the Docker driver's ControllerAddrs over the fake.

@@ -223,7 +223,7 @@ hack/exit-gate.sh <logfile>
 #   ~/.a12s/anthropic, ~/.a12s/lab/openai.json and GH_TOKEN.
 
 hack/exit-gate-enhancements.sh <workdir> <logfile> [setup inbox services amendment cli teardown]
-#   hack/gate/fleet.yaml: inbox delivery and crash safety, Services, grants, login, expiry, replace keys,
+#   hack/gate/fleet.yaml: inbox delivery and crash safety, Services, grants, expiry, replace keys,
 #   power policy, CLI. Needs bin/a12s, the images, the claude-code bundle, ~/.a12s/anthropic and the v0.2.1
 #   reference Services, built from that tag by hack/gate/services.sh.
 ```

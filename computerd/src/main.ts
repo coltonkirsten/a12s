@@ -10,10 +10,9 @@ import type { HarnessDeps } from './adapters/spawn.js';
 import { loadConfig, type Config } from './config.js';
 import { Computer } from './computer.js';
 import { credentialEnv } from './credentials.js';
-import { prepareDirs, prepareDrives } from './dirs.js';
+import { prepareDirs } from './dirs.js';
 import { Journal } from './journal.js';
-import { Leases, type TlsMaterial } from './leases.js';
-import { sendToInbox } from './send.js';
+import { sendToInbox, type TlsMaterial } from './send.js';
 import { apiHandler, controllerOnly, localHandler } from './server.js';
 import { parseUses, wire } from './wiring.js';
 
@@ -45,7 +44,6 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   log(`starting for ${cfg.computer} (${cfg.harness.kind} ${cfg.harness.version}, root=${cfg.isRoot})`);
   prepareDirs(cfg);
-  for (const d of prepareDrives(cfg, log)) log(`work drive ${d} handed to the agent`);
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const tls = await waitForTls(cfg);
 
@@ -54,12 +52,9 @@ async function main(): Promise<void> {
   const deps: HarnessDeps = { cfg, credentialEnv: () => credentialEnv(cfg), mcpServers: servers, wiringEnv: wiring.env };
   const adapter: Adapter = cfg.harness.kind === 'codex' ? new CodexAdapter(deps) : new ClaudeAdapter(deps);
   const computer = new Computer(cfg, journal, adapter, servers);
-  const leases = new Leases(cfg, tls, (drive, path, why) =>
-    journal.append('diagnostic', { message: `lease lost on ${drive}:${path}`, reason: why instanceof Error ? why.message : why }),
-  );
 
   rmSync(cfg.sockPath, { force: true });
-  const local = createHttpServer(localHandler(computer, leases, cfg.send.length ? (req) => sendToInbox(cfg, tls, req) : null));
+  const local = createHttpServer(localHandler(computer, cfg.send.length ? (req) => sendToInbox(cfg, tls, req) : null));
   await new Promise<void>((r) => local.listen(cfg.sockPath, r));
   chmodSync(cfg.sockPath, 0o666);
 
@@ -73,7 +68,6 @@ async function main(): Promise<void> {
     stopping = true;
     log(`${signal}: closing admission and interrupting the active turn`);
     await computer.shutdown();
-    leases.close();
     local.close();
     api.close();
     api.closeAllConnections();

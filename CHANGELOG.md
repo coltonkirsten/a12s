@@ -52,6 +52,21 @@ refuses to start. Then install the new release and `a12s up`.
 - **Only the owner sets `security.seccomp`.** A prefix token's write that adds, changes or drops an agent computer's
   own seccomp profile is `403 forbidden`; set profiles with the owner token (`a12s up`, or the SDK as owner).
 - A Controller's state from before v0.4.0 is no longer migrated: run `a12s up` with your fleet.yaml again.
+- **Work drives are gone.** The top-level `drives:` (`exclusive`, `shared`, `shared-write`), an agent computer's
+  `drives: [{name, at, readOnly}]` and the agent's `lock` / `release` system tools are removed, and a Fleet that names
+  them is refused. Agent computers share work through Messages or a Service. Home drives, Service state drives and
+  `a12s drive ls` / `rm` stay; `drive ls` no longer lists work drives and its rows have no `access`, and status rows
+  have no `drives`. Before upgrading, copy out what you need and `a12s drive rm <name>` each work drive while the old
+  release runs, then drop `drives:` from fleet.yaml (a Controller whose stored Fleet still has them doesn't start).
+- **`a12s service login` is gone**, with the Service manifest's `login {command, produces}`, the
+  `/v1/services/{s}/login` routes and the `{"credential": "reauth"}` health answer: set a Service's credential with
+  `a12s creds set <name>` like any other.
+- **`a12s apply` and `POST /v1/apply` are gone.** A staged change applies at the agent computer's next idle moment;
+  to apply it now, end the Turn with `a12s stop <name>`.
+- **Service networking extras are gone:** a Service's `publish:` (host ports; a12s opens no inbound ports, so receive
+  webhooks on your own server and send with the SDK), a Service's `egress.tcp`, and the top-level `egress:`
+  (`allowPrivate`, `enforcement`, `unenforced`). Egress is always enforced: on a Docker Engine older than 28, upgrade
+  it. `GET /v1/status` no longer carries `egressEnforcement`, and Service status no longer carries `publish`.
 
 ## v0.6.0 (2026-10-13)
 

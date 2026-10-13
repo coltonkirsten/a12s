@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
@@ -93,47 +91,6 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func runApply(g *globals, args []string) error {
-	fs := g.flags("apply")
-	interrupt := fs.Bool("interrupt", false, "interrupt busy agent computers' active turns")
-	grace := fs.Duration("grace", 30*time.Second, "how long an interrupted turn may take to finish")
-	pos, err := parse(fs, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) > 0 {
-		return usageError("apply takes no arguments")
-	}
-	c, _, err := g.connect()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := interruptible()
-	defer cancel()
-	var resp api.ApplyResponse
-	req := api.ApplyRequest{Interrupt: *interrupt, Grace: api.Duration(*grace)}
-	if err := c.Do(ctx, "POST", "/v1/apply", req, &resp); err != nil {
-		return err
-	}
-	if g.json {
-		return printJSON(resp)
-	}
-	if len(resp.Applied) == 0 && len(resp.Pending) == 0 {
-		fmt.Println("nothing staged")
-	}
-	if len(resp.Applied) > 0 {
-		fmt.Println("applied " + strings.Join(resp.Applied, ", "))
-	}
-	if len(resp.Pending) > 0 {
-		hint := ""
-		if !*interrupt {
-			hint = " (busy; --interrupt to force)"
-		}
-		fmt.Println("pending " + strings.Join(resp.Pending, ", ") + hint)
-	}
-	return nil
 }
 
 func powerServices(ctx context.Context, g *globals, c *cli.Client, f *fleet.Fleet, verb string, state api.Power, names []string) error {

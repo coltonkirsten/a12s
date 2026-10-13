@@ -328,17 +328,13 @@ then `from: [service:clock]`.
 
 ## Start work from a webhook
 
-Whatever receives the webhook sends the Message. From your own server, use the SDK with a token that may only send
-to lead (`a12s token create hooks --actions send --agent-computers lead`, see [below](#let-another-program-in)), check
-the sender's signature, then:
+Whatever receives the webhook sends the Message. a12s opens no inbound ports, so the receiver is your own server: use
+the SDK with a token that may only send to lead (`a12s token create hooks --actions send --agent-computers lead`, see
+[below](#let-another-program-in)), check the sender's signature, then:
 
 ```ts
 await lead.send(`GitHub ${event}: ${summary}`, { sender: "github", metadata: { source: "github", event } });
 ```
-
-To run the receiver inside the Fleet instead, write a Service with `grants.send` and `publish:`
-([Services](services.md#write-a-service-with-svckit)); the v0.2.1 source has a
-[GitHub webhook bridge](https://github.com/coltonkirsten/a12s/tree/v0.2.1/services/svc-webhook) to copy.
 
 ## Let another program in
 

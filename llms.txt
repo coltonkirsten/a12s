@@ -38,7 +38,7 @@ its own fleet.yaml, images, Services and app code.
 - grants.send: agent computers this agent computer (or Service) may send to. On an agent computer it adds the MCP
   tool `mcp__a12s__send` (args: computer, body; optional fresh boolean, expires seconds, replaceKey string) that
   returns a receipt, never an answer. Grants are one-way: for a reply, the other side needs its own grant back.
-- Service: a non-agent container in the same Fleet (a clock, a webhook bridge, an MCP server). No harness, no inbox.
+- Service: a non-agent container in the same Fleet (a clock, a database, an MCP server). No harness, no inbox.
 - phase (exact strings, capitalized): Provisioning, Starting, Ready, Busy, Stopping, Asleep, Error; a Service can also
   be Unhealthy. `status.phase` in the SDKs, `.phase` of each `a12s status --json` entry, agent_computer.phase events.
   One waiting for a credential with no value yet stays Provisioning with `waiting: {credentials, fix}`.
@@ -127,8 +127,7 @@ Agent computer fields (all optional except a harness, image and credential, whic
   own API and sign-in hosts are always added, so `allow: []` still lets Claude Code work. Allow everything public:
   `allow: ["*"]` (quote it: a bare * is YAML alias syntax and fails to parse).
 - grants: {send: [agent computers]}. uses: [services] (reach a Service's ports; an MCP port becomes a tool).
-- resources: {cpu: 2, memory: 4Gi}. drives: [{name, at: /work/x, readOnly}] (top-level `drives: {x: {size: 20Gi,
-  access: exclusive | shared | shared-write}}`).
+- resources: {cpu: 2, memory: 4Gi}.
 - Inbox bodies are at most 64 KiB.
 - power: {sleepAfterIdle: 15m, wakeOnMessage: {from: [local, service:clock, computer:lead, token:web],
   maxWakesPerHour: 6}}. sleepAfterIdle is off or 1s to 7d (e.g. 5s, 15m, 2h, 1d); maxWakesPerHour 1-60. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
@@ -140,7 +139,7 @@ Agent computer fields (all optional except a harness, image and credential, whic
   or the HTTP API, `seccomp` is the profile's JSON object. Set it only when the image's software needs blocked
   syscalls (Chromium's sandbox: see Custom images). Only the owner sets it, not a prefix token.
 
-Top level also takes `services:` (see Services) and `drives:`. Change anything (instructions and files
+Top level also takes `services:` (see Services). Change anything (instructions and files
 included) and run `a12s up`: it applies at each agent computer's next idle moment, never mid-Turn, and keeps the
 session. Changed files are written again; other files the agent made in its home stay.
 The Controller pins the image each tag names when it is first used and keeps running that image: to pick up a
@@ -181,7 +180,7 @@ a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Me
 a12s stop <c> | sleep <c> [--hold] | wake <c>   # plain sleep: a sender listed in wakeOnMessage
                                       #   wakes it; --hold: no Message wakes it until wake
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
-a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
+a12s service ls | status <svc> | logs <svc> [-f]
 a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names
                                       #   (not seccomp), nothing outside. Prints the secret (a12st_…) once, alone on stdout:
                                       #   TOKEN=$(a12s token create bizapp --prefix biz-); with --json it is .secret
@@ -419,7 +418,7 @@ services:                             # top level, next to agent_computers:
     image: my-clock:1                 # an image you built; it must contain /a12s/service.json
     grants: { send: [worker] }
     config: { to: worker, every: 2m } # becomes /run/a12s/config/config.json
-    # env: {K: v}, credentials: [name], publish: ["127.0.0.1:8787:8080"], egress: {allow: [...]}, uses: [svc]
+    # env: {K: v}, credentials: [name], egress: {allow: [...]}, uses: [svc]
 agent_computers:
   worker:
     power: { sleepAfterIdle: 30m, wakeOnMessage: { from: [service:clock] } }   # only if it may sleep
@@ -515,7 +514,7 @@ docker build -t my-clock:1 clock && a12s up && a12s service logs clock -f
   services.<name>.manifest. `user` is a non-zero uid (match the image's USER). Optional: `ports`
   ({"api": {"port": 8080, "protocol": "http"}}, add "mcp": {"path": "/mcp"} to expose an MCP server to agent
   computers that `uses:` it), `credentials` ([{"name": "x", "required": false}]), `state` ({"at": "/var/lib/svc", "size": "1Gi"}),
-  `tmpfs`, `resources`, `login` ({command, produces}, run by `a12s service login <svc>`).
+  `tmpfs`, `resources`.
 - The process runs as that uid, read-only root filesystem, no capabilities; write to `state.at` or a `tmpfs` path.
   Reaches the internet only through its own `egress.allow`. A Service that exits is restarted with backoff.
 - Any language works: read config.json, call POST $A12S_API/v1/agent-computers/{c}/inbox with the client
@@ -605,10 +604,10 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
 - Tokens (owner token): POST /v1/tokens {"name", "prefix"} or {"name", "actions", "computers"} → {name, …, secret}
   (secret shown once); GET /v1/tokens (each with createdAt and lastUsedAt?, recorded at most once a minute); DELETE /v1/tokens/{name}.
 - A prefix token may do everything the owner can on agent computers, Services and credentials whose names start with
-  its prefix (create/get/update/remove, send, inbox, events, power, stop, shell, Service logs and login). Their
-  grants.send, uses and drives, defaults included, must be inside the prefix too (a default grant outside: override
+  its prefix (create/get/update/remove, send, inbox, events, power, stop, shell, Service logs). Their
+  grants.send and uses, defaults included, must be inside the prefix too (a default grant outside: override
   it with the agent computer's own grants); its specs may name any credential. Reads list only names inside it.
-  Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), /v1/apply, drives and tokens are 403 forbidden.
+  Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), drives and tokens are 403 forbidden.
   Egress, image and resources are its call: trust it like the owner for its agent computers. Seccomp is owner-only:
   a write that adds, changes or drops an agent computer's own security.seccomp is 403 forbidden.
 - Error codes (`code`, stable): invalid, missing_field, bad_metadata, bad_expires (400);
@@ -635,7 +634,6 @@ GET /v1/agent-computers/{c}/events              events
 GET /v1/agent-computers/{c}/turns               events
 POST /v1/agent-computers/{c}/turns/{id}/stop    stop
 POST /v1/agent-computers/{c}/power              power
-POST /v1/apply                                  owner
 POST /v1/agent-computers/{c}/shell              owner, or prefix
 GET /v1/drives                                  owner
 DELETE /v1/drives/{d}                           owner
@@ -655,8 +653,6 @@ DELETE /v1/services/{s}                         owner, or prefix
 GET /v1/services/{s}/logs                       owner, or prefix
 POST /v1/services/{s}/power                     owner, or prefix
 POST /v1/services/{s}/shell                     owner, or prefix
-POST /v1/services/{s}/login                     owner, or prefix
-DELETE /v1/services/{s}/login                   owner, or prefix
 GET /v1/credentials                             owner, or prefix
 PUT /v1/credentials/{name}                      owner, or prefix
 DELETE /v1/credentials/{name}                   owner, or prefix
