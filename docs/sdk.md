@@ -48,7 +48,7 @@ The Fleet is found the way the CLI finds it: the `fleet.yaml` in the current dir
 | A scoped token or another URL | `Fleet.connect({ url, token })` | `a12s.Fleet(url=…, token=…)` |
 | This machine's Fleet under a scoped token | `Fleet.connect({ token })` | `a12s.Fleet(token=…)` |
 | Environment | `$A12S_URL` and `$A12S_TOKEN` | the same |
-| A web page | `a12s gateway --web <dir>`, then `Fleet.connect()` in the page ([In the browser](#in-the-browser)) | |
+| A web page | `a12s gateway -- npx vite` (or `--web dist` when built), then `Fleet.connect()` in the page ([In the browser](#in-the-browser)) | |
 
 In Python, `with a12s.Fleet() as fleet:` closes the connection at the end (or call `fleet.close()`).
 `a12s.AsyncFleet()` has the same objects and methods: `await` them, and use `async for` and `async with` for streams
@@ -328,32 +328,29 @@ coder = fleet.agent_computers.create("coder", credentials=["anthropic", "stripe-
 ## In the browser
 
 The Controller listens on loopback with the owner token, so a web page can't call it directly. `a12s gateway` sits
-in between: it serves your page, serves the TypeScript SDK at `/a12s.js`, and forwards `/v1/` to the Controller
-with a scoped token the page never sees.
+in between: it serves your page and forwards `/v1/` to the Controller with a scoped token the page never sees. The
+page imports `@coltonkirsten/a12s` through a bundler such as Vite.
 
 ```sh
 a12s gateway                     # the built-in dashboard: every agent computer, live events, a send box
 a12s gateway -- npm run dev      # your dev server (Vite, Next.js, …) behind the gateway, hot reload included
 a12s gateway --dev http://localhost:5173   # a dev server that is already running
-a12s gateway --web ./dist        # a built app (a directory of files)
+a12s gateway --web dist          # a built app (Vite's npm run build output)
 ```
 
 Each run makes a new key and opens `http://127.0.0.1:7012/?key=…` in your browser (`--no-open` just prints it). The
-gateway trades the key for an HttpOnly, SameSite=Strict cookie and drops it from the address bar; `/v1/` and
-`/a12s.js` need that cookie, so another user or program on the machine can't use the Fleet through the gateway. A
+gateway trades the key for an HttpOnly, SameSite=Strict cookie and drops it from the address bar; `/v1/` needs
+that cookie, so another user or program on the machine can't use the Fleet through the gateway. A
 script or test passes the key as a bearer token instead: `Fleet.connect({ url: "http://127.0.0.1:7012", token: key })`.
 Opened without the key, the gateway shows a page that says to use the printed link.
 
-With a dev server, the gateway forwards every request except `/v1/` and
-`/a12s.js` to it, websockets included, so the page and the API share one origin. It finds the dev server's port in
+With a dev server, the gateway forwards every request except `/v1/` to it, websockets included, so the page and the API share one origin. It finds the dev server's port in
 the URL it prints, or takes `--dev-port`. See [Recipes: A web app](recipes.md#a-web-app-react-vite-any-dev-server).
 
-```html
-<script type="module">
-  import { Fleet } from "/a12s.js";
-  const fleet = await Fleet.connect();                // same origin, no token
-  for await (const ev of fleet.events()) console.log(ev.computer, ev.type);
-</script>
+```ts
+import { Fleet } from "@coltonkirsten/a12s";
+const fleet = await Fleet.connect();                  // same origin, no token
+for await (const ev of fleet.events()) console.log(ev.computer, ev.type);
 ```
 
 The page may use `status`, `events`, `send` and `inbox` on every agent computer; narrow that with

@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+### Breaking
+- **`a12s gateway` no longer serves the SDK at `/a12s.js`, and the npm package drops its `./browser.js` export.** A
+  page imports `@coltonkirsten/a12s` through a bundler: `npm install @coltonkirsten/a12s vite`,
+  `import { Fleet } from "@coltonkirsten/a12s"` in your script, and `a12s gateway -- npx vite`. `--web <dir>` serves
+  a built app (`npx vite build`, then `a12s gateway --web dist`).
+
 ### Changed
 - **Breaking: a plain sleep leaves the power policy in charge.** `a12s sleep <c>`, SDK `sleep()` and
   `POST …/power {"state":"asleep"}` now sleep an agent computer like sleepAfterIdle does: a Message from a sender

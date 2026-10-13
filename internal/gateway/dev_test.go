@@ -95,9 +95,6 @@ func TestDevProxyForwardsAllButTheAPIIncludingWebsockets(t *testing.T) {
 	if got := get("/v1/status"); got != "controller" {
 		t.Errorf("/v1/: %q", got)
 	}
-	if got := get("/a12s.js"); !strings.Contains(got, "A12sClient = class") {
-		t.Errorf("/a12s.js is not the SDK")
-	}
 
 	conn, err := net.Dial("tcp", host)
 	if err != nil {

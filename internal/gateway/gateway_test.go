@@ -106,26 +106,34 @@ func TestRefusesNonLoopbackHostsAndCrossOriginWrites(t *testing.T) {
 	}
 }
 
-func TestServesTheSDKAndTheApp(t *testing.T) {
-	get := func(gw *httptest.Server, path string) string {
+func TestServesTheDashboardOrTheBuiltApp(t *testing.T) {
+	get := func(gw *httptest.Server, path string) (int, string) {
 		res, err := authed(gw).Get(gw.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer res.Body.Close()
 		b, _ := io.ReadAll(res.Body)
-		return string(b)
+		return res.StatusCode, string(b)
 	}
 	builtin, _ := newGateway(t, nil)
-	if !strings.Contains(get(builtin, "/"), `import { connect } from "/a12s.js"`) {
+	if _, page := get(builtin, "/"); !strings.Contains(page, `<script type="module" src="/dashboard.js">`) {
 		t.Error("the built-in dashboard is not served at /")
 	}
-	if !strings.Contains(get(builtin, "/a12s.js"), "A12sClient = class") {
-		t.Error("/a12s.js is not the browser SDK")
+	if _, js := get(builtin, "/dashboard.js"); !strings.Contains(js, "A12sClient = class") || strings.Contains(js, "\nexport ") {
+		t.Error("/dashboard.js is not the dashboard bundled with the SDK, or it exports the SDK")
 	}
-	app, _ := newGateway(t, fstest.MapFS{"index.html": {Data: []byte("my app")}})
-	if get(app, "/") != "my app" || !strings.Contains(get(app, "/a12s.js"), "A12sClient = class") {
-		t.Error("--web does not serve the app next to /a12s.js")
+	app, _ := newGateway(t, fstest.MapFS{
+		"index.html":         {Data: []byte(`<script type="module" src="/assets/index-x1.js"></script>`)},
+		"assets/index-x1.js": {Data: []byte("app code")},
+	})
+	if code, body := get(app, "/assets/index-x1.js"); code != http.StatusOK || body != "app code" {
+		t.Errorf("--web does not serve a built app's absolute asset paths: %d %q", code, body)
+	}
+	for _, p := range []string{"/a12s.js", "/dashboard.js"} {
+		if code, _ := get(app, p); code != http.StatusNotFound {
+			t.Errorf("--web serves %s: %d", p, code)
+		}
 	}
 }
 
@@ -181,7 +189,7 @@ func TestTheKeyBecomesACookieAndLeavesTheURL(t *testing.T) {
 	}
 }
 
-func TestWithoutTheKeyTheAPIAndSDKAreLocked(t *testing.T) {
+func TestWithoutTheKeyTheAPIIsLocked(t *testing.T) {
 	gw, seen := newGateway(t, nil)
 	status := func(path string, h ...string) int {
 		req, _ := http.NewRequest("GET", gw.URL+path, nil)
@@ -195,19 +203,18 @@ func TestWithoutTheKeyTheAPIAndSDKAreLocked(t *testing.T) {
 		res.Body.Close()
 		return res.StatusCode
 	}
-	for _, p := range []string{"/v1/status", "/a12s.js"} {
-		if s := status(p); s != http.StatusUnauthorized {
-			t.Errorf("%s without key: %d", p, s)
-		}
-		if s := status(p, "Authorization", "Bearer wrong"); s != http.StatusUnauthorized {
-			t.Errorf("%s with a wrong key: %d", p, s)
-		}
-		if s := status(p, "Cookie", "a12s-gateway-1=k"); s != http.StatusUnauthorized {
-			t.Errorf("%s with another port's cookie: %d", p, s)
-		}
-		if s := status(p, "Authorization", "Bearer k"); s != http.StatusOK {
-			t.Errorf("%s with the key as a bearer token: %d", p, s)
-		}
+	p := "/v1/status"
+	if s := status(p); s != http.StatusUnauthorized {
+		t.Errorf("%s without key: %d", p, s)
+	}
+	if s := status(p, "Authorization", "Bearer wrong"); s != http.StatusUnauthorized {
+		t.Errorf("%s with a wrong key: %d", p, s)
+	}
+	if s := status(p, "Cookie", "a12s-gateway-1=k"); s != http.StatusUnauthorized {
+		t.Errorf("%s with another port's cookie: %d", p, s)
+	}
+	if s := status(p, "Authorization", "Bearer k"); s != http.StatusOK {
+		t.Errorf("%s with the key as a bearer token: %d", p, s)
 	}
 	if s := status("/?key=wrong"); s != http.StatusForbidden {
 		t.Errorf("wrong ?key=: %d", s)

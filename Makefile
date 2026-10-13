@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build test vet fmt sdk-bundle check check-full release
+.PHONY: build test vet fmt dashboard check check-full release
 
 build:
 	$(GO) build ./...
@@ -15,10 +15,11 @@ vet:
 fmt:
 	$(GO) fmt ./...
 
-# The browser SDK the gateway serves at /a12s.js; `make check` checks it matches sdk/typescript.
-sdk-bundle:
+# The gateway's built-in dashboard: internal/gateway/dashboard/main.js bundled with the SDK source. `make check` checks
+# the embedded copy matches this build.
+dashboard:
 	cd sdk/typescript && npm ci && npm run build
-	cp sdk/typescript/dist/a12s.js internal/gateway/web/a12s.js
+	cp sdk/typescript/dist/dashboard.js internal/gateway/web/dashboard.js
 
 # Fast local feedback: Go, the API fixtures, both SDKs. No Docker. PR CI (.github/workflows/ci.yml) is the gate.
 check:

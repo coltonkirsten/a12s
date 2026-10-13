@@ -25,8 +25,8 @@ func runGateway(g *globals, args []string) error {
 	flags := g.flags("gateway")
 	port := flags.Int("port", 7012, "port on 127.0.0.1")
 	addr := flags.String("addr", "", "loopback address to listen on, host:port (default 127.0.0.1:<port>)")
-	web := flags.String("web", "", "directory of your web app to serve (default: the built-in dashboard)")
-	dev := flags.String("dev", "", "URL of a running dev server to proxy everything but /v1/ and /a12s.js to")
+	web := flags.String("web", "", "directory of your built web app to serve, like Vite's dist (default: the built-in dashboard)")
+	dev := flags.String("dev", "", "URL of a running dev server to proxy everything but /v1/ to")
 	devPort := flags.Int("dev-port", 0, "the port of the dev server started after --, when it doesn't print its URL")
 	allow := flags.String("allow", "status,events,send,inbox", "API actions the page may use ("+strings.Join(api.TokenActions, ",")+")")
 	computers := flags.String("computers", "*", "agent computers the page may reach, comma-separated")
@@ -126,7 +126,7 @@ func runGateway(g *globals, args []string) error {
 	key := rand.Text()
 	srv := &http.Server{Handler: gateway.Handler(gateway.Config{Controller: base, Token: tok.Secret, Key: key, Web: site, Dev: devURL}), ReadHeaderTimeout: 10 * time.Second}
 	link := "http://" + net.JoinHostPort(host, strconv.Itoa(*port)) + "/?key=" + key
-	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s and /a12s.js; Ctrl-C to stop\n  %s\n",
+	fmt.Printf("a12s gateway for Fleet %s: %s\n  serving %s; Ctrl-C to stop\n  %s\n",
 		f.Metadata.Name, link, serving, pageMay(tok))
 	if !*noOpen {
 		openBrowser(link)

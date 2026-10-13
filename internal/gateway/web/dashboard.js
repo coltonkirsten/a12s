@@ -12,19 +12,19 @@ async function* readSSE(body) {
       let nl;
       while ((nl = buf.search(/\r\n|\r|\n/)) >= 0) {
         if (buf[nl] === "\r" && nl === buf.length - 1) break;
-        const line = buf.slice(0, nl);
+        const line2 = buf.slice(0, nl);
         buf = buf.slice(nl + (buf.startsWith("\r\n", nl) ? 2 : 1));
-        if (line === "") {
+        if (line2 === "") {
           if (frame.data.length > 0 || frame.event) {
             yield { id: frame.id, event: frame.event, data: frame.data.join("\n") };
           }
           frame = { data: [] };
           continue;
         }
-        if (line.startsWith(":")) continue;
-        const colon = line.indexOf(":");
-        const field = colon < 0 ? line : line.slice(0, colon);
-        let val = colon < 0 ? "" : line.slice(colon + 1);
+        if (line2.startsWith(":")) continue;
+        const colon = line2.indexOf(":");
+        const field = colon < 0 ? line2 : line2.slice(0, colon);
+        let val = colon < 0 ? "" : line2.slice(colon + 1);
         if (val.startsWith(" ")) val = val.slice(1);
         if (field === "data") frame.data.push(val);
         else if (field === "id") frame.id = val;
@@ -339,8 +339,8 @@ var A12sClient = class {
   }
 };
 var SharedEvents = class {
-  constructor(open) {
-    this.open = open;
+  constructor(open2) {
+    this.open = open2;
   }
   subs = /* @__PURE__ */ new Set();
   conn;
@@ -715,322 +715,76 @@ function sleep(ms, signal) {
   });
 }
 
-// src/fleet.ts
-var enc2 = encodeURIComponent;
-var maxReplaceTries = 5;
-var Fleet = class _Fleet {
-  /** The lower-level client the handles use, for API calls that have no method here. */
-  client;
-  agentComputers;
-  services;
-  tokens;
-  credentials;
-  /** No discovery: `url` and `token` as given, by default the page's own origin. */
-  constructor(opts = {}) {
-    this.client = new A12sClient(opts);
-    this.agentComputers = new AgentComputers(this.client);
-    this.services = new Services(this.client);
-    this.tokens = new Tokens(this.client);
-    this.credentials = new Credentials(this.client);
-  }
-  /**
-   * In a browser: the Fleet behind the page's own origin, which is `a12s gateway` serving the page (no token
-   * needed). In Node: found like {@link connect} finds it. Pass `url` and `token` to reach anything else.
-   */
-  static async connect(opts = {}) {
-    return new _Fleet(opts);
-  }
-  get url() {
-    return this.client.url;
-  }
-  async get() {
-    const r = await this.client.request("GET", "/v1/fleet");
-    return { version: r.version, spec: r.fleet ?? emptySpec(), drift: r.drift ?? [] };
-  }
-  /**
-   * Reads the Fleet, lets `fn` change it (in place, or by returning a new spec) and writes it back only if nobody
-   * wrote in between; otherwise it reads again and retries, up to 5 times. `spec.defaults` is always present.
-   */
-  async replace(fn) {
-    for (let attempt = 1; ; attempt++) {
-      const cur = await this.get();
-      cur.spec.defaults ??= {};
-      const next = await fn(cur.spec) ?? cur.spec;
-      try {
-        warnWrites(
-          await this.client.request("PUT", "/v1/fleet", { fleet: next }, {
-            headers: { "if-match": `"${cur.version}"` }
-          })
-        );
-      } catch (err) {
-        if (attempt < maxReplaceTries && err instanceof A12sError && err.code === "version_mismatch") continue;
-        throw err;
-      }
-      return this.get();
-    }
-  }
-  /**
-   * Live events of the named agent computers, or (no argument) all of them, and the Fleet's own (`fleet.changed`,
-   * `agent_computer.phase`). Every stream of this Fleet shares one connection, which reconnects without losing
-   * events. `await stream.ready()` before sending work you want to see from the start; `close()` (or `break`) ends it.
-   * `turn` or `after` (one agent computer) replays from its journal instead.
-   */
-  events(agentComputers, opts = {}) {
-    if (opts.turn !== void 0 || opts.after !== void 0) return this.client.events(agentComputers, opts);
-    return this.client.sharedEvents(namesOf(agentComputers), opts);
-  }
-  /** Finished Turns of the named agent computers, or all of them, as they end. */
-  turns(agentComputers, opts = {}) {
-    return new TurnStream(this.client.sharedEvents(namesOf(agentComputers), opts));
-  }
-  /** Every agent computer and Service: phase, session, active Turn, inbox, power. */
-  status() {
-    return this.client.status();
-  }
-};
-function namesOf(names) {
-  return typeof names === "string" ? [names] : names;
-}
-function emptySpec() {
-  return { apiVersion: "a12s.ai/v1alpha1", kind: "Fleet", metadata: { name: "" }, agent_computers: {} };
-}
-function writeHeaders(opts) {
-  return opts.replace ? {} : { "if-none-match": "*" };
-}
-var AgentComputers = class {
-  constructor(client) {
-    this.client = client;
-  }
-  /** Adds an agent computer to the Fleet and starts it. Fails with code `exists` if the name is taken. */
-  async create(name, spec = {}) {
-    const { replace, ...body } = spec;
-    const r = await this.client.request("PUT", `/v1/agent-computers/${enc2(name)}`, body, {
-      headers: writeHeaders({ replace })
-    });
-    warnWrites(r);
-    return r.agentComputer ? new AgentComputer(this.client, r.agentComputer) : this.get(name);
-  }
-  /** Throws {@link NotFound} if there is none. */
-  async get(name) {
-    return new AgentComputer(this.client, await this.client.request("GET", `/v1/agent-computers/${enc2(name)}`));
-  }
-  async list() {
-    const r = await this.client.request("GET", "/v1/agent-computers");
-    return (r.agentComputers ?? []).map((d) => new AgentComputer(this.client, d));
-  }
-};
-var AgentComputer = class {
-  constructor(client, data) {
-    this.client = client;
-    this.name = data.name;
-    this.set(data);
-  }
-  name;
-  spec;
-  /** The spec with the Fleet's defaults merged in. */
-  effective;
-  status;
-  set(d) {
-    this.spec = d.spec;
-    this.effective = d.effective;
-    this.status = d.status;
-    return this;
-  }
-  get path() {
-    return `/v1/agent-computers/${enc2(this.name)}`;
-  }
-  async reload() {
-    return this.set(await this.client.request("GET", this.path));
-  }
-  /** Changes the spec: a key set to null goes back to the Fleet's default. A busy one picks it up when idle. */
-  async update(changes) {
-    const r = await this.client.request("PATCH", this.path, changes);
-    warnWrites(r);
-    return r.agentComputer ? this.set(r.agentComputer) : this.reload();
-  }
-  /** Removes it from the Fleet and stops it; its drives are kept. */
-  async remove() {
-    await this.client.request("DELETE", this.path);
-  }
-  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends. */
-  prompt(text, opts = {}) {
-    return this.client.prompt(this.name, text, opts);
-  }
-  /** Puts a Message in the inbox and returns at once; it is delivered at the next idle moment. */
-  send(text, opts = {}) {
-    return this.client.send(this.name, { ...opts, body: text });
-  }
-  /** Its events, live, from the Fleet's shared connection; `turn` replays one Turn from its start instead. */
-  events(opts = {}) {
-    if (opts.turn !== void 0 || opts.after !== void 0) return this.client.events(this.name, opts);
-    return this.client.sharedEvents([this.name], opts);
-  }
-  turns(opts = {}) {
-    const { limit, ...rest } = opts;
-    if (limit !== void 0) return this.pastTurns(limit);
-    return new TurnStream(this.client.sharedEvents([this.name], rest));
-  }
-  async pastTurns(limit) {
-    const r = await this.client.request("GET", `${this.path}/turns?limit=${limit}`);
-    return (r.turns ?? []).map((t) => ({
-      ...t,
-      computer: t.agentComputer,
-      tools: t.tools.map((tc) => ({ ...tc, isError: tc.isError ?? false }))
-    }));
-  }
-  /** Stops its processes and keeps its disks, session and inbox; a sender in wakeOnMessage wakes it, unless `hold`. */
-  sleep(opts = {}) {
-    return this.client.sleep(this.name, opts);
-  }
-  /** Wakes it; `clearInbox` discards the pending Messages first. */
-  wake(opts = {}) {
-    return this.client.wake(this.name, opts);
-  }
-  /** Holds its inbox: Messages still queue, none is delivered until resume(). */
-  hold(opts = {}) {
-    return this.client.hold(this.name, opts);
-  }
-  /** Releases a hold on its inbox. */
-  resume() {
-    return this.client.resume(this.name);
-  }
-  /** Interrupts a Turn (default: the active one). */
-  stop(turn) {
-    return this.client.stop(this.name, turn);
-  }
-  inbox(opts = {}) {
-    return this.client.inbox(this.name, opts);
-  }
-  message(id) {
-    return this.client.message(this.name, id);
-  }
-  /** Withdraws a pending Message; a 409 A12sError names its state if it is too late. */
-  withdraw(id) {
-    return this.client.withdraw(this.name, id);
-  }
-};
-var Services = class {
-  constructor(client) {
-    this.client = client;
-  }
-  /** Adds a Service to the Fleet. Fails with code `exists` if the name is taken. */
-  async create(name, spec = {}) {
-    const { replace, ...body } = spec;
-    const r = await this.client.request("PUT", `/v1/services/${enc2(name)}`, body, {
-      headers: writeHeaders({ replace })
-    });
-    warnWrites(r);
-    return r.service ? new Service(this.client, r.service) : this.get(name);
-  }
-  /** Throws {@link NotFound} if there is none. */
-  async get(name) {
-    return new Service(this.client, await this.client.service(name));
-  }
-  async list() {
-    return (await this.client.services()).map((s) => new Service(this.client, s));
-  }
-};
-var Service = class {
-  constructor(client, status) {
-    this.client = client;
-    this.name = status.name;
-    this.status = status;
-  }
-  name;
-  status;
-  /** As written in the Fleet. */
-  get spec() {
-    return this.status.spec ?? {};
-  }
-  get path() {
-    return `/v1/services/${enc2(this.name)}`;
-  }
-  async reload() {
-    this.status = await this.client.service(this.name);
-    return this;
-  }
-  /** Changes the spec as a JSON merge patch: a key set to null is removed. */
-  async update(changes) {
-    const r = await this.client.request("PATCH", this.path, changes);
-    warnWrites(r);
-    if (!r.service) return this.reload();
-    this.status = r.service;
-    return this;
-  }
-  /** Removes it from the Fleet and stops it; its state drive is kept. */
-  async remove() {
-    await this.client.request("DELETE", this.path);
-  }
-  sleep() {
-    return this.power("asleep");
-  }
-  wake() {
-    return this.power("awake");
-  }
-  async power(state) {
-    this.status = await this.client.request("POST", `${this.path}/power`, { state });
-    return this;
-  }
-};
-var Tokens = class {
-  constructor(client) {
-    this.client = client;
-  }
-  /**
-   * A token for another program; owner only. The secret is in the result once. With `prefix` it may do everything
-   * the owner can for names that start with it, and nothing outside; otherwise `actions` on `agentComputers`.
-   */
-  create(name, opts) {
-    if ("prefix" in opts) {
-      return this.client.createToken({ name, prefix: opts.prefix });
-    }
-    return this.client.createToken({ name, actions: opts.actions, computers: opts.agentComputers ?? ["*"] });
-  }
-  async list() {
-    return (await this.client.request("GET", "/v1/tokens")).tokens ?? [];
-  }
-  async remove(name) {
-    await this.client.request("DELETE", `/v1/tokens/${enc2(name)}`);
-  }
-};
-var Credentials = class {
-  constructor(client) {
-    this.client = client;
-  }
-  /** Stores the value on the Controller; agent computers that use it get the new value at once. */
-  set(name, value) {
-    return this.client.request("PUT", `/v1/credentials/${enc2(name)}`, { value });
-  }
-  async list() {
-    return (await this.client.request("GET", "/v1/credentials")).credentials ?? [];
-  }
-  /** Fails with A12sError code `in_use` while an agent computer or Service uses it. */
-  async remove(name) {
-    await this.client.request("DELETE", `/v1/credentials/${enc2(name)}`);
-  }
-};
-function warnWrites(r) {
-  for (const w of r?.warnings ?? []) console.warn(`a12s: ${w}`);
-}
-
 // src/index.ts
 async function connect(opts = {}) {
   return new A12sClient(opts);
 }
-export {
-  A12sClient,
-  A12sError,
-  A12sGapError,
-  A12sStreamError,
-  AgentComputer,
-  AgentComputers,
-  Credentials,
-  EventStream,
-  Fleet,
-  NotFound,
-  Service,
-  Services,
-  Tokens,
-  TurnStream,
-  connect
-};
+
+// ../../internal/gateway/dashboard/main.js
+var a12s = await connect();
+var $ = (id) => document.getElementById(id);
+var log = $("log");
+var open = /* @__PURE__ */ new Map();
+function line(computer, html, cls = "") {
+  const div = document.createElement("div");
+  div.className = `ev ${cls}`;
+  div.innerHTML = `<span class="who">${esc(computer)}</span> ${html}`;
+  const follow = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+  log.append(div);
+  if (follow) log.scrollTop = log.scrollHeight;
+  return div;
+}
+var esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+async function refresh() {
+  const st = await a12s.status();
+  $("fleet").textContent = st.fleet;
+  $("computers").innerHTML = st.agentComputers.map((c) => `
+    <div class="computer"><b>${esc(c.name)}</b><span class="phase">${esc(c.phase)}</span>
+    <div class="meta">${esc(c.harness.kind)} ${esc(c.harness.model ?? "")} \xB7 inbox ${c.inbox?.pending ?? 0}</div></div>`).join("");
+  const to = $("to");
+  if (to.options.length !== st.agentComputers.length) {
+    to.innerHTML = st.agentComputers.map((c) => `<option>${esc(c.name)}</option>`).join("");
+  }
+}
+await refresh();
+setInterval(() => refresh().catch(() => {
+}), 3e3);
+$("send").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = $("body").value.trim();
+  if (!body) return;
+  $("body").value = "";
+  try {
+    await a12s.send($("to").value, { body, sender: "dashboard" });
+  } catch (err) {
+    line($("to").value, esc(err.message), "err");
+  }
+});
+for await (const ev of a12s.events()) {
+  const key = `${ev.computer}/${ev.turn}`;
+  switch (ev.type) {
+    case "turn.started": {
+      const from = (ev.data.inbox?.messages ?? []).map((m) => m.via).join(", ");
+      line(ev.computer, `<span class="dim">turn started${from ? ` \xB7 from ${esc(from)}` : ""}</span>`);
+      break;
+    }
+    case "text.delta": {
+      let el = open.get(key);
+      if (!el) open.set(key, el = line(ev.computer, "").appendChild(document.createElement("span")));
+      el.textContent += ev.data.text;
+      break;
+    }
+    case "tool.started":
+      open.delete(key);
+      line(ev.computer, `<span class="dim">\u2192 ${esc(ev.data.name)}</span>`);
+      break;
+    case "turn.finished":
+      open.delete(key);
+      line(ev.computer, `<span class="${ev.data.status === "completed" ? "dim" : "err"}">turn ${esc(ev.data.status)}${ev.data.error ? `: ${esc(ev.data.error)}` : ""}</span>`);
+      break;
+    case "resume.failed":
+    case "gap":
+      line(ev.computer, `<span class="err">${esc(ev.type)} ${esc(JSON.stringify(ev.data))}</span>`);
+      break;
+  }
+}
