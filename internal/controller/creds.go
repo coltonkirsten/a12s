@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -21,13 +23,21 @@ import (
 // an agent computer and read /run/a12s/secrets, and without it every restart would break the Fleet's apps.
 const credsFile = "credentials.json"
 
+// credsTimesFile holds when each value last changed, apart from the values so an older Controller still reads them.
+const credsTimesFile = "credentials-updated.json"
+
 func (c *Controller) loadCreds() error {
 	p := filepath.Join(c.cfg.StateDir, credsFile)
 	if c.cfg.MemoryOnlyCredentials {
-		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
+		for _, f := range []string{p, filepath.Join(c.cfg.StateDir, credsTimesFile)} {
+			if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
 		}
 		return nil
+	}
+	if data, err := os.ReadFile(filepath.Join(c.cfg.StateDir, credsTimesFile)); err == nil {
+		_ = json.Unmarshal(data, &c.credTimes)
 	}
 	data, err := os.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -46,11 +56,18 @@ func (c *Controller) loadCreds() error {
 
 // setCredsLocked merges values into the store and persists it; nil values delete.
 func (c *Controller) setCredsLocked(values api.Credentials) error {
+	if c.credTimes == nil {
+		c.credTimes = map[string]time.Time{}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
 	for k, v := range values {
-		if v == nil {
+		switch {
+		case v == nil:
 			delete(c.creds, k)
-		} else {
+			delete(c.credTimes, k)
+		case !bytes.Equal(c.creds[k], v):
 			c.creds[k] = v
+			c.credTimes[k] = now
 		}
 	}
 	if c.cfg.MemoryOnlyCredentials {
@@ -60,7 +77,22 @@ func (c *Controller) setCredsLocked(values api.Credentials) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(c.cfg.StateDir, credsFile), data, 0o600)
+	if err := writeFileAtomic(filepath.Join(c.cfg.StateDir, credsFile), data, 0o600); err != nil {
+		return err
+	}
+	times, err := json.Marshal(c.credTimes)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(c.cfg.StateDir, credsTimesFile), times, 0o600)
+}
+
+func (c *Controller) credInfoLocked(name string, users []string) api.CredentialInfo {
+	info := api.CredentialInfo{Name: name, Set: len(c.creds[name]) > 0, UsedBy: users}
+	if t, ok := c.credTimes[name]; ok && info.Set {
+		info.UpdatedAt = &t
+	}
+	return info
 }
 
 // credentialUsers names the agent computers and Services that use a credential.
@@ -106,7 +138,7 @@ func (c *Controller) handleCredentials(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		users := slices.DeleteFunc(c.credentialUsersLocked(n), func(u string) bool { return !k.sees(u) })
-		out = append(out, api.CredentialInfo{Name: n, Set: len(c.creds[n]) > 0, UsedBy: users})
+		out = append(out, c.credInfoLocked(n, users))
 	}
 	c.mu.Unlock()
 	writeJSON(w, http.StatusOK, api.CredentialsResponse{Credentials: out})
@@ -133,6 +165,7 @@ func (c *Controller) handlePutCredential(w http.ResponseWriter, r *http.Request)
 	c.mu.Lock()
 	err := c.setCredsLocked(api.Credentials{name: []byte(req.Value)})
 	users := c.credentialUsersLocked(name)
+	info := c.credInfoLocked(name, users)
 	c.mu.Unlock()
 	if err != nil {
 		fail(w, err)
@@ -153,7 +186,7 @@ func (c *Controller) handlePutCredential(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, api.CredentialInfo{Name: name, Set: true, UsedBy: users})
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (c *Controller) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {

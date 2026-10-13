@@ -2,6 +2,29 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Added
+- **`inbox.changed` on `GET /v1/events`**: after any change to an agent computer's inbox (a Message sent, withdrawn,
+  delivered or expired; a hold, resume or clear), its inbox summary (`pending`, `claimed`, `held`, `holdReason`,
+  `usage`, …), a burst of changes as one event. In the SDKs' `fleet.events()` as `InboxChangedEvent`.
+- **`service.phase` on `GET /v1/events`**: `{service, phase, health?, restarts, error?}` whenever a Service's phase,
+  health or restart count changes. Its `agentComputer` is empty; tokens see it by the Service's name.
+- **Before and after values in change lists**: every `update` in a write's `changes` (`?dryRun=true` included) and in
+  `GET /v1/fleet`'s `drift` carries `diff: [{path, before?, after?}]`, one entry per changed leaf
+  (`grants.send`, `instructions`, …). `fields` is unchanged.
+- **`updatedAt` on credentials** (`GET /v1/credentials`, `PUT /v1/credentials/{name}`): when the value last changed.
+  Kept in `credentials-updated.json` next to the values; values stored by an older Controller have none until set
+  again.
+- **`lastUsedAt` on tokens** (`GET /v1/tokens`): when the token last authenticated, recorded at most once a minute.
+- **`a12s ui`** opens the web console (`npx github:coltonkirsten/a12s-console --fleet <fleet>`; `A12S_CONSOLE`
+  overrides the package). Needs Node.js 20+.
+
+### Changed
+- **The Controller's port is stable**: a new Controller container publishes a fixed loopback port (the one in
+  `controller.json` if it is free), so `docker restart` keeps the port clients read from `controller.json`. A
+  Controller created by an earlier release keeps its random port until `a12s up` replaces it on upgrade.
+
 ## v0.4.0 (2026-10-12)
 
 The live Fleet: hold a `Fleet` and create, change and remove agent computers on it from code while it runs, with

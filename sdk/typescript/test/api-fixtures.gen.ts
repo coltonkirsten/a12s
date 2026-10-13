@@ -296,6 +296,13 @@ export const putFleetResponse: T.PutFleetResponse = {
       "when": "when",
       "fields": [
         "fields"
+      ],
+      "diff": [
+        {
+          "path": "path",
+          "before": {},
+          "after": {}
+        }
       ]
     }
   ],
@@ -626,6 +633,13 @@ export const fleetResponse: T.FleetResponse = {
       "when": "when",
       "fields": [
         "fields"
+      ],
+      "diff": [
+        {
+          "path": "path",
+          "before": {},
+          "after": {}
+        }
       ]
     }
   ]
@@ -768,7 +782,8 @@ export const credentialsResponse: T.CredentialsResponse = {
       "set": true,
       "usedBy": [
         "usedBy"
-      ]
+      ],
+      "updatedAt": "2026-10-12T12:00:00Z"
     }
   ]
 };
@@ -892,6 +907,23 @@ export const phaseData: T.PhaseData = {
 
 export const phaseDataMinimal: T.PhaseData = {
   "phase": "Ready"
+};
+
+export const servicePhaseData: T.ServicePhaseData = {
+  "service": "service",
+  "phase": "Ready",
+  "health": "health",
+  "restarts": 1,
+  "error": {
+    "reason": "reason",
+    "retryable": true
+  }
+};
+
+export const servicePhaseDataMinimal: T.ServicePhaseData = {
+  "service": "service",
+  "phase": "Ready",
+  "restarts": 1
 };
 
 export const enqueueRequest: T.EnqueueRequest = {
@@ -1150,6 +1182,7 @@ export const token: T.Token = {
   ],
   "prefix": "prefix",
   "createdAt": "2026-10-12T12:00:00Z",
+  "lastUsedAt": "2026-10-12T12:00:00Z",
   "secret": "secret"
 };
 

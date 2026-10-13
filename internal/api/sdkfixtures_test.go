@@ -37,6 +37,7 @@ func TestSDKFixtures(t *testing.T) {
 		{"egressDeniedData", "EgressDeniedData", EgressDeniedData{}},
 		{"fleetChangedData", "FleetChangedData", FleetChangedData{}},
 		{"phaseData", "PhaseData", PhaseData{}},
+		{"servicePhaseData", "ServicePhaseData", ServicePhaseData{}},
 		{"enqueueRequest", "EnqueueRequest", EnqueueRequest{}},
 		{"enqueueResponse", "EnqueueResponse", EnqueueResponse{}},
 		{"message", "Message", Message{}},

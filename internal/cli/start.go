@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -85,9 +86,9 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 		return nil, err
 	}
 
-	token := ""
+	token, prevPort := "", 0
 	if cf, err := ReadControllerFile(o.Fleet); err == nil {
-		token = cf.Token
+		token, prevPort = cf.Token, cf.Port
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
@@ -96,7 +97,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 	switch {
 	case cerrdefs.IsNotFound(err):
 		token = NewToken()
-		if err := createController(ctx, dc, n, o, labels, token); err != nil {
+		if err := createController(ctx, dc, n, o, labels, token, prevPort); err != nil {
 			return nil, err
 		}
 		logf("started controller %s (%s)", n.Container, o.Image)
@@ -119,7 +120,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 			if _, err := dc.ContainerRemove(ctx, n.Container, client.ContainerRemoveOptions{Force: true}); err != nil {
 				return nil, fmt.Errorf("replace %s: %w", n.Container, err)
 			}
-			if err := createController(ctx, dc, n, o, labels, token); err != nil {
+			if err := createController(ctx, dc, n, o, labels, token, prevPort); err != nil {
 				return nil, err
 			}
 			logf("replaced controller %s (%s -> %s)", n.Container, res.Container.Config.Image, o.Image)
@@ -201,8 +202,9 @@ func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName st
 	return nil
 }
 
-// ControllerCreateOptions publishes the API port on loopback only.
-func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, labels map[string]string) client.ContainerCreateOptions {
+// ControllerCreateOptions publishes the API port on loopback only, on a fixed host port so that a restart of the
+// container keeps the port in controller.json.
+func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, hostPort int, labels map[string]string) client.ContainerCreateOptions {
 	port := network.MustParsePort(ControllerPort)
 	return client.ContainerCreateOptions{
 		Name: n.Container,
@@ -222,7 +224,7 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 			},
 			PortBindings: network.PortMap{port: {{
 				HostIP:   netip.MustParseAddr("127.0.0.1"),
-				HostPort: "0",
+				HostPort: strconv.Itoa(hostPort),
 			}}},
 		},
 		NetworkingConfig: &network.NetworkingConfig{
@@ -231,8 +233,12 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 	}
 }
 
-func createController(ctx context.Context, dc *client.Client, n ControllerNames, o StartOptions, labels map[string]string, token string) error {
-	opts := ControllerCreateOptions(n, o.Fleet, o.Image, token, labels)
+func createController(ctx context.Context, dc *client.Client, n ControllerNames, o StartOptions, labels map[string]string, token string, prevPort int) error {
+	port, err := freeLoopbackPort(prevPort)
+	if err != nil {
+		return fmt.Errorf("pick a port for %s: %w", n.Container, err)
+	}
+	opts := ControllerCreateOptions(n, o.Fleet, o.Image, token, port, labels)
 	// Lets tests run power-policy timers faster than real time.
 	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
 		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
@@ -240,7 +246,7 @@ func createController(ctx context.Context, dc *client.Client, n ControllerNames,
 	if o.MemoryOnlyCredentials {
 		opts.Config.Env = append(opts.Config.Env, "A12S_MEMORY_ONLY_CREDENTIALS=1")
 	}
-	_, err := dc.ContainerCreate(ctx, opts)
+	_, err = dc.ContainerCreate(ctx, opts)
 	if cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("controller image %s not found locally: build it or pass --controller-image", o.Image)
 	}
@@ -251,6 +257,22 @@ func createController(ctx context.Context, dc *client.Client, n ControllerNames,
 		return fmt.Errorf("start %s: %w", n.Container, err)
 	}
 	return nil
+}
+
+// freeLoopbackPort is prev if it is free on 127.0.0.1, else a port the kernel picks.
+func freeLoopbackPort(prev int) (int, error) {
+	if prev > 0 && prev < 65536 {
+		if ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(prev))); err == nil {
+			ln.Close()
+			return prev, nil
+		}
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
 func publishedPort(ctx context.Context, dc *client.Client, name string) (int, error) {

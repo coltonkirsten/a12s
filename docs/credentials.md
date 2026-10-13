@@ -81,6 +81,7 @@ fleet.credentials.remove("stripe-test")
 - `a12s up` adds and replaces values but never removes one it doesn't send, so a credential set from code stays until
   you remove it or run `a12s down`.
 
-The routes: `GET /v1/credentials` → `{credentials: [{name, set, usedBy}]}`; `PUT /v1/credentials/{name}`
-`{"value": "…"}` → `{name, set, usedBy}`; `DELETE /v1/credentials/{name}` → 204. A name is lowercase letters,
-digits, `-` and `_`.
+The routes: `GET /v1/credentials` → `{credentials: [{name, set, usedBy, updatedAt?}]}`; `PUT /v1/credentials/{name}`
+`{"value": "…"}` → `{name, set, usedBy, updatedAt}`; `DELETE /v1/credentials/{name}` → 204. A name is lowercase
+letters, digits, `-` and `_`. `updatedAt` is when the value last changed (`credentials-updated.json` next to the
+values; absent for a value stored by an older Controller).

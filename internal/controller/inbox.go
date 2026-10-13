@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -48,6 +49,9 @@ func (c *Controller) authenticate(next http.Handler) http.Handler {
 		}
 		if secret, ok := strings.CutPrefix(h, "Bearer "); ok && c.inbox != nil {
 			if t, err := c.inbox.LookupToken(r.Context(), secret); err == nil && t != nil {
+				if err := c.inbox.TokenUsed(r.Context(), t.Name); err != nil {
+					c.logf("token %s: record use: %v", t.Name, err)
+				}
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, caller{principal: "token:" + t.Name, token: t})))
 				return
 			}
@@ -402,4 +406,40 @@ func (c *Controller) inboxChanged(name string) {
 	}
 	c.inboxBroadcast()
 	c.kick(name)
+	c.queueInboxChanged(name)
+}
+
+// inboxEventDelay coalesces a burst of inbox changes into one inbox.changed per agent computer.
+const inboxEventDelay = 100 * time.Millisecond
+
+// queueInboxChanged runs on the store's notify hook: the summary is read later, in its own transaction.
+func (c *Controller) queueInboxChanged(name string) {
+	c.mu.Lock()
+	first := len(c.inboxDirty) == 0
+	if c.inboxDirty == nil {
+		c.inboxDirty = map[string]bool{}
+	}
+	c.inboxDirty[name] = true
+	c.mu.Unlock()
+	if !first {
+		return
+	}
+	c.spawn(func() {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-time.After(inboxEventDelay):
+		}
+		c.mu.Lock()
+		names := slices.Sorted(maps.Keys(c.inboxDirty))
+		c.inboxDirty = nil
+		c.mu.Unlock()
+		for _, n := range names {
+			sum, err := c.inbox.Summary(c.ctx, n)
+			if err != nil {
+				continue
+			}
+			c.publishControllerEvent(n, api.EventInboxChanged, sum, nil, nil)
+		}
+	})
 }

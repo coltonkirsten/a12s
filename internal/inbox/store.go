@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -68,6 +69,9 @@ type Store struct {
 	// notify triggers the drainer and expiry timer after a commit that
 	// changed an inbox.
 	notify func(computer string)
+
+	usedMu sync.Mutex
+	used   map[string]time.Time // token name -> last lastUsedAt write
 }
 
 const schema = `
@@ -156,11 +160,13 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("fleet.db schema: %w", err)
 	}
-	if err := addColumn(db, "tokens", "prefix TEXT NOT NULL DEFAULT ''"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("fleet.db schema: %w", err)
+	for _, col := range []string{"prefix TEXT NOT NULL DEFAULT ''", "last_used_at INTEGER"} {
+		if err := addColumn(db, "tokens", col); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("fleet.db schema: %w", err)
+		}
 	}
-	return &Store{db: db, now: time.Now}, nil
+	return &Store{db: db, now: time.Now, used: map[string]time.Time{}}, nil
 }
 
 // addColumn adds a column that a fleet.db from an older release lacks.

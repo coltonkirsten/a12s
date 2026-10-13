@@ -11,6 +11,9 @@ The SDKs wrap this API; use it directly from any other language. It is JSON over
 { "port": 52011, "token": "…" }
 ```
 
+The port stays the same across restarts of the Controller's container; a new Controller container reuses it while it
+is free.
+
 The base URL is `http://127.0.0.1:<port>`. Send the token on every request as `Authorization: Bearer <token>`. It
 is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped ones](#tokens).
 `a12s gateway` serves the same routes to a web page on its own origin, without a token
@@ -40,8 +43,8 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written |
 | `PUT`, `PATCH`, `DELETE /v1/services/{s}` | create or replace, change, remove a Service, like an agent computer (owner or prefix) |
 | `POST /v1/tokens`, `GET /v1/tokens`, `DELETE /v1/tokens/{name}` | [scoped tokens](#tokens) (owner only) |
-| `GET /v1/credentials` | → `{credentials: [{name, set, usedBy}]}`: every credential the Fleet names or the Controller stores, never a value (owner; a prefix token sees names inside its prefix) |
-| `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy}`: store it; agent computers and Services that use it get it at once (owner or prefix) |
+| `GET /v1/credentials` | → `{credentials: [{name, set, usedBy, updatedAt?}]}`: every credential the Fleet names or the Controller stores, never a value (owner; a prefix token sees names inside its prefix) |
+| `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy, updatedAt}`: store it; agent computers and Services that use it get it at once (owner or prefix) |
 | `DELETE /v1/credentials/{name}` | → 204; `409 in_use` while one uses it, `404` if none is stored (owner or prefix) |
 | `GET /v1/fleet` | → `{version, fleet, drift}` with `ETag: "<version>"` (owner only) |
 | `PUT /v1/fleet` | `{fleet, lock?, credentials?, asleep?, refresh?, file?}` → replace the whole Fleet (owner only); `a12s up` sends this |
@@ -67,7 +70,8 @@ profile's `sha256:` digest) when the agent computer runs with its own seccomp pr
   (`send`, `inbox`, `status`, `events`, `power`, `stop`) on those agent computers (or `["*"]`). A token with `send`
   sees only its own Messages.
 
-A token has `prefix` or `actions`, not both. `GET /v1/tokens` lists them (no secrets); `DELETE /v1/tokens/{name}`
+A token has `prefix` or `actions`, not both. `GET /v1/tokens` lists them (no secrets), each with `createdAt` and
+`lastUsedAt` (when it last authenticated, recorded at most once a minute; absent if never); `DELETE /v1/tokens/{name}`
 revokes one. The [API surface in llms.txt](../llms.txt) lists, per route, the action a narrow token needs.
 
 ## Changing the Fleet
@@ -126,6 +130,11 @@ write answers:
 
 `op` is `create`, `update` or `remove`; `kind` is `agentComputer` or `service`; `when` is `now`, or `idle` for an
 update that waits for a busy agent computer's next idle boundary; `fields` names the top-level fields that differ.
+`diff`, on an update, lists every leaf that differs with its value before and after:
+`[{"path": "grants.send", "after": ["scout"]}, {"path": "instructions", "before": "a", "after": "b"}]`. `path` is the
+dotted field path in the spec (objects are walked; lists and values are leaves), the values are the spec's with the
+defaults merged in, and `before` or `after` is left out where the field is absent. `GET /v1/fleet`'s `drift` carries
+the same.
 `errors` maps an agent computer or Service that did not converge to why; the rest was still applied.
 
 ### Sending a Message
@@ -153,9 +162,18 @@ The response's `state` is `pending` until a Turn takes it, then `claimed` and `d
 
 ## Event streams (SSE)
 
-`GET /v1/events` is the whole Fleet on one connection: every agent computer's events, plus `fleet.changed`
-`{version, by, names}` and `agent_computer.phase` `{phase, error?}`, filtered to what the token may watch (a prefix
-token sees only its prefix) and to `?agentComputers=a,b`. A browser opens at most six connections per origin, so
+`GET /v1/events` is the whole Fleet on one connection: every agent computer's events, plus the Controller's own:
+
+- `fleet.changed` `{version, by, names}`: the Fleet's version moved.
+- `agent_computer.phase` `{phase, error?}`: an agent computer's phase changed.
+- `inbox.changed`: an agent computer's inbox changed (a Message arrived, was withdrawn, delivered or expired; a hold
+  or resume; a clear). Its data is the inbox summary of `GET /v1/agent-computers/{c}/inbox` without `messages`
+  (`{computer, pending, claimed, held, holdReason?, limits, usage, overLimit, ended24h, …}`). Changes within about
+  100 ms are one event.
+- `service.phase` `{service, phase, health?, restarts, error?}`: a Service's phase, health or restart count changed.
+  Its `agentComputer` is empty; it is filtered by the Service's name.
+
+All of it is filtered to what the token may watch (a prefix token sees only its prefix) and to `?agentComputers=a,b`. A browser opens at most six connections per origin, so
 one stream per agent computer would stall a page that watches more than a few.
 
 - Frame ids are opaque strings. `Last-Event-ID` replays what came after it if the Controller still holds it (the last

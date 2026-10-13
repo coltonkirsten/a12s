@@ -37,6 +37,8 @@ def _wanted(names: frozenset[str] | None, ev: Event) -> bool:
     if ev.type == "fleet.changed":
         changed = ev.data.get("names") if isinstance(ev.data, dict) else None
         return isinstance(changed, list) and any(n in names for n in changed)
+    if ev.type == "service.phase":
+        return isinstance(ev.data, dict) and ev.data.get("service") in names
     return (ev.agent_computer or ev.computer) in names
 
 

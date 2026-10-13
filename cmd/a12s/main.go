@@ -43,6 +43,7 @@ func commands() []command {
 		{"sleep", "<name>... | --all [--allow-wake]", "sleep Computers (storage kept, no CPU or RAM)", runSleep},
 		{"wake", "<name>... | --all [--clear-inbox]", "wake Computers; resume happens on the next prompt", runWake},
 		{"gateway", "[--web dir | --dev url | -- npm run dev] [--port 7012] [--allow actions]", "serve a web app (or the built-in dashboard) that can reach the Fleet", runGateway},
+		{"ui", "[console args, e.g. --port 7013 --no-open]", "open the web console (a12s-console, via npx; Node.js 20+)", runUI},
 		{"shell", "<name> [--root] [-- command...]", "audited terminal inside a Computer, outside the harness", runShell},
 		{"service", "ls | status <svc> | logs <svc> [-f] | login <svc>", "list Services, show one, follow its logs, or log it in once", runService},
 		{"creds", "set <name>", "paste a token once; it is stored 0600 and bound", runCreds},

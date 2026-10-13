@@ -165,15 +165,17 @@ type Controller struct {
 	// when a refresh finds netMu held and is about to wait for it.
 	netContended func(ctx context.Context)
 
-	mu       sync.Mutex // guards everything below
-	state    *State
-	creds    api.Credentials // persisted by setCredsLocked
-	rt       map[string]*runtime
-	locks    map[string]*sync.Mutex // per Computer, see applyMu
-	clients  map[string]computerdClient
-	proxyIPs map[netip.Addr]string // Controller IP on a Computer network -> Computer
-	drains   map[string]*drainState
-	srt      map[string]*serviceRuntime
+	mu    sync.Mutex // guards everything below
+	state *State
+	creds api.Credentials // persisted by setCredsLocked
+	// credTimes is when each credential's value last changed.
+	credTimes map[string]time.Time
+	rt        map[string]*runtime
+	locks     map[string]*sync.Mutex // per Computer, see applyMu
+	clients   map[string]computerdClient
+	proxyIPs  map[netip.Addr]string // Controller IP on a Computer network -> Computer
+	drains    map[string]*drainState
+	srt       map[string]*serviceRuntime
 	// auditSubs are followers of a Service's audit lines (service logs -f).
 	auditSubs map[string][]chan string
 	// revoked are principals whose certificate was withdrawn (fail closed
@@ -186,6 +188,8 @@ type Controller struct {
 	hub       *hub
 	// inboxBcast is closed and replaced on every inbox change (Message streams).
 	inboxBcast chan struct{}
+	// inboxDirty are the agent computers whose inbox.changed is due.
+	inboxDirty map[string]bool
 	addrsAt    time.Time
 }
 

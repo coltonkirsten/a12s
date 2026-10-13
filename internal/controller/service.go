@@ -61,6 +61,8 @@ type serviceRuntime struct {
 	health       string // "ok", or the last failure
 	healthSince  time.Time
 	credsHash    string
+	// published is the last service.phase event, so one is sent only on a change.
+	published *api.ServicePhaseData
 }
 
 // serviceWaiting is a Service in Error for want of a credential: `a12s up` reports it as a
@@ -84,8 +86,13 @@ func (c *Controller) srtLocked(name string) *serviceRuntime {
 func (c *Controller) setServicePhase(name string, phase api.Phase, failure *api.Failure) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.setServicePhaseLocked(name, phase, failure)
+}
+
+func (c *Controller) setServicePhaseLocked(name string, phase api.Phase, failure *api.Failure) {
 	r := c.srtLocked(name)
 	if r.phase == phase && (failure == nil) == (r.failure == nil) && (failure == nil || *failure == *r.failure) {
+		c.publishServicePhaseLocked(name)
 		return
 	}
 	if failure != nil {
@@ -94,6 +101,28 @@ func (c *Controller) setServicePhase(name string, phase api.Phase, failure *api.
 		c.logf("service %s: %s -> %s", name, r.phase, phase)
 	}
 	r.phase, r.failure = phase, failure
+	c.publishServicePhaseLocked(name)
+}
+
+// publishServicePhaseLocked sends service.phase when the Service's phase, health or restart count moved. Its
+// envelope names no agent computer; the hub filters it by the Service's name.
+func (c *Controller) publishServicePhaseLocked(name string) {
+	r := c.srt[name]
+	if r == nil || c.hub == nil {
+		return
+	}
+	d := api.ServicePhaseData{Service: name, Phase: r.phase, Health: r.health, Error: r.failure}
+	if rec := c.state.Services[name]; rec != nil {
+		d.Restarts = rec.Restarts
+	}
+	if p := r.published; p != nil && p.Phase == d.Phase && p.Health == d.Health && p.Restarts == d.Restarts &&
+		(p.Error == nil) == (d.Error == nil) && (d.Error == nil || *p.Error == *d.Error) {
+		return
+	}
+	r.published = &d
+	data, _ := json.Marshal(d)
+	ev, _ := json.Marshal(api.Event{V: api.EventVersion, TS: time.Now().UTC(), Type: api.EventServicePhase, Data: data})
+	c.hub.publish(hubEvent{name: name, data: ev})
 }
 
 func (c *Controller) servicePhase(name string) api.Phase {
@@ -727,6 +756,11 @@ func (c *Controller) recordHealth(name string, err error) {
 	case err != nil && changed && prev == api.PhaseUnhealthy:
 		c.auditf(name, "still unhealthy: %v", err)
 	}
+	if changed {
+		c.mu.Lock()
+		c.publishServicePhaseLocked(name)
+		c.mu.Unlock()
+	}
 }
 
 // waitHealthy polls the health check until it passes or the startup grace
@@ -847,6 +881,7 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 		_ = c.setCredsLocked(req.Credentials)
 		c.state.Services[name].Restarts = 0
 		_ = c.saveLocked()
+		c.publishServicePhaseLocked(name)
 	}
 	c.mu.Unlock()
 	if !inFleet {
@@ -930,12 +965,12 @@ func (c *Controller) serviceDied(ev driver.Event) {
 	}
 	c.stopHealth(name)
 	c.unregisterCert(KindService, name)
-	c.setServicePhase(name, api.PhaseStarting, nil)
 	c.mu.Lock()
 	rec := c.state.Services[name]
 	rec.Restarts++
 	n := rec.Restarts
 	_ = c.saveLocked()
+	c.setServicePhaseLocked(name, api.PhaseStarting, nil)
 	c.mu.Unlock()
 	backoff := min(c.timing.RestartBackoff<<min(n-1, 16), MaxServiceBackoff)
 	c.auditf(name, "exited (code %d); restart %d in %s", ev.ExitCode, n, backoff)

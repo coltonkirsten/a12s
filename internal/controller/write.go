@@ -355,20 +355,39 @@ func diffKind[T any](kind string, old, cur map[string]T, o writeOpts, when func(
 		case !hasB:
 			out = append(out, api.Change{Op: api.ChangeRemove, Kind: kind, Name: n, When: api.WhenNow})
 		default:
-			if fields := changedFields(a, b); len(fields) > 0 {
-				out = append(out, api.Change{Op: api.ChangeUpdate, Kind: kind, Name: n, When: when(n), Fields: fields})
+			if fields, diff := changedFields(a, b); len(fields) > 0 {
+				out = append(out, api.Change{Op: api.ChangeUpdate, Kind: kind, Name: n, When: when(n), Fields: fields, Diff: diff})
 			}
 		}
 	}
 	return out
 }
 
-func changedFields(a, b any) []string {
-	var ma, mb map[string]json.RawMessage
+func changedFields(a, b any) ([]string, []api.FieldDiff) {
 	ja, _ := json.Marshal(a)
 	jb, _ := json.Marshal(b)
-	_ = json.Unmarshal(ja, &ma)
-	_ = json.Unmarshal(jb, &mb)
+	var fields []string
+	var diff []api.FieldDiff
+	for _, k := range keysOf(ja, jb) {
+		n := len(diff)
+		diffJSON(k.name, k.a, k.b, &diff)
+		if len(diff) > n {
+			fields = append(fields, k.name)
+		}
+	}
+	return fields, diff
+}
+
+type keyPair struct {
+	name string
+	a, b json.RawMessage
+}
+
+// keysOf pairs the fields of two JSON objects by name, sorted; a side that is not an object has none.
+func keysOf(a, b json.RawMessage) []keyPair {
+	var ma, mb map[string]json.RawMessage
+	_ = json.Unmarshal(a, &ma)
+	_ = json.Unmarshal(b, &mb)
 	keys := map[string]bool{}
 	for k := range ma {
 		keys[k] = true
@@ -376,13 +395,29 @@ func changedFields(a, b any) []string {
 	for k := range mb {
 		keys[k] = true
 	}
-	var out []string
+	out := make([]keyPair, 0, len(keys))
 	for _, k := range slices.Sorted(maps.Keys(keys)) {
-		if !bytes.Equal(ma[k], mb[k]) {
-			out = append(out, k)
-		}
+		out = append(out, keyPair{k, ma[k], mb[k]})
 	}
 	return out
+}
+
+// diffJSON walks objects on both sides and records each differing leaf; lists and values are leaves.
+func diffJSON(path string, a, b json.RawMessage, out *[]api.FieldDiff) {
+	if bytes.Equal(a, b) {
+		return
+	}
+	isObj := func(v json.RawMessage) bool { return len(v) > 0 && v[0] == '{' }
+	if (isObj(a) || a == nil) && (isObj(b) || b == nil) {
+		n := len(*out)
+		for _, k := range keysOf(a, b) {
+			diffJSON(path+"."+k.name, k.a, k.b, out)
+		}
+		if len(*out) > n {
+			return
+		}
+	}
+	*out = append(*out, api.FieldDiff{Path: path, Before: a, After: b})
 }
 
 // fleetChanged records a version change.

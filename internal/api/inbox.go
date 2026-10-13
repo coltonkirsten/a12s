@@ -173,7 +173,9 @@ type Token struct {
 	Computers []string  `json:"computers"`
 	Prefix    string    `json:"prefix,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
-	Secret    string    `json:"secret,omitempty"`
+	// LastUsedAt is recorded at most once a minute.
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	Secret     string     `json:"secret,omitempty"`
 }
 
 type TokensResponse struct {

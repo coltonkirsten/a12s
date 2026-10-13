@@ -200,6 +200,7 @@ class Token:
     computers: list[str]
     prefix: str | None = None
     created_at: str
+    last_used_at: str | None = None
     secret: str | None = None
 
 
@@ -295,6 +296,17 @@ class Change:
     name: str
     when: str
     fields: list[str] | None = None
+    diff: list[FieldDiff] | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FieldDiff:
+    """One leaf of a spec that differs: ``path`` is dotted field names ("grants.send"). ``before`` or ``after`` is
+    None where the field is absent."""
+
+    path: str
+    before: Any = None
+    after: Any = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -326,6 +338,7 @@ class CredentialInfo:
     name: str
     set: bool
     used_by: list[str] | None = None
+    updated_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
