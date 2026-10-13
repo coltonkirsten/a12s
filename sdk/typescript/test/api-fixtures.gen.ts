@@ -1020,17 +1020,12 @@ export const tokenRequest: T.TokenRequest = {
   ],
   "computers": [
     "computers"
-  ]
+  ],
+  "prefix": "prefix"
 };
 
 export const tokenRequestMinimal: T.TokenRequest = {
-  "name": "name",
-  "actions": [
-    "send"
-  ],
-  "computers": [
-    "computers"
-  ]
+  "name": "name"
 };
 
 export const token: T.Token = {
@@ -1041,6 +1036,7 @@ export const token: T.Token = {
   "computers": [
     "computers"
   ],
+  "prefix": "prefix",
   "createdAt": "2026-10-12T12:00:00Z",
   "secret": "secret"
 };

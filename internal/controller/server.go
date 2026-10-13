@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,13 +88,13 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/fleet", allow("", "", c.handleGetFleet))
 	mux.HandleFunc("PUT /v1/fleet", allow("", "", c.handlePutFleet))
 	mux.HandleFunc("GET /v1/status", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, c.Status(r.Context()))
+		writeJSON(w, http.StatusOK, filterStatus(callerOf(r), c.Status(r.Context())))
 	}))
 	mux.HandleFunc("GET /v1/agent-computers", allow(api.ActionStatus, "", c.handleAgentComputers))
 	mux.HandleFunc("GET /v1/agent-computers/{c}", allow(api.ActionStatus, "c", c.handleAgentComputer))
-	mux.HandleFunc("PUT /v1/agent-computers/{c}", allow("", "", c.handlePutAgentComputer))
-	mux.HandleFunc("PATCH /v1/agent-computers/{c}", allow("", "", c.handlePatchAgentComputer))
-	mux.HandleFunc("DELETE /v1/agent-computers/{c}", allow("", "", c.handleDeleteAgentComputer))
+	mux.HandleFunc("PUT /v1/agent-computers/{c}", allowOwnerOrPrefix("c", c.handlePutAgentComputer))
+	mux.HandleFunc("PATCH /v1/agent-computers/{c}", allowOwnerOrPrefix("c", c.handlePatchAgentComputer))
+	mux.HandleFunc("DELETE /v1/agent-computers/{c}", allowOwnerOrPrefix("c", c.handleDeleteAgentComputer))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/turns", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, api.Error{Code: api.ErrGone, Message: "turns are started from the inbox now (one way in)",
 			Fix: "POST /v1/agent-computers/" + r.PathValue("c") + "/inbox, or a12s prompt / a12s send"})
@@ -102,7 +103,7 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agent-computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
 	mux.HandleFunc("POST /v1/apply", allow("", "", c.handleApply))
-	mux.HandleFunc("POST /v1/agent-computers/{c}/shell", allow("", "", c.handleShell))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/shell", allowOwnerOrPrefix("c", c.handleShell))
 	mux.HandleFunc("GET /v1/drives", allow("", "", c.handleDrives))
 	mux.HandleFunc("DELETE /v1/drives/{d}", allow("", "", c.handleRemoveDrive))
 
@@ -115,20 +116,25 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox/hold", allow(api.ActionInbox, "c", c.handleInboxHold))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox/resume", allow(api.ActionInbox, "c", c.handleInboxResume))
 	mux.HandleFunc("GET /v1/services", allow(api.ActionStatus, "", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, api.ServicesResponse{Services: c.Services()})
+		k := callerOf(r)
+		svcs := slices.DeleteFunc(c.Services(), func(s api.ServiceStatus) bool { return !k.sees(s.Name) })
+		for i := range svcs {
+			svcs[i] = scopeService(k, svcs[i])
+		}
+		writeJSON(w, http.StatusOK, api.ServicesResponse{Services: svcs})
 	}))
 	mux.HandleFunc("GET /v1/services/{s}", allow(api.ActionStatus, "", c.handleService))
-	mux.HandleFunc("PUT /v1/services/{s}", allow("", "", c.handlePutService))
-	mux.HandleFunc("PATCH /v1/services/{s}", allow("", "", c.handlePatchService))
-	mux.HandleFunc("DELETE /v1/services/{s}", allow("", "", c.handleDeleteService))
-	mux.HandleFunc("GET /v1/services/{s}/logs", allow("", "", c.handleServiceLogs))
-	mux.HandleFunc("POST /v1/services/{s}/power", allow("", "", c.handleServicePower))
-	mux.HandleFunc("POST /v1/services/{s}/shell", allow("", "", c.handleServiceShell))
-	mux.HandleFunc("POST /v1/services/{s}/login", allow("", "", c.handleLogin))
-	mux.HandleFunc("DELETE /v1/services/{s}/login", allow("", "", c.handleLoginEnd))
-	mux.HandleFunc("GET /v1/credentials", allow("", "", c.handleCredentials))
-	mux.HandleFunc("PUT /v1/credentials/{name}", allow("", "", c.handlePutCredential))
-	mux.HandleFunc("DELETE /v1/credentials/{name}", allow("", "", c.handleDeleteCredential))
+	mux.HandleFunc("PUT /v1/services/{s}", allowOwnerOrPrefix("s", c.handlePutService))
+	mux.HandleFunc("PATCH /v1/services/{s}", allowOwnerOrPrefix("s", c.handlePatchService))
+	mux.HandleFunc("DELETE /v1/services/{s}", allowOwnerOrPrefix("s", c.handleDeleteService))
+	mux.HandleFunc("GET /v1/services/{s}/logs", allowOwnerOrPrefix("s", c.handleServiceLogs))
+	mux.HandleFunc("POST /v1/services/{s}/power", allowOwnerOrPrefix("s", c.handleServicePower))
+	mux.HandleFunc("POST /v1/services/{s}/shell", allowOwnerOrPrefix("s", c.handleServiceShell))
+	mux.HandleFunc("POST /v1/services/{s}/login", allowOwnerOrPrefix("s", c.handleLogin))
+	mux.HandleFunc("DELETE /v1/services/{s}/login", allowOwnerOrPrefix("s", c.handleLoginEnd))
+	mux.HandleFunc("GET /v1/credentials", allowOwnerOrPrefix("", c.handleCredentials))
+	mux.HandleFunc("PUT /v1/credentials/{name}", allowOwnerOrPrefix("name", c.handlePutCredential))
+	mux.HandleFunc("DELETE /v1/credentials/{name}", allowOwnerOrPrefix("name", c.handleDeleteCredential))
 	mux.HandleFunc("POST /v1/tokens", allow("", "", c.handleTokenCreate))
 	mux.HandleFunc("GET /v1/tokens", allow("", "", c.handleTokens))
 	mux.HandleFunc("DELETE /v1/tokens/{name}", allow("", "", c.handleTokenDelete))
@@ -577,11 +583,15 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 
 func (c *Controller) handleService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("s")
+	if k := callerOf(r); !k.sees(name) {
+		fail(w, outOfPrefix(k, name))
+		return
+	}
 	if !c.isService(name) {
 		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no service %q in the Fleet", name))
 		return
 	}
-	writeJSON(w, http.StatusOK, c.serviceStatus(name))
+	writeJSON(w, http.StatusOK, scopeService(callerOf(r), c.serviceStatus(name)))
 }
 
 func (c *Controller) handleServicePower(w http.ResponseWriter, r *http.Request) {
@@ -598,7 +608,7 @@ func (c *Controller) handleServicePower(w http.ResponseWriter, r *http.Request) 
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c.serviceStatus(name))
+	writeJSON(w, http.StatusOK, scopeService(callerOf(r), c.serviceStatus(name)))
 }
 
 // handleServiceLogs streams `a12s service logs`: the Controller's audit

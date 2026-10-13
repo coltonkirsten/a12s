@@ -67,6 +67,10 @@ func allow(action, computerParam string, h http.HandlerFunc) http.HandlerFunc {
 		if computerParam != "" {
 			computer = r.PathValue(computerParam)
 		}
+		if k.prefix() != "" && action != "" && !k.may(action, computer) {
+			fail(w, outOfPrefix(k, computer))
+			return
+		}
 		if action == "" && !k.owner() || action != "" && !k.may(action, computer) {
 			what := "make this call: it is owner-only"
 			if action != "" {
@@ -153,6 +157,10 @@ func allowSendOrInbox(h http.HandlerFunc) http.HandlerFunc {
 		k := callerOf(r)
 		name := r.PathValue("c")
 		if !k.may(api.ActionSend, name) && !k.may(api.ActionInbox, name) {
+			if k.prefix() != "" {
+				fail(w, outOfPrefix(k, name))
+				return
+			}
 			writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: k.principal + " may not read " + name + "'s inbox", Fix: "use a token with send or inbox on " + name})
 			return
 		}
@@ -275,6 +283,32 @@ func (c *Controller) writeSummary(w http.ResponseWriter, r *http.Request, name s
 // tokenNameRE limits token names to a DNS label so "token:<name>" never needs escaping in a frame.
 var tokenNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
+// prefixRE: what an agent computer or Service name can start with.
+var prefixRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}$`)
+
+func checkNarrowToken(req api.TokenRequest) error {
+	bad := func(msg, fix string) error {
+		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid, Message: msg, Fix: fix}}
+	}
+	if len(req.Actions) == 0 {
+		return bad("a token needs at least one action, or a prefix", "pass --prefix biz-, or --actions "+strings.Join(api.TokenActions, ","))
+	}
+	for _, a := range req.Actions {
+		if !slices.Contains(api.TokenActions, a) {
+			return bad("unknown action "+strconv.Quote(a), "actions are "+strings.Join(api.TokenActions, ", "))
+		}
+	}
+	if len(req.Computers) == 0 {
+		return bad("a token needs at least one agent computer", "pass --agent-computers name,... or --agent-computers '*'")
+	}
+	for _, n := range req.Computers {
+		if n != "*" && !fleet.ValidName(n) {
+			return bad("invalid agent computer name "+strconv.Quote(n), "")
+		}
+	}
+	return nil
+}
+
 func (c *Controller) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 	var req api.TokenRequest
 	if !decode(w, r, 1<<20, &req) {
@@ -284,32 +318,30 @@ func (c *Controller) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "token name " + strconv.Quote(req.Name) + " is not a lowercase DNS label", Fix: "use a-z, 0-9 and -, at most 63 characters"})
 		return
 	}
-	if len(req.Actions) == 0 {
-		writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "a token needs at least one action", Fix: "pass --actions " + strings.Join(api.TokenActions, ",")})
-		return
-	}
-	for _, a := range req.Actions {
-		if !slices.Contains(api.TokenActions, a) {
-			writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "unknown action " + strconv.Quote(a), Fix: "actions are " + strings.Join(api.TokenActions, ", ")})
+	if req.Prefix != "" {
+		if len(req.Actions) > 0 || len(req.Computers) > 0 {
+			writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "a prefix token has no actions or computers: it may do everything inside its prefix", Fix: "pass either --prefix, or --actions with --agent-computers"})
 			return
 		}
-	}
-	if len(req.Computers) == 0 {
-		writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "a token needs at least one Computer", Fix: "pass --computers name,... or --computers '*'"})
-		return
-	}
-	for _, n := range req.Computers {
-		if n != "*" && !fleet.ValidName(n) {
-			writeError(w, http.StatusBadRequest, api.ErrInvalid, "invalid Computer name "+strconv.Quote(n))
+		if !prefixRE.MatchString(req.Prefix) {
+			writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "prefix " + strconv.Quote(req.Prefix) + " must start a lowercase DNS label", Fix: "use a-z, 0-9 and -, e.g. biz-"})
 			return
 		}
+		req.Actions, req.Computers = []string{}, []string{}
+	} else if err := checkNarrowToken(req); err != nil {
+		fail(w, err)
+		return
 	}
-	t, err := c.inbox.CreateToken(r.Context(), req.Name, req.Actions, req.Computers)
+	t, err := c.inbox.CreateToken(r.Context(), req.Name, req.Actions, req.Computers, req.Prefix)
 	if err != nil {
 		inboxFail(w, err)
 		return
 	}
-	c.logf("token %s created (actions %s, computers %s)", t.Name, strings.Join(t.Actions, ","), strings.Join(t.Computers, ","))
+	if t.Prefix != "" {
+		c.logf("token %s created (prefix %s)", t.Name, t.Prefix)
+	} else {
+		c.logf("token %s created (actions %s, computers %s)", t.Name, strings.Join(t.Actions, ","), strings.Join(t.Computers, ","))
+	}
 	writeJSON(w, http.StatusCreated, t)
 }
 

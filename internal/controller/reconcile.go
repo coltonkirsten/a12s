@@ -93,6 +93,9 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if err != nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
 	}
+	if err := checkScope(o.by, f, o); err != nil {
+		return api.PutFleetResponse{}, err
+	}
 	if err := admitFields(f, o); err != nil {
 		return api.PutFleetResponse{}, err
 	}
@@ -115,8 +118,12 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	}
 	changes := c.diff(oldFleet, f, o)
 	if o.dryRun {
-		return api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
-			Warnings: slices.Concat(f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}, nil
+		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
+			Warnings: slices.Concat(f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
+		if o.by.prefix() != "" {
+			res.Warnings = nil
+		}
+		return res, nil
 	}
 	lockIn := o.lock
 	if lockIn == nil {
@@ -330,6 +337,10 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		}
 	}
 	c.refreshAddrs(ctx)
+	if o.by.prefix() != "" {
+		// Fleet-wide, so they may name what the token must not see.
+		res.Warnings, res.Lock = nil, nil
+	}
 	return res, nil
 }
 

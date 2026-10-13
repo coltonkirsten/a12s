@@ -198,6 +198,7 @@ class Token:
     name: str
     actions: list[str]
     computers: list[str]
+    prefix: str | None = None
     created_at: str
     secret: str | None = None
 

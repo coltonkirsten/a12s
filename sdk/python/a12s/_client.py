@@ -229,9 +229,22 @@ class Client:
     def service(self, name: str) -> ServiceStatus:
         return from_json(ServiceStatus, self._request("GET", f"/v1/services/{core.enc(name)}"))
 
-    def create_token(self, name: str, actions: Sequence[str], computers: Sequence[str]) -> Token:
-        """A scoped token for another program; owner only. The secret is in the response once."""
-        req = {"name": name, "actions": list(actions), "computers": list(computers)}
+    def create_token(
+        self,
+        name: str,
+        actions: Sequence[str] | None = None,
+        computers: Sequence[str] | None = None,
+        *,
+        prefix: str | None = None,
+    ) -> Token:
+        """A token for another program; owner only. The secret is in the response once."""
+        req: dict[str, Any] = {"name": name}
+        if actions is not None:
+            req["actions"] = list(actions)
+        if computers is not None:
+            req["computers"] = list(computers)
+        if prefix is not None:
+            req["prefix"] = prefix
         return from_json(Token, self._request("POST", "/v1/tokens", req))
 
     def put_fleet(self, request: dict[str, Any]) -> dict[str, Any]:

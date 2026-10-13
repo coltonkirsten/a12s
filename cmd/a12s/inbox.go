@@ -330,7 +330,9 @@ func runToken(g *globals, args []string) error {
 	sub, args := args[0], args[1:]
 	fs := g.flags("token " + sub)
 	actions := fs.String("actions", "", "with create: comma-separated actions ("+strings.Join(api.TokenActions, ",")+")")
-	computers := fs.String("computers", "", "with create: comma-separated Computers, or *")
+	computers := fs.String("agent-computers", "", "with create: comma-separated agent computers, or *")
+	fs.StringVar(computers, "computers", "", "the old name of --agent-computers")
+	prefix := fs.String("prefix", "", "with create: a token with every power over names that start with this, and none outside")
 	asJSON := &g.json
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -357,13 +359,17 @@ func runToken(g *globals, args []string) error {
 			return usageError("token create needs a name")
 		}
 		var t api.Token
-		if err := c.Do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: pos[0], Actions: split(*actions), Computers: split(*computers)}, &t); err != nil {
+		if err := c.Do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: pos[0], Actions: split(*actions), Computers: split(*computers), Prefix: *prefix}, &t); err != nil {
 			return err
 		}
 		if *asJSON {
 			return printJSON(t)
 		}
-		fmt.Printf("token %s (actions %s on %s); shown once, store it now:\n%s\n", t.Name, strings.Join(t.Actions, ","), strings.Join(t.Computers, ","), t.Secret)
+		scope := fmt.Sprintf("actions %s on %s", strings.Join(t.Actions, ","), strings.Join(t.Computers, ","))
+		if t.Prefix != "" {
+			scope = "everything on names starting " + t.Prefix
+		}
+		fmt.Printf("token %s (%s); shown once, store it now:\n%s\n", t.Name, scope, t.Secret)
 	case "ls":
 		var res api.TokensResponse
 		if err := c.Do(ctx, "GET", "/v1/tokens", nil, &res); err != nil {
@@ -376,6 +382,10 @@ func runToken(g *globals, args []string) error {
 			fmt.Println("no scoped tokens")
 		}
 		for _, t := range res.Tokens {
+			if t.Prefix != "" {
+				fmt.Printf("%-20s prefix %s\n", t.Name, t.Prefix)
+				continue
+			}
 			fmt.Printf("%-20s %-28s %s\n", t.Name, strings.Join(t.Actions, ","), strings.Join(t.Computers, ","))
 		}
 	case "rm":

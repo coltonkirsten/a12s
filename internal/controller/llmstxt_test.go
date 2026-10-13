@@ -51,7 +51,7 @@ func TestLLMsTxtSurface(t *testing.T) {
 
 func apiSurface(t *testing.T) string {
 	var b strings.Builder
-	b.WriteString("Routes, with the action a scoped token needs (owner: the owner token only):\n\n```text\n")
+	b.WriteString("Routes, with the action a narrow token needs (owner: the owner token only; prefix: a prefix token, for names inside it). A prefix token may also make every action route on names inside its prefix.\n\n```text\n")
 	for _, m := range routeRE.FindAllStringSubmatch(read(t, "server.go"), -1) {
 		var need string
 		switch a := actionRE.FindStringSubmatch(m[2]); {
@@ -61,6 +61,8 @@ func apiSurface(t *testing.T) string {
 			need = "owner"
 		case strings.HasPrefix(m[2], "allowSendOrInbox("):
 			need = "send or inbox"
+		case strings.HasPrefix(m[2], "allowOwnerOrPrefix("):
+			need = "owner, or prefix"
 		case strings.HasPrefix(m[2], "func("):
 			continue // answers 410 Gone with the replacement route
 		default:

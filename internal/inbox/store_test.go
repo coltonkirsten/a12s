@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -402,7 +403,7 @@ func TestDurableAcrossReopen(t *testing.T) {
 
 func TestTokens(t *testing.T) {
 	s, _ := newStore(t, nil)
-	tok, err := s.CreateToken(context.Background(), "ui", []string{api.ActionSend}, []string{"builder"})
+	tok, err := s.CreateToken(context.Background(), "ui", []string{api.ActionSend}, []string{"builder"}, "")
 	if err != nil || !strings.HasPrefix(tok.Secret, TokenPrefix) {
 		t.Fatal(err)
 	}
@@ -452,5 +453,36 @@ func TestConcurrentEnqueue(t *testing.T) {
 		if m.Seq != int64(i+1) {
 			t.Fatalf("seq %d at %d", m.Seq, i)
 		}
+	}
+}
+
+// A fleet.db from before prefix tokens gains the column on open, and its tokens keep working.
+func TestOldTokensTableGainsPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fleet.db")
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`CREATE TABLE tokens (name TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, actions TEXT NOT NULL, computers TEXT NOT NULL, created_at INTEGER NOT NULL);
+		INSERT INTO tokens VALUES ('web', '` + tokenHash(TokenPrefix+"abc") + `', '["send"]', '["lead"]', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tok, err := s.LookupToken(context.Background(), TokenPrefix+"abc")
+	if err != nil || tok == nil || tok.Prefix != "" || !Allows(tok, api.ActionSend, "lead") {
+		t.Fatalf("old token = %+v, %v", tok, err)
+	}
+	p, err := s.CreateToken(context.Background(), "biz", []string{}, []string{}, "biz-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.LookupToken(context.Background(), p.Secret)
+	if got.Prefix != "biz-" || !Allows(got, api.ActionPower, "biz-a") || Allows(got, api.ActionSend, "lead") {
+		t.Fatalf("prefix token = %+v", got)
 	}
 }

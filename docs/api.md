@@ -12,7 +12,7 @@ The SDKs wrap this API; use it directly from any other language. It is JSON over
 ```
 
 The base URL is `http://127.0.0.1:<port>`. Send the token on every request as `Authorization: Bearer <token>`. It
-is the owner token; `a12s token create` makes scoped ones (see [Inbox: scoped tokens](inbox.md#scoped-tokens)).
+is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped ones](#tokens).
 `a12s gateway` serves the same routes to a web page on its own origin, without a token
 ([SDK: In the browser](sdk.md#in-the-browser)).
 
@@ -23,9 +23,9 @@ is the owner token; `a12s token create` makes scoped ones (see [Inbox: scoped to
 | `GET /v1/status` | → `{fleet, agentComputers: [ComputerStatus], services: [ServiceStatus], warnings, …}` |
 | `GET /v1/agent-computers` | → `{agentComputers: [AgentComputer]}` |
 | `GET /v1/agent-computers/{c}` | → AgentComputer: `{name, spec, effective, status}` |
-| `PUT /v1/agent-computers/{c}` | its spec → create or replace it (owner only; [below](#changing-the-fleet)) |
-| `PATCH /v1/agent-computers/{c}` | a JSON merge patch → change some fields (owner only) |
-| `DELETE /v1/agent-computers/{c}` | → remove it; its drives and inbox are kept (owner only) |
+| `PUT /v1/agent-computers/{c}` | its spec → create or replace it (owner or prefix; [below](#changing-the-fleet)) |
+| `PATCH /v1/agent-computers/{c}` | a JSON merge patch → change some fields (owner or prefix) |
+| `DELETE /v1/agent-computers/{c}` | → remove it; its drives and inbox are kept (owner or prefix) |
 | `POST /v1/agent-computers/{c}/inbox` | Message → `201 {id, seq, state, position, phase, createdAt, expiresAt, replaced?, turn?}` |
 | `GET /v1/agent-computers/{c}/inbox` | `?state=pending\|all\|…&bodies=true` → `{pending, claimed, limits, usage, held, messages: [Message]}` |
 | `GET /v1/agent-computers/{c}/inbox/{id}` | → Message |
@@ -36,11 +36,11 @@ is the owner token; `a12s token create` makes scoped ones (see [Inbox: scoped to
 | `POST /v1/agent-computers/{c}/power` | `{"state": "asleep"\|"awake"}` |
 | `POST /v1/agent-computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written |
-| `PUT`, `PATCH`, `DELETE /v1/services/{s}` | create or replace, change, remove a Service, like an agent computer (owner only) |
-| `POST /v1/tokens`, `GET /v1/tokens`, `DELETE /v1/tokens/{name}` | scoped tokens (owner only) |
-| `GET /v1/credentials` | → `{credentials: [{name, set, usedBy}]}`: every credential the Fleet names or the Controller stores, never a value (owner only) |
-| `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy}`: store it; agent computers and Services that use it get it at once (owner only) |
-| `DELETE /v1/credentials/{name}` | → 204; `409 in_use` while one uses it, `404` if none is stored (owner only) |
+| `PUT`, `PATCH`, `DELETE /v1/services/{s}` | create or replace, change, remove a Service, like an agent computer (owner or prefix) |
+| `POST /v1/tokens`, `GET /v1/tokens`, `DELETE /v1/tokens/{name}` | [scoped tokens](#tokens) (owner only) |
+| `GET /v1/credentials` | → `{credentials: [{name, set, usedBy}]}`: every credential the Fleet names or the Controller stores, never a value (owner; a prefix token sees names inside its prefix) |
+| `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy}`: store it; agent computers and Services that use it get it at once (owner or prefix) |
+| `DELETE /v1/credentials/{name}` | → 204; `409 in_use` while one uses it, `404` if none is stored (owner or prefix) |
 | `GET /v1/fleet` | → `{version, fleet, drift}` with `ETag: "<version>"` (owner only) |
 | `PUT /v1/fleet` | `{fleet, lock?, credentials?, asleep?, refresh?, file?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
@@ -49,6 +49,24 @@ The paths of earlier releases, `/v1/computers/...`, are still served as `/v1/age
 
 The field-by-field shapes are in `internal/api` and the SDKs' types. A ComputerStatus carries `seccomp` (the
 profile's `sha256:` digest) when the agent computer runs with its own seccomp profile.
+
+## Tokens
+
+`POST /v1/tokens` (owner only) makes a token for another program and returns it, with its `secret`, once:
+
+- `{"name": "bizapp", "prefix": "biz-"}`: a prefix token. On agent computers, Services and credentials whose names
+  start with the prefix it may call every route the owner can, except the whole-Fleet ones (`GET`/`PUT /v1/fleet`,
+  `POST /v1/apply`), drives and tokens. What its agent computers and Services send to, use and attach (`grants.send`,
+  `uses`, `drives`, those from `defaults` included) must be inside the prefix too; its specs may name any credential.
+  `GET /v1/status`, `/v1/agent-computers`, `/v1/services` and `/v1/credentials` list only names inside it, and its
+  status and write responses carry no Fleet-wide warnings. Anything outside is `403 out_of_prefix`; the whole-Fleet
+  routes, drives and tokens are `403 forbidden`. See [Security: Tokens](security.md#tokens).
+- `{"name": "dash", "actions": ["status", "events"], "computers": ["a", "b"]}`: a narrow token, for those actions
+  (`send`, `inbox`, `status`, `events`, `power`, `stop`) on those agent computers (or `["*"]`). A token with `send`
+  sees only its own Messages.
+
+A token has `prefix` or `actions`, not both. `GET /v1/tokens` lists them (no secrets); `DELETE /v1/tokens/{name}`
+revokes one. The [API surface in llms.txt](../llms.txt) lists, per route, the action a narrow token needs.
 
 ## Changing the Fleet
 
@@ -166,6 +184,7 @@ Every error is JSON with a stable `code`, a `message`, and usually a `fix` line 
 | `missing_credential` | 400 | The agent computer names a credential the Controller holds no value for; set it with `PUT /v1/credentials/{name}`, or `a12s creds set` it and run `a12s up`. |
 | `unauthorized` | 401 | Missing or unknown token. |
 | `forbidden`, `no_grant` | 403 | The token or the sender lacks that action, agent computer or grant. |
+| `out_of_prefix` | 403 | A prefix token named something, or wrote a spec that points at something (`grants.send`, `uses`, a drive, also from `defaults`), whose name doesn't start with its prefix. |
 | `not_found`, `unknown_request` | 404 | No such agent computer, Service, Message or Turn. |
 | `busy`, `conflict`, `not_idle`, `idempotency_conflict` | 409 | The agent computer is busy, or the request conflicts with an earlier one. |
 | `exists` | 409 | A create-only write (`If-None-Match: *`) named an agent computer or Service that exists. |

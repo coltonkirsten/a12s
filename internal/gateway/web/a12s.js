@@ -737,8 +737,14 @@ var Tokens = class {
   constructor(client) {
     this.client = client;
   }
-  /** A scoped token for another program; owner only. The secret is in the result once. */
+  /**
+   * A token for another program; owner only. The secret is in the result once. With `prefix` it may do everything
+   * the owner can for names that start with it, and nothing outside; otherwise `actions` on `agentComputers`.
+   */
   create(name, opts) {
+    if ("prefix" in opts) {
+      return this.client.createToken({ name, prefix: opts.prefix });
+    }
     return this.client.createToken({ name, actions: opts.actions, computers: opts.agentComputers ?? ["*"] });
   }
   async list() {

@@ -156,11 +156,14 @@ const (
 
 var TokenActions = []string{ActionSend, ActionInbox, ActionStatus, ActionEvents, ActionPower, ActionStop}
 
-// TokenRequest is owner only.
+// TokenRequest is owner only. A token has either a Prefix, or Actions on Computers.
 type TokenRequest struct {
 	Name      string   `json:"name"`
-	Actions   []string `json:"actions"`
-	Computers []string `json:"computers"` // ["*"] for every Computer
+	Actions   []string `json:"actions,omitempty"`
+	Computers []string `json:"computers,omitempty"` // ["*"] for every agent computer
+	// Prefix makes a token that may do everything the owner can for agent computers, Services and credentials whose
+	// names start with it, and nothing else.
+	Prefix string `json:"prefix,omitempty"`
 }
 
 // Token.Secret is only returned once, on create.
@@ -168,6 +171,7 @@ type Token struct {
 	Name      string    `json:"name"`
 	Actions   []string  `json:"actions"`
 	Computers []string  `json:"computers"`
+	Prefix    string    `json:"prefix,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	Secret    string    `json:"secret,omitempty"`
 }

@@ -475,10 +475,13 @@ export interface ApiErrorBody {
 
 export type TokenAction = "send" | "inbox" | "status" | "events" | "power" | "stop";
 
+/** Either `prefix`, or `actions` on `computers` (agent computer names, or "*"). */
 export interface TokenRequest {
   name: string;
-  actions: TokenAction[];
-  computers: string[];
+  actions?: TokenAction[];
+  computers?: string[];
+  /** Every power over agent computers, Services and credentials whose names start with it; none outside. */
+  prefix?: string;
 }
 
 /** A credential's name, whether it has a value, and who uses it. */
@@ -496,6 +499,7 @@ export interface Token {
   name: string;
   actions: string[];
   computers: string[];
+  prefix?: string;
   createdAt: string;
   secret?: string;
 }

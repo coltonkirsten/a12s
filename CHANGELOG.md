@@ -72,6 +72,14 @@ Agent computers and Services can be created, changed and removed while the Fleet
   profiles to `profiles/<name>.json`. It never writes credential values, and it refuses to overwrite a file that
   differs (comments in `fleet.yaml` are lost) or remove a stale preset file without `--force`. See
   [CLI](docs/cli.md#changes-made-through-the-api).
+- **Prefix tokens**: `a12s token create bizapp --prefix biz-` (`fleet.tokens.create("bizapp", prefix="biz-")`,
+  TypeScript `{ prefix: "biz-" }`, `POST /v1/tokens {"name", "prefix"}`) gives an app its own lane. It may do
+  everything the owner can with agent computers, Services and credentials whose names start with `biz-`, and sees and
+  does nothing outside: their `grants.send`, `uses` and drives (`defaults` included) must stay inside the prefix, it
+  can't read or change the whole Fleet, drives or tokens, and anything outside answers the new error code
+  `out_of_prefix` (403). Egress, image, seccomp and resources of its agent computers are its call. See
+  [Security](docs/security.md#tokens).
+- `a12s token create --agent-computers` is the new name of `--computers`, which still works.
 - `a12s creds set <name>` also sets the value on the Fleet's running Controller, so agent computers using it get it
   at once; with no Controller running, `a12s up` sends it as before.
 - `a12s up` sends every credential bound in `a12s.bindings.yaml`, not only the ones the file's agent computers name,

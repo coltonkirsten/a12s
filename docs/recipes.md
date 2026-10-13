@@ -12,6 +12,7 @@ is done ([Quickstart](../README.md#quickstart)), and use the TypeScript or Pytho
 - [Run work on a schedule](#run-work-on-a-schedule)
 - [Start work from a webhook](#start-work-from-a-webhook)
 - [Let another program in](#let-another-program-in)
+- [Give an app its own lane](#give-an-app-its-own-lane)
 - [Any language: the HTTP API](#any-language-the-http-api)
 - [See what's going on](#see-whats-going-on)
 
@@ -327,7 +328,7 @@ then `from: [service:clock]`.
 ## Start work from a webhook
 
 Whatever receives the webhook sends the Message. From your own server, use the SDK with a token that may only send
-to lead (`a12s token create hooks --actions send --computers lead`, see [below](#let-another-program-in)), check
+to lead (`a12s token create hooks --actions send --agent-computers lead`, see [below](#let-another-program-in)), check
 the sender's signature, then:
 
 ```ts
@@ -343,7 +344,7 @@ To run the receiver inside the Fleet instead, write a Service with `grants.send`
 The owner token can do everything. Give a script or service a scoped token:
 
 ```sh
-a12s token create ci --actions send,events --computers lead
+a12s token create ci --actions send,events --agent-computers lead
 ```
 
 ```ts
@@ -354,8 +355,39 @@ const fleet = await Fleet.connect({ url: "http://127.0.0.1:52011", token: proces
 fleet = a12s.Fleet(url="http://127.0.0.1:52011", token=os.environ["A12S_TOKEN"])
 ```
 
-The port is in `~/.a12s/<fleet>/controller.json`. Messages it sends arrive `via="token:ci"`. A scoped token can send
-and watch; creating, changing and removing agent computers needs the owner token.
+The port is in `~/.a12s/<fleet>/controller.json`. Messages it sends arrive `via="token:ci"`. This token can send
+and watch; to let a program create its own agent computers, give it [a lane](#give-an-app-its-own-lane).
+
+## Give an app its own lane
+
+An app that creates and removes its own agent computers gets a prefix token. The owner makes it once:
+
+```sh
+a12s token create bizapp --prefix biz-        # printed once; store it as the app's A12S_TOKEN
+```
+
+The app connects with it and works on `biz-*` names like the owner would:
+
+```ts
+const fleet = await Fleet.connect({ url: "http://127.0.0.1:52011", token: process.env.A12S_TOKEN });
+const sales = await fleet.agentComputers.create("biz-sales", {
+  instructions: "You answer sales questions.",
+  grants: { send: ["biz-lead"] },               // only biz-* names
+});
+await sales.send("Draft a reply to the Acme lead.");
+```
+
+```python
+fleet = a12s.Fleet(url="http://127.0.0.1:52011", token=os.environ["A12S_TOKEN"])
+sales = fleet.agent_computers.create("biz-sales", instructions="You answer sales questions.", grants={"send": ["biz-lead"]})
+sales.send("Draft a reply to the Acme lead.")
+```
+
+It sees only `biz-*` agent computers, Services and credentials. Naming anything else, or inheriting a `defaults`
+grant, use or drive outside `biz-`, fails with `out_of_prefix`; set the agent computer's own `grants` to override
+the default. Its agent computers may use any credential the Fleet stores (here `anthropic`, from `defaults`), and
+their egress and image are its call, so trust the app like the owner for them. See
+[Security: Tokens](security.md#tokens).
 
 ## Any language: the HTTP API
 
