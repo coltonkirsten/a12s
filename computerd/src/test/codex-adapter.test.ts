@@ -2,21 +2,23 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ResumeError, type AdapterEvent, type TurnInput } from '../adapters/adapter.js';
+import { ResumeError, type AdapterEvent, type TaskEvent, type TurnInput } from '../adapters/adapter.js';
 import { CodexAdapter, mcpConfigArgs } from '../adapters/codex.js';
-import { collect, fixtures, testConfig } from './helpers.js';
+import { collect, fixtures, testConfig, until } from './helpers.js';
 
 const fake = join(fixtures, 'fake-codex.js');
 
-function setup(mode: string) {
+function setup(mode: string, env: Record<string, string> = {}) {
   const cfg = testConfig({ harness: { kind: 'codex', version: '0.0.0', model: null } });
   const logFile = join(cfg.runDir, 'codex.jsonl');
   const mcp = { a12s: { command: '/usr/bin/node', args: ['/opt/x.js'], env: { A12S_SOCK: '/run/s.sock' } } };
-  const adapter = new CodexAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_LOG: logFile }), mcpServers: mcp }, fake, { termAfterMs: 300, killAfterMs: 300 });
+  const adapter = new CodexAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_LOG: logFile, ...env }), mcpServers: mcp }, fake, { termAfterMs: 300, killAfterMs: 300 });
   const input: TurnInput = { prompt: 'reply with pong', sessionId: null, cwd: cfg.agentHome, model: 'gpt-x', mcpServers: mcp };
   after(() => adapter.close());
+  const tasks: TaskEvent[] = [];
+  adapter.listen({ backgroundTurn: () => assert.fail('codex never starts a turn by itself'), taskEvent: (ev) => tasks.push(ev) });
   const log = () => readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, any>);
-  return { adapter, input, log };
+  return { adapter, input, log, tasks };
 }
 
 const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
@@ -109,4 +111,29 @@ test('codex: a stalled request hits its deadline; stop during startup kills the 
   setTimeout(() => void stoppable.stop(), 200);
   await assert.rejects(p, /stopped before the turn started/);
   assert.ok(Date.now() - started < 5000);
+});
+
+test('codex: a command still running at the turn end is a background task until its late completion', async () => {
+  const { adapter, input, tasks } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg' });
+  const evs = await collect(run.events);
+  assert.deepEqual(evs.map((e) => e.type).slice(-2), ['task.started', 'turn.finished']);
+  assert.equal(adapter.backgroundTasks(), 1);
+  await until(() => tasks.length === 1);
+  assert.deepEqual(tasks[0]?.data, { id: (evs.at(-2) as TaskEvent).data.id, kind: 'shell', description: 'sleep 1; make', status: 'completed' });
+  assert.equal(adapter.backgroundTasks(), 0);
+});
+
+test('codex: stop and a new thread end the background terminals with the app-server', async () => {
+  const { adapter, input, tasks, log } = setup('normal', { FAKE_BG_MS: '60000' });
+  await collect((await adapter.startTurn({ ...input, prompt: 'bg' })).events);
+  await adapter.stop();
+  await until(() => tasks.length === 1);
+  assert.equal((tasks[0]?.data as { status: string }).status, 'killed');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg' });
+  await collect(run.events);
+  await collect((await adapter.startTurn(input)).events);
+  await until(() => tasks.length === 2);
+  assert.equal(adapter.backgroundTasks(), 0);
+  assert.equal(log().filter((m) => Array.isArray(m.argv)).length, 3, 'one app-server per session with background work');
 });

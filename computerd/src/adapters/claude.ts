@@ -3,7 +3,18 @@ import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { query, type Options, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { EventQueue, ResumeError, Tail, type Adapter, type AdapterEvent, type RunningTurn, type TurnInput } from './adapter.js';
+import {
+  EventQueue,
+  ResumeError,
+  Tail,
+  type Adapter,
+  type AdapterEvent,
+  type RunningTurn,
+  type SessionListener,
+  type TaskEvent,
+  type TaskStatus,
+  type TurnInput,
+} from './adapter.js';
 import { harnessEnv, spawnAsAgent, type HarnessDeps } from './spawn.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,20 +24,52 @@ export interface StopTiming {
   killAfterMs: number;
 }
 
-interface ActiveTurn {
-  query: Query;
-  child: ChildProcessWithoutNullStreams | null;
-  stopping: boolean;
-  /** Set when a resume came up in a different session: the run is stopped and the turn fails. */
-  resumeFailed: string | null;
-  timers: NodeJS.Timeout[];
+/** One CLI turn: started by a prompt computerd pushed (`uuid`), or by the CLI itself when background work ended. */
+interface CliTurn {
+  uuid: string | null;
+  out: EventQueue<AdapterEvent>;
+  mapper: ClaudeMapper | null;
 }
 
-/** Claude Code through the Agent SDK, pinned to the bundle's binary. One process per turn. */
+interface Task {
+  kind: string;
+  description: string;
+}
+
+/** One long-lived Claude Code process for one session. */
+interface Live {
+  query: Query;
+  child: ChildProcessWithoutNullStreams | null;
+  input: EventQueue<SDKUserMessage>;
+  sessionId: string;
+  cwd: string;
+  resuming: boolean;
+  stderr: Tail;
+  /** The first init passed the session check; later turns' inits are not re-checked. */
+  initSeen: boolean;
+  /** The CLI announces queued prompts with command_lifecycle frames; older CLIs do not. */
+  lifecycle: boolean;
+  /** Pushed, not yet started by the CLI. */
+  pending: CliTurn | null;
+  current: CliTurn | null;
+  tasks: Map<string, Task>;
+  foreground: Map<string, Task>;
+  /** Being ended on purpose: stop, restart, close or a switch to another session. */
+  ending: boolean;
+  resumeFailed: string | null;
+  timers: NodeJS.Timeout[];
+  exited: Promise<void>;
+}
+
+/**
+ * Claude Code through the Agent SDK in streaming-input mode, pinned to the bundle's binary. One process per session,
+ * kept across turns so background sub-agents and shells outlive the turn that started them.
+ */
 export class ClaudeAdapter implements Adapter {
   readonly kind = 'claude-code' as const;
-  private active: ActiveTurn | null = null;
+  private live: Live | null = null;
   private starting: { cancelled: boolean } | null = null;
+  private listener: SessionListener | null = null;
 
   constructor(
     private readonly deps: HarnessDeps,
@@ -34,12 +77,27 @@ export class ClaudeAdapter implements Adapter {
     private readonly timing: StopTiming = { termAfterMs: 10_000, killAfterMs: 5_000 },
   ) {}
 
+  listen(listener: SessionListener): void {
+    this.listener = listener;
+  }
+
+  backgroundTasks(): number {
+    return this.live?.tasks.size ?? 0;
+  }
+
   async startTurn(input: TurnInput): Promise<RunningTurn> {
-    if (this.active) throw new Error('a turn is already running');
+    const busy = this.live && (this.live.pending || this.live.current?.uuid);
+    if (this.starting || busy) throw new Error('a turn is already running');
     const start = { cancelled: false };
     this.starting = start;
+    let live = this.live;
     try {
-      if (input.sessionId) {
+      if (live && (live.ending || live.sessionId !== input.sessionId || live.cwd !== input.cwd)) {
+        this.end(live);
+        await live.exited;
+        live = null;
+      }
+      if (!live && input.sessionId) {
         const reason = await this.precheck(input.sessionId);
         if (reason) throw new ResumeError(reason);
       }
@@ -47,24 +105,44 @@ export class ClaudeAdapter implements Adapter {
       this.starting = null;
     }
     if (start.cancelled) throw new Error('stopped before the turn started');
+    live ??= this.spawn(input);
+    const uuid = randomUUID();
+    const turn: CliTurn = { uuid, out: new EventQueue(), mapper: null };
+    live.pending = turn;
+    // `later` keeps the prompt queued until a running turn's result instead of folding it into that turn.
+    live.input.push({ type: 'user', message: { role: 'user', content: input.prompt }, parent_tool_use_id: null, uuid, priority: 'later' });
+    return { sessionId: live.sessionId, events: turn.out };
+  }
+
+  private spawn(input: TurnInput): Live {
     const sessionId = input.sessionId ?? randomUUID();
-    const events = new EventQueue<AdapterEvent>();
-    const stderr = new Tail();
-    let endInput!: () => void;
-    const inputDone = new Promise<void>((resolve) => (endInput = resolve));
-    // An open-ended input stream keeps stdin open, which interrupt() needs; ending it lets the process exit.
-    async function* prompt(): AsyncGenerator<SDKUserMessage> {
-      yield { type: 'user', message: { role: 'user', content: input.prompt }, parent_tool_use_id: null };
-      await inputDone;
-    }
-    const active: ActiveTurn = { query: null as unknown as Query, child: null, stopping: false, resumeFailed: null, timers: [] };
+    let exited!: () => void;
+    const live: Live = {
+      query: null as unknown as Query,
+      child: null,
+      input: new EventQueue(),
+      sessionId,
+      cwd: input.cwd,
+      resuming: input.sessionId !== null,
+      stderr: new Tail(),
+      initSeen: false,
+      lifecycle: false,
+      pending: null,
+      current: null,
+      tasks: new Map(),
+      foreground: new Map(),
+      ending: false,
+      resumeFailed: null,
+      timers: [],
+      exited: new Promise((resolve) => (exited = resolve)),
+    };
     const options: Options = {
       pathToClaudeCodeExecutable: this.executable,
       spawnClaudeCodeProcess: (o) => {
         const child = spawnAsAgent(this.deps.cfg, o.command, o.args, { cwd: o.cwd ?? input.cwd, env: o.env });
-        child.stderr.setEncoding('utf8').on('data', (d: string) => stderr.add(d));
+        child.stderr.setEncoding('utf8').on('data', (d: string) => live.stderr.add(d));
         o.signal.addEventListener('abort', () => child.kill('SIGTERM'), { once: true });
-        active.child = child;
+        live.child = child;
         return child;
       },
       cwd: input.cwd,
@@ -82,64 +160,168 @@ export class ClaudeAdapter implements Adapter {
       permissionMode: 'bypassPermissions' as const,
       allowDangerouslySkipPermissions: true,
     };
-    active.query = query({ prompt: prompt(), options });
-    this.active = active;
-    void this.pump(active, sessionId, input.sessionId !== null, events, stderr, endInput);
-    return { sessionId, events };
+    // An open input stream keeps the process, and the background work it runs, alive between turns.
+    live.query = query({ prompt: live.input, options });
+    this.live = live;
+    void this.pump(live, exited);
+    return live;
   }
 
-  private async pump(active: ActiveTurn, sessionId: string, resuming: boolean, out: EventQueue<AdapterEvent>, stderr: Tail, endInput: () => void): Promise<void> {
-    const mapper = new ClaudeMapper(sessionId, resuming);
-    let finished: AdapterEvent | null = null;
-    let threw = false;
+  private async pump(live: Live, exited: () => void): Promise<void> {
+    let error: Error | null = null;
     try {
-      for await (const message of active.query) {
-        for (const ev of mapper.map(message)) {
-          if (ev.type === 'turn.finished') finished = ev;
-          else out.push(ev);
-          if (ev.type === 'resume.failed' && !active.resumeFailed) {
-            active.resumeFailed = ev.data.reason;
-            void this.stop();
-          }
-        }
-        if (message.type === 'result') endInput();
-      }
+      for await (const message of live.query) this.onMessage(live, message);
     } catch (err) {
-      // The SDK also throws after yielding an error result (an interrupt, say); the result already says it all.
-      threw = true;
-      if (!finished) out.push({ type: 'diagnostic', data: { message: `claude: ${(err as Error).message}`, stderr: stderr.toString() } });
-    } finally {
-      endInput();
-      for (const t of active.timers) clearTimeout(t);
-      this.active = null;
+      error = err as Error;
     }
-    // turn.finished goes last, after the process exited, so the next turn never overlaps this one.
-    if (active.resumeFailed) {
-      out.push({ type: 'turn.finished', data: { status: 'failed', usage: finished?.type === 'turn.finished' ? finished.data.usage : null, error: active.resumeFailed } });
-    } else if (finished?.type === 'turn.finished') {
-      if (active.stopping) finished.data.status = 'interrupted';
-      else if (finished.data.status === 'failed') out.push({ type: 'diagnostic', data: { message: 'claude: turn failed', stderr: stderr.toString() } });
-      out.push(finished);
-    } else {
-      if (!threw && !active.stopping) out.push({ type: 'diagnostic', data: { message: 'claude: exited without a result', stderr: stderr.toString() } });
-      out.push({ type: 'turn.finished', data: { status: active.stopping ? 'interrupted' : 'failed', usage: null, error: 'no result' } });
+    for (const t of live.timers) clearTimeout(t);
+    if (this.live === live) this.live = null;
+    for (const [id, task] of live.tasks) this.emit(live, { type: 'task.finished', data: { id, ...task, status: 'killed' } });
+    live.tasks.clear();
+    for (const turn of [live.current, live.pending]) {
+      if (!turn) continue;
+      if (live.resumeFailed && turn.uuid) {
+        turn.out.push({ type: 'turn.finished', data: { status: 'failed', usage: null, error: live.resumeFailed } });
+      } else {
+        // The SDK also throws after an interrupt; only an unexpected exit is worth a diagnostic.
+        if (!live.ending) {
+          const message = error ? `claude: ${error.message}` : 'claude: exited without a result';
+          turn.out.push({ type: 'diagnostic', data: { message, stderr: live.stderr.toString() } });
+        }
+        turn.out.push({ type: 'turn.finished', data: { status: live.ending ? 'interrupted' : 'failed', usage: null, error: 'no result' } });
+      }
+      turn.out.end();
     }
-    out.end();
+    live.current = live.pending = null;
+    exited();
+  }
+
+  private onMessage(live: Live, m: SDKMessage): void {
+    const frame = m as unknown as { type: string; subtype?: string; command_uuid?: string; state?: string };
+    if (frame.type === 'command_lifecycle') {
+      live.lifecycle = true;
+      if (frame.state === 'started' && live.pending && live.pending.uuid === frame.command_uuid && !live.ending) this.open(live, live.pending);
+      return;
+    }
+    if (m.type === 'system') {
+      if (m.subtype === 'task_started' || m.subtype === 'task_updated' || m.subtype === 'task_notification') return this.task(live, m);
+      if (m.subtype === 'init' && !live.current && !live.ending) {
+        // A CLI without lifecycle frames starts a pushed prompt at the next init; one with them announced it already.
+        if (live.pending && !live.lifecycle) this.open(live, live.pending);
+        else this.open(live, { uuid: null, out: new EventQueue(), mapper: null });
+      }
+    }
+    const turn = live.current;
+    // Between turns the CLI streams sub-agent work and status frames that belong to no turn.
+    if (!turn?.mapper) return;
+    if (m.type === 'system' && m.subtype === 'init') live.initSeen = true;
+    for (const ev of turn.mapper.map(m)) {
+      if (ev.type === 'resume.failed' && !live.resumeFailed) {
+        live.resumeFailed = ev.data.reason;
+        turn.out.push(ev);
+        this.end(live);
+        continue;
+      }
+      if (ev.type !== 'turn.finished') {
+        turn.out.push(ev);
+        continue;
+      }
+      if (live.resumeFailed && turn.uuid) Object.assign(ev.data, { status: 'failed', error: live.resumeFailed });
+      else if (live.ending) ev.data.status = 'interrupted';
+      else if (ev.data.status === 'failed') turn.out.push({ type: 'diagnostic', data: { message: 'claude: turn failed', stderr: live.stderr.toString() } });
+      turn.out.push(ev);
+      turn.out.end();
+      live.current = null;
+      if (live.ending) this.closeInput(live);
+    }
+  }
+
+  private open(live: Live, turn: CliTurn): void {
+    if (live.current && !live.current.uuid) {
+      // A CLI that folds a pushed prompt into a turn it started itself: the rest of that turn answers the prompt.
+      live.current.out.push({ type: 'turn.finished', data: { status: 'completed', usage: null } });
+      live.current.out.end();
+    }
+    if (live.pending === turn) live.pending = null;
+    turn.mapper = new ClaudeMapper(live.sessionId, live.resuming && !live.initSeen, turn.uuid);
+    live.current = turn;
+    if (!turn.uuid) this.listener?.backgroundTurn({ sessionId: live.sessionId, events: turn.out });
+  }
+
+  private task(live: Live, m: SDKMessage & { type: 'system' }): void {
+    const t = m as unknown as {
+      subtype: string;
+      task_id: string;
+      task_type?: string;
+      description?: string;
+      is_backgrounded?: boolean;
+      ambient?: boolean;
+      skip_transcript?: boolean;
+      status?: TaskStatus;
+      patch?: { is_backgrounded?: boolean };
+    };
+    const id = t.task_id;
+    const started = (task: Task) => {
+      live.foreground.delete(id);
+      live.tasks.set(id, task);
+      this.emit(live, { type: 'task.started', data: { id, ...task } });
+    };
+    switch (t.subtype) {
+      case 'task_started': {
+        if (t.ambient || t.skip_transcript || live.tasks.has(id)) return;
+        const task = { kind: t.task_type ?? 'task', description: t.description ?? '' };
+        if (t.is_backgrounded) started(task);
+        else live.foreground.set(id, task);
+        return;
+      }
+      case 'task_updated': {
+        const fg = live.foreground.get(id);
+        if (fg && t.patch?.is_backgrounded) started(fg);
+        return;
+      }
+      case 'task_notification': {
+        live.foreground.delete(id);
+        const task = live.tasks.get(id);
+        if (!task) return;
+        live.tasks.delete(id);
+        this.emit(live, { type: 'task.finished', data: { id, ...task, status: t.status ?? 'completed' } });
+      }
+    }
+  }
+
+  private emit(live: Live, ev: TaskEvent): void {
+    if (live.current) live.current.out.push(ev);
+    else this.listener?.taskEvent(ev);
+  }
+
+  /** Interrupts a running turn first: SIGTERM would leave it half-recorded in the transcript. */
+  private end(live: Live): void {
+    if (live.ending) return;
+    live.ending = true;
+    if (!live.current) return this.closeInput(live);
+    live.query.interrupt().catch(() => {});
+    live.timers.push(
+      setTimeout(() => {
+        live.child?.kill('SIGTERM');
+        live.timers.push(setTimeout(() => live.child?.kill('SIGKILL'), this.timing.killAfterMs));
+      }, this.timing.termAfterMs),
+    );
+  }
+
+  /** End of input makes the CLI stop its background tasks and exit. */
+  private closeInput(live: Live): void {
+    live.input.end();
+    live.timers.push(
+      setTimeout(() => {
+        live.child?.kill('SIGTERM');
+        live.timers.push(setTimeout(() => live.child?.kill('SIGKILL'), this.timing.killAfterMs));
+      }, this.timing.killAfterMs),
+    );
   }
 
   async stop(): Promise<void> {
     if (this.starting) this.starting.cancelled = true;
-    const a = this.active;
-    if (!a || a.stopping) return;
-    a.stopping = true;
-    // interrupt() ends the turn cleanly; SIGTERM would leave it half-recorded in the transcript.
-    a.query.interrupt().catch(() => {});
-    a.timers.push(
-      setTimeout(() => {
-        a.child?.kill('SIGTERM');
-        a.timers.push(setTimeout(() => a.child?.kill('SIGKILL'), this.timing.killAfterMs));
-      }, this.timing.termAfterMs),
-    );
+    if (this.live) this.end(this.live);
   }
 
   /** The session transcript must exist under $CLAUDE_CONFIG_DIR/projects/ and start with a JSON line. */
@@ -175,11 +357,17 @@ export class ClaudeAdapter implements Adapter {
     return `session transcript ${sessionId}.jsonl not found under ${root}`;
   }
 
-  /** Nothing to restart between turns: every turn starts a fresh process that reloads settings, skills and MCP. */
-  async restart(): Promise<void> {}
+  /** The next turn starts a new process that resumes the session and reloads settings, skills and MCP. */
+  async restart(): Promise<void> {
+    const live = this.live;
+    if (!live) return;
+    this.end(live);
+    await live.exited;
+  }
 
   async close(): Promise<void> {
-    await this.stop();
+    if (this.starting) this.starting.cancelled = true;
+    await this.restart();
   }
 }
 
@@ -189,7 +377,7 @@ function blocks(content: unknown): Block[] {
   return Array.isArray(content) ? (content.filter((b) => b && typeof b === 'object' && typeof b.type === 'string') as Block[]) : [];
 }
 
-/** Maps SDK messages of one turn onto a12s events. */
+/** Maps SDK messages of one CLI turn onto a12s events. */
 export class ClaudeMapper {
   private readonly toolNames = new Map<string, string>();
   private readonly denied = new Set<string>();
@@ -198,9 +386,11 @@ export class ClaudeMapper {
   private echoed = false;
   private dispatched = false;
 
+  /** `prompt` is the uuid of the pushed prompt whose echo is the receipt; a turn the CLI started itself has none. */
   constructor(
     private sessionId: string,
     private readonly resuming = false,
+    private readonly prompt: string | null = null,
   ) {}
 
   map(m: SDKMessage): AdapterEvent[] {
@@ -239,7 +429,7 @@ export class ClaudeMapper {
         }
         break;
       case 'user':
-        if ((m as { isReplay?: boolean }).isReplay === true && m.parent_tool_use_id === null) this.echoed = true;
+        if ((m as { isReplay?: boolean }).isReplay === true && m.parent_tool_use_id === null && this.prompt !== null && m.uuid === this.prompt) this.echoed = true;
         for (const b of blocks(m.message.content)) {
           if (b.type === 'tool_result') {
             const id = String(b.tool_use_id);

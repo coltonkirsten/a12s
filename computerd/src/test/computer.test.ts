@@ -355,3 +355,71 @@ test('a continuation accepted but not dispatched before a crash is abandoned at 
   assert.equal(c2.status().continuation, null);
   assert.equal(c2.cancelContinuation('again'), null);
 });
+
+test('background: a turn the harness starts by itself is journaled with reason background and holds admission', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'launch a sub-agent' });
+  adapter.task('a1', true);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  assert.deepEqual([computer.status().phase, computer.status().background], ['ready', { tasks: 1 }], 'background work alone leaves it ready');
+
+  adapter.task('a1', false);
+  adapter.backgroundTurn();
+  const bg = String(computer.status().activeTurn);
+  assert.notEqual(bg, t.turnId);
+  assert.equal(computer.status().phase, 'busy');
+  assert.equal(await status(computer.submitTurn({ requestId: 'r2', session: 'current', prompt: 'x' })), 409, 'a Message waits for the background turn');
+  adapter.finishBackground();
+  await until(() => finished(bg) === 'completed');
+  const evs = journal.after(0, null, 100);
+  const started = evs.find((e) => e.type === 'turn.started' && e.turn === bg);
+  assert.deepEqual([started?.data.reason, started?.data.inbox, started?.data.requestId, started?.session], ['background', undefined, undefined, t.sessionId]);
+  assert.deepEqual(evs.filter((e) => e.turn === bg).map((e) => e.type), ['turn.started', 'text.delta', 'turn.finished']);
+  assert.deepEqual(evs.filter((e) => e.type.startsWith('task.')).map((e) => [e.type, e.turn]), [['task.started', t.turnId], ['task.finished', null]]);
+  assert.equal(computer.status().phase, 'ready');
+  const next = await computer.submitTurn({ requestId: 'r3', session: 'current', prompt: 'x' });
+  assert.equal(next.sessionId, t.sessionId);
+});
+
+test('background: stop ends a turn and the background work; stopAll ends background work alone', async () => {
+  const { adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  adapter.task('a1', true);
+  computer.stopTurn(t.turnId);
+  await until(() => finished(t.turnId) === 'interrupted');
+  assert.deepEqual(computer.status().background, { tasks: 0 });
+  const u = await computer.submitTurn({ requestId: 'r2', session: 'current', prompt: 'x' });
+  adapter.task('a2', true);
+  adapter.finish();
+  await until(() => finished(u.turnId) === 'completed');
+  assert.deepEqual(computer.stopAll(), { turns: [], background: 1 });
+  assert.deepEqual(computer.status().background, { tasks: 0 });
+});
+
+test('background: restart_harness from a background turn waits for it; credentials wait for background work', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
+  const adapter = new StubAdapter();
+  const computer = new Computer(cfg, journal, adapter, {}, 20);
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  adapter.task('a1', true);
+  adapter.finish();
+  await until(() => journal.turnInfo(t.turnId)?.finished === 'completed');
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual([computer.status().credentialGeneration, adapter.restarts], [1, 0], 'a restart would end the background work');
+
+  adapter.task('a1', false);
+  await until(() => computer.status().credentialGeneration === 2);
+  adapter.backgroundTurn();
+  computer.requestRestart();
+  assert.equal(adapter.restarts, 1, 'not during the background turn');
+  adapter.finishBackground();
+  await until(() => adapter.restarts === 2);
+  await computer.shutdown(100);
+});

@@ -114,7 +114,7 @@ test('POST /v1/turns, ?turn= replays only that turn, diagnostics and status', as
     let t = '';
     res.on('data', (d) => (t += d)).on('end', () => resolve(JSON.parse(t)));
   }));
-  assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'continuation', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session']);
+  assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'background', 'continuation', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session']);
   assert.equal(st.phase, 'ready');
   assert.equal((await post(`/v1/turns/${turnId}/stop`, {})).body.status, 'completed');
 });

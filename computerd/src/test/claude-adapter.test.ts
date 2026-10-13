@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { test } from 'node:test';
-import { ResumeError, type AdapterEvent, type TurnInput } from '../adapters/adapter.js';
+import { after, test } from 'node:test';
+import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type TurnInput } from '../adapters/adapter.js';
 import { ClaudeAdapter } from '../adapters/claude.js';
-import { collect, fixtures, testConfig } from './helpers.js';
+import { collect, fixtures, testConfig, until } from './helpers.js';
 
 const fake = join(fixtures, 'fake-claude.js');
+const adapters: ClaudeAdapter[] = [];
+after(() => Promise.all(adapters.map((a) => a.close())));
 
-function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 }) {
+function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 }, env: Record<string, string> = {}) {
   const cfg = testConfig();
   const argsFile = join(cfg.runDir, 'args.jsonl');
-  const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile }), mcpServers: {} }, fake, timing);
+  const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile, ...env }), mcpServers: {} }, fake, timing);
+  adapters.push(adapter);
+  const background: RunningTurn[] = [];
+  const tasks: TaskEvent[] = [];
+  adapter.listen({ backgroundTurn: (run) => background.push(run), taskEvent: (ev) => tasks.push(ev) });
   const input: TurnInput = {
     prompt: 'reply with pong',
     sessionId: null,
@@ -19,11 +25,19 @@ function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 
     model: null,
     mcpServers: { a12s: { command: '/bin/true', args: ['x'], alwaysLoad: true } },
   };
+  const spawns = () => readFileSync(argsFile, 'utf8').trim().split('\n').length;
   const args = () => JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n').at(-1) ?? '[]') as string[];
-  return { cfg, adapter, input, args };
+  const transcript = (id: string) => {
+    const dir = join(cfg.claudeConfigDir, 'projects', '-home-agent');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${id}.jsonl`), '{"type":"user"}\n');
+  };
+  return { cfg, adapter, input, args, spawns, transcript, background, tasks };
 }
 
 const types = (evs: AdapterEvent[]) => evs.map((e) => e.type);
+const text = (evs: AdapterEvent[]) => evs.map((e) => (e.type === 'text.delta' ? e.data.text : '')).join('');
+const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
 
 test('claude: maps deltas, tools and the result; passes the pinned flags', async () => {
   const { adapter, input, args } = setup('normal');
@@ -104,4 +118,110 @@ test('claude: receipt needs the user-message echo and a passing init, in either 
     assert.equal(evs.filter((e) => e.type === 'turn.dispatched').length, want ? 1 : 0, mode);
     if (want) assert.equal(evs[0]?.type, 'turn.dispatched', 'before any model output');
   }
+});
+
+test('claude: one process serves consecutive turns of a session', async () => {
+  const { adapter, input, spawns } = setup('normal');
+  const first = await adapter.startTurn(input);
+  await collect(first.events);
+  const second = await adapter.startTurn({ ...input, sessionId: first.sessionId });
+  assert.equal(finished(await collect(second.events)).status, 'completed');
+  assert.equal(spawns(), 1, 'no new process, so background work survives');
+});
+
+test('claude: background work outlives its turn; the CLI starts a turn by itself when it ends', async () => {
+  const { adapter, input, background, tasks } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 300' });
+  const evs = await collect(run.events);
+  assert.deepEqual(types(evs), ['turn.dispatched', 'tool.started', 'task.started', 'tool.finished', 'text.delta', 'turn.finished']);
+  assert.deepEqual(evs[2]?.data, { id: 'task_1', kind: 'local_agent', description: 'sleep 300' });
+  assert.equal(adapter.backgroundTasks(), 1, 'still running after the turn ended');
+  await until(() => background.length === 1);
+  const own = await collect(background[0]!.events);
+  assert.equal(background[0]!.sessionId, run.sessionId);
+  assert.deepEqual(types(own), ['text.delta', 'turn.finished'], 'no receipt, and no sub-agent output from between turns');
+  assert.equal(text(own), 'task task_1 finished');
+  assert.deepEqual(tasks.map((t) => [t.type, t.data.id, 'status' in t.data ? t.data.status : null]), [['task.finished', 'task_1', 'completed']]);
+  assert.equal(adapter.backgroundTasks(), 0);
+});
+
+test('claude: a prompt while background work runs starts at once', async () => {
+  const { adapter, input } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 5000' });
+  await collect(run.events);
+  const t0 = Date.now();
+  const next = await adapter.startTurn({ ...input, sessionId: run.sessionId, prompt: 'what is 17*3' });
+  const evs = await collect(next.events);
+  assert.equal(finished(evs).status, 'completed');
+  assert.ok(Date.now() - t0 < 2000, 'did not wait for the background task');
+  assert.equal(adapter.backgroundTasks(), 1);
+});
+
+test('claude: a prompt pushed while the CLI runs its own turn waits for it, and nothing is mis-attributed', async () => {
+  const { adapter, input, background } = setup('normal', undefined, { FAKE_SELF_MS: '300' });
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 50' });
+  await collect(run.events);
+  await until(() => background.length === 1);
+  // computerd races the CLI: the prompt goes in while the self-started turn is still open.
+  const next = await adapter.startTurn({ ...input, sessionId: run.sessionId });
+  const [own, mine] = await Promise.all([collect(background[0]!.events), collect(next.events)]);
+  assert.equal(text(own), 'task task_1 finished');
+  assert.deepEqual(types(own), ['text.delta', 'turn.finished']);
+  assert.equal(text(mine), 'pong');
+  assert.equal(mine[0]?.type, 'turn.dispatched');
+  assert.equal(finished(mine).status, 'completed');
+});
+
+test('claude: stop ends the turn and the session with its background work', async () => {
+  const { adapter, input, tasks, spawns } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 10000' });
+  await collect(run.events);
+  assert.equal(adapter.backgroundTasks(), 1);
+  await adapter.stop();
+  await until(() => tasks.some((t) => t.type === 'task.finished'));
+  assert.equal(adapter.backgroundTasks(), 0);
+  assert.deepEqual(tasks.map((t) => [t.type, 'status' in t.data ? t.data.status : null]), [['task.finished', 'stopped']]);
+  const again = await adapter.startTurn({ ...input, sessionId: run.sessionId }).catch((e: Error) => e);
+  assert.ok(again instanceof ResumeError, 'the fake writes no transcript: the next turn has to resume in a new process');
+  assert.equal(spawns(), 1);
+});
+
+test('claude: a new session or a restart ends the live one and its background work', async () => {
+  const { adapter, input, tasks, spawns } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 10000' });
+  await collect(run.events);
+  const fresh = await adapter.startTurn(input);
+  assert.notEqual(fresh.sessionId, run.sessionId);
+  await collect(fresh.events);
+  assert.equal(spawns(), 2);
+  assert.equal(tasks.filter((t) => t.type === 'task.finished').length, 1);
+  const bg = await adapter.startTurn({ ...input, sessionId: fresh.sessionId, prompt: 'bg 10000' });
+  await collect(bg.events);
+  await adapter.restart();
+  assert.equal(adapter.backgroundTasks(), 0);
+  assert.equal(tasks.filter((t) => t.type === 'task.finished').length, 2);
+});
+
+test('claude: a crash mid-turn fails the turn and kills its tasks; the next turn resumes the session in a new process', async () => {
+  const { adapter, input, args, spawns, transcript } = setup('normal');
+  const bg = await adapter.startTurn({ ...input, prompt: 'bg 10000' });
+  await collect(bg.events);
+  const run = await adapter.startTurn({ ...input, sessionId: bg.sessionId, prompt: 'crash' });
+  const evs = await collect(run.events);
+  assert.deepEqual(types(evs), ['turn.dispatched', 'task.finished', 'diagnostic', 'turn.finished']);
+  assert.equal((evs[1] as TaskEvent).data.id, 'task_1');
+  assert.equal(finished(evs).status, 'failed');
+  transcript(bg.sessionId);
+  const next = await adapter.startTurn({ ...input, sessionId: bg.sessionId });
+  assert.equal(finished(await collect(next.events)).status, 'completed');
+  assert.equal(spawns(), 2);
+  assert.ok(args().includes(`--resume=${bg.sessionId}`));
+});
+
+test('claude: a CLI without lifecycle frames still delimits turns by init and result', async () => {
+  const { adapter, input } = setup('no-lifecycle');
+  const first = await adapter.startTurn(input);
+  assert.deepEqual(types(await collect(first.events)), ['turn.dispatched', 'text.delta', 'text.delta', 'tool.started', 'tool.finished', 'turn.finished']);
+  const second = await adapter.startTurn({ ...input, sessionId: first.sessionId });
+  assert.equal(finished(await collect(second.events)).status, 'completed');
 });

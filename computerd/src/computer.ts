@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chownSync, existsSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type TurnStatus } from './adapters/adapter.js';
+import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
 import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import type { Journal } from './journal.js';
@@ -53,7 +53,10 @@ const CONTINUE_PROMPT = 'a12s restarted your harness at your request and resumed
 const PRECHECK_TIMEOUT_MS = 60_000;
 const RECLAIM_DEBOUNCE_MS = 200;
 
-/** One Computer's runtime state: admission, the active turn, the session record, harness restarts. */
+/**
+ * One Computer's runtime state: admission, the active turn, the session record, harness restarts. The harness
+ * session outlives turns: a turn it starts by itself, when background work ends, runs in `background`.
+ */
 export class Computer {
   private base: 'starting' | 'ready' | 'stopping' = 'starting';
   private session: SessionRecord | null = null;
@@ -61,6 +64,7 @@ export class Computer {
   private sessionDamaged: string | null = null;
   private resumePending = false;
   private active: ActiveTurn | null = null;
+  private background: ActiveTurn | null = null;
   private restarting = false;
   private restartRequested = false;
   private readonly inflight = new Map<string, { hash: string; reply: Promise<TurnReply> }>();
@@ -79,11 +83,21 @@ export class Computer {
     private readonly adapter: Adapter,
     private readonly mcpServers: Record<string, McpServer>,
     private readonly credentialPollMs = 2_000,
-  ) {}
+  ) {
+    adapter.listen({
+      backgroundTurn: (run) => this.beginBackgroundTurn(run),
+      taskEvent: (ev) => this.journal.append(ev.type, ev.data, { session: this.session?.sessionId ?? null }),
+    });
+  }
 
   get phase(): Phase {
     if (this.base !== 'ready') return this.base;
-    return this.active || this.restarting ? 'busy' : 'ready';
+    return this.active || this.background || this.restarting ? 'busy' : 'ready';
+  }
+
+  /** The turn the harness is running or about to run: a requested one first. */
+  private get running(): ActiveTurn | null {
+    return this.active ?? this.background;
   }
 
   private get sessionPath(): string {
@@ -132,7 +146,8 @@ export class Computer {
     return {
       phase: this.phase,
       session: this.session?.sessionId ?? null,
-      activeTurn: this.active?.turnId ?? null,
+      activeTurn: this.running?.turnId ?? null,
+      background: { tasks: this.adapter.backgroundTasks() },
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
       credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
@@ -166,7 +181,7 @@ export class Computer {
     if (req.continuation && this.owedContinuation?.id !== req.requestId) {
       return Promise.reject(new HttpError(409, `no continuation ${req.requestId} is owed`));
     }
-    if (this.active || this.restarting) return Promise.reject(new HttpError(409, 'computer is busy'));
+    if (this.active || this.background || this.restarting) return Promise.reject(new HttpError(409, 'computer is busy'));
     const reply = this.beginTurn(body, hash).finally(() => this.inflight.delete(req.requestId));
     this.inflight.set(req.requestId, { hash, reply });
     return reply;
@@ -203,8 +218,10 @@ export class Computer {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
       const generation = credentialGeneration(this.cfg);
-      if (this.wire(turnId) && generation !== this.ackedGeneration) {
-        await this.adapter.restart(); // rotated credentials must not stay in a long-lived harness
+      // Rotated credentials must not stay in a long-lived harness, but restarting it would end background work:
+      // with some running, the rotation waits for the idle boundary.
+      if (this.wire(turnId) && generation !== this.ackedGeneration && this.adapter.backgroundTasks() === 0) {
+        await this.adapter.restart();
         this.ackedGeneration = generation;
       }
       // A stop may have landed during the awaits above: then nothing reaches the harness.
@@ -247,6 +264,25 @@ export class Computer {
     if (active.stopRequested) void this.adapter.stop();
     void this.pump(active, sessionId, wanted !== null, run.events, req);
     return { turnId, sessionId };
+  }
+
+  /** A turn the harness started by itself: journaled like any other, with reason `background` and no request. */
+  private beginBackgroundTurn(run: RunningTurn): void {
+    const turnId = `t_${randomBytes(8).toString('hex')}`;
+    let resolveDone!: () => void;
+    const done = new Promise<void>((r) => (resolveDone = r));
+    const active: ActiveTurn = { turnId, started: true, stopRequested: false, done, resolveDone };
+    this.background = active;
+    const started = {
+      harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version },
+      model: this.cfg.harness.model,
+      resumed: true,
+      prompt: '',
+      cwd: this.session?.cwd ?? this.cfg.agentHome,
+      reason: 'background',
+    };
+    this.journal.acceptTurn(turnId, turnId, '', started, run.sessionId);
+    void this.pump(active, run.sessionId, false, run.events, { requestId: turnId, session: 'current', prompt: '' });
   }
 
   /**
@@ -329,6 +365,7 @@ export class Computer {
     }
     if (resumed && status === 'completed') this.resumePending = false;
     this.endTurn(active);
+    if (this.active || this.background) return;
     if (this.restartRequested) void this.restartHarness(active.turnId, status);
     else void this.applyCredentials();
   }
@@ -336,13 +373,14 @@ export class Computer {
   private endTurn(active: ActiveTurn): void {
     this.wire(active.turnId);
     if (this.active === active) this.active = null;
+    if (this.background === active) this.background = null;
     active.resolveDone();
   }
 
-  /** POST /v1/turns/{id}/stop. Idempotent. */
+  /** POST /v1/turns/{id}/stop: the turn ends interrupted and the session's background work ends too. Idempotent. */
   stopTurn(turnId: string): { turnId: string; status: string } {
-    const a = this.active;
-    if (a && a.turnId === turnId) {
+    const a = [this.active, this.background].find((t) => t?.turnId === turnId);
+    if (a) {
       if (!a.stopRequested) {
         a.stopRequested = true;
         void this.adapter.stop(); // also cancels a turn the adapter is still starting
@@ -354,20 +392,33 @@ export class Computer {
     return { turnId, status: info.finished ?? 'stopping' };
   }
 
+  /** POST /v1/stop: stops whatever runs, turns and background work. Returns what it stopped. */
+  stopAll(): { turns: string[]; background: number } {
+    const turns: string[] = [];
+    for (const t of [this.active, this.background]) {
+      if (!t) continue;
+      t.stopRequested = true;
+      turns.push(t.turnId);
+    }
+    const background = this.adapter.backgroundTasks();
+    void this.adapter.stop();
+    return { turns, background };
+  }
+
   diagnostic(message: string, data: unknown): number {
-    const scope = { turn: this.active?.turnId ?? null, session: this.session?.sessionId ?? null };
+    const scope = { turn: this.running?.turnId ?? null, session: this.session?.sessionId ?? null };
     return this.journal.append('diagnostic', { message, data, source: 'controller' }, scope).seq;
   }
 
   /** The Controller's egress proxy refused a connection: one structured event, in the Turn it happened in. */
   egressDenied(host: string, port: number, reason: string): number {
-    const scope = { turn: this.active?.turnId ?? null, session: this.session?.sessionId ?? null };
+    const scope = { turn: this.running?.turnId ?? null, session: this.session?.sessionId ?? null };
     return this.journal.append('egress.denied', { host, port, reason }, scope).seq;
   }
 
   /** restart_harness: after the current turn ends, restart, resume the session, and continue. */
   requestRestart(): string {
-    if (this.active) {
+    if (this.running) {
       this.restartRequested = true;
       return 'The harness will restart when this turn ends, resume this session, and continue with a new turn.';
     }
@@ -412,7 +463,7 @@ export class Computer {
   private async applyCredentials(): Promise<void> {
     const generation = credentialGeneration(this.cfg);
     if (generation === this.ackedGeneration || generation === this.failedGeneration) return;
-    if (this.base !== 'ready' || this.active || this.restarting) return;
+    if (this.base !== 'ready' || this.running || this.restarting || this.adapter.backgroundTasks() > 0) return;
     this.restarting = true;
     try {
       if (!this.wire(null)) {
@@ -438,10 +489,11 @@ export class Computer {
     for (const w of this.watchers) w.close();
     if (this.reclaimTimer) clearTimeout(this.reclaimTimer);
     this.lifecycle('stopping');
-    const a = this.active;
-    if (a) {
-      this.stopTurn(a.turnId);
-      await Promise.race([a.done, new Promise((r) => setTimeout(r, flushMs).unref())]);
+    const running = [this.active, this.background].filter((t): t is ActiveTurn => t !== null);
+    if (running.length) {
+      this.stopAll();
+      const timeout = new Promise((r) => setTimeout(r, flushMs).unref());
+      await Promise.race([Promise.all(running.map((t) => t.done)), timeout]);
     }
     await this.adapter.close();
     this.wire(null);
@@ -459,7 +511,7 @@ export class Computer {
           if (file !== name || this.reclaimTimer) return;
           this.reclaimTimer = setTimeout(() => {
             this.reclaimTimer = null;
-            this.wire(this.active?.turnId ?? null);
+            this.wire(this.running?.turnId ?? null);
           }, RECLAIM_DEBOUNCE_MS);
         });
         w.on('error', () => w.close());

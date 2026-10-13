@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { EventQueue, ResumeError, Tail, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type TurnInput, type TurnStatus } from './adapter.js';
+import { EventQueue, ResumeError, Tail, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type SessionListener, type TaskEvent, type TurnInput, type TurnStatus } from './adapter.js';
 import { harnessEnv, spawnAsAgent, terminate, type HarnessDeps } from './spawn.js';
 import type { StopTiming } from './claude.js';
 
@@ -51,6 +51,11 @@ export class CodexAdapter implements Adapter {
   private turn: ActiveTurn | null = null;
   private starting: { cancelled: boolean } | null = null;
   private stderr = new Tail();
+  private listener: SessionListener | null = null;
+  /** Commands of the running turn that have not completed, by item id. */
+  private readonly commands = new Map<string, string>();
+  /** Commands still running when their turn ended: Codex keeps them as background terminals until they exit. */
+  private readonly tasks = new Map<string, { threadId: string; description: string }>();
 
   constructor(
     private readonly deps: HarnessDeps,
@@ -59,6 +64,14 @@ export class CodexAdapter implements Adapter {
     private readonly requestTimeoutMs = 60_000,
   ) {
     this.mcpServers = deps.mcpServers;
+  }
+
+  listen(listener: SessionListener): void {
+    this.listener = listener;
+  }
+
+  backgroundTasks(): number {
+    return this.tasks.size;
   }
 
   async startTurn(input: TurnInput): Promise<RunningTurn> {
@@ -77,7 +90,9 @@ export class CodexAdapter implements Adapter {
   }
 
   private async dispatch(input: TurnInput, start: { cancelled: boolean }): Promise<RunningTurn> {
-    if (JSON.stringify(input.mcpServers) !== JSON.stringify(this.mcpServers)) {
+    const otherThread = [...this.tasks.values()].some((t) => t.threadId !== input.sessionId);
+    if (JSON.stringify(input.mcpServers) !== JSON.stringify(this.mcpServers) || otherThread) {
+      // Leaving a session ends its background terminals, as for Claude Code.
       this.mcpServers = input.mcpServers;
       await this.restart();
     }
@@ -127,7 +142,11 @@ export class CodexAdapter implements Adapter {
       return;
     }
     const t = this.turn;
-    if (!t || t.stopping) return;
+    if (!t) {
+      if (this.tasks.size && this.child) void terminate(this.child, this.timing.killAfterMs);
+      return;
+    }
+    if (t.stopping) return;
     t.stopping = true;
     if (t.turnId) void this.interrupt(t);
   }
@@ -202,6 +221,9 @@ export class CodexAdapter implements Adapter {
     this.loaded.clear();
     for (const p of this.pending.values()) p.reject(new Error(`codex app-server ${why}`));
     this.pending.clear();
+    this.commands.clear();
+    for (const [id, task] of this.tasks) this.emit({ type: 'task.finished', data: { id, kind: 'shell', description: task.description, status: 'killed' } });
+    this.tasks.clear();
     const t = this.turn;
     if (t) {
       if (!t.stopping) t.out.push({ type: 'diagnostic', data: { message: `codex app-server ${why}`, stderr: this.stderr.toString() } });
@@ -211,9 +233,21 @@ export class CodexAdapter implements Adapter {
 
   private finish(t: ActiveTurn, status: TurnStatus, error?: string): void {
     if (t.timer) clearTimeout(t.timer);
+    for (const [id, description] of this.commands) {
+      this.tasks.set(id, { threadId: t.threadId, description });
+      t.out.push({ type: 'task.started', data: { id, kind: 'shell', description } });
+    }
+    this.commands.clear();
     t.out.push({ type: 'turn.finished', data: { status, usage: t.usage, ...(error ? { error } : {}) } });
     t.out.end();
     if (this.turn === t) this.turn = null;
+    // A stop ends the session's background work too.
+    if (t.stopping && this.tasks.size && this.child) void terminate(this.child, this.timing.killAfterMs);
+  }
+
+  private emit(ev: TaskEvent): void {
+    if (this.turn) this.turn.out.push(ev);
+    else this.listener?.taskEvent(ev);
   }
 
   private request(method: string, params: Json): Promise<Json> {
@@ -298,6 +332,14 @@ export class CodexAdapter implements Adapter {
   }
 
   private notify(method: string, p: Json): void {
+    const task = method === 'item/completed' ? this.tasks.get(String(p.item?.id)) : undefined;
+    if (task) {
+      // A background terminal's completion carries the id of the turn that started it: it belongs to no other turn.
+      const id = String(p.item.id);
+      this.tasks.delete(id);
+      const status = p.item.status === 'completed' && (p.item.exitCode ?? 0) === 0 ? 'completed' : 'failed';
+      return this.emit({ type: 'task.finished', data: { id, kind: 'shell', description: task.description, status } });
+    }
     const t = this.turn;
     if (!t || (p.threadId !== undefined && p.threadId !== t.threadId)) return;
     switch (method) {
@@ -308,12 +350,14 @@ export class CodexAdapter implements Adapter {
       case 'item/started': {
         const tool = toolOf(p.item);
         received(t);
+        if (p.item?.type === 'commandExecution') this.commands.set(String(p.item.id), String(p.item.command ?? '').slice(0, 200));
         if (tool) t.out.push({ type: 'tool.started', data: { id: String(p.item.id), name: tool.name, input: tool.input } });
         break;
       }
       case 'item/completed': {
         const tool = toolOf(p.item);
         received(t);
+        this.commands.delete(String(p.item?.id));
         if (tool) t.out.push({ type: 'tool.finished', data: { id: String(p.item.id), name: tool.name, isError: tool.isError, output: tool.output } });
         break;
       }
