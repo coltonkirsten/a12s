@@ -49,7 +49,7 @@ PARSED: dict[str, tuple[type, Callable[[Any], Any]]] = {
 }
 # Requests the client builds from keyword arguments, and responses it passes through as dicts.
 REQUESTS = {"enqueueRequest", "tokenRequest"}
-RAW = {"putFleetResponse", "error"}
+RAW = {"putFleetResponse", "error", "stopResponse"}
 # Event data stays the raw JSON dict; the ones TurnBuilder reads are folded below.
 EVENT_DATA = {
     "diagnosticData",
@@ -57,6 +57,7 @@ EVENT_DATA = {
     "textDeltaData",
     "turnFinishedData",
     "egressDeniedData",
+    "taskData",
     "fleetChangedData",
     "phaseData",
     "servicePhaseData",
@@ -135,6 +136,7 @@ def test_turn_builder_folds_the_turn_event_data() -> None:
         assert turn is not None
         assert (turn.status, turn.text, turn.usage, turn.error) == ("completed", "text", {}, finished.get("error"))
         assert (turn.started_at, turn.finished_at) == ("t0", "t2")
+        assert turn.reason == started.get("reason")
         assert [m.id for m in turn.messages] == [m["id"] for m in started.get("inbox", {}).get("messages", [])]
 
 

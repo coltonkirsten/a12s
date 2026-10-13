@@ -211,7 +211,9 @@ for t in fleet.turns(["lead", "worker1"]):
 A Turn has `agentComputer` / `agent_computer`, `id`, `status`
 (`completed`, `failed` or `interrupted`), `text` (everything the agent said), `error`, `messages` (the Messages it
 delivered, each with `id`, `sender` and `via`), `tools` (each tool call with `name`, `input`, `output`, `isError` /
-`is_error`), `usage`, `tokens`, `startedAt` / `started_at` and `finishedAt` / `finished_at`. `error` is a string;
+`is_error`), `usage`, `tokens`, `startedAt` / `started_at` and `finishedAt` / `finished_at`, plus `reason`
+`"background"` for a Turn the harness started by itself when [background work](concepts.md#background-work) ended
+(it delivers no Messages). `error` is a string;
 `input`, `output` and `usage` are the harness's JSON as is (a dict in Python). `tokens` (`TokenUsage`) is the same
 for every harness: `input` (not counting cached input), `output`, `cacheRead` / `cache_read`, `cacheWrite` /
 `cache_write`.
@@ -409,10 +411,10 @@ way: in a browser, `Fleet.connect()` talks to the page's own origin.
 
 | On | TypeScript | Python | What it does |
 |---|---|---|---|
-| Fleet | `status()` | `status()` | Every agent computer (`agentComputers` / `agent_computers`) and Service: `phase`, `session`, `activeTurn`, `inbox`, `power`, warnings. |
+| Fleet | `status()` | `status()` | Every agent computer (`agentComputers` / `agent_computers`) and Service: `phase`, `session`, `activeTurn`, `background`, `inbox`, `power`, warnings. |
 | AgentComputer | `inbox({ state, bodies })` | `inbox(state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
 | AgentComputer | `message(id)`, `withdraw(id)` | the same | One Message; take back a pending one. |
-| AgentComputer | `stop(turn?)` | `stop(turn=None)` | Interrupt a Turn (default: the active one). |
+| AgentComputer | `stop(turn?)` | `stop(turn=None)` | Interrupt a Turn (default: whatever runs) and end the session's background work. |
 | AgentComputer | `sleep({ hold? })`, `wake()` | `sleep(hold=)`, `wake()` | Stop it and keep its disks, session and inbox; start it again. A sender listed in its wakeOnMessage wakes a plain sleep; `hold` keeps it asleep until `wake()`. |
 | AgentComputer | `hold({ reason? })`, `resume()` | `hold(reason=)`, `resume()` | Hold delivery (Messages still queue); release it. |
 

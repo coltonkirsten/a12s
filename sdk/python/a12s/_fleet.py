@@ -180,7 +180,7 @@ class AgentComputer:
         return self._fleet._client.resume(self.name)
 
     def stop(self, turn: str | None = None) -> None:
-        """Interrupts a Turn (default: the active one)."""
+        """Interrupts a Turn (default: whatever runs) and ends the session's background work."""
         self._fleet._client.stop(self.name, turn)
 
     def inbox(self, *, state: str | None = None, bodies: bool = False, after: int | None = None) -> InboxList:

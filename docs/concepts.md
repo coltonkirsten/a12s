@@ -7,7 +7,7 @@ Five ideas are enough to build with a12s:
 | **Fleet** | The agent computers (and Services) one project runs. `fleet.yaml` declares it and `a12s up` makes the running Fleet match the file; the SDK adds, changes and removes agent computers while it runs. |
 | **Agent computer** | One agent's durable machine (`AgentComputer` in code): a harness (Claude Code or Codex), a home drive with its instructions, a conversation (session) and an inbox. Containers come and go; the agent computer stays. |
 | **Message** | Work you put in an agent computer's inbox (`send`). Anyone allowed can send: you, your app, a Service, or another agent computer with `grants.send`. |
-| **Turn** | One delivery of work: the agent computer takes everything pending in its inbox, runs the agent once, and ends `completed`, `failed` or `interrupted`. |
+| **Turn** | One delivery of work: the agent computer takes everything pending in its inbox, runs the agent once, and ends `completed`, `failed` or `interrupted`. When [background work](#background-work) ends, the agent can also start a Turn by itself, with no Messages. |
 | **Event** | What an agent computer journals while it works: `turn.started`, streamed `text.delta`, `tool.started`, `turn.finished`, … Your app follows them live. |
 
 The everyday loop: **edit `fleet.yaml` or an agent computer's instructions → `a12s up` → send a Message → follow its
@@ -66,7 +66,7 @@ container. An asleep agent computer uses no CPU or RAM.
 
 | Survives sleep | Does not survive |
 |---|---|
-| The home drive: session files (`~/.claude/projects`, `~/.codex/sessions`), the journal, tools the agent installed, the browser profile. The session id. The inbox. | RAM, background processes, `/tmp`, injected credentials, certificates. |
+| The home drive: session files (`~/.claude/projects`, `~/.codex/sessions`), the journal, tools the agent installed, the browser profile. The session id. The inbox. | RAM, background work and other background processes, `/tmp`, injected credentials, certificates. |
 
 **Wake** starts the container, re-injects credentials and a fresh certificate, and reports `Ready (resumePending)`.
 Resume is lazy: the next Turn reopens the native session (`--resume <id>` for Claude Code, `thread/resume` for
@@ -81,6 +81,29 @@ repair the cause (for example roll back the bundle) and retry.
 **Interrupted Turns stay interrupted.** Side effects may already have happened, so nothing is replayed
 automatically. The conversation survives, so "continue" works.
 
+## Background work
+
+The harness runs as one long-lived process per session, across Turns. Work the agent starts in the background keeps
+running after the Turn that started it ends: a Claude Code sub-agent or Bash command run with `run_in_background`, or
+a Codex command still running when its Turn ends (a background terminal). Each one is journaled as `task.started`
+and `task.finished`, and status shows the count as `background: {tasks: N}` while any run.
+
+- **The agent stays responsive.** While only background work runs, the agent computer is `Ready`: a Message is
+  delivered at once, as a new Turn in the same session.
+- **Claude Code reports back by itself.** When background work ends, Claude Code starts a Turn on its own to look at
+  the result. It is journaled like any Turn, with `turn.started` `{reason: "background"}` and no Messages, so
+  `a12s logs`, the event streams and `turns()` show it. The agent computer is `Busy` while it runs; Messages that
+  arrive meanwhile wait for its end. Codex tracks its background terminals but never starts a Turn by itself: the
+  agent sees their output in its next Turn.
+- **Background work keeps the agent computer awake.** `sleepAfterIdle` counts only time with no Turn and no
+  background work, and a config change that restarts the agent computer waits for the same idle.
+- **What ends the session, and its background work with it:** `a12s stop` (and the SDKs' `stop()`), sleep (manual
+  or automatic), `restart_harness`, a Message sent with `--fresh`, applying a config change, and the agent computer
+  stopping or restarting. A rotated credential reaches a long-lived harness only by restarting it, so it is applied
+  once no background work runs. Background work that never ends (a dev server, say) keeps a config change staged
+  and the agent computer awake until `a12s stop <name>` ends it. A harness that crashes fails the running Turn; the
+  next Turn resumes the session in a new process.
+
 ## Data safety
 
 Removing an agent computer from the Fleet (from the file, or with `remove()`) stops it and keeps its drives and
@@ -94,8 +117,9 @@ database; the next `a12s up` reattaches them. Only two commands destroy data, an
 ## Config changes
 
 A change to an agent computer, from `a12s up` or from the SDK's `update()`, is staged right away and applied at its
-next idle boundary, with no automatic deadline, so a running six-hour job is never killed by a config edit. For an urgent change (a CVE in an image),
-`a12s stop <name>` ends the active Turn, and the change applies right after. Services have no idle boundary, so a changed Service is
+next idle boundary (no Turn and no [background work](#background-work)), with no automatic deadline, so a running
+six-hour job is never killed by a config edit. For an urgent change (a CVE in an image), `a12s stop <name>` ends the
+active Turn and the background work, and the change applies right after. Services have no idle boundary, so a changed Service is
 restarted at once.
 
 Every change to the Fleet adds one to its version. A whole-Fleet write can name the version it read (`If-Match`)
@@ -112,7 +136,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 
 | Type | `data` |
 |---|---|
-| `turn.started` | `{harness, model, resumed, prompt, cwd, inbox: {batch, messages: [{id, sender, via, …}]}}`: the Messages this Turn delivers |
+| `turn.started` | `{harness, model, resumed, prompt, cwd, inbox: {batch, messages: [{id, sender, via, …}]}}`: the Messages this Turn delivers. A Turn the harness started by itself has `reason: "background"` and no `inbox` |
 | `turn.dispatched` | `{}`: the harness has received the prompt |
 | `text.delta` | `{text}`: streamed text from the agent |
 | `tool.started` | `{id, name, input}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send` |
@@ -123,6 +147,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
+| `task.started`, `task.finished` | `{id, kind, description, status?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`, `shell`); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns |
 
 The fleet-wide stream (`GET /v1/events`) adds the events the Controller makes: `fleet.changed`
 `{version, by, names}` when a write changes the Fleet, `agent_computer.phase` `{phase, error?, waiting?}` when an agent

@@ -11,9 +11,18 @@ const notify = (method: string, params: unknown) => send({ method, params });
 let threads = 0;
 let current: { threadId: string; turnId: string } | null = null;
 
-function runTurn(threadId: string, turnId: string): void {
+function runTurn(threadId: string, turnId: string, prompt: string): void {
   notify('turn/started', { threadId, turn: { id: turnId, status: 'inProgress', items: [] } });
   if (mode === 'hang' || mode === 'ignore-interrupt') return;
+  if (prompt === 'bg') {
+    // A command still running when the turn ends stays a background terminal; its completion names the old turn.
+    const item = { type: 'commandExecution', id: `item_bg_${turnId}`, command: 'sleep 1; make', cwd: '/', status: 'inProgress' };
+    notify('item/started', { threadId, turnId, item });
+    notify('turn/completed', { threadId, turn: { id: turnId, status: process.env.FAKE_BG_STATUS ?? 'completed', items: [] } });
+    current = null;
+    setTimeout(() => notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', exitCode: 0 } }), Number(process.env.FAKE_BG_MS ?? 200));
+    return;
+  }
   notify('item/started', { threadId, turnId, item: { type: 'commandExecution', id: 'item_1', command: 'ls', cwd: '/', status: 'inProgress' } });
   send({ id: 'srv_1', method: 'item/commandExecution/requestApproval', params: { threadId, turnId, itemId: 'item_1', command: 'ls', cwd: '/' } });
 }
@@ -48,7 +57,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       const turnId = `turn_${Date.now()}`;
       current = { threadId: String(m.params?.threadId), turnId };
       send({ id: m.id, result: { turn: { id: turnId, status: 'inProgress', items: [] } } });
-      return runTurn(current.threadId, turnId);
+      return runTurn(current.threadId, turnId, String(m.params?.input?.[0]?.text ?? ''));
     }
     case 'turn/interrupt':
       send({ id: m.id, result: {} });

@@ -184,6 +184,8 @@ export interface ComputerStatus {
   warnings?: string[];
   inbox?: InboxSummary;
   power?: PowerStatus;
+  /** Set while the harness session runs background work (sub-agents, shells) between Turns; it is not idle then. */
+  background?: { tasks: number };
 }
 
 export interface DriveRow {
@@ -346,9 +348,27 @@ export interface TurnStartedData {
   prompt: string;
   cwd: string;
   requestId?: string;
-  /** The Messages this Turn delivers. Absent for a continuation after `restart_harness`. */
+  /** The Messages this Turn delivers. Absent for a continuation after `restart_harness` and a background Turn. */
   inbox?: TurnInbox;
   continuation?: string;
+  /** "background": the harness started this Turn by itself when background work ended. */
+  reason?: string;
+}
+
+/** Background work (a sub-agent, a shell) the harness keeps running after the Turn that started it. */
+export interface TaskData {
+  id: string;
+  /** The harness's own kind: local_agent, local_bash, shell, … */
+  kind: string;
+  description: string;
+  /** On task.finished. "killed": the session ended (stop, sleep, restart, a new session) while it ran. */
+  status?: "completed" | "failed" | "stopped" | "killed";
+}
+
+/** POST /v1/agent-computers/{name}/stop: the Turns it stopped and how many background tasks it ended. */
+export interface StopResponse {
+  turns: string[];
+  background: number;
 }
 
 export interface TurnFinishedData {
@@ -452,6 +472,8 @@ export type TurnRefusedEvent = Ev<"turn.refused", { requestId: string }>;
 /** A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included. */
 export type InboxDiscardedEvent = Ev<"inbox.discarded", Record<string, unknown>>;
 export type EgressDeniedEvent = Ev<"egress.denied", EgressDeniedData>;
+export type TaskStartedEvent = Ev<"task.started", TaskData>;
+export type TaskFinishedEvent = Ev<"task.finished", TaskData>;
 /** Made by the Controller, on the fleet-wide stream only. */
 export type FleetChangedEvent = Ev<"fleet.changed", FleetChangedData>;
 /** Made by the Controller, on the fleet-wide stream only. */
@@ -481,6 +503,8 @@ export type A12sEvent =
   | TurnRefusedEvent
   | InboxDiscardedEvent
   | EgressDeniedEvent
+  | TaskStartedEvent
+  | TaskFinishedEvent
   | FleetChangedEvent
   | PhaseEvent
   | InboxChangedEvent
@@ -505,6 +529,8 @@ export interface Turn {
   id: string;
   session: string;
   status: TurnFinishedData["status"];
+  /** "background": the harness started this Turn by itself when background work ended; it delivered no Messages. */
+  reason?: string;
   /** Everything the agent said in the Turn, concatenated. */
   text: string;
   error?: string;

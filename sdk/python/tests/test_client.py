@@ -416,22 +416,22 @@ def test_events_turn_and_after_need_one_computer() -> None:
         AsyncClient("http://x").events(None, turn="t")
 
 
-def test_stop_defaults_to_the_active_turn() -> None:
+def test_stop_defaults_to_whatever_runs() -> None:
     seen: list[str] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
         seen.append(f"{req.method} {req.url.path}")
-        if req.url.path == "/v1/status":
-            return httpx.Response(200, json={"agentComputers": [{"name": "lead", "activeTurn": "t_1"}, {"name": "idle"}]})
         assert req.content == b"{}"
-        return httpx.Response(204)
+        if "/nope/" in req.url.path:
+            return httpx.Response(404, json={"code": "not_found", "message": "no computer nope"})
+        return httpx.Response(200, json={"turns": [], "background": 1})
 
     client = Client("http://x", http=httpx.Client(transport=httpx.MockTransport(handler)))
     client.stop("lead")
-    client.stop("idle")
+    client.stop("lead", "t_1")
     with pytest.raises(A12sError, match="not_found"):
         client.stop("nope")
-    assert seen == ["GET /v1/status", "POST /v1/agent-computers/lead/turns/t_1/stop", "GET /v1/status", "GET /v1/status"]
+    assert seen == ["POST /v1/agent-computers/lead/stop", "POST /v1/agent-computers/lead/turns/t_1/stop", "POST /v1/agent-computers/nope/stop"]
 
 
 

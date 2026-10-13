@@ -100,6 +100,7 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
     }
     const stop = /^\/v1\/turns\/([^/]+)\/stop$/.exec(path);
     if (stop && method === 'POST') return send(res, 200, computer.stopTurn(decodeURIComponent(stop[1] ?? '')));
+    if (path === '/v1/stop' && method === 'POST') return send(res, 200, computer.stopAll());
     if (path === '/v1/events' && method === 'GET') {
       const lastId = req.headers['last-event-id'];
       return streamEvents(req, res, journal, url.searchParams.get('turn'), Array.isArray(lastId) ? lastId[0] : lastId);

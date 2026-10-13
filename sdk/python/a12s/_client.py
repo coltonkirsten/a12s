@@ -213,10 +213,12 @@ class Client:
         return from_json(Message, self._request("DELETE", path))
 
     def stop(self, computer: str, turn: str | None = None) -> None:
-        """Interrupts a Turn (default: the active one). The Turn ends ``interrupted``; nothing is replayed."""
-        id = turn if turn is not None else self.computer(computer).active_turn
-        if id:
-            self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
+        """Interrupts a Turn (default: whatever runs) and ends the session's background work. The Turn ends
+        ``interrupted``; nothing is replayed."""
+        if turn is not None:
+            self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(turn)}/stop", {})
+        else:
+            self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/stop", {})
 
     def sleep(self, computer: str, *, hold: bool = False) -> None:
         """Stops the agent computer's processes and keeps its disks, session and inbox. A Message from a sender its

@@ -88,6 +88,11 @@ class PowerStatus:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class Background:
+    tasks: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ComputerStatus:
     name: str
     phase: str
@@ -106,6 +111,8 @@ class ComputerStatus:
     warnings: list[str] | None = None
     inbox: InboxSummary | None = None
     power: PowerStatus | None = None
+    background: Background | None = None
+    """Set while the harness session runs background work (sub-agents, shells) between Turns; it is not idle then."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -263,13 +270,15 @@ class TokenUsage:
 class Turn:
     """A finished Turn: who sent the work (``messages``), what the agent said (``text``) and how it ended.
 
-    ``messages`` is empty for a continuation, or when the stream joined mid-Turn.
+    ``messages`` is empty for a continuation, a background Turn (``reason`` "background": the harness started it by
+    itself when background work ended), or when the stream joined mid-Turn.
     """
 
     agent_computer: str
     id: str
     session: str
     status: str
+    reason: str | None = None
     text: str
     error: str | None = None
     messages: list[TurnInboxMessage]

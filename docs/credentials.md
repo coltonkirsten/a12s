@@ -40,8 +40,9 @@ Use a setup token or an API key, not a copy of your interactive Claude login.
   moves back onto tmpfs any credential file a harness replaced on the home drive, after every Turn and at shutdown.
 - **Refreshes are one-way.** A token refreshed inside an agent computer is not written back to the Controller. To rotate,
   `a12s creds set` it again. A setup token is never refreshed, so this only affects JSON logins.
-- Credential rotation restarts the harness process, so a long-lived Codex server doesn't keep a revoked key.
-  computerd reports the credential generation it has actually loaded (`a12s status`).
+- Credential rotation restarts the harness process, so a long-lived Claude Code or Codex process doesn't keep a
+  revoked key. Restarting it ends the session's [background work](concepts.md#background-work), so the restart
+  waits until none runs. computerd reports the credential generation it has actually loaded (`a12s status`).
 
 Services receive their credentials the same way, at `/run/a12s/secrets/<name>` owned by the Service's user.
 

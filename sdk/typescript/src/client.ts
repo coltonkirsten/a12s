@@ -253,10 +253,13 @@ export class Client {
     return this.request("DELETE", `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}`);
   }
 
-  /** Interrupts a Turn (default: the active one). The Turn ends `interrupted`; nothing is replayed. */
+  /**
+   * Interrupts a Turn (default: whatever runs) and ends the session's background work. The Turn ends `interrupted`;
+   * nothing is replayed.
+   */
   async stop(computer: string, turn?: string): Promise<void> {
-    const id = turn ?? (await this.computer(computer)).activeTurn;
-    if (id) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
+    if (turn) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(turn)}/stop`, {});
+    else await this.request("POST", `/v1/agent-computers/${enc(computer)}/stop`, {});
   }
 
   /**
@@ -757,7 +760,7 @@ export class TurnStream implements AsyncIterableIterator<Turn> {
 
 /** Folds a Computer's events into Turns. */
 class TurnBuilder {
-  private readonly open = new Map<string, { text: string; afterTool: boolean; messages: TurnInboxMessage[]; tools: Map<string, ToolCall>; startedAt?: string }>();
+  private readonly open = new Map<string, { text: string; afterTool: boolean; messages: TurnInboxMessage[]; tools: Map<string, ToolCall>; startedAt?: string; reason?: string }>();
 
   add(ev: A12sEvent): Turn | undefined {
     if (!ev.turn) return undefined;
@@ -769,6 +772,7 @@ class TurnBuilder {
       case "turn.started":
         t.messages = ev.data.inbox?.messages ?? [];
         t.startedAt = ev.ts;
+        t.reason = ev.data.reason;
         return undefined;
       case "tool.started":
         t.afterTool = true;
@@ -792,6 +796,7 @@ class TurnBuilder {
           id: ev.turn,
           session: ev.session,
           status: ev.data.status,
+          ...(t.reason ? { reason: t.reason } : {}),
           text: t.text,
           ...(ev.data.error ? { error: ev.data.error } : {}),
           messages: t.messages,

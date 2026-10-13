@@ -14,8 +14,9 @@ a12s inbox builder                                      # list pending Messages,
 
 1. One durable inbox per agent computer. It survives restarts, sleep, wake, Controller restarts and a plain `a12s down`.
 2. Anyone with API access, or a Service or agent computer holding `grants.send`, can enqueue. Bodies are untrusted data.
-3. When the agent computer is idle, the Controller drains **all** pending Messages, in order, into **one** Turn. Messages
-   that arrive during the Turn wait for the next one.
+3. When no Turn is running, the Controller drains **all** pending Messages, in order, into **one** Turn, also while
+   [background work](concepts.md#background-work) runs. Messages that arrive during a Turn wait for the next one,
+   including during a Turn the harness started by itself when background work ended.
 4. A Batch continues the current session by default. A Message sent with `--fresh` starts a new
    session; it begins a new Batch, so it never drags another sender's Message out of the conversation it was written
    for.
@@ -141,8 +142,10 @@ agent_computers:
 | `wakeOnMessage.from` | nothing wakes it | principals: `local`, `token:<name>`, `service:<name>`, `computer:<name>`; no wildcard |
 | `wakeOnMessage.maxWakesPerHour` | 6 | 1 to 60 automatic wakes in a rolling hour |
 
-- **Idle** means `Ready`, with no Turn running, no work owed, nothing pending (or the inbox held), and no `a12s shell`
-  attached. Background processes the agent started don't count; sleep ends them.
+- **Idle** means `Ready`, with no Turn running, no [background work](concepts.md#background-work) (`background` in
+  status: Claude Code sub-agents and background shells, Codex background terminals), no work owed, nothing pending
+  (or the inbox held), and no `a12s shell` attached. Other processes the agent started don't count; sleep ends them,
+  and the background work too.
 - **The Controller decides; the sender gains nothing.** No request field asks for a wake. A pending Message wakes the
   agent computer only if its `via` is listed. Once awake, the first Batch delivers everything pending.
 - **A plain sleep leaves the policy in charge.** After `a12s sleep <name>`, a Message whose `via` is listed wakes it,

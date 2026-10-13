@@ -37,7 +37,8 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/events` | SSE: every agent computer's events and the Fleet's own on one connection (below); `?agentComputers=a,b` filters |
 | `GET /v1/agent-computers/{c}/events` | SSE: the agent computer's journal (below) |
 | `GET /v1/agent-computers/{c}/turns` | `?limit=20` (1 to 200) → `{turns: [Turn]}`: its last finished Turns, newest first |
-| `POST /v1/agent-computers/{c}/turns/{turn}/stop` | `{}` → interrupt the Turn |
+| `POST /v1/agent-computers/{c}/turns/{turn}/stop` | `{}` → interrupt the Turn and end the session's background work |
+| `POST /v1/agent-computers/{c}/stop` | `{}` → `{turns, background}`: interrupt whatever Turn runs and end the session's background work; what it stopped |
 | `POST /v1/agent-computers/{c}/power` | `{"state": "asleep"\|"awake"}` |
 | `POST /v1/agent-computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written |
@@ -50,7 +51,9 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `PUT /v1/fleet` | `{fleet, credentials?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
 The field-by-field shapes are in `internal/api` and the SDKs' types. A ComputerStatus carries `seccomp` (the
-profile's `sha256:` digest) when the agent computer runs with its own seccomp profile.
+profile's `sha256:` digest) when the agent computer runs with its own seccomp profile, and `background: {tasks}` while
+its session runs [background work](concepts.md#background-work). A Turn has `reason: "background"` when the harness
+started it by itself.
 
 ## Tokens
 

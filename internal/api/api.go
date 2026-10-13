@@ -187,6 +187,8 @@ type ComputerStatus struct {
 	Warnings   []string      `json:"warnings,omitempty"`
 	Inbox      *InboxSummary `json:"inbox,omitempty"`
 	Power      *PowerStatus  `json:"power,omitempty"`
+	// Background is set while the session runs background work; the agent computer is not idle then.
+	Background *Background `json:"background,omitempty"`
 }
 
 const (

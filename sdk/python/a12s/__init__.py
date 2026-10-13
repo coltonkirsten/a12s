@@ -34,6 +34,7 @@ from ._fleet import (
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
     AgentComputerInfo,
+    Background,
     Change,
     CredentialInfo,
     ComputerStatus,
@@ -82,6 +83,7 @@ __all__ = [
     "AsyncServices",
     "AsyncTokens",
     "AsyncTurnStream",
+    "Background",
     "Change",
     "CredentialInfo",
     "Credentials",

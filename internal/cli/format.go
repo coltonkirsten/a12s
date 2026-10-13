@@ -145,6 +145,9 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		if c.ActiveTurn != "" {
 			extra = append(extra, "turn "+c.ActiveTurn)
 		}
+		if c.Background != nil {
+			extra = append(extra, fmt.Sprintf("background %d", c.Background.Tasks))
+		}
 		if c.StagedGeneration > c.Generation {
 			extra = append(extra, fmt.Sprintf("staged gen %d", c.StagedGeneration))
 		}
@@ -320,6 +323,9 @@ func TurnStartedLine(turn, kind string, d api.TurnStartedData) string {
 		parts = append(parts, d.Model)
 	}
 	parts = append(parts, fmt.Sprintf("resumed: %t", d.Resumed))
+	if d.Reason != "" {
+		parts = append(parts, d.Reason)
+	}
 	if d.Inbox != nil && len(d.Inbox.Messages) > 1 {
 		parts = append(parts, fmt.Sprintf("batch of %d", len(d.Inbox.Messages)))
 	}
@@ -382,6 +388,10 @@ func EventLine(e api.Event) string {
 		if r := str("reason"); r != "" {
 			return "[resume.failed] " + r
 		}
+	case api.EventTaskStarted:
+		return fmt.Sprintf("[task] %s %s started", str("kind"), str("description"))
+	case api.EventTaskFinished:
+		return fmt.Sprintf("[task] %s %s %s", str("kind"), str("description"), str("status"))
 	}
 	return fmt.Sprintf("[%s] %s", e.Type, Truncate(Compact(e.Data), 160))
 }

@@ -212,6 +212,7 @@ class _OpenTurn:
     messages: list[TurnInboxMessage] = field(default_factory=list)
     tools: dict[str, ToolCall] = field(default_factory=dict)
     started_at: str | None = None
+    reason: str | None = None
 
 
 class TurnBuilder:
@@ -231,6 +232,7 @@ class TurnBuilder:
             messages = inbox.get("messages") if isinstance(inbox, dict) else None
             t.messages = [from_json(TurnInboxMessage, m) for m in messages] if isinstance(messages, list) else []
             t.started_at = ev.ts or None
+            t.reason = data.get("reason") or None
         elif ev.type == "tool.started":
             t.after_tool = True
             tid = str(data.get("id", len(t.tools)))
@@ -261,6 +263,7 @@ class TurnBuilder:
                 id=ev.turn,
                 session=ev.session,
                 status=str(data.get("status", "")),
+                reason=t.reason,
                 text=t.text,
                 error=data.get("error") or None,
                 messages=t.messages,

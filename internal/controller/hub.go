@@ -246,6 +246,7 @@ func (c *Controller) foldTurn(name string, ev api.Event) {
 		if json.Unmarshal(ev.Data, &d) == nil && d.Inbox != nil {
 			o.t.Messages = d.Inbox.Messages
 		}
+		o.t.Reason = d.Reason
 		ts := ev.TS
 		o.t.StartedAt = &ts
 	case api.EventToolStarted:

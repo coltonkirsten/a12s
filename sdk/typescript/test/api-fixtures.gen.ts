@@ -80,6 +80,9 @@ export const statusResponse: T.StatusResponse = {
         "idleSince": "2026-10-12T12:00:00Z",
         "sleptBy": "sleptBy",
         "sleptAt": "2026-10-12T12:00:00Z"
+      },
+      "background": {
+        "tasks": 1
       }
     }
   ],
@@ -320,6 +323,9 @@ export const putFleetResponse: T.PutFleetResponse = {
         "idleSince": "2026-10-12T12:00:00Z",
         "sleptBy": "sleptBy",
         "sleptAt": "2026-10-12T12:00:00Z"
+      },
+      "background": {
+        "tasks": 1
       }
     }
   },
@@ -584,6 +590,9 @@ export const agentComputersResponse: T.AgentComputersResponse = {
           "idleSince": "2026-10-12T12:00:00Z",
           "sleptBy": "sleptBy",
           "sleptAt": "2026-10-12T12:00:00Z"
+        },
+        "background": {
+          "tasks": 1
         }
       }
     }
@@ -639,6 +648,7 @@ export const turnsResponse: T.TurnsResponse = {
       "id": "id",
       "session": "session",
       "status": "completed",
+      "reason": "reason",
       "text": "text",
       "error": "error",
       "messages": [
@@ -1094,7 +1104,8 @@ export const turnStartedData: T.TurnStartedData = {
       }
     ]
   },
-  "continuation": "continuation"
+  "continuation": "continuation",
+  "reason": "reason"
 };
 
 export const turnStartedDataMinimal: T.TurnStartedData = {
@@ -1152,6 +1163,33 @@ export const resumeFailedDataMinimal: T.ResumeFailedData = {
   "sessionId": "sessionId",
   "reason": "reason",
   "at": "at"
+};
+
+export const taskData: T.TaskData = {
+  "id": "id",
+  "kind": "kind",
+  "description": "description",
+  "status": "completed"
+};
+
+export const taskDataMinimal: T.TaskData = {
+  "id": "id",
+  "kind": "kind",
+  "description": "description"
+};
+
+export const stopResponse: T.StopResponse = {
+  "turns": [
+    "turns"
+  ],
+  "background": 1
+};
+
+export const stopResponseMinimal: T.StopResponse = {
+  "turns": [
+    "turns"
+  ],
+  "background": 1
 };
 
 export const error: T.ApiErrorBody = {

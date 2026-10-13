@@ -80,6 +80,9 @@
             "idleSince": "2026-10-12T12:00:00Z",
             "sleptBy": "sleptBy",
             "sleptAt": "2026-10-12T12:00:00Z"
+          },
+          "background": {
+            "tasks": 1
           }
         }
       }
@@ -604,6 +607,9 @@
           "idleSince": "2026-10-12T12:00:00Z",
           "sleptBy": "sleptBy",
           "sleptAt": "2026-10-12T12:00:00Z"
+        },
+        "background": {
+          "tasks": 1
         }
       }
     },
@@ -842,6 +848,9 @@
           "idleSince": "2026-10-12T12:00:00Z",
           "sleptBy": "sleptBy",
           "sleptAt": "2026-10-12T12:00:00Z"
+        },
+        "background": {
+          "tasks": 1
         }
       }
     ],
@@ -951,6 +960,29 @@
       }
     ]
   },
+  "stopResponse": {
+    "turns": [
+      "turns"
+    ],
+    "background": 1
+  },
+  "stopResponseMinimal": {
+    "turns": [
+      "turns"
+    ],
+    "background": 1
+  },
+  "taskData": {
+    "id": "id",
+    "kind": "kind",
+    "description": "description",
+    "status": "completed"
+  },
+  "taskDataMinimal": {
+    "id": "id",
+    "kind": "kind",
+    "description": "description"
+  },
   "textDeltaData": {
     "text": "text"
   },
@@ -1035,7 +1067,8 @@
         }
       ]
     },
-    "continuation": "continuation"
+    "continuation": "continuation",
+    "reason": "reason"
   },
   "turnStartedDataMinimal": {
     "harness": {
@@ -1053,6 +1086,7 @@
         "id": "id",
         "session": "session",
         "status": "completed",
+        "reason": "reason",
         "text": "text",
         "error": "error",
         "messages": [

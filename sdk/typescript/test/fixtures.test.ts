@@ -20,6 +20,8 @@ const routes: Record<string, unknown> = {
   "GET /v1/fleet": fx.fleetResponse,
   "GET /v1/agent-computers": fx.agentComputersResponse,
   "PUT /v1/agent-computers/name": fx.putFleetResponse,
+  "POST /v1/agent-computers/lead/stop": fx.stopResponse,
+  "POST /v1/agent-computers/lead/turns/t_1/stop": { turnId: "t_1", status: "stopping" },
 };
 
 test("the client parses every Go-rendered API fixture", async () => {
@@ -47,6 +49,8 @@ test("the client parses every Go-rendered API fixture", async () => {
     const [ac] = await fleet.agentComputers.list();
     assert.deepEqual(ac!.status, fx.agentComputersResponse.agentComputers[0]!.status);
     assert.deepEqual((await fleet.agentComputers.create("name")).status, fx.putFleetResponse.agentComputer!.status);
+    await client.stop("lead"); // whatever runs, background work included
+    await client.stop("lead", "t_1");
     await assert.rejects(client.withdraw("lead", "m_1"), (e: unknown) => {
       assert.ok(e instanceof A12sError);
       assert.equal(e.code, fx.error.code);

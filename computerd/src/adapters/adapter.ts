@@ -21,6 +21,14 @@ export interface TurnInput {
 
 export type TurnStatus = 'completed' | 'failed' | 'interrupted';
 
+/** `killed`: the session ended (stop, sleep, restart, a new session) while the task ran. */
+export type TaskStatus = 'completed' | 'failed' | 'stopped' | 'killed';
+
+/** Background work (a sub-agent, a shell) the harness keeps running after the turn that started it. */
+export type TaskEvent =
+  | { type: 'task.started'; data: { id: string; kind: string; description: string } }
+  | { type: 'task.finished'; data: { id: string; kind: string; description: string; status: TaskStatus } };
+
 /** What an adapter yields; computerd journals each one under the turn. */
 export type AdapterEvent =
   | { type: 'text.delta'; data: { text: string } }
@@ -35,7 +43,8 @@ export type AdapterEvent =
    * Evidence the harness received the prompt: Claude's echo of the user message after the init
    * record passed the session check, Codex's turn/start response. Emitted at most once, before any model output.
    */
-  | { type: 'turn.dispatched'; data: Record<string, never> };
+  | { type: 'turn.dispatched'; data: Record<string, never> }
+  | TaskEvent;
 
 export interface RunningTurn {
   sessionId: string;
@@ -43,14 +52,31 @@ export interface RunningTurn {
   events: AsyncIterable<AdapterEvent>;
 }
 
+export interface SessionListener {
+  /** A turn the harness started by itself, when background work finished. */
+  backgroundTurn(run: RunningTurn): void;
+  /** A task event while no turn runs. */
+  taskEvent(ev: TaskEvent): void;
+}
+
 export interface Adapter {
   readonly kind: HarnessKind;
-  /** Starts a turn. Rejects with ResumeError if an existing session cannot be reopened. */
+  listen(listener: SessionListener): void;
+  /**
+   * Starts a turn in the live session, opening one (or resuming the session in a new process) when needed.
+   * Rejects with ResumeError if an existing session cannot be reopened.
+   */
   startTurn(input: TurnInput): Promise<RunningTurn>;
-  /** Interrupts the active turn; its stream then ends with turn.finished `interrupted`. Idempotent. */
+  /**
+   * Interrupts the running turn, whose stream then ends with turn.finished `interrupted`, and ends the live
+   * session with its background work. Idempotent.
+   */
   stop(): Promise<void>;
+  /** Live background tasks in the session. */
+  backgroundTasks(): number;
   /** Checks a session can be resumed without running a model turn. Resolves null if fine, else a reason. */
   precheck(sessionId: string): Promise<string | null>;
+  /** Ends the live session and its background work; the next turn resumes it in a new process. */
   restart(): Promise<void>;
   close(): Promise<void>;
 }
