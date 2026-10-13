@@ -82,6 +82,12 @@ func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts
 				Message: k.principal + " may not set or change " + name + "'s attach: only the owner attaches a host folder",
 				Fix:     "leave attach as it is, or use the owner token"}}
 		}
+		// computerd runs as root, so the image decides what root does to a writable host folder (a setuid file).
+		if comp, ok := f.Computers[name]; ok && len(comp.Attach) > 0 && effectiveImage(before, name) != comp.Image {
+			return &httpError{status: http.StatusForbidden, body: api.Error{Code: api.ErrForbidden,
+				Message: k.principal + " may not change " + name + "'s image: it has an attached host folder, and only the owner picks what runs as root next to it",
+				Fix:     "leave image as it is, or use the owner token"}}
+		}
 		var send []string
 		var uses []fleet.Use
 		if comp, ok := f.Computers[name]; ok {
@@ -127,6 +133,18 @@ func ownAttach(s *fleet.Spec, name string) string {
 	}
 	b, _ := json.Marshal(c.Attach)
 	return string(b)
+}
+
+// effectiveImage is the image an agent computer ran with, defaults merged; "" when it didn't exist.
+func effectiveImage(s *fleet.Spec, name string) string {
+	if s == nil {
+		return ""
+	}
+	f, err := s.Effective()
+	if err != nil {
+		return ""
+	}
+	return f.Computers[name].Image
 }
 
 // filterStatus keeps what a prefix token may see; Fleet-wide warnings and orphans name others, so they go.

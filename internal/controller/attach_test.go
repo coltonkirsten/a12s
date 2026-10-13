@@ -45,6 +45,18 @@ func TestOnlyTheOwnerAttaches(t *testing.T) {
 	if r := biz("PATCH", "/v1/agent-computers/biz-s", `{"instructions":"sell"}`); r.StatusCode != 200 {
 		t.Fatalf("patch other fields of biz-s = %d %+v", r.StatusCode, apiError(t, r))
 	}
+	// Its computerd runs as root next to the host folder: the image is the owner's call too.
+	wantImageForbidden := func(what string, res *http.Response) {
+		t.Helper()
+		if e := apiError(t, res); res.StatusCode != http.StatusForbidden || e.Code != api.ErrForbidden || !strings.Contains(e.Message, "image") || e.Fix == "" {
+			t.Errorf("%s = %d %s (%s), want 403 forbidden naming image", what, res.StatusCode, e.Code, e.Message)
+		}
+	}
+	wantImageForbidden("patch the image", biz("PATCH", "/v1/agent-computers/biz-s", `{"image":"ghcr.io/evil/agent:1"}`))
+	wantImageForbidden("put another image", biz("PUT", "/v1/agent-computers/biz-s", strings.Replace(bizSpec, `"slim"`, `"ghcr.io/evil/agent:1"`, 1)+`,"attach":`+attachApp+`}`))
+	if r := biz("PATCH", "/v1/agent-computers/biz-a?dryRun=true", `{"image":"ghcr.io/evil/agent:1"}`); r.StatusCode == http.StatusForbidden {
+		t.Errorf("image of one without a folder = %d %+v", r.StatusCode, apiError(t, r))
+	}
 	if r := biz("DELETE", "/v1/agent-computers/biz-s", ""); r.StatusCode != 200 {
 		t.Fatalf("remove biz-s = %d", r.StatusCode)
 	}
