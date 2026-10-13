@@ -247,10 +247,10 @@ func decodeService(raw json.RawMessage) (fleet.Service, error) {
 	return svc, nil
 }
 
-func (c *Controller) attachService(name string) func(context.Context, *api.PutFleetResponse) {
+func (c *Controller) attachService(k caller, name string) func(context.Context, *api.PutFleetResponse) {
 	return func(_ context.Context, res *api.PutFleetResponse) {
 		if c.isService(name) {
-			st := c.serviceStatus(name)
+			st := scopeService(k, c.serviceStatus(name))
 			res.Service = &st
 		}
 	}
@@ -276,7 +276,7 @@ func (c *Controller) handlePutService(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Services[name] = svc
 		return s, nil
-	}, writeOpts{only: []string{name}}, c.attachService(name))
+	}, writeOpts{only: []string{name}}, c.attachService(callerOf(r), name))
 }
 
 func (c *Controller) handlePatchService(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +302,7 @@ func (c *Controller) handlePatchService(w http.ResponseWriter, r *http.Request) 
 			return nil, err
 		}
 		return s, nil
-	}, writeOpts{only: []string{name}}, c.attachService(name))
+	}, writeOpts{only: []string{name}}, c.attachService(callerOf(r), name))
 }
 
 func (c *Controller) handleDeleteService(w http.ResponseWriter, r *http.Request) {

@@ -37,7 +37,7 @@ func commands() []command {
 		{"prompt", "<name> [--new] \"…\"", "send a turn and stream its events", runPrompt},
 		{"send", "<name> \"…\" [--fresh] [--expires d] [--replace k] [--meta k=v]", "enqueue a message and exit (works while asleep)", runSend},
 		{"inbox", "<name> [--all] [--bodies] | rm|clear|hold|resume <name>", "list or manage a Computer's inbox", runInbox},
-		{"token", "create <name> --actions a,b --computers c | ls | rm <name>", "scoped API tokens", runToken},
+		{"token", "create <name> --prefix p | --actions a,b --agent-computers c | ls | rm <name>", "API tokens for other programs", runToken},
 		{"stop", "<name> [--hold]", "interrupt the active turn (--hold: hold the inbox first)", runStop},
 		{"logs", "<name> [--follow] [--since <seq>]", "replay and follow the journal", runLogs},
 		{"sleep", "<name>... | --all [--allow-wake]", "sleep Computers (storage kept, no CPU or RAM)", runSleep},

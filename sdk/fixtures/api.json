@@ -1053,6 +1053,7 @@
     "computers": [
       "computers"
     ],
+    "prefix": "prefix",
     "createdAt": "2026-10-12T12:00:00Z",
     "secret": "secret"
   },
@@ -1073,16 +1074,11 @@
     ],
     "computers": [
       "computers"
-    ]
+    ],
+    "prefix": "prefix"
   },
   "tokenRequestMinimal": {
-    "name": "name",
-    "actions": [
-      "send"
-    ],
-    "computers": [
-      "computers"
-    ]
+    "name": "name"
   },
   "turnFinishedData": {
     "status": "completed",

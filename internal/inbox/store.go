@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -155,7 +156,20 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("fleet.db schema: %w", err)
 	}
+	if err := addColumn(db, "tokens", "prefix TEXT NOT NULL DEFAULT ''"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("fleet.db schema: %w", err)
+	}
 	return &Store{db: db, now: time.Now}, nil
+}
+
+// addColumn adds a column that a fleet.db from an older release lacks.
+func addColumn(db *sql.DB, table, def string) error {
+	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + def)
+	if err != nil && strings.Contains(err.Error(), "duplicate column") {
+		return nil
+	}
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }

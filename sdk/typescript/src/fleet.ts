@@ -328,8 +328,14 @@ export class Service {
 export class Tokens {
   constructor(private readonly client: A12sClient) {}
 
-  /** A scoped token for another program; owner only. The secret is in the result once. */
-  create(name: string, opts: { actions: TokenAction[]; agentComputers?: string[] }): Promise<Token> {
+  /**
+   * A token for another program; owner only. The secret is in the result once. With `prefix` it may do everything
+   * the owner can for names that start with it, and nothing outside; otherwise `actions` on `agentComputers`.
+   */
+  create(name: string, opts: { prefix: string } | { actions: TokenAction[]; agentComputers?: string[] }): Promise<Token> {
+    if ("prefix" in opts) {
+      return this.client.createToken({ name, prefix: opts.prefix });
+    }
     return this.client.createToken({ name, actions: opts.actions, computers: opts.agentComputers ?? ["*"] });
   }
 
