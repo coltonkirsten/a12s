@@ -17,7 +17,9 @@ its own fleet.yaml, presets, images, Services and app code.
 - agent computer (`AgentComputer` in code): one agent (harness + home drive + session + inbox). Survives sleep and
   restarts.
 - Message: work in an agent computer's inbox. `send` puts one there; it is delivered at the agent computer's next
-  idle moment, batched with anything else pending. Works while it is busy or asleep.
+  idle moment, batched with anything else pending. Works while it is busy or asleep. Two Messages sent back to back
+  to an idle agent computer usually run as two Turns (the first starts at once, the second waits for the next idle
+  moment), so count results across Turns, never expect them in one.
 - Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted.
 - Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data} (`computer` is agentComputer under its
@@ -76,6 +78,11 @@ a12s up                               # creates the agent computers, returns whe
 a12s prompt assistant "Reply with the single word pong."
 ```
 
+Order: `creds set` runs in the Fleet's directory (after `a12s init dir`, cd into dir first) and BEFORE the first
+`a12s up`; up refuses an agent computer whose credential has no value (400 missing_credential) and applies nothing.
+`a12s init` writes `harness: { kind: claude-code, version: 2.1.280 }` with no model key (the harness's default
+model): add `model: haiku` to that line yourself.
+
 `a12s init` is optional: a hand-written fleet.yaml works; `a12s up` writes fleet.lock and `creds set` writes the
 bindings file. Commit fleet.yaml, fleet.lock and presets; never commit a12s.bindings.yaml. A Message sent right
 after `a12s up` is delivered as soon as the agent computer is Ready. `a12s init` puts harness, image and credentials
@@ -131,7 +138,7 @@ Agent computer fields (all optional except a harness, image and credential, whic
   access: exclusive | shared | shared-write}}`).
 - inbox: {maxMessages, maxBytes (≤1Mi), intro}. Bodies are at most 64 KiB.
 - power: {sleepAfterIdle: 15m, wakeOnMessage: {from: [local, service:clock, computer:lead, token:web],
-  maxWakesPerHour: 6}}. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
+  maxWakesPerHour: 6}}. sleepAfterIdle is off or 1m to 7d (1m is the shortest; 30s is refused); maxWakesPerHour 1-60. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
   A manual sleep (`a12s sleep`, SDK `sleep()`) holds it asleep until `wake`, ignoring wakeOnMessage (status says
   "auto-wake suppressed"); `a12s sleep <c> --allow-wake`, `sleep(allow_wake=True)` or `sleep({ allowWake: true })`
   sleeps it like sleepAfterIdle does, so a listed sender's Message wakes it.
@@ -200,7 +207,8 @@ a12s down                             # stop all, keep disks;  down --purge dele
 
 Every command finds the Fleet from -F path/fleet.yaml, $A12S_FLEET, or the nearest fleet.yaml upward. `<c>` is an
 agent computer's name. Every command takes `--json` (before or after it) for scripts: `a12s status --json` is
-{fleet, agentComputers: [{name, phase, inbox: {pending, held, …}, …}], …} (phase directly on each entry);
+{fleet, agentComputers: [{name, phase, inbox: {pending, held, …}, …}], …} (phase directly on each entry; held is
+true/false, pending a number); `a12s --json send desk "hi" | jq -r .id` gives a Message id (m_ plus 26 capitals/digits);
 `a12s inbox desk --json` is the inbox object below; `a12s --json token create bizapp --prefix biz- | jq -r .secret`.
 
 ## TypeScript SDK (npm install @coltonkirsten/a12s; Node 20+, ESM; browsers via the gateway)
