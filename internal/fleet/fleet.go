@@ -51,6 +51,8 @@ type Computer struct {
 	Credentials []string          `yaml:"credentials,omitempty" json:"credentials,omitzero"`
 	Egress      Egress            `yaml:"egress,omitempty" json:"egress,omitzero"`
 	Security    Security          `yaml:"security,omitempty" json:"security,omitzero"`
+	// Attach mounts host folders into the home, by name; set only by the owner, never in defaults.
+	Attach map[string]Attach `yaml:"attach,omitempty" json:"attach,omitempty"`
 	// Inbox is Controller state, not container config: never hashed into a generation.
 	Inbox Inbox `yaml:"inbox,omitempty" json:"inbox,omitzero"`
 	// Power is Controller state, never hashed into a generation. Off unless set.
