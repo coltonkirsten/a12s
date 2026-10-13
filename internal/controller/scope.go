@@ -13,7 +13,7 @@ import (
 // A prefix token is the owner inside its prefix and nobody outside it: it sees, writes and uses only agent
 // computers, Services and credentials whose names start with the prefix, and what those point at (grants and uses)
 // must start with it too. Credentials are the exception on the way in: its specs may name any. It never sets
-// a seccomp profile: that loosens the sandbox, which is the owner's call alone.
+// a seccomp profile or an attached host folder: both widen the sandbox, which is the owner's call alone.
 
 func (k caller) prefix() string {
 	if k.token == nil {
@@ -60,7 +60,7 @@ func allowOwnerOrPrefix(param string, h http.HandlerFunc) http.HandlerFunc {
 
 // checkScope keeps a prefix token's write inside its prefix, defaults included: everything the written agent
 // computers and Services send to or use must be inside it, and an agent computer it writes (rather than
-// removes) keeps the security.seccomp it had in before.
+// removes) keeps the security.seccomp and attach it had before.
 func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts) error {
 	if k.prefix() == "" {
 		return nil
@@ -76,6 +76,11 @@ func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts
 			return &httpError{status: http.StatusForbidden, body: api.Error{Code: api.ErrForbidden,
 				Message: k.principal + " may not set " + name + "'s security.seccomp: only the owner sets a seccomp profile",
 				Fix:     "leave security.seccomp as it is, or use the owner token"}}
+		}
+		if _, kept := after.AgentComputers[name]; kept && ownAttach(before, name) != ownAttach(after, name) {
+			return &httpError{status: http.StatusForbidden, body: api.Error{Code: api.ErrForbidden,
+				Message: k.principal + " may not set or change " + name + "'s attach: only the owner attaches a host folder",
+				Fix:     "leave attach as it is, or use the owner token"}}
 		}
 		var send []string
 		var uses []fleet.Use
@@ -109,6 +114,19 @@ func ownSeccomp(s *fleet.Spec, name string) string {
 		return ""
 	}
 	return c.Security.Seccomp.Path + c.Security.Seccomp.Digest()
+}
+
+// ownAttach identifies the attach an agent computer sets; "" when none. Defaults can't carry one.
+func ownAttach(s *fleet.Spec, name string) string {
+	if s == nil {
+		return ""
+	}
+	var c fleet.Computer
+	if raw, ok := s.AgentComputers[name]; !ok || json.Unmarshal(raw, &c) != nil || len(c.Attach) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(c.Attach)
+	return string(b)
 }
 
 // filterStatus keeps what a prefix token may see; Fleet-wide warnings and orphans name others, so they go.

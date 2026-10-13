@@ -443,6 +443,7 @@ func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 		f = &fleet.Fleet{}
 	}
 	rows := []api.DriveRow{}
+	keep := keepDrives(f)
 	for id, d := range obs.Drives {
 		row := api.DriveRow{Name: id, AttachedTo: d.AttachedTo}
 		if svc, ok := driver.ServiceOfStateDrive(id); ok {
@@ -457,6 +458,10 @@ func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 				c.mu.Unlock()
 			}
 			_ = s
+		} else if driver.IsKeepDrive(id) {
+			row.Kind, row.Computer, row.Path = api.DriveKeep, d.Computer, d.Path
+			_, declared := keep[id]
+			row.Orphaned = !declared
 		} else if owner, ok := strings.CutPrefix(id, "home-"); ok {
 			row.Kind, row.Computer = api.DriveHome, owner
 			_, declared := f.Computers[owner]
@@ -481,7 +486,7 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	if strings.HasPrefix(name, "home-") {
+	if strings.HasPrefix(name, "home-") || driver.IsKeepDrive(name) {
 		id = name
 	} else if svc, ok := strings.CutSuffix(name, "-state"); ok {
 		id = driver.StateDriveID(svc)

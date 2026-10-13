@@ -321,7 +321,7 @@ func credentialWaits(f *fleet.Fleet, creds api.Credentials, o writeOpts) []strin
 
 // admitFields refuses what only a Fleet file may hold, and names fields that neither the spec nor the defaults set.
 func admitFields(f *fleet.Fleet, o writeOpts) error {
-	var missing, fileOnly []string
+	var missing, fileOnly, relHosts []string
 	for _, name := range f.ComputerNames() {
 		comp := f.Computers[name]
 		field := "agent_computers." + name
@@ -337,11 +337,21 @@ func admitFields(f *fleet.Fleet, o writeOpts) error {
 		if comp.Security.Seccomp.Path != "" {
 			fileOnly = append(fileOnly, field+".security.seccomp")
 		}
+		for _, an := range slices.Sorted(maps.Keys(comp.Attach)) {
+			if fleet.HostIsFileRelative(comp.Attach[an].Host) {
+				relHosts = append(relHosts, field+".attach."+an+".host")
+			}
+		}
 	}
 	if len(fileOnly) > 0 {
 		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid,
 			Message: strings.Join(fileOnly, ", ") + ": a path exists only in a Fleet file; send the seccomp profile as JSON",
 			Fix:     "a12s up does this; from the API set security.seccomp to the profile itself"}}
+	}
+	if len(relHosts) > 0 {
+		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid,
+			Message: strings.Join(relHosts, ", ") + ": a relative or ~ path exists only in a Fleet file",
+			Fix:     "a12s up resolves it; from the API send the folder's absolute path"}}
 	}
 	if len(missing) > 0 {
 		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrMissingField,
@@ -419,6 +429,13 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 	c.mu.Unlock()
 	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name}); err != nil {
 		return unchanged, c.fail(name, err, true)
+	}
+	for _, a := range spec.Attach {
+		for _, k := range a.Keep {
+			if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: k.Drive, Kind: driver.DriveKeep, Computer: name, Path: k.Target}); err != nil {
+				return unchanged, c.fail(name, err, true)
+			}
+		}
 	}
 
 	running := exists && obs.Power == driver.PowerAwake
@@ -802,7 +819,8 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
 // its pins (generation and files bytes unset), and the hash of what makes a
-// generation: image, bundle, resources, environment, egress and the files' and seccomp profile's digests.
+// generation: image, bundle, resources, environment, egress, attached folders and the files' and seccomp profile's
+// digests.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -839,20 +857,49 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 	}
 	seccompDigest := comp.Security.Seccomp.Digest()
 	spec.Seccomp = string(comp.Security.Seccomp.Profile)
+	spec.Attach = attachSpec(name, comp)
 	egress := slices.Sorted(slices.Values(comp.Egress.Allow))
 	b, err := json.Marshal(struct {
 		Image, Bundle string
 		CPU, Memory   int64
 		Env           []string
 		Egress        []string
-		Files         string `json:",omitempty"`
-		Seccomp       string `json:",omitempty"`
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Env(c.cfg.Fleet), egress, spec.FilesDigest, seccompDigest})
+		Files         string          `json:",omitempty"`
+		Seccomp       string          `json:",omitempty"`
+		Attach        []driver.Attach `json:",omitempty"`
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Env(c.cfg.Fleet), egress, spec.FilesDigest, seccompDigest, spec.Attach})
 	if err != nil {
 		return spec, "", err
 	}
 	sum := sha256.Sum256(b)
 	return spec, hex.EncodeToString(sum[:]), nil
+}
+
+// attachSpec is the Driver's view of an agent computer's attached folders, sorted by name.
+func attachSpec(name string, comp fleet.Computer) []driver.Attach {
+	var out []driver.Attach
+	for _, an := range slices.Sorted(maps.Keys(comp.Attach)) {
+		a := comp.Attach[an]
+		da := driver.Attach{Host: a.Host, Target: fleet.AttachTarget(an), ReadOnly: a.ReadOnly}
+		for _, k := range a.Keep {
+			da.Keep = append(da.Keep, driver.Keep{Drive: driver.KeepDriveID(name, an, k), Target: da.Target + "/" + k})
+		}
+		out = append(out, da)
+	}
+	return out
+}
+
+// keepDrives are the keep drive IDs the Fleet declares, each with its agent computer.
+func keepDrives(f *fleet.Fleet) map[string]string {
+	out := map[string]string{}
+	for _, name := range f.ComputerNames() {
+		for _, a := range attachSpec(name, f.Computers[name]) {
+			for _, k := range a.Keep {
+				out[k.Drive] = name
+			}
+		}
+	}
+	return out
 }
 
 // admitSeccomp warns about profiles that allow every syscall they do not list. The profile comes only from the

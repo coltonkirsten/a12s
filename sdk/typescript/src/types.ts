@@ -40,6 +40,11 @@ export interface AgentComputerSpec {
   egress?: { allow?: string[] };
   /** `seccomp` is the profile JSON itself. */
   security?: { seccomp?: Record<string, unknown> };
+  /**
+   * Host folders mounted at /home/agent/<name>, by name; owner only. `host` is an absolute path on the machine
+   * running a12s; `keep` paths (like node_modules) stay inside a12s, on a drive each, never in the host folder.
+   */
+  attach?: Record<string, { host: string; readOnly?: boolean; keep?: string[] }>;
   inbox?: { maxMessages?: number; maxBytes?: string };
   power?: { sleepAfterIdle?: string; wakeOnMessage?: { from: string[]; maxWakesPerHour?: number } };
   uses?: Array<string | { name: string; mcp?: boolean }>;
@@ -183,8 +188,10 @@ export interface ComputerStatus {
 
 export interface DriveRow {
   name: string;
-  kind: "home" | "state";
+  kind: "home" | "state" | "keep";
   computer?: string;
+  /** Where a keep drive is mounted, e.g. /home/agent/project/node_modules. */
+  path?: string;
   service?: string;
   /** A quantity such as "10Gi". */
   size?: string;
@@ -530,7 +537,10 @@ export interface TokenRequest {
   name: string;
   actions?: TokenAction[];
   computers?: string[];
-  /** Every power over agent computers, Services and credentials whose names start with it but seccomp; none outside. */
+  /**
+   * Every power over agent computers, Services and credentials whose names start with it but seccomp and attach;
+   * none outside.
+   */
   prefix?: string;
 }
 

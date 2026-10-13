@@ -113,6 +113,7 @@ class DriveRow:
     name: str
     kind: str
     computer: str | None = None
+    path: str | None = None
     service: str | None = None
     size: str | None = None
     attached_to: list[str] | None = None

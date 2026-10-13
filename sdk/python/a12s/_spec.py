@@ -27,6 +27,14 @@ class SecuritySpec(TypedDict, total=False):
     """A seccomp profile in Docker's JSON format, replacing the default for this agent computer."""
 
 
+class AttachSpec(TypedDict, total=False):
+    host: str
+    """The folder's absolute path on the machine running a12s."""
+    readOnly: bool
+    keep: list[str]
+    """Paths under the folder (like node_modules) kept inside a12s on a drive each, never in the host folder."""
+
+
 class InboxSpec(TypedDict, total=False):
     maxMessages: int
     maxBytes: str
@@ -60,6 +68,8 @@ class AgentComputerSpec(TypedDict, total=False):
     credentials: list[str]
     egress: EgressSpec
     security: SecuritySpec
+    attach: dict[str, AttachSpec]
+    """Host folders mounted at /home/agent/<name>, by name; only the owner sets them."""
     inbox: InboxSpec
     power: PowerSpec
     uses: list[Union[str, UseSpec]]
