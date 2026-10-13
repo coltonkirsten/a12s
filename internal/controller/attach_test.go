@@ -114,3 +114,15 @@ func TestAttachStagesMountsAndKeepDrives(t *testing.T) {
 		t.Fatal("keep drive still there")
 	}
 }
+
+// A Service may be named keep-…: drive rm takes its state drive's name, not a keep drive's.
+func TestRemoveStateDriveOfKeepNamedService(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	h.d.mu.Lock()
+	h.d.drives[driver.StateDriveID("keep-db")] = true
+	h.d.mu.Unlock()
+	if r := h.api("DELETE", "/v1/drives/keep-db-state", ""); r.StatusCode != http.StatusNoContent || h.d.hasDrive(driver.StateDriveID("keep-db")) {
+		t.Fatalf("drive rm keep-db-state = %d %+v", r.StatusCode, apiError(t, r))
+	}
+}

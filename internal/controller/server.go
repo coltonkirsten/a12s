@@ -486,10 +486,13 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	if strings.HasPrefix(name, "home-") || driver.IsKeepDrive(name) {
+	// A keep drive ID ends in its digest, never "-state": a Service named keep-… keeps its state drive.
+	if strings.HasPrefix(name, "home-") {
 		id = name
 	} else if svc, ok := strings.CutSuffix(name, "-state"); ok {
 		id = driver.StateDriveID(svc)
+	} else if driver.IsKeepDrive(name) {
+		id = name
 	}
 	d, ok := obs.Drives[id]
 	if !ok {
