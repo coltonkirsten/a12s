@@ -4,7 +4,8 @@
 //   `bg <ms>`    launches a background task that ends after <ms>, and then starts a turn by itself
 //   `slow <ms>`  the turn takes <ms> before its result
 //   `crash`      the process dies mid-turn, after receipt
-// FAKE_SELF_MS keeps a self-started turn open that long before its result.
+// FAKE_SELF_MS keeps a self-started turn open that long before its result. FAKE_ORPHAN makes a resumed process
+// report a task the previous one left behind, in a turn without a model call, as the real CLI does.
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -141,6 +142,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (m.type !== 'user') return;
   const prompt = { uuid: m.uuid ?? `p${n}`, message: m.message ?? {} };
+  if (process.env.FAKE_ORPHAN && flag('--resume') && n === 0) {
+    out({ type: 'system', subtype: 'task_notification', task_id: 'orphan', status: 'stopped', output_file: '', summary: 'did not finish before the previous session ended' });
+    init();
+    out({ type: 'result', subtype: 'success', is_error: false, result: '', errors: [], usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0, duration_ms: 10, num_turns: 0, permission_denials: [] });
+  }
   command(prompt.uuid, 'queued');
   queue.push({ kind: 'prompt', prompt });
   next();

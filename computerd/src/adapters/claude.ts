@@ -29,6 +29,8 @@ interface CliTurn {
   uuid: string | null;
   out: EventQueue<AdapterEvent>;
   mapper: ClaudeMapper | null;
+  /** A turn the CLI started by itself becomes a Turn once it calls the model. */
+  announced: boolean;
 }
 
 interface Task {
@@ -107,7 +109,7 @@ export class ClaudeAdapter implements Adapter {
     if (start.cancelled) throw new Error('stopped before the turn started');
     live ??= this.spawn(input);
     const uuid = randomUUID();
-    const turn: CliTurn = { uuid, out: new EventQueue(), mapper: null };
+    const turn: CliTurn = { uuid, out: new EventQueue(), mapper: null, announced: true };
     live.pending = turn;
     // `later` keeps the prompt queued until a running turn's result instead of folding it into that turn.
     live.input.push({ type: 'user', message: { role: 'user', content: input.prompt }, parent_tool_use_id: null, uuid, priority: 'later' });
@@ -179,7 +181,7 @@ export class ClaudeAdapter implements Adapter {
     for (const [id, task] of live.tasks) this.emit(live, { type: 'task.finished', data: { id, ...task, status: 'killed' } });
     live.tasks.clear();
     for (const turn of [live.current, live.pending]) {
-      if (!turn) continue;
+      if (!turn?.announced) continue;
       if (live.resumeFailed && turn.uuid) {
         turn.out.push({ type: 'turn.finished', data: { status: 'failed', usage: null, error: live.resumeFailed } });
       } else {
@@ -208,14 +210,25 @@ export class ClaudeAdapter implements Adapter {
       if (m.subtype === 'init' && !live.current && !live.ending) {
         // A CLI without lifecycle frames starts a pushed prompt at the next init; one with them announced it already.
         if (live.pending && !live.lifecycle) this.open(live, live.pending);
-        else this.open(live, { uuid: null, out: new EventQueue(), mapper: null });
+        else this.open(live, { uuid: null, out: new EventQueue(), mapper: null, announced: false });
       }
     }
     const turn = live.current;
     // Between turns the CLI streams sub-agent work and status frames that belong to no turn.
     if (!turn?.mapper) return;
     if (m.type === 'system' && m.subtype === 'init') live.initSeen = true;
-    for (const ev of turn.mapper.map(m)) {
+    const events = turn.mapper.map(m);
+    if (!turn.announced && ((m.type === 'system' && m.subtype === 'status') || events.some((ev) => ev.type !== 'turn.finished'))) {
+      turn.announced = true;
+      this.listener?.backgroundTurn({ sessionId: live.sessionId, events: turn.out });
+    }
+    if (!turn.announced && events.length) {
+      // On resume the CLI reports tasks the previous process left behind and closes that turn without a model call.
+      live.current = null;
+      if (live.ending) this.closeInput(live);
+      return;
+    }
+    for (const ev of events) {
       if (ev.type === 'resume.failed' && !live.resumeFailed) {
         live.resumeFailed = ev.data.reason;
         turn.out.push(ev);
@@ -245,7 +258,6 @@ export class ClaudeAdapter implements Adapter {
     if (live.pending === turn) live.pending = null;
     turn.mapper = new ClaudeMapper(live.sessionId, live.resuming && !live.initSeen, turn.uuid);
     live.current = turn;
-    if (!turn.uuid) this.listener?.backgroundTurn({ sessionId: live.sessionId, events: turn.out });
   }
 
   private task(live: Live, m: SDKMessage & { type: 'system' }): void {
@@ -290,7 +302,7 @@ export class ClaudeAdapter implements Adapter {
   }
 
   private emit(live: Live, ev: TaskEvent): void {
-    if (live.current) live.current.out.push(ev);
+    if (live.current?.announced) live.current.out.push(ev);
     else this.listener?.taskEvent(ev);
   }
 

@@ -203,7 +203,7 @@ test('claude: a new session or a restart ends the live one and its background wo
 });
 
 test('claude: a crash mid-turn fails the turn and kills its tasks; the next turn resumes the session in a new process', async () => {
-  const { adapter, input, args, spawns, transcript } = setup('normal');
+  const { adapter, input, args, spawns, transcript, background } = setup('normal', undefined, { FAKE_ORPHAN: '1' });
   const bg = await adapter.startTurn({ ...input, prompt: 'bg 10000' });
   await collect(bg.events);
   const run = await adapter.startTurn({ ...input, sessionId: bg.sessionId, prompt: 'crash' });
@@ -216,6 +216,7 @@ test('claude: a crash mid-turn fails the turn and kills its tasks; the next turn
   assert.equal(finished(await collect(next.events)).status, 'completed');
   assert.equal(spawns(), 2);
   assert.ok(args().includes(`--resume=${bg.sessionId}`));
+  assert.equal(background.length, 0, 'the resumed CLI reporting its orphaned task without a model call is no Turn');
 });
 
 test('claude: a CLI without lifecycle frames still delimits turns by init and result', async () => {
