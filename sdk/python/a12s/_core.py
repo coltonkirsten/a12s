@@ -16,7 +16,7 @@ import httpx
 from ._errors import A12sError, A12sGapError, A12sStreamError, NotFound
 from ._parse import from_json
 from ._sse import SSEFrame
-from ._types import EnqueueResponse, Event, PromptResult, Tokens, ToolCall, Turn, TurnInboxMessage
+from ._types import EnqueueResponse, Event, PromptResult, TokenUsage, ToolCall, Turn, TurnInboxMessage
 
 OnGap = Literal["yield", "throw"]
 
@@ -268,7 +268,7 @@ class TurnBuilder:
                 messages=t.messages,
                 tools=list(t.tools.values()),
                 usage=data.get("usage"),
-                tokens=from_json(Tokens, tokens) if isinstance(tokens, dict) else None,
+                tokens=from_json(TokenUsage, tokens) if isinstance(tokens, dict) else None,
                 started_at=t.started_at,
                 finished_at=ev.ts,
             )

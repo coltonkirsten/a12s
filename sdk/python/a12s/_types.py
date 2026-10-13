@@ -248,7 +248,7 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Tokens:
+class TokenUsage:
     """A Turn's token usage, the same for every harness. ``input`` excludes cached input."""
 
     input: int
@@ -274,7 +274,7 @@ class Turn:
     messages: list[TurnInboxMessage]
     tools: list[ToolCall]
     usage: Any
-    tokens: Tokens | None = None
+    tokens: TokenUsage | None = None
     started_at: str | None = None
     finished_at: str
 
