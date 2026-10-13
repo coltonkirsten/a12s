@@ -338,8 +338,7 @@ http://localhost:<port> URL the command prints (or `--dev-port <port>`). Scripts
 Fleet.connect({ url: "http://127.0.0.1:7012", token: key }). The page may use status, events, send and
 inbox on every agent computer, not create or change them; narrow with `--allow status,events` and
 `--agent-computers worker`. Messages from the page arrive via token:gateway-7012. Loopback only; to serve other
-people, run your own server with login that calls a12s with a scoped token: narrow (`a12s token create web --actions
-send,status --agent-computers lead`) or, if it creates agent computers, a prefix token (`--prefix web-`).
+people, run your own server with login that calls a12s with a narrow or prefix token (see CLI).
 A page with a send box and live events: https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/gateway-page
 
 ## HTTP API (any language)
@@ -347,8 +346,8 @@ A page with a send box and live events: https://github.com/coltonkirsten/a12s-co
 - Base http://127.0.0.1:<port>, header `Authorization: Bearer <token>`, both from ~/.a12s/<fleet>/controller.json
   ({"port", "token"}: the owner token), or a token from `a12s token create`. Errors are {code, message, fix}.
   Every route, field, event and error code: docs/api.md.
-- Send: POST /v1/agent-computers/{c}/inbox {"body", "sender"?, "metadata"?, "fresh"?, "expires"? (seconds),
-  "replaceKey"?, "idempotencyKey"? (a retry with the same key returns the original Message)} → {id, state, …}.
+- Send: POST /v1/agent-computers/{c}/inbox {"body", "sender"?, "metadata"?, "fresh"?, "expires"? (seconds), "replaceKey"?}
+  → {id, state, …}.
 - One agent computer: PUT /v1/agent-computers/{c} with its spec as JSON (fleet.yaml's fields; seccomp is the profile
   object) creates or replaces it; `If-None-Match: *` only creates (409 exists if taken). PATCH is a JSON merge patch
   (null falls back to the default). Last write wins. A write answers `agentComputer: {name, spec, effective,
@@ -435,8 +434,6 @@ SDK objects (Python names; TypeScript is camelCase):
   `{"defaultAction": "SCMP_ACT_ALLOW"}` (a12s warns that it allows every syscall).
 - Agent computers made from code are for work that comes and goes (one per task, user or branch): create,
   send(...).wait(), remove. Keep long-lived roles in fleet.yaml; `a12s up` removes what the file doesn't list.
-- Two programs editing the same agent computer: the last write wins. Whole-Fleet edits go through `fleet.replace`,
-  which retries on 412 version_mismatch.
 - Send each new task with fresh=true so the agent starts a new conversation; without it, the agent remembers
   earlier tasks and may repeat an old answer.
 - An agent can only `send` to agent computers in its grants.send; anything else gets 403 no_grant. A grant may name

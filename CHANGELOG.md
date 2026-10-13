@@ -74,7 +74,7 @@ of the specs your code writes.
   it. `GET /v1/status` no longer carries `egressEnforcement`, and Service status no longer carries `publish`.
 
 ### Changed
-- llms.txt is cut from 706 to about 450 lines: one SDK block for TypeScript and Python (with the Python naming
+- llms.txt is cut from 726 lines (v0.6.0) to 451: one SDK block for TypeScript and Python (with the Python naming
   rules), a short HTTP section next to the generated API surface, and shorter event and error lists (docs/api.md has
   them all). The Go Service walkthrough, the gateway example page and the hand-off recipe moved to the cookbook:
   [go-service](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/go-service),
