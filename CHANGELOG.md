@@ -22,7 +22,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   the same way (Codex never starts a Turn by itself). What ends the session and its background work: `a12s stop`
   (and `stop()`), sleep, `restart_harness`, a `--fresh` Message, applying a config change, the agent computer
   stopping. `a12s stop <name>` and `stop()` without a Turn id stop whatever runs, background work included, through
-  the new `POST /v1/agent-computers/{c}/stop`. See docs/concepts.md#background-work.
+  the new `POST /v1/agent-computers/{c}/stop`; `a12s stop --json` now prints `{computer, turns, background}`
+  instead of `{computer, turn, status}`, so scripts reading `turn` read `turns`. See
+  docs/concepts.md#background-work.
 
 ## v0.7.1 (2026-10-13)
 
