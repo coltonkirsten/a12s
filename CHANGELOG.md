@@ -2,6 +2,17 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Changed
+- **Breaking: a plain sleep leaves the power policy in charge.** `a12s sleep <c>`, SDK `sleep()` and
+  `POST …/power {"state":"asleep"}` now sleep an agent computer like sleepAfterIdle does: a Message from a sender
+  listed in wakeOnMessage wakes it. `--allow-wake` / `allowWake` / `allow_wake` are removed. What to do: to keep it
+  asleep until a manual wake, use `a12s sleep <c> --hold`, `sleep({ hold: true })` or `sleep(hold=True)`
+  (`{"state":"asleep","hold":true}`); `a12s status` shows it as `Asleep (held)`. Agent computers already asleep from
+  a manual sleep under v0.4 are now in the policy's charge.
+- **sleepAfterIdle accepts 1s to 7d** (e.g. `5s`); the 1m floor is gone.
+
 ## v0.4.3 (2026-10-12)
 
 The second pass of the cold-agent loop: a seccomp profile with an unknown architecture is refused when written,

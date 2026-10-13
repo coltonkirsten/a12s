@@ -255,8 +255,8 @@ export class AgentComputer {
     }));
   }
 
-  /** Stops its processes and keeps its disks, session and inbox until wake(); `allowWake` lets wakeOnMessage wake it. */
-  sleep(opts: { allowWake?: boolean } = {}): Promise<void> {
+  /** Stops its processes and keeps its disks, session and inbox; a sender in wakeOnMessage wakes it, unless `hold`. */
+  sleep(opts: { hold?: boolean } = {}): Promise<void> {
     return this.client.sleep(this.name, opts);
   }
 

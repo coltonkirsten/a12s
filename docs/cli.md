@@ -83,7 +83,7 @@ Commit the result, check it with `a12s diff`, and run `a12s up`: the file it sen
 
 | Command | What it does |
 |---|---|
-| `a12s sleep <name>... \| --all [--allow-wake]` | Stop processes, keep storage. A manual sleep suppresses automatic wakes until a manual wake; `--allow-wake` leaves the power policy in charge. |
+| `a12s sleep <name>... \| --all [--hold]` | Stop processes, keep storage. The power policy stays in charge: a sender listed in `wakeOnMessage` wakes it; `--hold` keeps it asleep until a manual wake. |
 | `a12s wake <name>... \| --all [--clear-inbox]` | Start agent computers (or Services). The session resumes on the next Turn. `--clear-inbox` discards what was pending first. |
 
 `--all` covers Services too.

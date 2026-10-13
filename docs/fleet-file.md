@@ -125,7 +125,7 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Default: Docker's default profile. |
 | `inbox` | `{maxMessages, maxBytes, intro}`. See [Inbox](inbox.md#queue-size). |
-| `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`. See [Power policy](inbox.md#power-policy). |
+| `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |
 | `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
 | `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
 

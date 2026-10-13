@@ -186,15 +186,15 @@ type TokensResponse struct {
 const (
 	AutoWakeOn          = "on"
 	AutoWakeOff         = "off"
-	AutoWakeSuppressed  = "suppressed"   // manually slept: until a manual wake
+	AutoWakeSuppressed  = "suppressed"   // slept with hold: until a manual wake
 	AutoWakePaused      = "paused"       // credentials not loaded, or the last wake failed
 	AutoWakeRateLimited = "rate_limited" // maxWakesPerHour reached
 )
 
 const (
-	SleptAuto      = "auto"
-	SleptManual    = "manual"
-	SleptAllowWake = "allow_wake"
+	SleptAuto   = "auto"
+	SleptManual = "manual"
+	SleptHeld   = "held"
 )
 
 type PowerStatus struct {

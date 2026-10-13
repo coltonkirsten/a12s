@@ -154,7 +154,7 @@ agent_computers:
 
 | Field | Default | Allowed |
 |---|---|---|
-| `sleepAfterIdle` | `off` | `off`, or `1m` to `7d` |
+| `sleepAfterIdle` | `off` | `off`, or `1s` to `7d` (`5s`, `15m`, `2h`, `1d`) |
 | `wakeOnMessage.from` | nothing wakes it | principals: `local`, `token:<name>`, `service:<name>`, `computer:<name>`; no wildcard |
 | `wakeOnMessage.maxWakesPerHour` | 6 | 1 to 60 automatic wakes in a rolling hour |
 
@@ -162,8 +162,10 @@ agent_computers:
   attached. Background processes the agent started don't count; sleep ends them.
 - **The Controller decides; the sender gains nothing.** No request field asks for a wake. A pending Message wakes the
   agent computer only if its `via` is listed. Once awake, the first Batch delivers everything pending.
-- **Manual sleep wins.** After `a12s sleep <name>`, no Message wakes the agent computer until a manual `a12s wake`.
-  `a12s sleep <name> --allow-wake` sleeps it and leaves the policy in charge.
+- **A plain sleep leaves the policy in charge.** After `a12s sleep <name>`, a Message whose `via` is listed wakes it,
+  as after an automatic sleep; with no `wakeOnMessage`, nothing is listed, so it stays asleep until `a12s wake`.
+- **A held sleep wins.** After `a12s sleep <name> --hold`, no Message wakes the agent computer until a manual
+  `a12s wake`.
 - **Credentials.** A Controller started with `a12s up --memory-only-credentials` holds credentials only in memory.
   After it restarts, auto-wake pauses until `a12s up` sends them again. By default the Controller stores them, so
   auto-wake carries on after a restart.
@@ -176,7 +178,7 @@ agent_computers:
 COMPUTER  PHASE                  INBOX          POWER
 scout     Asleep (auto 18:12)    1/200 · 2Ki    wakes on service:clock, local · 2/6 this hour
 builder   Busy                   3/50 · 12Ki    sleeps after 15m idle
-reviewer  Asleep (manual)        4/200 · 6Ki    auto-wake suppressed until a12s wake
+reviewer  Asleep (held)          4/200 · 6Ki    auto-wake suppressed until a12s wake
 ```
 
 Services have no power policy; they keep manual `sleep` and `wake`.

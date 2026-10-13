@@ -95,7 +95,7 @@ type Computer struct {
 }
 
 type Power struct {
-	// SleepAfterIdle is "off" or a duration from 1m to 7d ("15m", "2h", "1d").
+	// SleepAfterIdle is "off" or a duration from 1s to 7d ("5s", "15m", "2h", "1d").
 	SleepAfterIdle *string        `yaml:"sleepAfterIdle,omitempty" json:"sleepAfterIdle,omitempty"`
 	WakeOnMessage  *WakeOnMessage `yaml:"wakeOnMessage,omitempty" json:"wakeOnMessage,omitempty"`
 }

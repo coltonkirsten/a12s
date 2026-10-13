@@ -246,8 +246,8 @@ type PowerRequest struct {
 	// RequestID makes a retry never clear a Message that arrived later.
 	ClearInbox bool   `json:"clearInbox,omitempty"`
 	RequestID  string `json:"requestId,omitempty"`
-	// AllowWake, on a sleep, leaves the power policy in charge.
-	AllowWake bool `json:"allowWake,omitempty"`
+	// Hold, on a sleep, keeps it asleep until a manual wake, whatever its power policy says.
+	Hold bool `json:"hold,omitempty"`
 }
 
 type ApplyRequest struct {

@@ -197,13 +197,13 @@ var A12sClient = class {
     if (id) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
   }
   /**
-   * Stops the agent computer's processes and keeps its disks, session and inbox. It stays asleep until wake(); with
-   * `allowWake` its power policy (wakeOnMessage) may wake it instead.
+   * Stops the agent computer's processes and keeps its disks, session and inbox. A Message from a sender its power
+   * policy lists (wakeOnMessage) wakes it; with `hold` it stays asleep until wake().
    */
   async sleep(computer, opts = {}) {
     await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
       state: "asleep",
-      ...opts.allowWake ? { allowWake: true } : {}
+      ...opts.hold ? { hold: true } : {}
     });
   }
   /** Starts a sleeping agent computer; its session resumes on the next Turn. `clearInbox` discards pending Messages. */
@@ -878,7 +878,7 @@ var AgentComputer = class {
       tools: t.tools.map((tc) => ({ ...tc, isError: tc.isError ?? false }))
     }));
   }
-  /** Stops its processes and keeps its disks, session and inbox until wake(); `allowWake` lets wakeOnMessage wake it. */
+  /** Stops its processes and keeps its disks, session and inbox; a sender in wakeOnMessage wakes it, unless `hold`. */
   sleep(opts = {}) {
     return this.client.sleep(this.name, opts);
   }

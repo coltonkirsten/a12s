@@ -21,9 +21,9 @@ func runWake(g *globals, args []string) error { return power(g, "wake", api.Powe
 func power(g *globals, verb string, state api.Power, args []string) error {
 	fs := g.flags(verb)
 	all := fs.Bool("all", false, "every agent computer in the Fleet")
-	var clearInbox, allowWake *bool
+	var clearInbox, hold *bool
 	if state == api.PowerAsleep {
-		allowWake = fs.Bool("allow-wake", false, "leave the power policy in charge: a listed sender's message may wake it")
+		hold = fs.Bool("hold", false, "keep it asleep until a12s wake: no message wakes it, whatever its wakeOnMessage")
 	}
 	if state == api.PowerAwake {
 		clearInbox = fs.Bool("clear-inbox", false, "discard the pending messages (journaled, not erased) before the agent computer takes work")
@@ -59,8 +59,8 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		}
 	}
 	if len(services) > 0 {
-		if (clearInbox != nil && *clearInbox) || (allowWake != nil && *allowWake) {
-			return usageError("--clear-inbox and --allow-wake are for agent computers; a Service has no inbox or power policy")
+		if !*all && ((clearInbox != nil && *clearInbox) || (hold != nil && *hold)) {
+			return usageError("--clear-inbox and --hold are for agent computers; a Service has no inbox or power policy")
 		}
 		if err := powerServices(ctx, g, c, f, verb, state, services); err != nil {
 			return err
@@ -91,8 +91,8 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	var wg sync.WaitGroup
 	for i, n := range names {
 		reqs[i].State = state
-		if allowWake != nil && *allowWake {
-			reqs[i].AllowWake = true
+		if hold != nil && *hold {
+			reqs[i].Hold = true
 		}
 		if clearInbox != nil && *clearInbox {
 			// One requestId per Computer: a retry is the same clear.
