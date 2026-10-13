@@ -112,10 +112,10 @@ Three kinds of bearer token call the owner API:
   Fleet. Use it for read-only dashboards and webhooks; `a12s gateway` uses one.
 
 There is no ceiling inside a prefix token's lane: egress (`allow: ["*"]` included), image, seccomp profile and
-resources are its call, and its agent computers can use any stored credential. A cap on those would not hold anyway,
-since an agent computer with the owner's API key and open egress can send that key anywhere. Treat a prefix token like
-the owner token for the agent computers it creates, and give it only to programs you trust that far. What it can't do
-is reach, read or change anything outside its prefix.
+resources are its call, and its agent computers can use any stored credential. One rule, the prefix, is easier to get
+right than a dozen limits, and it leaves an app free to shape its own agent computers. Treat a prefix token like the
+owner token for the agent computers it creates, and give it only to programs you trust that far. What it can't do is
+reach, read or change anything outside its prefix.
 
 ## Secrets
 
