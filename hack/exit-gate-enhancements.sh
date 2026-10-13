@@ -40,13 +40,7 @@ PY
   mkdir -p ~/.a12s/gate
   umask 077; [ -s ~/.a12s/gate/postgres ] || head -c 18 /dev/urandom | base64 | tr -d '/+=' > ~/.a12s/gate/postgres
   [ -s ~/.a12s/gate/gh-webhook ] || head -c 18 /dev/urandom | base64 | tr -d '/+=' > ~/.a12s/gate/gh-webhook
-  cat > a12s.bindings.yaml <<'B'
-credentials:
-  anthropic:  { file: ~/.a12s/anthropic }
-  postgres:   { file: ~/.a12s/gate/postgres }
-  gh-webhook: { file: ~/.a12s/gate/gh-webhook }
-B
-  rm -f fleet.lock
+  for c in anthropic gate/postgres gate/gh-webhook; do a creds set "${c#gate/}" < ~/.a12s/$c || { log "FAIL setup: creds set $c"; exit 1; }; done
   A12S_TEST_TIME_SCALE=60 run a up || { log "FAIL setup: a12s up"; exit 1; }
   run a status
   for s in scout builder reviewer; do check "setup $s Ready" wait_phase $s Ready 180; done
@@ -200,9 +194,7 @@ PY
   docker tag a12s/svc-cron:0.1 a12s/svc-cron:0.1-gate
   sed -i '' 's|image: a12s/svc-cron:0.1$|image: a12s/svc-cron:0.1-gate|' fleet.yaml
   run a up
-  check "15 new ref appended; old pin kept" eval "grep -q 'clock@a12s/svc-cron:0.1-gate' fleet.lock && grep -q 'clock@a12s/svc-cron:0.1:' fleet.lock"
-  run a lock update services/clock
-  check "15 lock update keeps the key, moves explicitly" grep -q 'clock@a12s/svc-cron:0.1-gate' fleet.lock
+  check "15 a new ref is a new pin" eval "a --json service status clock | grep -q '\"pin\": \"sha256:'"
   sed -i '' 's|image: a12s/svc-cron:0.1-gate$|image: a12s/svc-cron:0.1|' fleet.yaml; run a up
   cp fleet.yaml fleet.npx.yaml
   sed -i '' 's|command: \["/opt/mcp/bin/mcp-server-postgres"\]|command: ["npx", "-y", "@modelcontextprotocol/server-postgres"]|' fleet.npx.yaml

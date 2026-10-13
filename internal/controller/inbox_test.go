@@ -25,7 +25,7 @@ func decodeBody[T any](t *testing.T, res *http.Response) T {
 
 func TestInboxAPI(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true) // asleep: Messages wait
+	h.up(labFleet(t, nil), true) // asleep: Messages wait
 
 	res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"add a health check","idempotencyKey":"k1"}`)
 	if res.StatusCode != http.StatusCreated {
@@ -80,7 +80,7 @@ func TestInboxAPI(t *testing.T) {
 
 func TestScopedTokens(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 
 	res := h.api("POST", "/v1/tokens", `{"name":"ui","actions":["send"],"computers":["builder"]}`)
 	if res.StatusCode != http.StatusCreated {
@@ -147,7 +147,7 @@ func TestInboxFleetLimits(t *testing.T) {
 			f.Computers[n] = c
 		}
 	})
-	h.up(f, nil, true)
+	h.up(f, true)
 	for i := range 4 {
 		res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"x`+string(rune('a'+i))+`"}`)
 		if i < 3 && res.StatusCode != 201 || i == 3 && res.StatusCode != 429 {
@@ -177,7 +177,7 @@ func TestInboxFleetLimits(t *testing.T) {
 		c.Inbox.MaxMessages = &one
 		f.Computers["builder"] = c
 	})
-	res := h.up(f2, nil, true)
+	res := h.up(f2, true)
 	if len(res.Staged)+len(res.Updated) != 0 {
 		t.Fatalf("a limit change restaged: %+v", res)
 	}
@@ -199,7 +199,7 @@ func TestInboxFleetLimits(t *testing.T) {
 // Expiry runs on the Controller's timer, whatever the Computer is doing.
 func TestInboxExpiryTimer(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/scout/inbox", `{"body":"soon","expires":1}`))
 	deadline := time.Now().Add(3 * time.Second)
 	for {

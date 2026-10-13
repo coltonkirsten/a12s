@@ -56,7 +56,7 @@ func reqIDs(r api.TurnRequest) []string {
 // Three sends while busy become one Turn, in seq order.
 func TestBatchedWhileBusy(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	first := h.send("builder", "long task")
 	h.waitMessage("builder", first.ID, api.MsgDelivered)
@@ -83,7 +83,7 @@ func TestBatchedWhileBusy(t *testing.T) {
 // A sleeping Computer keeps its Messages; wake delivers them in one Turn.
 func TestNoWakeWithoutPolicy(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	m := h.send("scout", "while you slept")
 	time.Sleep(50 * time.Millisecond)
 	if h.phase("scout") != api.PhaseAsleep || h.message("scout", m.ID).State != api.MsgPending {
@@ -101,7 +101,7 @@ func TestNoWakeWithoutPolicy(t *testing.T) {
 // No receipt -> returned, redelivered under a new Batch id with attempts 1.
 func TestRedeliveryBeforeDispatch(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	builder.set(func(f *fakeComputerd) { f.noDispatch = true })
 	m := h.send("builder", "work")
@@ -133,7 +133,7 @@ func TestRedeliveryBeforeDispatch(t *testing.T) {
 // inbox; only resume --new delivers again, in a new session.
 func TestResumeFailureHolds(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	builder.set(func(f *fakeComputerd) { f.resumeFail = true })
 	m := h.send("builder", "work")
@@ -160,7 +160,7 @@ func TestResumeFailureHolds(t *testing.T) {
 // A Turn that races the drainer (409 busy) returns the Batch without an attempt.
 func TestConflictReturnsWithoutAttempt(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	builder.set(func(f *fakeComputerd) { f.conflictNext = true })
 	m := h.send("builder", "x")
@@ -173,7 +173,7 @@ func TestConflictReturnsWithoutAttempt(t *testing.T) {
 // An owed restart_harness continuation runs before the next Batch, once.
 func TestContinuationRunsBeforeBatch(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	builder := h.cds.get("builder")
 	m := h.send("builder", "next")
 	builder.set(func(f *fakeComputerd) { f.continuation = "c_01TEST" })
@@ -195,7 +195,7 @@ func TestContinuationRunsBeforeBatch(t *testing.T) {
 // Expires 0 to idle, busy, asleep and held Computers.
 func TestNowOrNever(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, func(f *fleet.Fleet) {}), nil, false)
+	h.up(labFleet(t, func(f *fleet.Fleet) {}), false)
 	res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"now","expires":0}`)
 	m := decodeBody[api.EnqueueResponse](t, res)
 	if res.StatusCode != http.StatusCreated || m.Turn != "t_1" || m.Batch == "" {
@@ -234,7 +234,7 @@ func TestNowOrNever(t *testing.T) {
 // A claimed keyed Message returned while a newer one is pending is replaced.
 func TestReturnedKeyedMessageIsReplaced(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	builder.set(func(f *fakeComputerd) { f.noDispatch = true })
 	k1 := h.send("builder", "deploy 1", `"replaceKey":"deploy-check"`)
@@ -270,7 +270,7 @@ func TestDeliveryRace(t *testing.T) {
 	}
 	total := clients * each
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	builder.set(func(f *fakeComputerd) { f.autoFinish = true })
 	srv := httptest.NewServer(h.c.Handler())
@@ -341,7 +341,7 @@ func TestDeliveryRace(t *testing.T) {
 // The Controller dies after the claim, before the POST.
 func TestClaimedBeforePostSurvivesRestart(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	m := h.send("builder", "work")
 	b, err := h.c.inbox.Claim(context.Background(), "builder") // claimed; the POST never happened
 	if err != nil || b == nil {
@@ -361,7 +361,7 @@ func TestClaimedBeforePostSurvivesRestart(t *testing.T) {
 // The Message stream starts with a snapshot and ends delivered.
 func TestMessageStream(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	m := h.send("builder", "x")
 	res := h.api("GET", "/v1/computers/builder/inbox/"+m.ID+"/events", "")
 	r := bufio.NewReader(res.Body)

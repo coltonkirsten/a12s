@@ -1,11 +1,6 @@
-# a12s bindings and local state are never committed
-a12s.bindings.yaml
-*.bindings.yaml
 /bin/
 /dist/
 node_modules/
 *.log
 .DS_Store
-examples/lab/fleet.lock
-examples/quickstart/fleet.lock
 sdk/typescript/dist/

@@ -19,7 +19,7 @@ import (
 func TestSleptComputerStaysAsleepAcrossDown(t *testing.T) {
 	h := newHarness(t)
 	f := labFleet(t, nil)
-	h.up(f, nil, false)
+	h.up(f, false)
 	h.waitPhase("scout", api.PhaseReady)
 	if err := h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep}); err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestSleptComputerStaysAsleepAcrossDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	h2 := startHarness(t, h.dir, h.d)
-	h2.up(f, nil, false)
+	h2.up(f, false)
 	h2.waitPhase("builder", api.PhaseReady)
 	h2.waitPhase("scout", api.PhaseAsleep)
 }
@@ -42,7 +42,7 @@ func TestSleptComputerStaysAsleepAcrossDown(t *testing.T) {
 // A certificate never outlives its container.
 func TestCertificateRefusedWhileServiceIsDown(t *testing.T) {
 	h := newHarness(t)
-	h.up(withServices(t, h.d, nil), nil, false)
+	h.up(withServices(t, h.d, nil), false)
 	h.waitService("clock", api.PhaseReady)
 	srv := mtlsServer(t, h)
 	leaf, _ := h.c.ca.ServiceCert("clock", 1)
@@ -97,7 +97,7 @@ func TestNamedEgressFailsClosedWithoutBridge(t *testing.T) {
 // certificate while the container runs; the next start clears it.
 func TestRevocationHoldsWhenTheRegistryWriteFails(t *testing.T) {
 	h := newHarness(t)
-	h.up(withServices(t, h.d, nil), nil, false)
+	h.up(withServices(t, h.d, nil), false)
 	h.waitService("clock", api.PhaseReady)
 	srv := mtlsServer(t, h)
 	leaf, _ := h.c.ca.ServiceCert("clock", 1)

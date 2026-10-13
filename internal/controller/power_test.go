@@ -47,7 +47,7 @@ func (h *harness) events(name string, typ string) int {
 // is delivered with everything pending; an unlisted one doesn't wake it.
 func TestAutoSleepAndWakeOnMessage(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
-	h.up(powerFleet(t, 6), nil, false)
+	h.up(powerFleet(t, 6), false)
 	h.waitPhase("scout", api.PhaseAsleep)
 	if h.events("scout", "power.auto_sleep") != 1 || h.powerOf("scout").SleptBy != api.SleptAuto {
 		t.Fatalf("auto sleep not recorded: %+v", h.powerOf("scout"))
@@ -82,7 +82,7 @@ func TestIdleDefinition(t *testing.T) {
 	h.d.mu.Lock()
 	h.d.sessions = map[string]int{"scout": 1}
 	h.d.mu.Unlock()
-	h.up(powerFleet(t, 6), nil, false)
+	h.up(powerFleet(t, 6), false)
 	time.Sleep(100 * time.Millisecond)
 	if h.phase("scout") != api.PhaseReady {
 		t.Fatal("slept with a shell attached")
@@ -105,7 +105,7 @@ func TestIdleDefinition(t *testing.T) {
 // The rate limit, recorded once, and the wake when the window reopens.
 func TestWakeRateLimit(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, 1200) // a minute is 50ms; the window (3s) is crossed with advance
-	h.up(powerFleet(t, 1), nil, false)
+	h.up(powerFleet(t, 1), false)
 	scout := h.cds.get("scout")
 	scout.set(func(f *fakeComputerd) { f.autoFinish = true })
 	h.waitPhase("scout", api.PhaseAsleep)
@@ -143,7 +143,7 @@ func TestHeldSleepSuppresses(t *testing.T) {
 	c := f.Computers["scout"]
 	c.Power.SleepAfterIdle = &idle
 	f.Computers["scout"] = c
-	h.up(f, nil, false)
+	h.up(f, false)
 	if res := h.api("POST", "/v1/computers/scout/power", `{"state":"asleep","hold":true}`); res.StatusCode != http.StatusOK {
 		t.Fatal(res.StatusCode)
 	}
@@ -180,14 +180,14 @@ func TestHeldSleepSuppresses(t *testing.T) {
 func TestCredentialsPaused(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	f := powerFleet(t, 6)
-	res := h.up(f, nil, false)
+	h.up(f, false)
 	h.waitPhase("scout", api.PhaseAsleep)
 	h.stop()
 	h2 := startHarnessScaled(t, h.dir, h.d, powerScale)
 	m := h2.send("scout", "waits")
 	waitFor(t, func() bool {
 		ps := h2.powerOf("scout")
-		return ps != nil && ps.AutoWake == api.AutoWakePaused && ps.Reason == "credentials_not_loaded" && ps.Fix == "a12s up"
+		return ps != nil && ps.AutoWake == api.AutoWakePaused && ps.Reason == "credentials_not_loaded" && ps.Fix == "a12s creds set <name>"
 	})
 	if e := apiError(t, h2.api("POST", "/v1/computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
 		t.Fatalf("now-or-never asleep: %+v", e)
@@ -195,14 +195,14 @@ func TestCredentialsPaused(t *testing.T) {
 	if h2.phase("scout") != api.PhaseAsleep {
 		t.Fatal("woke without credentials")
 	}
-	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Lock: res.Lock, Credentials: labCreds}, writeOpts{})
+	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	h2.waitMessage("scout", m.ID, api.MsgDelivered)
 }
 
 // A wake that fails pauses auto-wake (no loop).
 func TestFailedWakePauses(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
-	h.up(powerFleet(t, 6), nil, false)
+	h.up(powerFleet(t, 6), false)
 	h.waitPhase("scout", api.PhaseAsleep)
 	h.cds.get("scout").setBroken(true)
 	h.send("scout", "x")

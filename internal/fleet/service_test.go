@@ -181,16 +181,6 @@ func TestValidateServiceManifest(t *testing.T) {
 	}
 }
 
-func TestLockServices(t *testing.T) {
-	l := NewLock()
-	if !l.PinService("clock", "example/cron:0.1", "sha256:a") || l.PinService("clock", "example/cron:0.1", "sha256:b") {
-		t.Fatal("pin is append-only")
-	}
-	if l.Services["clock@example/cron:0.1"] != "sha256:a" {
-		t.Fatalf("%v", l.Services)
-	}
-}
-
 func TestGateFleetParses(t *testing.T) {
 	f, err := Load("../../hack/gate/fleet.yaml")
 	if err != nil {

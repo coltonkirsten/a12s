@@ -23,62 +23,11 @@ import (
 // inlineInstructionsMax is the longest instructions export leaves in fleet.yaml; longer ones become a preset file.
 const inlineInstructionsMax = 2000
 
-// runDiff compares the Fleet file with the live Fleet without changing anything: a dry run of a12s up.
-func runDiff(g *globals, args []string) error {
-	flags := g.flags("diff")
-	pos, err := parse(flags, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) > 0 {
-		return usageError("diff takes no arguments")
-	}
-	spec, f, err := g.loadSpec()
-	if err != nil {
-		return err
-	}
-	c, err := cli.Dial(f.Metadata.Name)
-	if err != nil {
-		return err
-	}
-	creds := api.Credentials{}
-	if b, err := cli.LoadBindings(g.bindings()); err == nil {
-		creds, _ = b.ResolveBound(cli.AllBound(b, f))
-	}
-	lock, err := fleet.LoadLock(g.lockPath())
-	if err != nil {
-		return err
-	}
-	ctx, cancel := interruptible()
-	defer cancel()
-	var dry api.PutFleetResponse
-	req := api.PutFleetRequest{Fleet: spec, Lock: lock, Credentials: creds, File: true}
-	if err := c.Do(ctx, "PUT", "/v1/fleet?dryRun=true", req, &dry); err != nil {
-		return err
-	}
-	if g.json {
-		if err := printJSON(dry.Changes); err != nil {
-			return err
-		}
-	} else if len(dry.Changes) == 0 {
-		fmt.Println("no differences")
-	} else {
-		fmt.Printf("%s -> live Fleet (a12s up applies these):\n", g.fleetPath)
-		for _, line := range cli.ChangeLines(dry.Changes) {
-			fmt.Println("  " + line)
-		}
-	}
-	if len(dry.Changes) > 0 {
-		return exitCode(2)
-	}
-	return nil
-}
-
 // runExport writes the live Fleet back to the Fleet file: short instructions stay inline, longer ones and files go
-// to presets/<name>/, seccomp profiles to profiles/<name>.json. Credential values are never written.
+// to presets/<name>/, seccomp profiles to profiles/<name>.json. Credential values are never written. It overwrites
+// what differs: the live Fleet is the source of truth, and git diff shows what changed.
 func runExport(g *globals, args []string) error {
 	flags := g.flags("export")
-	force := flags.Bool("force", false, "overwrite files that differ from the export")
 	pos, err := parse(flags, args)
 	if err != nil {
 		return err
@@ -106,7 +55,7 @@ func runExport(g *globals, args []string) error {
 	}
 	files := maps.Clone(all)
 	dir := g.dir()
-	var conflicts, wrote []string
+	var wrote []string
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
 		old, err := os.ReadFile(filepath.Join(dir, rel))
 		switch {
@@ -115,17 +64,11 @@ func runExport(g *globals, args []string) error {
 			return err
 		case bytes.Equal(old, files[rel]):
 			delete(files, rel)
-		default:
-			conflicts = append(conflicts, rel)
 		}
 	}
 	stale, err := stalePresetFiles(dir, all, &live.Fleet)
 	if err != nil {
 		return err
-	}
-	conflicts = append(conflicts, stale...)
-	if len(conflicts) > 0 && !*force {
-		return fmt.Errorf("these files differ from the live Fleet: %s\n  fix: commit or move them, then a12s export --force", strings.Join(conflicts, ", "))
 	}
 	for _, rel := range stale {
 		if err := os.Remove(filepath.Join(dir, rel)); err != nil {

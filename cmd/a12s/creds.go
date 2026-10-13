@@ -18,7 +18,7 @@ import (
 
 var credNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
-// runCreds writes the token 0600 and atomically, so a secret is never world-readable or half-written.
+// runCreds sets a credential on the Fleet's Controller, starting it if needed; the value is kept nowhere else.
 func runCreds(g *globals, args []string) error {
 	if len(args) == 0 || args[0] != "set" {
 		return usageError("creds set <name>  (reads the value from stdin)")
@@ -68,46 +68,30 @@ func runCreds(g *globals, args []string) error {
 			return err
 		}
 	}
-	path, err := cli.CredentialPath(f.Metadata.Name, name)
-	if err != nil {
+	if err := setCredential(f.Metadata.Name, name, value); err != nil {
 		return err
 	}
-	if err := cli.WriteSecret(path, value); err != nil {
-		return err
-	}
-	if err := cli.BindFile(g.bindings(), name, path); err != nil {
-		return err
-	}
-	uploaded := uploadCredential(f.Metadata.Name, name, value)
 	if g.json {
-		return printJSON(map[string]any{"credential": name, "file": path, "bindings": g.bindings(), "uploaded": uploaded})
+		return printJSON(map[string]any{"credential": name})
 	}
-	if uploaded {
-		fmt.Printf("%s saved to %s (0600), bound in %s and set on the running Controller\n", name, path, g.bindings())
-		return nil
-	}
-	fmt.Printf("%s saved to %s (0600) and bound in %s; a12s up sends it\n", name, path, g.bindings())
+	fmt.Printf("%s set on the Fleet's Controller; agent computers and Services that name it get it now\n", name)
 	return nil
 }
 
-// uploadCredential sets the value on the Fleet's Controller when one runs; agent computers that use it get it at
-// once.
-func uploadCredential(fleetName, name string, value []byte) bool {
-	c, err := cli.Dial(fleetName)
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+// setCredential puts the value on the Fleet's Controller, starting one if none runs, so the order of creds set and
+// a12s up never matters.
+func setCredential(fleetName, name string, value []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := c.Do(ctx, "PUT", "/v1/credentials/"+name, api.CredentialRequest{Value: string(value)}, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: the running Controller did not take %s (%v); a12s up sends it\n", name, err)
-		return false
+	c, err := cli.EnsureController(ctx, cli.StartOptions{Fleet: fleetName, Image: cli.DefaultControllerImage, Log: func(s string) { fmt.Fprintln(os.Stderr, s) }})
+	if err != nil {
+		return err
 	}
-	return true
+	return c.Do(ctx, "PUT", "/v1/credentials/"+name, api.CredentialRequest{Value: string(value)}, nil)
 }
 
 // serviceLogin runs the login in a memory-only container so the credential
-// never touches disk there; it lands on the host 0600, atomically.
+// never touches disk there or on the host; it goes straight to the Controller.
 func serviceLogin(g *globals, args []string) error {
 	pos, err := parse(g.flags("service login"), args)
 	if err != nil {
@@ -121,7 +105,7 @@ func serviceLogin(g *globals, args []string) error {
 	if err != nil {
 		return fmt.Errorf("a12s service login runs the docker CLI: %w", err)
 	}
-	c, f, err := g.connect()
+	c, _, err := g.connect()
 	if err != nil {
 		return err
 	}
@@ -149,20 +133,13 @@ func serviceLogin(g *globals, args []string) error {
 	if err := read.Run(); err != nil {
 		return fmt.Errorf("reading the credential: %v: %s", err, bytes.TrimSpace(errb.Bytes()))
 	}
-	path, err := cli.CredentialPath(f.Metadata.Name, l.Produces)
-	if err != nil {
-		return err
-	}
-	if err := cli.WriteSecret(path, out.Bytes()); err != nil {
-		return err
-	}
-	if err := cli.BindFile(g.bindings(), l.Produces, path); err != nil {
+	if err := c.Do(ctx, "PUT", "/v1/credentials/"+l.Produces, api.CredentialRequest{Value: string(bytes.TrimSpace(out.Bytes()))}, nil); err != nil {
 		return err
 	}
 	if g.json {
-		return printJSON(map[string]string{"service": name, "credential": l.Produces, "file": path, "bindings": g.bindings()})
+		return printJSON(map[string]string{"service": name, "credential": l.Produces})
 	}
-	fmt.Printf("logged in: %s saved to %s (0600) and bound; nothing is left in the container. Run a12s up to start %s with it.\n", l.Produces, path, name)
+	fmt.Printf("logged in: %s set on the Controller; nothing is left in the container, and %s starts with it.\n", l.Produces, name)
 	return nil
 }
 

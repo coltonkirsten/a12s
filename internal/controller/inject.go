@@ -126,7 +126,7 @@ func credentialWait(missing []string, service, produces string) *api.Waiting {
 	var fixes []string
 	for _, n := range missing {
 		if n == produces {
-			fixes = append(fixes, "a12s service login "+service+", then a12s up")
+			fixes = append(fixes, "a12s service login "+service)
 		} else {
 			fixes = append(fixes, "a12s creds set "+n)
 		}

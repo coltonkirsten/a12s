@@ -8,7 +8,7 @@ import (
 
 func TestScaffoldParses(t *testing.T) {
 	for _, h := range []string{"claude-code", "codex"} {
-		text, _, err := scaffold("My_Project", h)
+		text, err := scaffold("My_Project", h)
 		if err != nil {
 			t.Fatal(err)
 		}

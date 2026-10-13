@@ -1,5 +1,5 @@
 // Package fleet parses, defaults, validates and diffs a12s Fleet files, and
-// reads and writes fleet.lock.
+// holds the image pins the Controller keeps.
 package fleet
 
 import "sort"

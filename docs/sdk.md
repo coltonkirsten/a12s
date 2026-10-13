@@ -89,8 +89,8 @@ coder = fleet.agent_computers.create(
 - A field that neither the spec nor `defaults` sets (harness, image) fails with `missing_field`. A credential the
   Controller holds no value for doesn't fail: `create` returns with a warning (`console.warn`, `A12sWarning`) and the
   agent computer waits in `Provisioning` (`status.waiting`: `{credentials, fix}`) until the value is set, then
-  starts. `a12s up` sends every credential bound in the bindings file, and
-  [`fleet.credentials.set`](#services-tokens-and-credentials) sets one from code.
+  starts. `a12s creds set` or
+  [`fleet.credentials.set`](#services-tokens-and-credentials) sets one.
 - A grant may name an agent computer that doesn't exist yet (the write warns), so two that send to each other can be
   created one after the other.
 
@@ -124,9 +124,8 @@ coder.remove()
 - Each call changes only that one agent computer. Two programs updating the same one: the last write wins.
 
 The Fleet file and your code share one Fleet. `a12s up` makes the Fleet match the file again: it removes agent
-computers your code created and undoes changes it made ([`fleet.get()`](#the-whole-fleet) lists them as `drift`).
-It lists those changes and asks before undoing them, and fails without a terminal unless `--force`; `a12s export`
-writes them to the file instead ([CLI](cli.md#changes-made-through-the-api)). Keep long-lived roles in `fleet.yaml`
+computers your code created and undoes changes it made, without asking. To keep them, run `a12s export` first
+([CLI](cli.md#keeping-changes-made-from-code)). Keep long-lived roles in `fleet.yaml`
 and create the short-lived ones (one per task, user or branch) from code.
 
 ## Send work, get the answer
@@ -281,10 +280,8 @@ To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`
 ## The whole Fleet
 
 `fleet.get()` returns the Fleet as written (`spec`, a `FleetSpec` with `defaults`, `agent_computers`, `services`,
-`drives`), its `version`, and `drift`: what changed through the API since the last `a12s up`, `fleet.replace`
-writes included. `fleet.replace(fn)`
-reads it, lets `fn` change it (in place, or by returning a new one) and writes it back only if nobody wrote in
-between; otherwise it reads again and retries, up to 5 times.
+`drives`) and its `version`. `fleet.replace(fn)` reads it, lets `fn` change it (in place, or by returning a new
+one) and writes it back only if nobody wrote in between; otherwise it reads again and retries, up to 5 times.
 
 ```ts
 await fleet.replace((f) => {

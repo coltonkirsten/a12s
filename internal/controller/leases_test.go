@@ -103,7 +103,7 @@ func TestLeaseAuthorization(t *testing.T) {
 			c.Drives = append(c.Drives, fleet.DriveMount{Name: "team", At: "/work/team", ReadOnly: ro})
 			f.Computers[name] = c
 		}
-	}), nil, false)
+	}), false)
 	for _, tc := range []struct {
 		computer, drive string
 		ok              bool

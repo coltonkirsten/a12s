@@ -17,7 +17,7 @@ func TestErrorTable(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	f := withServices(t, h.d, nil)
-	h.up(f, nil, false)
+	h.up(f, false)
 	h.waitService("clock", api.PhaseReady)
 
 	parse := func(edit string) string {

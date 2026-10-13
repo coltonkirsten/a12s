@@ -78,7 +78,7 @@ func TestMTLSGrantsAndRegistry(t *testing.T) {
 		b.Grants = fleet.Grants{Send: []string{"reviewer"}}
 		f.Computers["builder"] = b
 	})
-	h.up(f, nil, false)
+	h.up(f, false)
 	h.waitService("clock", api.PhaseReady)
 	h.waitPhase("builder", api.PhaseReady)
 	ctx := context.Background()
@@ -144,7 +144,7 @@ func TestProxyInternalNames(t *testing.T) {
 		s.Uses = []fleet.Use{{Name: "db"}}
 		f.Computers["scout"] = s
 	})
-	h.up(f, nil, false)
+	h.up(f, false)
 	h.waitService("db", api.PhaseReady)
 	h.waitPhase("scout", api.PhaseReady)
 	ctx := context.Background()

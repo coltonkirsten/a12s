@@ -44,14 +44,9 @@ type CredentialsResponse struct {
 // PutFleetRequest is PUT /v1/fleet: `a12s up` and fleet.replace. If-Match carries the version it read.
 type PutFleetRequest struct {
 	Fleet       *fleet.Spec `json:"fleet"`
-	Lock        *fleet.Lock `json:"lock"`
 	Credentials Credentials `json:"credentials,omitempty"`
 	// Asleep creates new agent computers asleep.
 	Asleep bool `json:"asleep,omitempty"`
-	// Refresh names Services whose ref is resolved again and re-pinned.
-	Refresh []string `json:"refresh,omitempty"`
-	// File marks the Fleet as read from a Fleet file (a12s up): later API changes are drift from it.
-	File bool `json:"file,omitempty"`
 }
 
 // PutFleetResponse answers every write to the Fleet: PUT /v1/fleet and the per-agent-computer and per-Service
@@ -65,8 +60,6 @@ type PutFleetResponse struct {
 	Updated []string `json:"updated"` // applied now (the agent computer was idle or asleep)
 	Staged  []string `json:"staged"`  // waiting for the agent computer's next idle boundary
 	Removed []string `json:"removed"` // stopped and deleted; drives kept
-	// Lock is written back to fleet.lock by the CLI.
-	Lock *fleet.Lock `json:"lock"`
 	// Errors maps an agent computer or Service that did not converge to why; the rest was still applied.
 	Errors   map[string]string `json:"errors,omitempty"`
 	Warnings []string          `json:"warnings,omitempty"`
@@ -114,9 +107,6 @@ const (
 type FleetResponse struct {
 	Version int64      `json:"version"`
 	Fleet   fleet.Spec `json:"fleet"`
-	// Drift lists what changed through the API since the last whole-Fleet write (a12s up): an up from the file
-	// undoes it.
-	Drift []Change `json:"drift"`
 }
 
 // AgentComputer is GET /v1/agent-computers/{c}: its spec as written, with the defaults merged in, and its status.

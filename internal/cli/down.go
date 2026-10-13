@@ -398,8 +398,8 @@ func removeDataVolume(ctx context.Context, dc DownDocker, fleetName, name string
 	return nil
 }
 
-// removeStateFiles keeps anything it does not own, such as credentials a bindings
-// file points at, and never follows a symlink.
+// removeStateFiles keeps anything it does not own, such as credential files an older
+// a12s wrote, and never follows a symlink.
 func removeStateFiles(dir string) (removed []string, removedDir bool, err error) {
 	fi, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {

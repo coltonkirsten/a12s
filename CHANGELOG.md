@@ -2,6 +2,32 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## v0.6.0 (2026-10-13)
+
+The live Fleet is the source of truth. fleet.lock, the bindings file and drift detection are gone: `a12s up` is a
+plain apply of fleet.yaml (which stays optional), `a12s export` writes the live Fleet back, and credentials live only
+in the Controller.
+
+Upgrading: install a12s 0.6.0, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.6.0` under new tags,
+then `a12s up`. Delete `fleet.lock` and `a12s.bindings.yaml` from your project. Credentials the running Controller
+already holds stay; on a new Controller, `a12s creds set <name>` each one again.
+
+### Breaking
+- **fleet.lock is gone.** The Controller pins the image each image, bundle and Service ref names when first used, in
+  its own state, and keeps running it; a new tag is how a rebuilt image rolls out (`a12s service status <svc>` shows
+  the pin). If the pinned image is gone, the ref's current image is used. The `a12s:` release pin is gone: a binary
+  runs its own release's images. `a12s lock update` is removed; give the image a new tag instead.
+- **The bindings file (`a12s.bindings.yaml`) and `--bindings` are gone.** `a12s creds set <name>` sets the value on
+  the Fleet's Controller, starting it if none runs, and keeps no copy on the host (no `~/.a12s/<fleet>/<name>`);
+  `a12s service login` does the same with what the login produces. `a12s up` and `a12s wake` no longer send
+  credentials. With `--memory-only-credentials`, set them again after a Controller restart.
+- **No drift.** `GET /v1/fleet` no longer returns `drift` (SDK: `fleet.get()` has no `drift`), `a12s up` no longer asks
+  `apply anyway?` and `--force` is removed: it makes the live Fleet match the file, removing what the file doesn't
+  list. To keep what code changed, `a12s export` first (`git diff` shows it). `a12s diff` is removed; `export` takes
+  no `--force` and overwrites what differs.
+- **`PUT /v1/fleet`** takes no `lock`, `refresh` or `file`, and its answer has no `lock`.
+- `a12s init` writes fleet.yaml and a README only.
+
 ## v0.5.0 (2026-10-12)
 
 The obvious guess is now the right one: a plain sleep is woken by a listed sender, `send()` hands back the Turn
@@ -201,7 +227,7 @@ Agent computers and Services can be created, changed and removed while the Fleet
   files stay inline; longer ones and files go to `presets/<name>/` (`presets/defaults/` for `defaults`), seccomp
   profiles to `profiles/<name>.json`. It never writes credential values, and it refuses to overwrite a file that
   differs (comments in `fleet.yaml` are lost) or remove a stale preset file without `--force`. See
-  [CLI](docs/cli.md#changes-made-through-the-api).
+  [CLI](docs/cli.md#keeping-changes-made-from-code).
 - **Prefix tokens**: `a12s token create bizapp --prefix biz-` (`fleet.tokens.create("bizapp", prefix="biz-")`,
   TypeScript `{ prefix: "biz-" }`, `POST /v1/tokens {"name", "prefix"}`) gives an app its own lane. It may do
   everything the owner can with agent computers, Services and credentials whose names start with `biz-`, and sees and

@@ -18,7 +18,6 @@ from ._fleetstream import FleetEventStream, FleetTurnStream, SharedStream, names
 from ._parse import from_json
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
-    Change,
     ComputerStatus,
     CredentialInfo,
     EnqueueResponse,
@@ -53,18 +52,16 @@ def write_headers(replace: bool) -> dict[str, str] | None:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FleetState:
-    """The Fleet as written and its version. ``drift`` lists what changed through the API since the last a12s up."""
+    """The Fleet as written and its version."""
 
     version: int
     spec: FleetSpec
-    drift: list[Change]
 
 
 def fleet_state(data: Any) -> FleetState:
     return FleetState(
         version=int(data.get("version") or 0),
         spec=FleetSpec(data.get("fleet") or {}),
-        drift=[from_json(Change, c) for c in data.get("drift") or []],
     )
 
 

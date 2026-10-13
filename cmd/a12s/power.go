@@ -71,20 +71,6 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	}
 
 	reqs := make([]api.PowerRequest, len(names))
-	if state == api.PowerAwake {
-		b, err := cli.LoadBindings(g.bindings())
-		if err != nil {
-			return err
-		}
-		// Resolve everything before waking anything.
-		for i, n := range names {
-			creds, err := b.Resolve(cli.Needed(f, n))
-			if err != nil {
-				return err
-			}
-			reqs[i].Credentials = creds
-		}
-	}
 
 	errs := make([]error, len(names))
 	results := make([]api.ComputerStatus, len(names))
@@ -162,19 +148,6 @@ func runApply(g *globals, args []string) error {
 
 func powerServices(ctx context.Context, g *globals, c *cli.Client, f *fleet.Fleet, verb string, state api.Power, names []string) error {
 	reqs := make([]api.ServicePowerRequest, len(names))
-	if state == api.PowerAwake {
-		b, err := cli.LoadBindings(g.bindings())
-		if err != nil {
-			return err
-		}
-		for i, n := range names {
-			creds, err := b.ResolveBound(cli.NeededByServices(f, n))
-			if err != nil {
-				return err
-			}
-			reqs[i].Credentials = creds
-		}
-	}
 	errs := make([]error, len(names))
 	var wg sync.WaitGroup
 	for i, n := range names {

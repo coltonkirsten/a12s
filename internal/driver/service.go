@@ -29,8 +29,6 @@ type ServiceDriver interface {
 	// ServiceWrite is the injection path: a12s-init does the write, so the image needs no shell.
 	ServiceWrite(ctx context.Context, name, path, owner, mode, dirMode string, data []byte) error
 
-	RefreshImage(ctx context.Context, ref string) (string, error)
-
 	LoginDriver
 }
 

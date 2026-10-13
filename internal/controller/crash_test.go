@@ -14,7 +14,7 @@ import (
 // clears nothing that arrived later.
 func TestWakeClearInbox(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	a := h.send("scout", "first")
 	b := h.send("scout", "second")
 	res := h.api("POST", "/v1/computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`)
@@ -42,7 +42,7 @@ func TestWakeClearInbox(t *testing.T) {
 // awake (held), at once.
 func TestDeferredJournaling(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	m := h.send("scout", "soon", `"expires":1`)
 	h.waitMessage("scout", m.ID, api.MsgExpired)
 	scout := h.cds.get("scout")
@@ -62,7 +62,7 @@ func TestDeferredJournaling(t *testing.T) {
 // stop --hold holds before it interrupts: nothing is delivered after.
 func TestStopHold(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
 	h.send("builder", "long")
 	h.waitPhase("builder", api.PhaseBusy)
@@ -82,7 +82,7 @@ func TestStopHold(t *testing.T) {
 // a Controller restart and are acted on afterwards.
 func TestInboxStateSurvivesRestart(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, true)
+	h.up(labFleet(t, nil), true)
 	h.send("builder", "claimed one")
 	if b, _ := h.c.inbox.Claim(context.Background(), "builder"); b == nil {
 		t.Fatal("no claim")

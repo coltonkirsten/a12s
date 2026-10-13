@@ -18,7 +18,7 @@ const helloSpec = `{"harness":{"kind":"claude-code","version":"2.1.280"},"image"
 
 func TestAgentComputerWrites(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	v0 := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Version
 
 	// A dry run lists the change and changes nothing.
@@ -73,12 +73,6 @@ func TestAgentComputerWrites(t *testing.T) {
 		t.Fatalf("old path = %d", r.StatusCode)
 	}
 
-	// Drift: what changed since the last whole-Fleet write.
-	fr := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", ""))
-	if len(fr.Drift) != 1 || fr.Drift[0].Name != "hello" || fr.Drift[0].Op != api.ChangeCreate {
-		t.Fatalf("drift = %+v", fr.Drift)
-	}
-
 	if d := decodeBody[api.PutFleetResponse](t, h.api("DELETE", "/v1/agent-computers/hello", "")); len(d.Removed) != 1 || d.Version != v0+3 {
 		t.Fatalf("delete = %+v", d)
 	}
@@ -92,7 +86,7 @@ func TestAgentComputerWrites(t *testing.T) {
 
 func TestAgentComputerAdmissionCodes(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	for _, tc := range []struct {
 		body   string
 		status int
@@ -113,7 +107,7 @@ func TestAgentComputerAdmissionCodes(t *testing.T) {
 // Naming a credential with no value admits the agent computer, which waits in Provisioning until the value is set.
 func TestCreateWaitsForCredential(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	res := decodeBody[api.PutFleetResponse](t, h.api("PUT", "/v1/agent-computers/job-1",
 		`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","credentials":["anthropic","dbname"]}`))
 	want := "agent_computers.job-1: credential dbname has no value yet; it starts when you set it (a12s creds set dbname)"
@@ -146,7 +140,7 @@ func TestCreateWaitsForCredential(t *testing.T) {
 
 func TestFleetIfMatch(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	fr := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", ""))
 	body, _ := json.Marshal(api.PutFleetRequest{Fleet: &fr.Fleet, Credentials: labCreds})
 	stale := `"` + string(rune('0'+fr.Version-1)) + `"`
@@ -190,9 +184,6 @@ func TestLegacyStateMigrates(t *testing.T) {
 	if c.Home.Preset != "" || !strings.Contains(c.Files["CLAUDE.md"], "scout") || string(c.Security.Seccomp.Profile) != profile {
 		t.Fatalf("migrated scout = %+v", c)
 	}
-	if st.Applied == nil {
-		t.Fatal("the migrated spec is the applied one: no drift")
-	}
 }
 
 func mustPresetTar(t *testing.T) []byte {
@@ -219,7 +210,7 @@ func TestCredentialStore(t *testing.T) {
 	dir := t.TempDir()
 	persistCreds[dir] = true
 	h := startHarness(t, dir, nil)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	if r := h.api("PUT", "/v1/credentials/hubspot", `{"value":"hs-secret"}`); r.StatusCode != 200 {
 		t.Fatalf("set = %d", r.StatusCode)
 	}

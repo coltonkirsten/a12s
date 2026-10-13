@@ -15,7 +15,7 @@ const bizSpec = `{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"
 func prefixHarness(t *testing.T) (*harness, func(method, path, body string) *http.Response) {
 	t.Helper()
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	res := h.api("POST", "/v1/tokens", `{"name":"bizapp","prefix":"biz-"}`)
 	if res.StatusCode != 201 {
 		t.Fatalf("create prefix token = %d", res.StatusCode)

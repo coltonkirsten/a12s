@@ -1,21 +1,14 @@
 # Fleet file reference
 
-A Fleet is declared in three files that sit side by side:
-
-| File | In git? | What it holds |
-|---|---|---|
-| `fleet.yaml` | yes | The portable desired state: agent computers, drives, Services, grants. |
-| `a12s.bindings.yaml` | **no** | Where each named credential comes from on this machine. |
-| `fleet.lock` | yes | The exact image, bundle and Service digests the Fleet runs. |
-
-`a12s init` scaffolds all three (plus a `.gitignore` for the bindings file and a README).
+`fleet.yaml` declares a Fleet: agent computers, drives, Services, grants. It is optional: the live Fleet is the source
+of truth, and the file is one way to write it. `a12s init` scaffolds `fleet.yaml` and a README.
 
 The CLI finds the Fleet file from `--fleet`/`-F`, then `$A12S_FLEET`, then the nearest `fleet.yaml` in the current
-directory or a parent. The bindings file is `a12s.bindings.yaml` next to it unless `--bindings` says otherwise.
+directory or a parent.
 
 The SDK and the HTTP API change the same Fleet while it runs ([SDK](sdk.md#agent-computers)). `a12s up` makes the
 running Fleet match the file again: it removes agent computers created from code and undoes changes made through the
-API.
+API. Run `a12s export` first to keep them ([CLI](cli.md#keeping-changes-made-from-code)).
 
 ## Example
 
@@ -111,7 +104,7 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | Field | Meaning |
 |---|---|
 | `harness.kind` | `claude-code` or `codex`. |
-| `harness.version` | The harness version; selects the bundle `<kind>@<version>`, pinned in `fleet.lock`. |
+| `harness.version` | The harness version; selects the bundle `<kind>@<version>` ([pinned](#pins)). |
 | `harness.model` | Optional, passed to the harness as is: an alias it knows (`haiku`, `sonnet`, `opus` for Claude Code) or a full model id. Default: the harness's own default. |
 | `image` | `slim`, or a custom image reference built FROM slim. See [Images](images.md#custom-images). |
 | `instructions` | Text written to the home drive as `CLAUDE.md` (claude-code) or `AGENTS.md` (codex): the agent's standing role. |
@@ -120,7 +113,7 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `home.size` | Home drive size. |
 | `home.preset` | A directory, relative to the Fleet file, of files for the home drive (`CLAUDE.md`, skills, settings). Only the Fleet file has it: `a12s up` reads the directory and sends its files as `files` (text files only; a symlink or a binary file is an error, and so is a path also in `files`). A preset `CLAUDE.md` (`AGENTS.md` for codex) together with `instructions` is an error: keep one. |
 | `autonomy` | `full` (default) or `restricted`. See [Permissions](concepts.md#permissions). |
-| `credentials` | Credential names, resolved through the bindings file. See [Credentials](credentials.md). |
+| `credentials` | Credential names; set each value with `a12s creds set <name>`. See [Credentials](credentials.md). |
 | `drives` | `[{name, at, readOnly?}]`: work drives and their absolute mount paths. |
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Default: Docker's default profile. |
@@ -138,43 +131,14 @@ elsewhere on the home drive are kept; one of these files that the agent edited i
 
 Scaling is editing `agent_computers:` and running `a12s up` again: only what changed is created, staged or removed.
 
-## Bindings file
+## Pins
 
-The Fleet names credentials; the bindings file says where each comes from on this machine, so the Fleet file stays
-portable. Never commit it.
+The first time an image, bundle or Service ref is used, the Controller pins the image ID it resolves to, in its own
+state. A pin never moves while its image exists, so to roll out a rebuilt image give it a new tag: a new ref is a new
+pin. If the pinned image is gone, the ref's current image is used. `a12s service status <svc>` shows a Service's pin.
+Presets and seccomp profiles are not pinned: edit one and run `a12s up`, and it applies at the next idle boundary.
 
-```yaml
-credentials:
-  anthropic: { file: ~/.a12s/anthropic }        # read from a file
-  github:    { env: GH_TOKEN }                  # read from an environment variable
-```
-
-The CLI reads the bindings on the host and sends the values to the Controller with `up` (every credential the file
-binds, so agent computers created from code can name them too) and `wake`. `a12s creds set <name>` reads a value
-from stdin, stores it at `~/.a12s/<fleet>/<name>` (0600), binds it for you and, when the Fleet's Controller is
-running, sets it there too. A credential set nowhere doesn't fail `up`: what names it waits, and starts once it is set
-([Credentials](credentials.md#from-code-and-the-api)).
-
-## fleet.lock
-
-```yaml
-a12s:     v0.5.0
-images:   { slim: "sha256:…", "ghcr.io/you/browser-agent:1": "sha256:…" }
-bundles:  { "claude-code@2.1.280": "sha256:…", "codex@0.154.0": "sha256:…" }
-services: { "db@ghcr.io/you/mcp-postgres:1": "sha256:…" }
-```
-
-`a12s: v0.5.0` pins the a12s release. A release binary of another version refuses to apply the Fleet and says how to
-upgrade: install that version, or change the line to the new version and run `a12s up`. `a12s init` and the first
-`a12s up` of a release binary write it; a source build only warns. Existing pins are never moved, so when you
-upgrade, also delete the `slim` entry under `images:` (it pins the old release's image) and rebuild any
-custom image FROM the new base under a new tag.
-
-`a12s up` resolves and appends missing entries and never changes an existing image, bundle or Service pin.
-Presets and seccomp profiles are your own source and travel inside the Fleet itself, so the lock doesn't record them:
-edit one and run `a12s up`, and the change applies at the agent computer's next idle boundary. Moving a
-version forward is explicit: change the version or ref in `fleet.yaml` (a new key), or run `a12s lock update services/<svc>` to re-pin
-an unchanged Service ref.
+To upgrade a12s, install the new release, rebuild custom images FROM the new `slim` under new tags, and run `a12s up`.
 
 ## Validation
 

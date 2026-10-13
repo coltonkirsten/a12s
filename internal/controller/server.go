@@ -389,7 +389,7 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 		res.Warnings = append(res.Warnings, "egress is NOT enforced (egress.enforcement: unenforced)")
 	}
 	if !res.CredentialsLoaded {
-		res.Warnings = append(res.Warnings, "credentials not loaded (the Controller restarted); run a12s up")
+		res.Warnings = append(res.Warnings, "credentials not loaded (a memory-only Controller restarted); set them again with a12s creds set")
 	}
 
 	names := f.ComputerNames()

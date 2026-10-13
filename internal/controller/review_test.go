@@ -17,7 +17,7 @@ import (
 // sleep; a prompt after sleep has closed admission is refused.
 func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	scout := h.cds.get("scout")
 	gate := make(chan struct{})
 	scout.setGate(gate)
@@ -65,7 +65,7 @@ func TestPromptAdmissionIsSerializedWithSleep(t *testing.T) {
 // Restaging an idle Computer closes admission before its idle check.
 func TestRestageClosesAdmission(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	gate := make(chan struct{})
 	h.cds.get("reviewer").setGate(gate)
 	go h.api("POST", "/v1/computers/reviewer/inbox", `{"body":"x"}`)
@@ -76,7 +76,7 @@ func TestRestageClosesAdmission(t *testing.T) {
 			c := f.Computers["reviewer"]
 			c.Harness.Model = "gpt-7"
 			f.Computers["reviewer"] = c
-		}), res.Lock, false)
+		}), false)
 	}()
 	select {
 	case r := <-done:
@@ -94,7 +94,7 @@ func TestRestageClosesAdmission(t *testing.T) {
 // holder's generation is gone; there are never two attachments.
 func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	tester := h.cds.get("tester")
 	tester.StartTurn(context.Background(), api.TurnRequest{RequestID: "r1", Prompt: "ux"})
 	h.waitPhase("tester", api.PhaseBusy)
@@ -105,7 +105,7 @@ func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
 		tc.Drives = nil
 		f.Computers["tester"], f.Computers["scout"] = tc, sc
 	}
-	staged := h.up(labFleet(t, move), res.Lock, false)
+	staged := h.up(labFleet(t, move), false)
 	if !slices.Equal(staged.Staged, []string{"scout", "tester"}) {
 		t.Fatalf("up = %+v", staged)
 	}
@@ -130,13 +130,13 @@ func TestExclusiveDriveMoveWaitsForTheHolder(t *testing.T) {
 // recorded as done.
 func TestStageIsReadBack(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.d.setLostStages(true)
 	out := h.up(labFleet(t, func(f *fleet.Fleet) {
 		c := f.Computers["builder"]
 		c.Harness.Model = "gpt-7"
 		f.Computers["builder"] = c
-	}), res.Lock, false)
+	}), false)
 	if !strings.Contains(out.Errors["builder"], "not observed") {
 		t.Fatalf("errors = %v", out.Errors)
 	}
@@ -151,7 +151,7 @@ func TestStageIsReadBack(t *testing.T) {
 // A restart finishes removing Computers the Fleet dropped.
 func TestRestartFinishesRemovals(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, fifth), nil, false)
+	h.up(labFleet(t, fifth), false)
 	st := readState(t, h.dir) // as if the Controller died right after saving the smaller Fleet
 	delete(st.Spec.AgentComputers, "fifth")
 	if err := st.save(filepath.Join(h.dir, stateFile)); err != nil {
@@ -167,7 +167,7 @@ func TestRestartFinishesRemovals(t *testing.T) {
 // Preset files survive a restart: they are part of the stored spec.
 func TestPresetsSurviveRestart(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.d.RemoveComputer(context.Background(), "scout") // lost: must be staged again
 	h2 := h.restart()
 	// No credentials after the restart, but staged.
@@ -180,7 +180,7 @@ func TestPresetsSurviveRestart(t *testing.T) {
 // A staged egress change waits with the rest of the generation.
 func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	scout := h.cds.get("scout")
 	scout.StartTurn(context.Background(), api.TurnRequest{RequestID: "r1", Prompt: "x"})
 	h.waitPhase("scout", api.PhaseBusy)
@@ -188,7 +188,7 @@ func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 		c := f.Computers["scout"]
 		c.Egress.Allow = []string{"new.example"}
 		f.Computers["scout"] = c
-	}), res.Lock, false)
+	}), false)
 	p, _ := h.c.policy("scout")
 	if p.Check("new.example", 443) == "" || p.Check("api.anthropic.com", 443) != "" || p.Check("platform.claude.com", 443) != "" {
 		t.Fatalf("policy changed before the staged generation applied: %+v", p)
@@ -204,7 +204,7 @@ func TestEgressFollowsTheActiveGeneration(t *testing.T) {
 // There is no turns endpoint: a Message is the one way to start a Turn.
 func TestTurnsEndpointIsGone(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	res := h.api("POST", "/v1/computers/scout/turns", `{"requestId":"r1","session":"current","prompt":"hi"}`)
 	if e := apiError(t, res); res.StatusCode != http.StatusGone || e.Code != api.ErrGone || !strings.Contains(e.Fix, "/inbox") {
 		t.Fatalf("turns = %d %+v", res.StatusCode, e)
@@ -218,12 +218,12 @@ func TestTurnsEndpointIsGone(t *testing.T) {
 // into running Computers.
 func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h2 := h.restart()
 	h2.waitPhase("builder", api.PhaseReady)
 	h.d.takeCalls()
 	fresh := api.Credentials{"anthropic": []byte(`{"new":1}`), "openai": []byte("sk-new"), "github": []byte("ghp_new")}
-	if _, err := h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: res.Lock, Credentials: fresh}, writeOpts{}); err != nil {
+	if _, err := h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Credentials: fresh}, writeOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.d.file("builder", "/run/a12s/secrets/openai", "1000:1000", "0600"); string(got) != "sk-new" {
@@ -231,7 +231,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	}
 	// Known material is not injected again.
 	h.d.takeCalls()
-	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: res.Lock, Credentials: fresh}, writeOpts{})
+	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Credentials: fresh}, writeOpts{})
 	if calls := h.d.takeCalls(); hasCall(calls, "write") {
 		t.Fatalf("re-injected unchanged material: %v", calls)
 	}
@@ -240,7 +240,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 // The session a turn switched to is kept while asleep.
 func TestAsleepShowsTheLatestSession(t *testing.T) {
 	h := newHarness(t)
-	h.up(labFleet(t, nil), nil, false)
+	h.up(labFleet(t, nil), false)
 	h.api("POST", "/v1/computers/scout/inbox", `{"body":"hi","fresh":true}`).Body.Close()
 	waitFor(t, func() bool { return readState(t, h.dir).Computers["scout"].Session == "s_scout_1" })
 	h.cds.get("scout").finish(api.TurnCompleted)
@@ -257,7 +257,7 @@ func TestStatusEgressMode(t *testing.T) {
 		c := f.Computers["tester"]
 		c.Egress.Allow = []string{"*"}
 		f.Computers["tester"] = c
-	}), nil, false)
+	}), false)
 	st := h.c.Status(context.Background())
 	got := map[string]string{}
 	for _, cs := range st.Computers {
@@ -268,7 +268,7 @@ func TestStatusEgressMode(t *testing.T) {
 	}
 
 	u := newHarness(t)
-	u.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), nil, false)
+	u.up(labFleet(t, func(f *fleet.Fleet) { f.Egress.Enforcement = fleet.EnforcementUnenforced }), false)
 	if cs := u.c.computerStatus(context.Background(), "scout"); cs.EgressMode != api.EgressUnenforced {
 		t.Fatalf("unenforced = %q", cs.EgressMode)
 	}
