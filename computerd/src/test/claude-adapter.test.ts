@@ -241,3 +241,23 @@ test('claude: a CLI without lifecycle frames still delimits turns by init and re
   const second = await adapter.startTurn({ ...input, sessionId: first.sessionId });
   assert.equal(finished(await collect(second.events)).status, 'completed');
 });
+
+test('claude: the count follows the CLI live task set, so a lost end event cannot keep a task alive', async () => {
+  const { adapter, input, tasks, background } = setup('normal', undefined, { FAKE_LOST_END: '1' });
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 100' });
+  await collect(run.events);
+  assert.equal(adapter.backgroundTasks(), 1);
+  await until(() => background.length === 1);
+  assert.equal(adapter.backgroundTasks(), 0, 'the live set dropped it, with no task_notification');
+  await until(() => tasks.length === 1, 5000);
+  assert.deepEqual([tasks[0]?.type, (tasks[0]?.data as { status: string }).status], ['task.finished', 'completed'], 'journaled after the grace period');
+});
+
+test('claude: without the live task set (an older CLI) start and end events count', async () => {
+  const { adapter, input, background } = setup('normal', undefined, { FAKE_NO_LEVEL: '1' });
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 100' });
+  await collect(run.events);
+  assert.equal(adapter.backgroundTasks(), 1);
+  await until(() => background.length === 1);
+  assert.equal(adapter.backgroundTasks(), 0);
+});

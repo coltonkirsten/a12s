@@ -6,7 +6,8 @@
 //   `crash`      the process dies mid-turn, after receipt
 // FAKE_SELF_MS keeps a self-started turn open that long before its result. FAKE_ORPHAN makes a resumed process
 // report a task the previous one left behind, in a turn without a model call, as the real CLI does. FAKE_DONE_FILE
-// gets a line for each prompt turn that ran to completion.
+// gets a line for each prompt turn that ran to completion. FAKE_NO_LEVEL leaves out background_tasks_changed, like an
+// older CLI; FAKE_LOST_END leaves out a finished task's notification, so only the live set says it ended.
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -46,6 +47,7 @@ let running: { uuid: string | null; end: () => void } | null = null;
 let eof = false;
 const tasks = new Map<string, NodeJS.Timeout>();
 let taskSeq = 0;
+const level = () => !process.env.FAKE_NO_LEVEL && out({ type: 'system', subtype: 'background_tasks_changed', tasks: [...tasks.keys()].map((task_id) => ({ task_id, task_type: 'local_agent', description: task_id })) });
 
 process.on('SIGTERM', () => {
   if (mode !== 'ignore-term') process.exit(143);
@@ -105,14 +107,16 @@ function promptTurn(m: Prompt): void {
       id,
       setTimeout(() => {
         tasks.delete(id);
+        level();
         // Sub-agent output between turns belongs to no turn.
         out({ type: 'assistant', parent_tool_use_id: `toolu_${id}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_sub_${id}`, name: 'Bash', input: {} }] } });
         out({ type: 'stream_event', parent_tool_use_id: `toolu_${id}`, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'sub-agent text' } } });
-        out({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '', summary: 'done' });
+        if (!process.env.FAKE_LOST_END) out({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '', summary: 'done' });
         queue.push({ kind: 'notification', task: id });
         next();
       }, Number(bg[1])),
     );
+    level();
     text('launched');
     return finishTurn('success', false, 'launched');
   }

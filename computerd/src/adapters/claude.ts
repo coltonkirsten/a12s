@@ -17,6 +17,7 @@ import {
 } from './adapter.js';
 import { harnessEnv, spawnAsAgent, type HarnessDeps } from './spawn.js';
 
+const LEVEL_GRACE_MS = 2_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface StopTiming {
@@ -54,8 +55,15 @@ interface Live {
   /** Pushed, not yet started by the CLI. */
   pending: CliTurn | null;
   current: CliTurn | null;
+  /** Background tasks journaled as started and not yet as finished. */
   tasks: Map<string, Task>;
+  /** Foreground tasks of the running turn, which may still move to the background. */
   foreground: Map<string, Task>;
+  /** The CLI's full set of live background tasks (background_tasks_changed), once it sent one. */
+  level: Set<string> | null;
+  /** The last status task_updated reported, for a task whose notification never comes. */
+  lastStatus: Map<string, TaskStatus>;
+  levelTimer: NodeJS.Timeout | null;
   /** Being ended on purpose: stop, restart, close or a switch to another session. */
   ending: boolean;
   resumeFailed: string | null;
@@ -84,7 +92,10 @@ export class ClaudeAdapter implements Adapter {
   }
 
   backgroundTasks(): number {
-    return this.live?.tasks.size ?? 0;
+    const live = this.live;
+    if (!live) return 0;
+    // The level signal, not start/end pairing: a missed end event must not keep the computer awake forever.
+    return live.level ? live.level.size : live.tasks.size;
   }
 
   async startTurn(input: TurnInput): Promise<RunningTurn> {
@@ -133,6 +144,9 @@ export class ClaudeAdapter implements Adapter {
       current: null,
       tasks: new Map(),
       foreground: new Map(),
+      level: null,
+      lastStatus: new Map(),
+      levelTimer: null,
       ending: false,
       resumeFailed: null,
       timers: [],
@@ -177,6 +191,7 @@ export class ClaudeAdapter implements Adapter {
       error = err as Error;
     }
     for (const t of live.timers) clearTimeout(t);
+    if (live.levelTimer) clearTimeout(live.levelTimer);
     if (this.live === live) this.live = null;
     for (const [id, task] of live.tasks) this.emit(live, { type: 'task.finished', data: { id, ...task, status: 'killed' } });
     live.tasks.clear();
@@ -207,6 +222,7 @@ export class ClaudeAdapter implements Adapter {
     }
     if (m.type === 'system') {
       if (m.subtype === 'task_started' || m.subtype === 'task_updated' || m.subtype === 'task_notification') return this.task(live, m);
+      if (m.subtype === 'background_tasks_changed') return this.level(live, m);
       if (m.subtype === 'init' && !live.current) {
         // A CLI without lifecycle frames starts a pushed prompt at the next init; one with them announced it already.
         if (live.pending && !live.lifecycle) this.open(live, live.pending);
@@ -246,8 +262,29 @@ export class ClaudeAdapter implements Adapter {
       turn.out.push(ev);
       turn.out.end();
       live.current = null;
+      // A foreground task that has not moved to the background by the turn's end never will.
+      live.foreground.clear();
       if (live.ending && !live.pending) this.closeInput(live);
     }
+  }
+
+  /**
+   * A task the CLI dropped from its live set without a notification is finished after a grace period: the set
+   * usually arrives just before the notification that carries the status.
+   */
+  private level(live: Live, m: SDKMessage & { type: 'system' }): void {
+    const tasks = (m as unknown as { tasks?: { task_id: string; ambient?: boolean }[] }).tasks ?? [];
+    live.level = new Set(tasks.filter((t) => !t.ambient).map((t) => t.task_id));
+    if (live.levelTimer) clearTimeout(live.levelTimer);
+    live.levelTimer = setTimeout(() => {
+      live.levelTimer = null;
+      for (const [id, task] of live.tasks) {
+        if (live.level?.has(id)) continue;
+        live.tasks.delete(id);
+        this.emit(live, { type: 'task.finished', data: { id, ...task, status: live.lastStatus.get(id) ?? 'completed' } });
+        live.lastStatus.delete(id);
+      }
+    }, LEVEL_GRACE_MS);
   }
 
   private open(live: Live, turn: CliTurn): void {
@@ -273,7 +310,7 @@ export class ClaudeAdapter implements Adapter {
       ambient?: boolean;
       skip_transcript?: boolean;
       status?: TaskStatus;
-      patch?: { is_backgrounded?: boolean };
+      patch?: { is_backgrounded?: boolean; status?: string };
     };
     const id = t.task_id;
     const started = (task: Task) => {
@@ -292,10 +329,13 @@ export class ClaudeAdapter implements Adapter {
       case 'task_updated': {
         const fg = live.foreground.get(id);
         if (fg && t.patch?.is_backgrounded) started(fg);
+        const status = t.patch?.status;
+        if (live.tasks.has(id) && (status === 'completed' || status === 'failed' || status === 'killed')) live.lastStatus.set(id, status);
         return;
       }
       case 'task_notification': {
         live.foreground.delete(id);
+        live.lastStatus.delete(id);
         const task = live.tasks.get(id);
         if (!task) return;
         live.tasks.delete(id);
