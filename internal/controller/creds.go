@@ -142,7 +142,8 @@ func (c *Controller) handlePutCredential(w http.ResponseWriter, r *http.Request)
 	if len(users) > 0 {
 		// The users pick up the new value: running ones get it injected, ones that waited for it start.
 		_, err, ok := detached(c, r, func(ctx context.Context) (api.PutFleetResponse, error) {
-			return c.applySpec(ctx, func(s *fleet.Spec) (*fleet.Spec, error) { return s, nil }, writeOpts{only: users, by: callerOf(r)})
+			// The Controller's own follow-up, not the caller's write: a prefix token's credential may be used outside it.
+			return c.applySpec(ctx, func(s *fleet.Spec) (*fleet.Spec, error) { return s, nil }, writeOpts{only: users, by: caller{principal: api.PrincipalLocal}})
 		})
 		if !ok {
 			return
