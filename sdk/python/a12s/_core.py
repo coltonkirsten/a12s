@@ -66,7 +66,6 @@ def enqueue_body(
     sender: str | None,
     metadata: dict[str, str] | None,
     fresh: bool,
-    idempotency_key: str | None,
     expires: int | None,
     replace_key: str | None,
 ) -> dict[str, Any]:
@@ -77,7 +76,7 @@ def enqueue_body(
         m["metadata"] = metadata
     if fresh:
         m["fresh"] = True
-    m["idempotencyKey"] = idempotency_key if idempotency_key is not None else str(uuid.uuid4())
+    m["idempotencyKey"] = str(uuid.uuid4())
     if expires is not None:
         m["expires"] = expires
     if replace_key is not None:

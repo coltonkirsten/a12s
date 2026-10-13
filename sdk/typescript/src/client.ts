@@ -1,4 +1,4 @@
-// Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run dashboard` bundles it for the browser).
+// Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run browser` bundles it for the browser).
 import { readSSE } from "./sse.js";
 import type {
   A12sEvent,
@@ -13,6 +13,7 @@ import type {
   Message,
   PutFleetRequest,
   PutFleetResponse,
+  SendRequest,
   ServiceStatus,
   StatusResponse,
   Token,
@@ -161,14 +162,13 @@ export class Client {
    * Puts a Message in a Computer's inbox and returns at once. It is delivered at the Computer's next idle moment,
    * batched with anything else pending. Works while the Computer is busy or asleep.
    */
-  send(computer: string, msg: EnqueueRequest | string): Promise<EnqueueResponse> {
-    const m: EnqueueRequest = typeof msg === "string" ? { body: msg } : { ...msg };
-    m.idempotencyKey ??= globalThis.crypto.randomUUID();
+  send(computer: string, msg: SendRequest | string): Promise<EnqueueResponse> {
+    const m: EnqueueRequest = { ...(typeof msg === "string" ? { body: msg } : msg), idempotencyKey: globalThis.crypto.randomUUID() };
     return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox`, m);
   }
 
   /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends. */
-  async prompt(computer: string, body: string, opts: Omit<EnqueueRequest, "body"> & WaitOptions = {}): Promise<Reply> {
+  async prompt(computer: string, body: string, opts: Omit<SendRequest, "body"> & WaitOptions = {}): Promise<Reply> {
     const { signal, onEvent, ...msg } = opts;
     return this.reply(computer, await this.send(computer, { ...msg, body }), { signal, onEvent });
   }
@@ -270,12 +270,9 @@ export class Client {
     });
   }
 
-  /** Starts a sleeping agent computer; its session resumes on the next Turn. `clearInbox` discards pending Messages. */
-  async wake(computer: string, opts: { clearInbox?: boolean } = {}): Promise<void> {
-    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
-      state: "awake",
-      ...(opts.clearInbox ? { clearInbox: true, requestId: crypto.randomUUID() } : {}),
-    });
+  /** Starts a sleeping agent computer; its session resumes on the next Turn. */
+  async wake(computer: string): Promise<void> {
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "awake" });
   }
 
   /** Holds the inbox: Messages still queue, none is delivered until resume(). */

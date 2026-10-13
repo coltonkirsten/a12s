@@ -21,12 +21,9 @@ func runWake(g *globals, args []string) error { return power(g, "wake", api.Powe
 func power(g *globals, verb string, state api.Power, args []string) error {
 	fs := g.flags(verb)
 	all := fs.Bool("all", false, "every agent computer in the Fleet")
-	var clearInbox, hold *bool
+	var hold *bool
 	if state == api.PowerAsleep {
 		hold = fs.Bool("hold", false, "keep it asleep until a12s wake: no message wakes it, whatever its wakeOnMessage")
-	}
-	if state == api.PowerAwake {
-		clearInbox = fs.Bool("clear-inbox", false, "discard the pending messages (journaled, not erased) before the agent computer takes work")
 	}
 	names, err := parse(fs, args)
 	if err != nil {
@@ -59,8 +56,8 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		}
 	}
 	if len(services) > 0 {
-		if !*all && ((clearInbox != nil && *clearInbox) || (hold != nil && *hold)) {
-			return usageError("--clear-inbox and --hold are for agent computers; a Service has no inbox or power policy")
+		if !*all && hold != nil && *hold {
+			return usageError("--hold is for agent computers; a Service has no power policy")
 		}
 		if err := powerServices(ctx, g, c, f, verb, state, services); err != nil {
 			return err
@@ -80,10 +77,6 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 		if hold != nil && *hold {
 			reqs[i].Hold = true
 		}
-		if clearInbox != nil && *clearInbox {
-			// One requestId per Computer: a retry is the same clear.
-			reqs[i].ClearInbox, reqs[i].RequestID = true, cli.NewRequestID()
-		}
 		wg.Go(func() {
 			var cs api.ComputerStatus
 			if err := c.Do(ctx, "POST", computerPath(n, "/power"), reqs[i], &cs); err != nil {
@@ -91,9 +84,6 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 				return
 			}
 			results[i] = cs
-			if cs.InboxCleared != nil && !g.json {
-				fmt.Printf("%s: discarded %d pending message(s) (journaled with their bodies)\n", n, *cs.InboxCleared)
-			}
 		})
 	}
 	wg.Wait()

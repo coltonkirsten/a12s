@@ -114,7 +114,6 @@ class AgentComputer:
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
-        idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
     ) -> SentMessage:
@@ -126,7 +125,6 @@ class AgentComputer:
             sender=sender,
             metadata=metadata,
             fresh=fresh,
-            idempotency_key=idempotency_key,
             expires=expires,
             replace_key=replace_key,
         )
@@ -169,9 +167,9 @@ class AgentComputer:
         """Puts it to sleep; a sender in its wakeOnMessage wakes it. With ``hold``, it stays asleep until wake()."""
         self._fleet._client.sleep(self.name, hold=hold)
 
-    def wake(self, *, clear_inbox: bool = False) -> None:
-        """Wakes it; ``clear_inbox`` discards the pending Messages first."""
-        self._fleet._client.wake(self.name, clear_inbox=clear_inbox)
+    def wake(self) -> None:
+        """Wakes it; its session resumes on the next Turn."""
+        self._fleet._client.wake(self.name)
 
     def hold(self, *, reason: str | None = None) -> InboxList:
         """Holds its inbox: Messages still queue, none is delivered until resume()."""

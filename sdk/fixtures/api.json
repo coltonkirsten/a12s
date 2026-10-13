@@ -71,7 +71,6 @@
             "orphaned": true,
             "sessionOverride": "sessionOverride"
           },
-          "inboxCleared": 1,
           "power": {
             "sleepAfterIdle": "sleepAfterIdle",
             "wakeOnMessage": [
@@ -630,7 +629,6 @@
           "orphaned": true,
           "sessionOverride": "sessionOverride"
         },
-        "inboxCleared": 1,
         "power": {
           "sleepAfterIdle": "sleepAfterIdle",
           "wakeOnMessage": [
@@ -881,7 +879,6 @@
           "orphaned": true,
           "sessionOverride": "sessionOverride"
         },
-        "inboxCleared": 1,
         "power": {
           "sleepAfterIdle": "sleepAfterIdle",
           "wakeOnMessage": [
@@ -913,7 +910,6 @@
         "orphaned": true
       }
     ],
-    "credentialsLoaded": true,
     "warnings": [
       "warnings"
     ],
@@ -1009,8 +1005,7 @@
         "autonomy": "autonomy",
         "generation": 1
       }
-    ],
-    "credentialsLoaded": true
+    ]
   },
   "textDeltaData": {
     "text": "text"

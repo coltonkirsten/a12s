@@ -20,7 +20,7 @@ type ControllerFile struct {
 }
 
 // Credentials is keyed by credential name ("anthropic", "github", ...). The Controller keeps the values in its
-// state volume (0600) unless it runs with memory-only credentials, and never returns them.
+// state volume (0600) and never returns them.
 type Credentials map[string][]byte
 
 // CredentialRequest is PUT /v1/credentials/{name}.
@@ -45,8 +45,6 @@ type CredentialsResponse struct {
 type PutFleetRequest struct {
 	Fleet       *fleet.Spec `json:"fleet"`
 	Credentials Credentials `json:"credentials,omitempty"`
-	// Asleep creates new agent computers asleep.
-	Asleep bool `json:"asleep,omitempty"`
 }
 
 // PutFleetResponse answers every write to the Fleet: PUT /v1/fleet and the per-agent-computer and per-Service
@@ -165,12 +163,9 @@ type StatusResponse struct {
 	EgressEnforcement string           `json:"egressEnforcement"`
 	AgentComputers    []ComputerStatus `json:"agentComputers"`
 	OrphanedDrives    []DriveRow       `json:"orphanedDrives,omitempty"`
-	// CredentialsLoaded is false after a memory-only Controller restarted,
-	// until `a12s up` or `a12s wake` sends credentials again.
-	CredentialsLoaded bool            `json:"credentialsLoaded"`
-	Warnings          []string        `json:"warnings,omitempty"`
-	OrphanedInboxes   []InboxSummary  `json:"orphanedInboxes,omitempty"`
-	Services          []ServiceStatus `json:"services,omitempty"`
+	Warnings          []string         `json:"warnings,omitempty"`
+	OrphanedInboxes   []InboxSummary   `json:"orphanedInboxes,omitempty"`
+	Services          []ServiceStatus  `json:"services,omitempty"`
 }
 
 type ComputerStatus struct {
@@ -197,9 +192,7 @@ type ComputerStatus struct {
 	EgressMode string        `json:"egressMode,omitempty"`
 	Warnings   []string      `json:"warnings,omitempty"`
 	Inbox      *InboxSummary `json:"inbox,omitempty"`
-	// InboxCleared is set only on a wake --clear-inbox answer.
-	InboxCleared *int         `json:"inboxCleared,omitempty"`
-	Power        *PowerStatus `json:"power,omitempty"`
+	Power      *PowerStatus  `json:"power,omitempty"`
 }
 
 const (
@@ -246,10 +239,6 @@ const (
 type PowerRequest struct {
 	State       Power       `json:"state"`
 	Credentials Credentials `json:"credentials,omitempty"`
-	// ClearInbox discards pending Messages up to the head at acceptance;
-	// RequestID makes a retry never clear a Message that arrived later.
-	ClearInbox bool   `json:"clearInbox,omitempty"`
-	RequestID  string `json:"requestId,omitempty"`
 	// Hold, on a sleep, keeps it asleep until a manual wake, whatever its power policy says.
 	Hold bool `json:"hold,omitempty"`
 }
@@ -267,13 +256,12 @@ type ApplyResponse struct {
 // ShellRequest lets the Controller journal the shell before the CLI runs
 // `docker exec` itself.
 type ShellRequest struct {
-	Root    bool     `json:"root,omitempty"`
 	Command []string `json:"command,omitempty"`
 }
 
 type ShellResponse struct {
 	Container string `json:"container"`
-	User      string `json:"user"` // "0:0" or "1000:1000"
+	User      string `json:"user"` // uid:gid
 }
 
 type DrivesResponse struct {

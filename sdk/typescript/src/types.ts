@@ -103,9 +103,8 @@ export interface AgentComputersResponse {
 
 export interface PutFleetRequest {
   fleet: FleetSpec;
-  /** Credential values by name, base64-encoded (Go []byte). Kept in the Controller's memory only. */
+  /** Credential values by name, base64-encoded (Go []byte). */
   credentials?: Record<string, string>;
-  asleep?: boolean;
 }
 
 export interface ServiceChanges {
@@ -188,8 +187,6 @@ export interface ComputerStatus {
   egressMode?: string;
   warnings?: string[];
   inbox?: InboxSummary;
-  /** Set only on a wake --clear-inbox answer: how many Messages were discarded. */
-  inboxCleared?: number;
   power?: PowerStatus;
 }
 
@@ -233,7 +230,6 @@ export interface StatusResponse {
   egressEnforcement: string;
   agentComputers: ComputerStatus[];
   orphanedDrives?: DriveRow[];
-  credentialsLoaded: boolean;
   warnings?: string[];
   orphanedInboxes?: InboxSummary[];
   services?: ServiceStatus[];
@@ -254,12 +250,15 @@ export interface EnqueueRequest {
   sender?: string;
   metadata?: Record<string, string>;
   fresh?: boolean;
-  /** A retry with the same key returns the original Message. The client sends a random one if unset. */
+  /** Set by the client on every send: a request repeated with the same key returns the original Message. */
   idempotencyKey?: string;
   /** Seconds; 0 means now or never. */
   expires?: number;
   replaceKey?: string;
 }
+
+/** What send() takes: the client sets the idempotencyKey itself. */
+export type SendRequest = Omit<EnqueueRequest, "idempotencyKey">;
 
 export interface EnqueueResponse {
   id: string;

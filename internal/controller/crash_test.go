@@ -2,41 +2,10 @@ package controller
 
 import (
 	"context"
-	"net/http"
 	"testing"
-	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 )
-
-// Two sends to a sleeping Computer, then wake --clear-inbox: no Turn,
-// two inbox.discarded records with bodies; a retry with the same requestId
-// clears nothing that arrived later.
-func TestWakeClearInbox(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), true)
-	a := h.send("scout", "first")
-	b := h.send("scout", "second")
-	res := h.api("POST", "/v1/agent-computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`)
-	cs := decodeBody[api.ComputerStatus](t, res)
-	if res.StatusCode != http.StatusOK || cs.InboxCleared == nil || *cs.InboxCleared != 2 {
-		t.Fatalf("wake = %d %+v", res.StatusCode, cs)
-	}
-	scout := h.cds.get("scout")
-	waitFor(t, func() bool { return len(scout.sealedSnapshot()) == 2 })
-	sealed := scout.sealedSnapshot()
-	if sealed[a.ID]["body"] != "first" || sealed[b.ID]["reason"] != "wake-clear" {
-		t.Fatalf("sealed %+v", sealed)
-	}
-	if n := len(scout.requestsSnapshot()); n != 0 {
-		t.Fatalf("a turn ran: %d", n)
-	}
-	// A message after the clear survives a retry of the same wake.
-	h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep})
-	c := h.send("scout", "after")
-	h.api("POST", "/v1/agent-computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`).Body.Close()
-	h.waitMessage("scout", c.ID, api.MsgDelivered)
-}
 
 // An expiry while asleep is journaled at wake; while
 // awake (held), at once.
@@ -57,25 +26,6 @@ func TestDeferredJournaling(t *testing.T) {
 	h.api("POST", "/v1/agent-computers/scout/inbox/hold", `{}`).Body.Close()
 	n := h.send("scout", "soon too", `"expires":1`)
 	waitFor(t, func() bool { return scout.sealedSnapshot()[n.ID]["body"] == "soon too" })
-}
-
-// stop --hold holds before it interrupts: nothing is delivered after.
-func TestStopHold(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	builder := h.cds.get("builder")
-	h.send("builder", "long")
-	h.waitPhase("builder", api.PhaseBusy)
-	next := h.send("builder", "next")
-	res := h.api("POST", "/v1/agent-computers/builder/turns/t_1/stop?hold=true", `{}`)
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("stop --hold = %d", res.StatusCode)
-	}
-	h.waitPhase("builder", api.PhaseReady)
-	time.Sleep(50 * time.Millisecond)
-	if len(builder.requestsSnapshot()) != 1 || h.message("builder", next.ID).State != api.MsgPending {
-		t.Fatal("delivered after stop --hold")
-	}
 }
 
 // Claimed rows, a hold and a session override survive

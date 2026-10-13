@@ -47,7 +47,7 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `PUT /v1/credentials/{name}` | `{"value": "…"}` → `{name, set, usedBy, updatedAt}`: store it; agent computers and Services that use it get it at once (owner or prefix) |
 | `DELETE /v1/credentials/{name}` | → 204; `409 in_use` while one uses it, `404` if none is stored (owner or prefix) |
 | `GET /v1/fleet` | → `{version, fleet}` with `ETag: "<version>"` (owner only) |
-| `PUT /v1/fleet` | `{fleet, credentials?, asleep?}` → replace the whole Fleet (owner only); `a12s up` sends this |
+| `PUT /v1/fleet` | `{fleet, credentials?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
 The field-by-field shapes are in `internal/api` and the SDKs' types. A ComputerStatus carries `seccomp` (the
 profile's `sha256:` digest) when the agent computer runs with its own seccomp profile.

@@ -49,8 +49,7 @@ type Record struct {
 	// the hash of its spec.
 	Generation int64  `json:"generation"`
 	SpecHash   string `json:"specHash,omitempty"`
-	// DesiredPower is the operator's choice: set by `up --asleep` (new
-	// Computers only), `sleep` and `wake`.
+	// DesiredPower is the operator's choice: set by `sleep` and `wake`.
 	DesiredPower driver.Power `json:"desiredPower"`
 	// StagedGeneration is greater than Generation while a change waits for
 	// the Computer's next idle boundary; StagedHash is its spec hash.

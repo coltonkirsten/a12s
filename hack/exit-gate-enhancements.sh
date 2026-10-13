@@ -84,10 +84,10 @@ PY
   run a wake reviewer; wait_phase reviewer Ready; sleep 3; idle reviewer 180
   check "2 delivered after wake" eval "[ \"\$(msg_state reviewer $id2 2>/dev/null || true)\" = delivered ] || $A12S inbox reviewer --all --json | grep -q '\"state\": \"delivered\"'"
 
-  log "## 3 clear on wake"
+  log "## 3 clear while asleep, then wake"
   run a sleep reviewer; wait_phase reviewer Asleep
   c1=$(send_id reviewer "discard me one"); c2=$(send_id reviewer "discard me two")
-  run a wake reviewer --clear-inbox; wait_phase reviewer Ready; sleep 5
+  run a inbox clear reviewer --yes; run a wake reviewer; wait_phase reviewer Ready; sleep 5
   events reviewer > /tmp/gate3.ev
   check "3 two inbox.discarded with bodies, no Turn" eval "[ \$(grep -c '\"type\":\"inbox.discarded\"' /tmp/gate3.ev) -ge 2 ] && grep -q 'discard me one' /tmp/gate3.ev && grep -q 'discard me two' /tmp/gate3.ev && ! grep 'turn.started' /tmp/gate3.ev | grep -q '$c1'"
 
@@ -220,9 +220,9 @@ PY
   check "18 owner API unreachable, no Docker socket" eval "! grep -q fleet /tmp/gate18 && grep -q 'No such file' /tmp/gate18"
   # Copy the clock's live key out, and use it from inside builder (on its own network, like any peer).
   for f in ca.crt cert.pem key.pem; do
-    docker exec -u 0 a12s-gate-clock cat /run/a12s/tls/$f | a shell builder --root -- sh -c "mkdir -p /tmp/cert && cat > /tmp/cert/$f"
+    docker exec -u 0 a12s-gate-clock cat /run/a12s/tls/$f | docker exec -i -u 0 a12s-gate-builder sh -c "mkdir -p /tmp/cert && cat > /tmp/cert/$f"
   done
-  mt() { a shell builder --root -- sh -c "curl -s -o /dev/null -w '%{http_code}' --cacert /tmp/cert/ca.crt --cert /tmp/cert/cert.pem --key /tmp/cert/key.pem -X $1 https://a12s-gate-controller:7443$2 -H 'content-type: application/json' -d '$3'"; }
+  mt() { docker exec -u 0 a12s-gate-builder sh -c "curl -s -o /dev/null -w '%{http_code}' --cacert /tmp/cert/ca.crt --cert /tmp/cert/cert.pem --key /tmp/cert/key.pem -X $1 https://a12s-gate-controller:7443$2 -H 'content-type: application/json' -d '$3'"; }
   r1=$(mt PUT /v1/fleet '{}'); r2=$(mt POST /v1/leases '{}'); r3=$(mt POST /v1/agent-computers/scout/inbox '{"body":"from a copied clock key"}')
   log "with the clock's copied key: PUT /v1/fleet $r1, POST /v1/leases $r2, send to scout (granted) $r3"
   check "18 PUT /v1/fleet and POST /v1/leases are 403 over mTLS; the granted send works" eval "[ '$r1' = 403 ] && [ '$r2' = 403 ] && [ '$r3' = 201 ]"
@@ -230,7 +230,7 @@ PY
   r4=$(mt POST /v1/agent-computers/scout/inbox '{"body":"after sleep"}')
   log "after a12s sleep clock: $r4"
   check "18 after sleep the copied cert is refused" eval "[ '$r4' = 403 ]"
-  a shell builder --root -- rm -rf /tmp/cert
+  docker exec -u 0 a12s-gate-builder rm -rf /tmp/cert
   run a wake clock; wait_phase clock Ready 120
 fi
 

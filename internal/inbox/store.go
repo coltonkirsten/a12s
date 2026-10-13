@@ -724,9 +724,8 @@ func (s *Store) Withdraw(ctx context.Context, computer, id, via, by string) (*ap
 	return m, err
 }
 
-// Clear discards pending Messages with seq <= throughSeq (nil: all). An
-// orphaned inbox is cleared only with orphan set.
-func (s *Store) Clear(ctx context.Context, computer string, throughSeq *int64, orphan bool, reason, by string) (int, error) {
+// Clear discards pending Messages with seq <= throughSeq (nil: all).
+func (s *Store) Clear(ctx context.Context, computer string, throughSeq *int64, reason, by string) (int, error) {
 	n := 0
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		ib, err := getInbox(tx, computer)
@@ -735,9 +734,6 @@ func (s *Store) Clear(ctx context.Context, computer string, throughSeq *int64, o
 		}
 		if ib == nil {
 			return ErrUnknownInbox
-		}
-		if !ib.declared && !orphan {
-			return errf(409, api.ErrConflict, fmt.Sprintf("a12s inbox clear %s --orphan", computer), "%s is no longer in the Fleet; its inbox is orphaned", computer)
 		}
 		through := int64(1<<62 - 1)
 		if throughSeq != nil {

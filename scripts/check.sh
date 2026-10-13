@@ -64,10 +64,7 @@ run_sdk() {
   need npm "Node 24+ and npm"
   step "sdk/typescript: npm ci"; (cd sdk/typescript && q npm ci)
   step "sdk/typescript: lint";   (cd sdk/typescript && q npm run lint)
-  step "sdk/typescript: test (build, dashboard bundle, node --test)"; (cd sdk/typescript && q npm test)
-  step "gateway embeds this dashboard build"
-  cmp -s sdk/typescript/dist/dashboard.js internal/gateway/web/dashboard.js \
-    || { echo "internal/gateway/web/dashboard.js is stale; run make dashboard"; return 1; }
+  step "sdk/typescript: test (build, browser bundle, node --test)"; (cd sdk/typescript && q npm test)
 }
 
 run_python() {

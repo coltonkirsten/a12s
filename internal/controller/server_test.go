@@ -80,10 +80,10 @@ func TestAPI(t *testing.T) {
 	}
 
 	// The shell request is journaled in the Computer.
-	res = h.api("POST", "/v1/agent-computers/builder/shell", `{"root":true}`)
+	res = h.api("POST", "/v1/agent-computers/builder/shell", `{}`)
 	var sh api.ShellResponse
 	json.NewDecoder(res.Body).Decode(&sh)
-	if sh.Container != "a12s-lab-builder" || sh.User != "0:0" || len(h.cds.get("builder").diagnostics) != 1 {
+	if sh.Container != "a12s-lab-builder" || sh.User != "1000:1000" || len(h.cds.get("builder").diagnostics) != 1 {
 		t.Fatalf("shell = %+v, diagnostics %v", sh, h.cds.get("builder").diagnostics)
 	}
 

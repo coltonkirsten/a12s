@@ -175,28 +175,29 @@ func TestHeldSleepSuppresses(t *testing.T) {
 	h2.waitMessage("scout", n.ID, api.MsgDelivered)
 }
 
-// After a Controller restart auto-wake pauses until a12s up, and
+// While a credential has no value auto-wake pauses until it is set, and
 // expires 0 to a sleeping Computer bounces without a wake.
 func TestCredentialsPaused(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	f := powerFleet(t, 6)
 	h.up(f, false)
 	h.waitPhase("scout", api.PhaseAsleep)
-	h.stop()
-	h2 := startHarnessScaled(t, h.dir, h.d, powerScale)
-	m := h2.send("scout", "waits")
+	h.c.mu.Lock()
+	clear(h.c.creds)
+	h.c.mu.Unlock()
+	m := h.send("scout", "waits")
 	waitFor(t, func() bool {
-		ps := h2.powerOf("scout")
+		ps := h.powerOf("scout")
 		return ps != nil && ps.AutoWake == api.AutoWakePaused && ps.Reason == "credentials_not_loaded" && ps.Fix == "a12s creds set <name>"
 	})
-	if e := apiError(t, h2.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
+	if e := apiError(t, h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
 		t.Fatalf("now-or-never asleep: %+v", e)
 	}
-	if h2.phase("scout") != api.PhaseAsleep {
+	if h.phase("scout") != api.PhaseAsleep {
 		t.Fatal("woke without credentials")
 	}
-	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
-	h2.waitMessage("scout", m.ID, api.MsgDelivered)
+	h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
+	h.waitMessage("scout", m.ID, api.MsgDelivered)
 }
 
 // A wake that fails pauses auto-wake (no loop).

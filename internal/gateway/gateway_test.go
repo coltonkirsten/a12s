@@ -28,11 +28,10 @@ func newGateway(t *testing.T, web fstest.MapFS) (*httptest.Server, *[]*http.Requ
 	}))
 	t.Cleanup(ctl.Close)
 	u, _ := url.Parse(ctl.URL)
-	cfg := Config{Controller: u, Token: "scoped", Key: "k"}
-	if web != nil {
-		cfg.Web = web
+	if web == nil {
+		web = fstest.MapFS{"index.html": {Data: []byte("<p>app</p>")}}
 	}
-	gw := httptest.NewServer(Handler(cfg))
+	gw := httptest.NewServer(Handler(Config{Controller: u, Token: "scoped", Key: "k", Web: web}))
 	t.Cleanup(gw.Close)
 	return gw, &seen
 }
@@ -106,7 +105,7 @@ func TestRefusesNonLoopbackHostsAndCrossOriginWrites(t *testing.T) {
 	}
 }
 
-func TestServesTheDashboardOrTheBuiltApp(t *testing.T) {
+func TestServesTheBuiltApp(t *testing.T) {
 	get := func(gw *httptest.Server, path string) (int, string) {
 		res, err := authed(gw).Get(gw.URL + path)
 		if err != nil {
@@ -116,24 +115,12 @@ func TestServesTheDashboardOrTheBuiltApp(t *testing.T) {
 		b, _ := io.ReadAll(res.Body)
 		return res.StatusCode, string(b)
 	}
-	builtin, _ := newGateway(t, nil)
-	if _, page := get(builtin, "/"); !strings.Contains(page, `<script type="module" src="/dashboard.js">`) {
-		t.Error("the built-in dashboard is not served at /")
-	}
-	if _, js := get(builtin, "/dashboard.js"); !strings.Contains(js, "var Fleet = class") || strings.Contains(js, "\nexport ") {
-		t.Error("/dashboard.js is not the dashboard bundled with the SDK, or it exports the SDK")
-	}
 	app, _ := newGateway(t, fstest.MapFS{
 		"index.html":         {Data: []byte(`<script type="module" src="/assets/index-x1.js"></script>`)},
 		"assets/index-x1.js": {Data: []byte("app code")},
 	})
 	if code, body := get(app, "/assets/index-x1.js"); code != http.StatusOK || body != "app code" {
 		t.Errorf("--web does not serve a built app's absolute asset paths: %d %q", code, body)
-	}
-	for _, p := range []string{"/a12s.js", "/dashboard.js"} {
-		if code, _ := get(app, p); code != http.StatusNotFound {
-			t.Errorf("--web serves %s: %d", p, code)
-		}
 	}
 }
 

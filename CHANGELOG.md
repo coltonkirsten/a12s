@@ -16,6 +16,22 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   `a12s.AsyncFleet()`, whose agent computer handles have the same methods (`fleet.agentComputers.get(name).send(...)`).
   TypeScript `fleet.client` keeps `url` and `request(method, path, body?)` only; for `inbox`, `message`, `withdraw`
   and the rest, use the agent computer handle. `A12sClientOptions` is now `ConnectOptions`.
+- **`a12s gateway` serves only your app.** The built-in dashboard is gone, and `a12s gateway` with no `--web`, `--dev`
+  or `-- <command>` is a usage error. For a dashboard, run `a12s ui`.
+- **Rarely used flags are removed:**
+  - `up --asleep`: run `a12s up`, then `a12s sleep <name>`. `PUT /v1/fleet` takes no `asleep`.
+  - `up --memory-only-credentials`: the Controller always keeps credential values in its state volume (0600), and
+    `A12S_MEMORY_ONLY_CREDENTIALS` is ignored. `GET /v1/status` (SDK: `status()`) no longer returns
+    `credentialsLoaded`.
+  - `stop --hold`: run `a12s inbox hold <name>`, then `a12s stop <name>`. The Turn stop route takes no `?hold=true`.
+  - `wake --clear-inbox`: run `a12s inbox clear <name>`, then `a12s wake <name>`. The power route takes no
+    `clearInbox` or `requestId` and returns no `inboxCleared`; SDK `wake()` takes no `clearInbox` / `clear_inbox`.
+  - `inbox clear --orphan`: `a12s inbox clear <name>` now clears a removed agent computer's inbox as well. The clear
+    route takes no `orphan`.
+  - `logs --since`: `a12s logs <name>` replays the whole journal; filter on the seq column.
+  - `shell --root`: use `docker exec -u 0 <container>`. The shell routes take no `root`.
+  - `send --key`, the SDKs' `idempotencyKey` / `idempotency_key` send option and svckit's `Enqueue.IdempotencyKey`:
+    the CLI and SDKs set a fresh key on every send themselves; the HTTP API still accepts `idempotencyKey`.
 
 ## v0.6.0 (2026-10-13)
 

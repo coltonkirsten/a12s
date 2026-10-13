@@ -62,23 +62,23 @@ $A12S up > /tmp/gate5.b; cat /tmp/gate5.b >> "$LOG"; run $A12S drive ls > /tmp/g
 fifth_removed() { grep -q '^removed fifth' /tmp/gate5.b && grep -q 'home-fifth' /tmp/gate5.c; }
 check "5 fifth removed, home drive kept (orphan listed)" fifth_removed
 
-log "## 6 kill the SSE client mid-turn, reconnect with Last-Event-ID: no loss, no duplicates"
+log "## 6 kill the SSE client mid-turn, follow again: no loss, no duplicates"
 $A12S logs scout --follow > /tmp/gate6.a 2>&1 &
 L=$!
 $A12S send --wait scout "Count from 1 to 150, one number per line, nothing else." > /tmp/gate6.prompt 2>&1 &
 P=$!
-head0=$($A12S logs scout --since 0 2>/dev/null | awk '{print $1}' | tail -1); head0=${head0:-0}
+head0=$($A12S logs scout 2>/dev/null | awk '{print $1}' | tail -1); head0=${head0:-0}
 for i in $(seq 1 300); do awk -v h="$head0" '$1 > h && $2 == "text.delta" {f=1} END {exit !f}' /tmp/gate6.a && break; sleep 0.2; done; sleep 1
 kill -9 $L; wait $L 2>/dev/null
 last=$(awk '{print $1}' /tmp/gate6.a | tail -1)
-log "killed the logs client mid-turn at seq $last; reconnecting with Last-Event-ID $last"
-$A12S logs scout --follow --since "$last" > /tmp/gate6.b 2>&1 &
+log "killed the logs client mid-turn at seq $last; following again from after it"
+$A12S logs scout --follow > /tmp/gate6.b 2>&1 &
 L2=$!
 wait $P; cat /tmp/gate6.prompt >> "$LOG"; sleep 2; kill $L2; wait $L2 2>/dev/null
 cat > /tmp/gate6.py <<'PY'
 import sys, json
 a = [l for l in open(sys.argv[1]) if l[:1].isdigit()]
-b = [l for l in open(sys.argv[2]) if l[:1].isdigit()]
+b = [l for l in open(sys.argv[2]) if l[:1].isdigit() and int(l.split(" ", 1)[0]) > int(sys.argv[3])]
 rows = [(int(l.split(" ", 2)[0]), l.split(" ", 2)[1], l.split(" ", 2)[2]) for l in a + b]
 started = max(s for s, t, d in rows if t == "turn.started")
 mid_turn = not any(t == "turn.finished" and s > started for s, t, d in (tuple(r) for r in rows[:len(a)]))
@@ -88,16 +88,16 @@ text = "".join(json.loads(d).get("text", "") for s, t, d in rows if t == "text.d
 nums = [int(t) for t in text.split() if t.isdigit()]
 finished = any(t == "turn.finished" and s > started for s, t, d in rows)
 ok = mid_turn and finished and dupes == 0 and not gaps and nums == list(range(1, 151))
-print(f"6: killed mid-turn={mid_turn}; before kill {len(a)} events, after reconnect {len(b)}; dupes={dupes}, gaps={gaps}; numbers 1..150 complete={nums == list(range(1, 151))}; turn.finished seen={finished}")
+print(f"6: killed mid-turn={mid_turn}; before kill {len(a)} events, after it {len(b)}; dupes={dupes}, gaps={gaps}; numbers 1..150 complete={nums == list(range(1, 151))}; turn.finished seen={finished}")
 sys.exit(0 if ok else 1)
 PY
-python3 /tmp/gate6.py /tmp/gate6.a /tmp/gate6.b > /tmp/gate6.res 2>&1; rc=$?; tee -a "$LOG" < /tmp/gate6.res
+python3 /tmp/gate6.py /tmp/gate6.a /tmp/gate6.b "$last" > /tmp/gate6.res 2>&1; rc=$?; tee -a "$LOG" < /tmp/gate6.res
 check "6 reconnect lost nothing and duplicated nothing" test "$rc" -eq 0
 
 log "## 7 a request to a host that isn't allowed is blocked and shows up as a diagnostic"
-since7=$($A12S logs builder --since 0 2>/dev/null | awk '{print $1}' | tail -1); since7=${since7:-0}
+since7=$($A12S logs builder 2>/dev/null | awk '{print $1}' | tail -1); since7=${since7:-0}
 $A12S send --wait builder "Run exactly this shell command and report its exit code and the first line of output: curl -sS -m 10 https://example.com" > /tmp/gate7.out; cat /tmp/gate7.out >> "$LOG"
-$A12S logs builder --since "$since7" > /tmp/gate7.log; cat /tmp/gate7.log >> "$LOG"
+$A12S logs builder | awk -v s="$since7" '$1 > s' > /tmp/gate7.log; cat /tmp/gate7.log >> "$LOG"
 denied7() { grep -q '^turn t_[0-9a-f]* completed$' /tmp/gate7.out && grep ' diagnostic ' /tmp/gate7.log | grep -q '"host":"example.com"'; }
 check "7 example.com denied with a diagnostic event (this turn)" denied7
 

@@ -67,8 +67,6 @@ API key (`sk-ant-api…`). Not a copy of your interactive Claude login. Codex: `
   status), then starts once it is set.
 - The Controller stores credential values in its state volume (credentials.json, 0600), so they survive a restart
   of Docker or the Controller; `a12s down` removes them. No API call returns a value.
-  `a12s up --memory-only-credentials` (when it starts a new Controller) keeps them in memory only: after a restart,
-  `creds set` them again.
 - A bad or expired credential fails the Turn: turn.finished status failed, error "Failed to authenticate: …".
 
 ## New project
@@ -175,18 +173,17 @@ profiles to profiles/<name>.json; comments are lost): run it before `a12s up` to
 
 ```sh
 a12s up                               # apply fleet.yaml to the live Fleet (start the Controller if needed)
-a12s up --memory-only-credentials     # a new Controller keeps credential values in memory only
 a12s export                           # write the live Fleet back to fleet.yaml, presets/ and profiles/
 a12s status                           # phase, inbox, power, warnings (--json for machines)
 a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # enqueue and exit; busy or asleep
 a12s send <c> "…" --wait              # and stream the Turn that delivers it; exit 0 if it completed, 1 if not
 a12s logs <c> [--follow]              # its journal, one "<seq> <type> <data JSON>" line per event, then exits;
                                       #   --follow keeps following (Ctrl-C). Types as in Words: turn.finished, …
-a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--agent-computers c1,c2] [--no-open]
+a12s gateway --web dir | --dev url | -- npm run dev [--port 7012] [--allow status,events,send,inbox] [--agent-computers c1,c2] [--no-open]
 a12s ui [--port 7013] [--no-open]     # the web console (npx a12s-console; Node.js 20+); args go to the console
 a12s inbox <c> [--bodies]             # pending Messages (human table; --json for machines)
 a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Messages still queue), release, withdraw
-a12s stop <c> | sleep <c> [--hold] | wake <c> [--clear-inbox]   # plain sleep: a sender listed in wakeOnMessage
+a12s stop <c> | sleep <c> [--hold] | wake <c>   # plain sleep: a sender listed in wakeOnMessage
                                       #   wakes it; --hold: no Message wakes it until wake
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
@@ -231,7 +228,7 @@ lead.name; lead.spec; lead.effective; lead.status.phase  // as written, with def
 await lead.reload();                                     // refreshes the snapshot
 
 const m = await lead.send("…");                     // or send("…", { sender, metadata, fresh, expires (seconds),
-m.id; m.state;                                      //   replaceKey, idempotencyKey }); returns at once
+m.id; m.state;                                      //   replaceKey }); returns at once
 
 // Send and wait for the answer; onEvent streams that Turn's events as they happen:
 const r = await lead.send("Explain TCP in two sentences.").wait({
@@ -255,7 +252,7 @@ const box = await lead.inbox({ bodies: true });     // {computer, held, holdReas
                                                     //   [{id, seq, state, sender, via, body?, replaceKey?, …}], …}
 await lead.message(m.id); await lead.withdraw(m.id); // withdraw: a pending Message is removed, never delivered
 await lead.hold({ reason: "triage" }); await lead.resume();   // hold delivery (sends still queue); release it
-await lead.stop(); await lead.wake();               // wake({ clearInbox: true }) discards pending Messages first
+await lead.stop(); await lead.wake();               // stop the active Turn; wake a sleeping one
 await lead.sleep();                                 // asleep, and a sender listed in wakeOnMessage wakes it
 await lead.sleep({ hold: true });                   // asleep until wake(): NO Message wakes it, wakeOnMessage or not
 await coder.remove();                               // stops and removes it; its drives are kept
@@ -319,7 +316,7 @@ lead.update(instructions="…")         # changes only these fields; applies at 
 box = lead.inbox(bodies=True)         # box.held, box.pending, box.messages[i].id/.body/.state/.via
 lead.message(m.id); lead.withdraw(m.id)   # withdraw: a pending Message is removed, never delivered
 lead.hold(reason="triage"); lead.resume() # hold delivery (sends still queue); release it
-lead.stop(); lead.wake()                  # wake(clear_inbox=True) discards pending Messages first
+lead.stop(); lead.wake()                  # stop the active Turn; wake a sleeping one
 lead.sleep()                              # asleep, and a sender listed in wakeOnMessage wakes it
 lead.sleep(hold=True)                     # asleep until wake(): NO Message wakes it, wakeOnMessage or not
 coder.remove()                        # stops and removes it; its drives are kept
@@ -490,7 +487,7 @@ func main() {
 }
 ```
 
-svckit.Enqueue fields: Body, Sender, Metadata map[string]string, Fresh bool, IdempotencyKey, Expires *int64
+svckit.Enqueue fields: Body, Sender, Metadata map[string]string, Fresh bool, Expires *int64
 (seconds), ReplaceKey. Also svckit.Secret(name) ([]byte, error) reads /run/a12s/secrets/<name>, and
 c.Get(computer, id) (svckit.Message, error) reads back its own Message {ID, Seq, State, ExpiresAt, Replaced}.
 
@@ -537,7 +534,6 @@ The page imports the npm package through a bundler (Vite here); that is the only
 directory (or -F path/fleet.yaml).
 
 ```sh
-a12s gateway                          # built-in dashboard: every agent computer, live events, a send box
 a12s gateway -- npx vite              # your dev server behind it (or -- npm run dev: Next.js, …), hot reload included
 a12s gateway --dev http://localhost:5173   # a dev server that is already running
 a12s gateway --web dist               # your built app (npx vite build writes dist/)
@@ -706,8 +702,7 @@ SDK objects (Python names; TypeScript is camelCase):
 - Every Claude Code Turn logs one or two `egress.denied` events for telemetry hosts: harmless.
 - Nothing is delivered? `a12s inbox <c>` (held? says why; `a12s inbox resume <c>`), `a12s status` (asleep?
   `a12s wake <c>`), `a12s doctor`. A Turn failing with "Failed to authenticate": set it again with `a12s creds set <name>`.
-- After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored. With
-  --memory-only-credentials it holds none until you `a12s creds set` them again.
+- After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored.
 - Upgrading a12s: install the new release, rebuild custom images FROM the new slim under new tags, `a12s up`.
 
 ## Optional

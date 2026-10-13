@@ -16,7 +16,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | Command | What it does |
 |---|---|
 | `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (harness, `image: slim` and the credential in `defaults`, and one agent computer, `assistant`) and a README. |
-| `a12s up [--asleep] [--memory-only-credentials] [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `home.preset` directory and `security.seccomp` file and sends their contents. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). `--asleep` creates new agent computers asleep. `--memory-only-credentials` makes a Controller that this `up` starts keep credential values in memory only ([Credentials](credentials.md#how-secrets-are-handled)). |
+| `a12s up [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `home.preset` directory and `security.seccomp` file and sends their contents. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). |
 | `a12s export` | Write the live Fleet back to the Fleet file's directory. See [Keeping changes made from code](#keeping-changes-made-from-code). |
 | `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy agent computers now, interrupting their Turns after the grace period. |
 | `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |
@@ -44,12 +44,12 @@ the Fleet file's directory:
 
 | Command | What it does |
 |---|---|
-| `a12s send <name> "…" [flags]` | Enqueue a Message and exit; works while the agent computer is busy or asleep. `-` reads the body from stdin. Flags: `--from`, `--fresh`, `--meta k=v`, `--key`, `--expires`, `--replace` (see [Inbox](inbox.md#message-options)). With `--wait` it then streams the Turn that delivers the Message and exits `0` if that Turn completed, `1` if not, `130` if interrupted (Ctrl-C withdraws a pending Message or stops its Turn); an agent computer that is asleep and won't wake for you fails at once. With `--json`, `--wait` prints `{message, turn}`, then the Turn's events as JSON lines. |
-| `a12s stop <name> [--hold]` | Interrupt the active Turn. `--hold` holds the inbox first, so nothing else is delivered. |
-| `a12s logs <name> [--follow] [--since <seq>]` | Replay the agent computer's journal, and follow it. |
-| `a12s gateway [--web dir \| --dev url \| -- command...] [--dev-port n] [--port 7012 \| --addr host:port] [--allow actions] [--agent-computers c,d] [--no-open]` | Serve a web app (default: a built-in dashboard) on `127.0.0.1`: a built app's directory (`--web dist`), a dev server it starts (`-- npm run dev`; it reads the port from the dev server's output, or `--dev-port`) or one already running (`--dev`), proxied with websockets. Next to it, the API at `/v1/` under a scoped token the page never sees; the page imports `@coltonkirsten/a12s` through a bundler. It opens `http://127.0.0.1:<port>/?key=…` in the browser (`--no-open`: only print it); the key is new each run, and `/v1/` needs it. Like every command it serves the Fleet found from `-F` or the current directory; if the port is taken it says so, and `--port` picks another. Each gateway gets its own scoped token, `gateway-<port>`, revoked when it stops (a killed gateway's token is removed by the next one to start), so several can serve one Fleet on different ports. `--addr` takes a loopback address only; anything else is refused (see [SDK: Serve other people](sdk.md#serve-other-people)). See [SDK: In the browser](sdk.md#in-the-browser). |
+| `a12s send <name> "…" [flags]` | Enqueue a Message and exit; works while the agent computer is busy or asleep. `-` reads the body from stdin. Flags: `--from`, `--fresh`, `--meta k=v`, `--expires`, `--replace` (see [Inbox](inbox.md#message-options)). With `--wait` it then streams the Turn that delivers the Message and exits `0` if that Turn completed, `1` if not, `130` if interrupted (Ctrl-C withdraws a pending Message or stops its Turn); an agent computer that is asleep and won't wake for you fails at once. With `--json`, `--wait` prints `{message, turn}`, then the Turn's events as JSON lines. |
+| `a12s stop <name>` | Interrupt the active Turn. To deliver nothing after it, `a12s inbox hold <name>` first. |
+| `a12s logs <name> [--follow]` | Replay the agent computer's journal, and follow it. |
+| `a12s gateway --web dir \| --dev url \| -- command... [--dev-port n] [--port 7012 \| --addr host:port] [--allow actions] [--agent-computers c,d] [--no-open]` | Serve your web app on `127.0.0.1`: a built app's directory (`--web dist`), a dev server it starts (`-- npm run dev`; it reads the port from the dev server's output, or `--dev-port`) or one already running (`--dev`), proxied with websockets; one of them is required (the dashboard is `a12s ui`). Next to it, the API at `/v1/` under a scoped token the page never sees; the page imports `@coltonkirsten/a12s` through a bundler. It opens `http://127.0.0.1:<port>/?key=…` in the browser (`--no-open`: only print it); the key is new each run, and `/v1/` needs it. Like every command it serves the Fleet found from `-F` or the current directory; if the port is taken it says so, and `--port` picks another. Each gateway gets its own scoped token, `gateway-<port>`, revoked when it stops (a killed gateway's token is removed by the next one to start), so several can serve one Fleet on different ports. `--addr` takes a loopback address only; anything else is refused (see [SDK: Serve other people](sdk.md#serve-other-people)). See [SDK: In the browser](sdk.md#in-the-browser). |
 | `a12s ui [console args...]` | Open the web console: runs `npx --yes github:coltonkirsten/a12s-console --fleet <fleet> [args]` (`A12S_CONSOLE` names another package or path), for the Fleet found from `-F` (before `ui`) or the current directory. Every argument after `ui` goes to the console, e.g. `--port 7013 --no-open`. Needs Node.js 20+ (`npx`) and a running Fleet; exits with the console's exit code. |
-| `a12s shell <name> [--root] [-- command...]` | An audited terminal inside an agent computer or Service, outside the harness. Counts as activity for the power policy. |
+| `a12s shell <name> [-- command...]` | An audited terminal inside an agent computer or Service, outside the harness. Counts as activity for the power policy. |
 
 ## Inbox
 
@@ -57,7 +57,7 @@ the Fleet file's directory:
 |---|---|
 | `a12s inbox <name> [--all] [--bodies]` | List pending Messages with limits, usage and the last 24 hours' expired, replaced, withdrawn and discarded counts. |
 | `a12s inbox rm <name> <id>` | Withdraw a pending Message. |
-| `a12s inbox clear <name> [--yes] [--orphan]` | Discard every pending Message (journaled, not erased). `--orphan` targets the inbox of an agent computer no longer in the Fleet. |
+| `a12s inbox clear <name> [--yes]` | Discard every pending Message (journaled, not erased), also in the inbox of an agent computer no longer in the Fleet. |
 | `a12s inbox hold <name>` | Keep accepting Messages, stop delivering them. |
 | `a12s inbox resume <name> [--new]` | Deliver again; `--new` delivers the next Batch in a new session. |
 
@@ -66,7 +66,7 @@ the Fleet file's directory:
 | Command | What it does |
 |---|---|
 | `a12s sleep <name>... \| --all [--hold]` | Stop processes, keep storage. The power policy stays in charge: a sender listed in `wakeOnMessage` wakes it; `--hold` keeps it asleep until a manual wake. |
-| `a12s wake <name>... \| --all [--clear-inbox]` | Start agent computers (or Services). The session resumes on the next Turn. `--clear-inbox` discards what was pending first. |
+| `a12s wake <name>... \| --all` | Start agent computers (or Services). The session resumes on the next Turn. To drop what is pending first, `a12s inbox clear <name>`. |
 
 `--all` covers Services too.
 

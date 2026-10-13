@@ -252,7 +252,7 @@ export class Computer {
 
   /**
    * End-to-end test hooks: files in the root-only state dir, so only an operator with
-   * `a12s shell --root` can arm them, and each fires once. At 'accept': `exit-after-accept` kills computerd. At
+   * `docker exec -u 0` can arm them, and each fires once. At 'accept': `exit-after-accept` kills computerd. At
    * 'dispatch': `exit-after-dispatch` kills computerd right after turn.dispatched is on disk.
    */
   private async testHooks(at: 'accept' | 'dispatch'): Promise<void> {

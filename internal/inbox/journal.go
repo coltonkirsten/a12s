@@ -4,10 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
-
-	"github.com/coltonkirsten/a12s/internal/api"
 )
 
 // Discarded is the sealed-journal record of a Message that ended without
@@ -20,7 +17,7 @@ type Discarded struct {
 	CreatedAt  time.Time         `json:"createdAt"`
 	Body       string            `json:"body"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
-	Reason     string            `json:"reason"` // wake-clear | inbox-clear | withdrawn | expired | replaced
+	Reason     string            `json:"reason"` // inbox-clear | withdrawn | expired | replaced
 	By         string            `json:"by"`
 	ExpiresAt  *time.Time        `json:"expiresAt,omitempty"`
 	ReplacedBy string            `json:"replacedBy,omitempty"`
@@ -93,61 +90,4 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 		return err
 	})
 	return n, err
-}
-
-// WakeClear records the inbox head under requestId before applying, so a
-// retry with the same id never clears a Message that arrived later.
-func (s *Store) WakeClear(ctx context.Context, computer, requestID, by string) (int64, int, error) {
-	var through int64
-	n := 0
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		var c string
-		err := tx.QueryRow(`SELECT computer, through_seq FROM clear_ops WHERE request_id = ?`, requestID).Scan(&c, &through)
-		switch {
-		case err == nil:
-			if c != computer {
-				return errf(409, api.ErrConflict, "use a new requestId", "requestId %s was used for %s", requestID, c)
-			}
-		case errors.Is(err, sql.ErrNoRows):
-			ib, err := getInbox(tx, computer)
-			if err != nil {
-				return err
-			}
-			if ib == nil {
-				return ErrUnknownInbox
-			}
-			through = ib.nextSeq - 1
-			if _, err := tx.Exec(`INSERT INTO clear_ops (request_id, computer, through_seq, at) VALUES (?, ?, ?, ?)`, requestID, computer, through, ms(s.now())); err != nil {
-				return err
-			}
-		default:
-			return err
-		}
-		rows, err := tx.Query(`SELECT id FROM messages WHERE computer = ? AND state = 'pending' AND seq <= ? ORDER BY seq`, computer, through)
-		if err != nil {
-			return err
-		}
-		var ids []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, id)
-		}
-		rows.Close()
-		now := s.now()
-		for _, id := range ids {
-			if err := endTx(tx, id, api.MsgDiscarded, "wake-clear", by, now, map[string]any{"reason": "wake-clear", "requestId": requestID}); err != nil {
-				return err
-			}
-		}
-		n = len(ids)
-		return nil
-	})
-	if err == nil && n > 0 {
-		s.changed(computer)
-	}
-	return through, n, err
 }

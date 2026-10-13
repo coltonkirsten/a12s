@@ -197,14 +197,7 @@ func (c *Controller) handlePower(w http.ResponseWriter, r *http.Request) {
 		inboxFail(w, err)
 		return
 	}
-	cs := c.computerStatus(r.Context(), name)
-	if req.ClearInbox {
-		c.mu.Lock()
-		n := c.rtLocked(name).lastClear
-		c.mu.Unlock()
-		cs.InboxCleared = &n
-	}
-	writeJSON(w, http.StatusOK, cs)
+	writeJSON(w, http.StatusOK, c.computerStatus(r.Context(), name))
 }
 
 // awake returns the computerd client of a Computer accepting work, or an
@@ -233,24 +226,6 @@ func (c *Controller) awake(name string) (computerdClient, error) {
 
 func (c *Controller) handleStop(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("c")
-	if r.URL.Query().Get("hold") == "true" {
-		// stop --hold: the hold first, under the admission gate, then the interrupt, so no Batch
-		// slips in between.
-		if !callerOf(r).may(api.ActionInbox, name) {
-			writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: "stop --hold needs the inbox action", Fix: "use a token with inbox on " + name})
-			return
-		}
-		c.mu.Lock()
-		rt := c.rtLocked(name)
-		c.mu.Unlock()
-		rt.admit.Lock()
-		err := c.inbox.Hold(r.Context(), name, api.HoldOperator, "a12s stop --hold", callerOf(r).principal)
-		rt.admit.Unlock()
-		if err != nil {
-			inboxFail(w, err)
-			return
-		}
-	}
 	cl, err := c.awake(name)
 	if err == nil {
 		err = cl.Stop(r.Context(), r.PathValue("id"))
@@ -348,9 +323,6 @@ func (c *Controller) handleShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := "1000:1000"
-	if req.Root {
-		user = "0:0"
-	}
 	if err := cl.Diagnostic(r.Context(), "shell opened", map[string]any{"user": user, "command": req.Command}); err != nil {
 		fail(w, err)
 		return
@@ -363,14 +335,6 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	c.mu.Lock()
 	f := c.state.Fleet
 	res = api.StatusResponse{Fleet: c.cfg.Fleet, EgressEnforcement: fleet.EnforcementEnforced, AgentComputers: []api.ComputerStatus{}}
-	needCreds := false
-	if f != nil {
-		for _, comp := range f.Computers {
-			needCreds = needCreds || len(comp.Credentials) > 0
-		}
-	}
-	// Only a memory-only Controller loses its values on a restart; a credential never set shows as waiting instead.
-	res.CredentialsLoaded = len(c.creds) > 0 || !needCreds || !c.cfg.MemoryOnlyCredentials
 	unenforced := false // in any Computer's active generation
 	for _, rec := range c.state.Computers {
 		unenforced = unenforced || rec.Active.Unenforced
@@ -386,9 +350,6 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	if unenforced {
 		res.EgressEnforcement = fleet.EnforcementUnenforced
 		res.Warnings = append(res.Warnings, "egress is NOT enforced (egress.enforcement: unenforced)")
-	}
-	if !res.CredentialsLoaded {
-		res.Warnings = append(res.Warnings, "credentials not loaded (a memory-only Controller restarted); set them again with a12s creds set")
 	}
 
 	names := f.ComputerNames()
@@ -406,7 +367,7 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 				byName[s.Computer] = s
 				if s.Orphaned && s.Pending+s.Claimed > 0 {
 					res.OrphanedInboxes = append(res.OrphanedInboxes, s)
-					res.Warnings = append(res.Warnings, fmt.Sprintf("orphaned inbox %s: %d pending (a12s inbox clear %s --orphan discards them)", s.Computer, s.Pending, s.Computer))
+					res.Warnings = append(res.Warnings, fmt.Sprintf("orphaned inbox %s: %d pending (a12s inbox clear %s discards them)", s.Computer, s.Pending, s.Computer))
 				}
 			}
 			for i := range res.AgentComputers {
@@ -659,9 +620,6 @@ func (c *Controller) handleServiceShell(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	user := serviceUser(m)
-	if req.Root {
-		user = "0:0"
-	}
 	c.auditf(name, "shell opened as %s (%s)", user, strings.Join(req.Command, " "))
 	writeJSON(w, http.StatusOK, api.ShellResponse{Container: c.containerName(name), User: user})
 }

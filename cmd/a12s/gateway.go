@@ -25,7 +25,7 @@ func runGateway(g *globals, args []string) error {
 	flags := g.flags("gateway")
 	port := flags.Int("port", 7012, "port on 127.0.0.1")
 	addr := flags.String("addr", "", "loopback address to listen on, host:port (default 127.0.0.1:<port>)")
-	web := flags.String("web", "", "directory of your built web app to serve, like Vite's dist (default: the built-in dashboard)")
+	web := flags.String("web", "", "directory of your built web app to serve, like Vite's dist")
 	dev := flags.String("dev", "", "URL of a running dev server to proxy everything but /v1/ to")
 	devPort := flags.Int("dev-port", 0, "the port of the dev server started after --, when it doesn't print its URL")
 	allow := flags.String("allow", "status,events,send,inbox", "API actions the page may use ("+strings.Join(api.TokenActions, ",")+")")
@@ -37,6 +37,9 @@ func runGateway(g *globals, args []string) error {
 	}
 	if (*web != "") && (*dev != "" || len(pos) > 0) || (*dev != "" && len(pos) > 0) {
 		return usageError("pick one of --web <dir>, --dev <url> or -- <dev server command>")
+	}
+	if *web == "" && *dev == "" && len(pos) == 0 {
+		return usageError("gateway needs an app to serve: --web <dir>, --dev <url> or -- npm run dev (for a dashboard, a12s ui)")
 	}
 	if *devPort != 0 && len(pos) == 0 {
 		return usageError("--dev-port is the port of the dev server command after --")
@@ -100,10 +103,7 @@ func runGateway(g *globals, args []string) error {
 		defer cancel()
 		_ = c.Do(ctx, "DELETE", "/v1/tokens/"+tokenName, nil, nil)
 	}()
-	serving := "the built-in dashboard"
-	if *web != "" {
-		serving = *web
-	}
+	serving := *web
 	var devExited error
 	if len(pos) > 0 {
 		ds, err := gateway.StartDev(ctx, pos, *devPort, os.Stdout)

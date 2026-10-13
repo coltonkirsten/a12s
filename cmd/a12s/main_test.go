@@ -46,6 +46,10 @@ func TestExitCodes(t *testing.T) {
 		t.Errorf("code %d: %s", code, b.String())
 	}
 	b.Reset()
+	if code := run([]string{"gateway"}, &b); code != 2 || !strings.HasPrefix(b.String(), "a12s: gateway needs an app to serve") {
+		t.Errorf("code %d: %s", code, b.String())
+	}
+	b.Reset()
 	if code := run([]string{"-f", filepath.Join(t.TempDir(), "missing.yaml"), "status"}, &b); code != 1 || !strings.HasPrefix(b.String(), "a12s: read fleet") {
 		t.Errorf("code %d: %s", code, b.String())
 	}
@@ -249,7 +253,7 @@ func TestFinishUpPartialFailure(t *testing.T) {
 		Errors:  map[string]string{"tester": "image a12s/browser:dev not found"},
 	}
 	var out, errOut bytes.Buffer
-	err := g.finishUp(resp, false, &out, &errOut)
+	err := g.finishUp(resp, &out, &errOut)
 	if err == nil || !strings.Contains(err.Error(), "1 agent computer(s) or Service(s) did not converge") {
 		t.Fatalf("err = %v", err)
 	}
@@ -259,7 +263,7 @@ func TestFinishUpPartialFailure(t *testing.T) {
 	if !strings.Contains(errOut.String(), "tester: image a12s/browser:dev not found\n") {
 		t.Errorf("stderr %q", errOut.String())
 	}
-	if code := report(io.Discard, command{name: "up"}, g.finishUp(resp, false, io.Discard, io.Discard)); code != 1 {
+	if code := report(io.Discard, command{name: "up"}, g.finishUp(resp, io.Discard, io.Discard)); code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
 }

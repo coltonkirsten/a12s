@@ -144,9 +144,6 @@ func doctor(ctx context.Context, g *globals) []check {
 		return out
 	}
 	ok("controller answers (fleet %s)", st.Fleet)
-	if !st.CredentialsLoaded {
-		warn("a12s creds set <name>", "the Controller holds no credentials (a memory-only Controller restarted)")
-	}
 	if st.EgressEnforcement == fleet.EnforcementUnenforced {
 		warn("set egress.enforcement: enforced on a substrate that can enforce it", "egress is not enforced for this Fleet")
 	} else {

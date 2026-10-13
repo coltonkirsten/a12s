@@ -36,8 +36,6 @@ type runtime struct {
 	// released is set while the old generation was removed to free its
 	// drives and the new one is not staged yet.
 	released bool
-	// lastClear is what the last wake --clear-inbox discarded (its answer).
-	lastClear int
 	// idleSince is when the current idle run began (zero: not idle); powerBusy marks a
 	// power-policy action in flight.
 	idleSince time.Time

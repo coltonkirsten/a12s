@@ -235,8 +235,8 @@ For production, `npm run build` and serve the output with `a12s gateway --web di
 
 ## A live dashboard in the browser
 
-No code: `a12s gateway` opens a built-in dashboard at http://127.0.0.1:7012 with every agent computer, their events as
-they stream, and a box to send a Message.
+No code: `a12s ui` opens the web console with every agent computer, their events as they stream, and a box to send a
+Message.
 
 Your own page: a Vite app that imports the npm package, run through the gateway. The page needs no token.
 
