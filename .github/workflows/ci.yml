@@ -66,8 +66,6 @@ jobs:
             sdk:
               - *shared
               - sdk/typescript/**
-              - internal/gateway/web/**
-              - internal/gateway/dashboard/**
             python:
               - *shared
               - sdk/python/**
@@ -102,7 +100,7 @@ jobs:
           go-version-file: go.mod # caches the module and build caches by go.sum
       - run: scripts/check.sh go
 
-  # TypeScript SDK: lint, tests (build, dashboard bundle, node --test), gateway embeds that dashboard build.
+  # TypeScript SDK: lint, tests (build, browser bundle, node --test).
   sdk:
     needs: changes
     if: needs.changes.outputs.sdk == 'true'

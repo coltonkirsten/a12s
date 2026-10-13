@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from types import TracebackType
@@ -68,12 +67,11 @@ class AsyncClient:
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
-        idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
     ) -> EnqueueResponse:
         """See Client.send."""
-        m = core.enqueue_body(body, sender, metadata, fresh, idempotency_key, expires, replace_key)
+        m = core.enqueue_body(body, sender, metadata, fresh, expires, replace_key)
         return from_json(EnqueueResponse, await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox", m))
 
     async def prompt(
@@ -85,7 +83,6 @@ class AsyncClient:
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
-        idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
     ) -> Reply:
@@ -96,7 +93,6 @@ class AsyncClient:
             sender=sender,
             metadata=metadata,
             fresh=fresh,
-            idempotency_key=idempotency_key,
             expires=expires,
             replace_key=replace_key,
         )
@@ -178,13 +174,9 @@ class AsyncClient:
             body["hold"] = True
         await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
 
-    async def wake(self, computer: str, *, clear_inbox: bool = False) -> None:
+    async def wake(self, computer: str) -> None:
         """See Client.wake."""
-        body: dict[str, Any] = {"state": "awake"}
-        if clear_inbox:
-            body["clearInbox"] = True
-            body["requestId"] = uuid.uuid4().hex
-        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
+        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "awake"})
 
     async def hold(self, computer: str, *, reason: str | None = None) -> InboxList:
         """See Client.hold."""

@@ -32,10 +32,6 @@ Use a setup token or an API key, not a copy of your interactive Claude login.
   an agent computer and read `/run/a12s/secrets`; without it, every restart would break the Fleet's apps until every
   credential was set again. `a12s down` removes the state volume and the stored values with it. No API call returns
   a value.
-- `a12s up --memory-only-credentials` starts a Controller that keeps them in memory only (the Controller's
-  environment: `A12S_MEMORY_ONLY_CREDENTIALS=1`). The flag applies when that `up` starts a new Controller, so run
-  `a12s down` first if one is running; on start it deletes a `credentials.json` left in the volume. After a restart
-  of such a Controller, `a12s status` says credentials aren't loaded; set them again with `a12s creds set`.
 - The Controller writes each secret into the running container over `docker exec` stdin, into a tmpfs at
   `/run/a12s/secrets/<name>` (owned by the agent user, 0600). Nothing appears in `docker inspect`, argv, the
   container's environment, the image or any drive. Sleep clears them; wake injects them again.

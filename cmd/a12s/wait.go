@@ -326,7 +326,6 @@ func dim(w io.Writer, line string) {
 
 func runStop(g *globals, args []string) error {
 	fs := g.flags("stop")
-	hold := fs.Bool("hold", false, "hold the inbox first, so nothing is delivered after the stop")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -350,36 +349,19 @@ func runStop(g *globals, args []string) error {
 			continue
 		}
 		if cs.ActiveTurn == "" {
-			if *hold {
-				if err := c.Do(ctx, "POST", computerPath(name, "/inbox/hold"), api.HoldRequest{Reason: "a12s stop --hold"}, nil); err != nil {
-					return err
-				}
-				if g.json {
-					return printJSON(map[string]any{"computer": name, "turn": nil, "held": true})
-				}
-				fmt.Printf("%s has no active turn; its inbox is held (a12s inbox resume %s)\n", name, name)
-				return nil
-			}
 			if g.json {
-				return printJSON(map[string]any{"computer": name, "turn": nil, "held": false})
+				return printJSON(map[string]any{"computer": name, "turn": nil})
 			}
 			fmt.Printf("%s has no active turn\n", name)
 			return nil
 		}
-		q := ""
-		if *hold {
-			q = "?hold=true"
-		}
-		if err := c.Do(ctx, "POST", computerPath(name, "/turns/"+url.PathEscape(cs.ActiveTurn)+"/stop"+q), struct{}{}, nil); err != nil {
+		if err := c.Do(ctx, "POST", computerPath(name, "/turns/"+url.PathEscape(cs.ActiveTurn)+"/stop"), struct{}{}, nil); err != nil {
 			return err
 		}
 		if g.json {
-			return printJSON(map[string]any{"computer": name, "turn": cs.ActiveTurn, "status": "stopping", "held": *hold})
+			return printJSON(map[string]any{"computer": name, "turn": cs.ActiveTurn, "status": "stopping"})
 		}
 		fmt.Printf("stopping turn %s on %s\n", cs.ActiveTurn, name)
-		if *hold {
-			fmt.Printf("%s's inbox is held (a12s inbox resume %s)\n", name, name)
-		}
 		return nil
 	}
 	return fmt.Errorf("fleet %s has no agent computer %q", st.Fleet, name)
@@ -388,16 +370,12 @@ func runStop(g *globals, args []string) error {
 func runLogs(g *globals, args []string) error {
 	follow := new(bool)
 	fs := g.flagsFollow("logs", follow)
-	since := fs.Int64("since", 0, "start after this seq")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
 		return usageError("logs needs one agent computer name")
-	}
-	if *since < 0 {
-		return usageError("--since must not be negative")
 	}
 	c, _, err := g.connect()
 	if err != nil {
@@ -408,7 +386,6 @@ func runLogs(g *globals, args []string) error {
 	s := &cli.Stream{
 		Client:     c,
 		Path:       computerPath(pos[0], "/events"),
-		After:      *since,
 		SendCursor: true,
 		UntilHead:  !*follow,
 	}

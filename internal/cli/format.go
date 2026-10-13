@@ -46,14 +46,10 @@ func ChangeLines(changes []api.Change) []string {
 	return out
 }
 
-func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
+func UpSummary(r *api.PutFleetResponse) []string {
 	var lines []string
 	if len(r.Created) > 0 {
-		line := "created " + strings.Join(r.Created, ", ")
-		if asleep {
-			line += " (asleep until their first Message or a12s wake)"
-		}
-		lines = append(lines, line)
+		lines = append(lines, "created "+strings.Join(r.Created, ", "))
 	}
 	if len(r.Updated) > 0 {
 		lines = append(lines, "updated "+strings.Join(r.Updated, ", "))
@@ -254,9 +250,6 @@ func StatusWarnings(st *api.StatusResponse) []string {
 	}
 	if st.EgressEnforcement == fleet.EnforcementUnenforced {
 		add("egress is UNENFORCED for this Fleet: allowlists are not a firewall here")
-	}
-	if !st.CredentialsLoaded {
-		add("the Controller holds no credentials (a memory-only Controller restarted?): set them again with a12s creds set")
 	}
 	// A Controller that already lists the orphaned drives in its warnings would be said twice.
 	if !slices.ContainsFunc(st.Warnings, func(w string) bool { return strings.HasPrefix(w, "orphaned drives") }) {

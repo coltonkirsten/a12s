@@ -184,7 +184,6 @@ analyst.send("…", sender="billing", metadata={"ticket": "T-42"}, expires=3600)
 | `fresh` | Start a new session (conversation) with this Message. |
 | `expires` | Seconds to wait for delivery; `0` means now or never. |
 | `replaceKey` / `replace_key` | Replace your pending Message with the same key, if it hasn't been delivered yet. |
-| `idempotencyKey` / `idempotency_key` | Retries with the same key return the original Message. Set for you if you don't. |
 
 Bodies are at most 64 KiB. The agent treats them as data from the sender, not as instructions that override its
 role: put instructions in its `instructions`.
@@ -349,7 +348,6 @@ in between: it serves your page and forwards `/v1/` to the Controller with a sco
 page imports `@coltonkirsten/a12s` through a bundler such as Vite.
 
 ```sh
-a12s gateway                     # the built-in dashboard: every agent computer, live events, a send box
 a12s gateway -- npm run dev      # your dev server (Vite, Next.js, …) behind the gateway, hot reload included
 a12s gateway --dev http://localhost:5173   # a dev server that is already running
 a12s gateway --web dist          # a built app (Vite's npm run build output)
@@ -413,7 +411,7 @@ way: in a browser, `Fleet.connect()` talks to the page's own origin.
 | AgentComputer | `inbox({ state, bodies })` | `inbox(state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
 | AgentComputer | `message(id)`, `withdraw(id)` | the same | One Message; take back a pending one. |
 | AgentComputer | `stop(turn?)` | `stop(turn=None)` | Interrupt a Turn (default: the active one). |
-| AgentComputer | `sleep({ hold? })`, `wake({ clearInbox? })` | `sleep(hold=)`, `wake(clear_inbox=)` | Stop it and keep its disks, session and inbox; start it again. A sender listed in its wakeOnMessage wakes a plain sleep; `hold` keeps it asleep until `wake()`. |
+| AgentComputer | `sleep({ hold? })`, `wake()` | `sleep(hold=)`, `wake()` | Stop it and keep its disks, session and inbox; start it again. A sender listed in its wakeOnMessage wakes a plain sleep; `hold` keeps it asleep until `wake()`. |
 | AgentComputer | `hold({ reason? })`, `resume()` | `hold(reason=)`, `resume()` | Hold delivery (Messages still queue); release it. |
 
 In TypeScript the spec types are `AgentComputerSpec` and `FleetSpec`, and `fleet.client.request(method, path, body?)`

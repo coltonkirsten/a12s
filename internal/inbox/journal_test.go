@@ -37,20 +37,3 @@ func TestJournalAndPrune(t *testing.T) {
 		t.Fatal("delivered row kept past retention")
 	}
 }
-
-func TestWakeClearIdempotent(t *testing.T) {
-	s, _ := newStore(t, nil)
-	enq(t, s, "scout", "local", api.EnqueueRequest{Body: "1"})
-	enq(t, s, "scout", "local", api.EnqueueRequest{Body: "2"})
-	through, n, err := s.WakeClear(context.Background(), "scout", "r1", "local")
-	if err != nil || n != 2 || through != 2 {
-		t.Fatalf("clear %d %d %v", through, n, err)
-	}
-	late := enq(t, s, "scout", "local", api.EnqueueRequest{Body: "3"})
-	if _, n, _ := s.WakeClear(context.Background(), "scout", "r1", "local"); n != 0 {
-		t.Fatal("a retried clear discarded a later message")
-	}
-	if m, _ := s.Get(context.Background(), "scout", late.Message.ID, "", false); m.State != api.MsgPending {
-		t.Fatalf("late %+v", m)
-	}
-}

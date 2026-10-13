@@ -179,7 +179,6 @@ func TestChangeDiff(t *testing.T) {
 // when it authenticates.
 func TestCredentialAndTokenTimes(t *testing.T) {
 	dir := t.TempDir()
-	persistCreds[dir] = true
 	h := startHarness(t, dir, nil)
 	h.up(labFleet(t, nil), false)
 	put := decodeBody[api.CredentialInfo](t, h.api("PUT", "/v1/credentials/hubspot", `{"value":"hs-1"}`))

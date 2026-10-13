@@ -43,8 +43,6 @@ type Config struct {
 	APIAddr string // A12S_API_ADDR
 	// TimeScale divides power-policy durations; 1 in production, larger in tests.
 	TimeScale float64 // A12S_TEST_TIME_SCALE
-	// MemoryOnlyCredentials keeps credential values out of the state volume.
-	MemoryOnlyCredentials bool // A12S_MEMORY_ONLY_CREDENTIALS=1
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -54,8 +52,6 @@ func ConfigFromEnv() (Config, error) {
 		APIToken: os.Getenv("A12S_API_TOKEN"),
 		APIAddr:  os.Getenv("A12S_API_ADDR"),
 		DataDir:  os.Getenv("A12S_DATA_DIR"),
-
-		MemoryOnlyCredentials: os.Getenv("A12S_MEMORY_ONLY_CREDENTIALS") == "1",
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = "/var/lib/a12s"

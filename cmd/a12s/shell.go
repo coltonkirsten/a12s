@@ -13,7 +13,6 @@ import (
 // replaces this process with a local `docker exec`.
 func runShell(g *globals, args []string) error {
 	fs := g.flags("shell")
-	root := fs.Bool("root", false, "run as root instead of the agent user")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -37,22 +36,15 @@ func runShell(g *globals, args []string) error {
 	if f.HasService(name) {
 		path, workdir = servicePath(name, "/shell"), "/"
 	}
-	if err := c.Do(ctx, "POST", path, api.ShellRequest{Root: *root, Command: command}, &resp); err != nil {
+	if err := c.Do(ctx, "POST", path, api.ShellRequest{Command: command}, &resp); err != nil {
 		return err
 	}
 	cancel()
-	user := resp.User
-	if user == "" {
-		user = "1000:1000"
-		if *root {
-			user = "0:0"
-		}
-	}
 	argv := []string{"docker", "exec", "-i"}
 	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
 		argv = append(argv, "-t")
 	}
-	argv = append(argv, "-u", user, "-w", workdir, resp.Container)
+	argv = append(argv, "-u", resp.User, "-w", workdir, resp.Container)
 	if len(command) == 0 {
 		command = []string{"sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi"}
 	}

@@ -52,8 +52,6 @@ type StartOptions struct {
 	// Wait of zero means 60s.
 	Wait time.Duration
 	Log  func(string)
-	// MemoryOnlyCredentials starts a new Controller that never writes credential values to its state volume.
-	MemoryOnlyCredentials bool
 }
 
 func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
@@ -242,9 +240,6 @@ func createController(ctx context.Context, dc *client.Client, n ControllerNames,
 	// Lets tests run power-policy timers faster than real time.
 	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
 		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
-	}
-	if o.MemoryOnlyCredentials {
-		opts.Config.Env = append(opts.Config.Env, "A12S_MEMORY_ONLY_CREDENTIALS=1")
 	}
 	_, err = dc.ContainerCreate(ctx, opts)
 	if cerrdefs.IsNotFound(err) {

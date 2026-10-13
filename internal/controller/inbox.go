@@ -226,7 +226,7 @@ func (c *Controller) handleInboxClear(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("c")
 	k := callerOf(r)
-	n, err := c.inbox.Clear(r.Context(), name, req.ThroughSeq, req.Orphan, "inbox-clear", k.principal)
+	n, err := c.inbox.Clear(r.Context(), name, req.ThroughSeq, "inbox-clear", k.principal)
 	if err != nil {
 		inboxFail(w, err)
 		return

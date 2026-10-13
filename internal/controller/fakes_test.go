@@ -722,10 +722,6 @@ type harness struct {
 // so a test need not wait out a real window.
 func (h *harness) advance(d time.Duration) { h.skew.Add(int64(d)) }
 
-// persistCreds names the state dirs whose harness keeps credentials on disk; the rest run memory-only, so their
-// restarts forget credentials.
-var persistCreds = map[string]bool{}
-
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	dir := t.TempDir()
@@ -751,7 +747,7 @@ func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale, MemoryOnlyCredentials: !persistCreds[dir]}, d, ca)
+	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale}, d, ca)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,11 +825,22 @@ func specFor(f *fleet.Fleet) *fleet.Spec {
 
 var labCreds = api.Credentials{"anthropic": []byte(`{"claudeAiOauth":{}}`), "openai": []byte("sk-test"), "github": []byte("ghp_test")}
 
+// up applies f; with asleep, it then puts every new agent computer to sleep, so Messages wait.
 func (h *harness) up(f *fleet.Fleet, asleep bool) api.PutFleetResponse {
 	h.t.Helper()
-	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds, Asleep: asleep}, writeOpts{})
+	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	if err != nil {
 		h.t.Fatalf("PutFleet: %v", err)
+	}
+	if asleep {
+		for _, name := range res.Created {
+			if _, ok := f.Computers[name]; !ok {
+				continue
+			}
+			if err := h.c.SetPower(context.Background(), name, api.PowerRequest{State: api.PowerAsleep}); err != nil {
+				h.t.Fatalf("sleep %s: %v", name, err)
+			}
+		}
 	}
 	return res
 }

@@ -10,13 +10,13 @@ import (
 
 func TestUpSummary(t *testing.T) {
 	r := &api.PutFleetResponse{Created: []string{"fifth"}, Updated: []string{"scout"}, Staged: []string{"tester"}, Removed: []string{"old"}}
-	got := strings.Join(UpSummary(r, true), "\n")
+	got := strings.Join(UpSummary(r), "\n")
 	for _, want := range []string{"fifth", "scout", "tester", "old", "drives kept", "apply --interrupt"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary lacks %q:\n%s", want, got)
 		}
 	}
-	if got := UpSummary(&api.PutFleetResponse{}, false); len(got) != 1 || got[0] != "no changes" {
+	if got := UpSummary(&api.PutFleetResponse{}); len(got) != 1 || got[0] != "no changes" {
 		t.Errorf("got %q", got)
 	}
 
@@ -25,7 +25,7 @@ func TestUpSummary(t *testing.T) {
 	if got := UpErrors(r); len(got) != 2 || !strings.HasPrefix(got[0], "builder: ") || !strings.HasPrefix(got[1], "tester: ") {
 		t.Errorf("UpErrors = %q", got)
 	}
-	if got := UpSummary(&api.PutFleetResponse{Errors: map[string]string{"scout": "x"}}, false); len(got) != 0 {
+	if got := UpSummary(&api.PutFleetResponse{Errors: map[string]string{"scout": "x"}}); len(got) != 0 {
 		t.Errorf("summary with only errors = %q", got)
 	}
 }
@@ -35,7 +35,6 @@ func TestWriteStatus(t *testing.T) {
 	st := &api.StatusResponse{
 		Fleet:             "lab",
 		EgressEnforcement: "enforced",
-		CredentialsLoaded: true,
 		AgentComputers: []api.ComputerStatus{
 			{Name: "scout", Phase: api.PhaseAsleep, Session: "9c41aa07-1111", Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"}, HomeSize: gi},
 			{Name: "builder", Phase: api.PhaseBusy, Session: "2f00", ActiveTurn: "t_41", Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, HomeSize: gi, Drives: []string{"a12s-repo"},
@@ -79,11 +78,10 @@ func TestWriteStatus(t *testing.T) {
 		}
 	}
 
-	// Unenforced egress and lost credentials are said on every row / loudly.
+	// Unenforced egress is said on every row and once loudly.
 	// From the per-row mode; a Controller without it falls back to the
 	// Fleet-wide enforcement for every row.
 	st.EgressEnforcement = "unenforced"
-	st.CredentialsLoaded = false
 	st.Warnings = []string{"egress is UNENFORCED for this Fleet: allowlists are not a firewall here"} // duplicate dropped
 	st.AgentComputers[0].EgressMode = api.EgressUnenforced
 	b.Reset()
@@ -92,7 +90,7 @@ func TestWriteStatus(t *testing.T) {
 	if strings.Count(out, "EGRESS UNENFORCED") != 2 || strings.Count(out, `EGRESS ALLOW "*"`) != 1 {
 		t.Errorf("egress markers:\n%s", out)
 	}
-	if strings.Count(out, "egress is UNENFORCED") != 1 || !strings.Contains(out, "holds no credentials") {
+	if strings.Count(out, "egress is UNENFORCED") != 1 {
 		t.Errorf("warnings:\n%s", out)
 	}
 	for _, line := range strings.Split(out, "\n") {

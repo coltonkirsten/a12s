@@ -105,13 +105,12 @@ class AsyncAgentComputer:
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
-        idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
     ) -> AsyncSending:
         """Queues ``text``; it is delivered at the next idle moment, even if busy or asleep. Await the result for the
         queued Message, or call ``await ….wait()`` on it (or on that Message, later) for the Turn that delivers it."""
-        return AsyncSending(self._send(text, sender, metadata, fresh, idempotency_key, expires, replace_key))
+        return AsyncSending(self._send(text, sender, metadata, fresh, expires, replace_key))
 
     async def _send(
         self,
@@ -119,7 +118,6 @@ class AsyncAgentComputer:
         sender: str | None,
         metadata: dict[str, str] | None,
         fresh: bool,
-        idempotency_key: str | None,
         expires: int | None,
         replace_key: str | None,
     ) -> AsyncSentMessage:
@@ -129,7 +127,6 @@ class AsyncAgentComputer:
             sender=sender,
             metadata=metadata,
             fresh=fresh,
-            idempotency_key=idempotency_key,
             expires=expires,
             replace_key=replace_key,
         )
@@ -172,9 +169,9 @@ class AsyncAgentComputer:
         """Puts it to sleep; a sender in its wakeOnMessage wakes it. With ``hold``, it stays asleep until wake()."""
         await self._fleet._client.sleep(self.name, hold=hold)
 
-    async def wake(self, *, clear_inbox: bool = False) -> None:
-        """Wakes it; ``clear_inbox`` discards the pending Messages first."""
-        await self._fleet._client.wake(self.name, clear_inbox=clear_inbox)
+    async def wake(self) -> None:
+        """Wakes it; its session resumes on the next Turn."""
+        await self._fleet._client.wake(self.name)
 
     async def hold(self, *, reason: str | None = None) -> InboxList:
         """Holds its inbox: Messages still queue, none is delivered until resume()."""

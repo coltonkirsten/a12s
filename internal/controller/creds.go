@@ -28,14 +28,6 @@ const credsTimesFile = "credentials-updated.json"
 
 func (c *Controller) loadCreds() error {
 	p := filepath.Join(c.cfg.StateDir, credsFile)
-	if c.cfg.MemoryOnlyCredentials {
-		for _, f := range []string{p, filepath.Join(c.cfg.StateDir, credsTimesFile)} {
-			if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-		}
-		return nil
-	}
 	if data, err := os.ReadFile(filepath.Join(c.cfg.StateDir, credsTimesFile)); err == nil {
 		_ = json.Unmarshal(data, &c.credTimes)
 	}
@@ -69,9 +61,6 @@ func (c *Controller) setCredsLocked(values api.Credentials) error {
 			c.creds[k] = v
 			c.credTimes[k] = now
 		}
-	}
-	if c.cfg.MemoryOnlyCredentials {
-		return nil
 	}
 	data, err := json.Marshal(c.creds)
 	if err != nil {

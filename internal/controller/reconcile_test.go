@@ -245,35 +245,6 @@ func TestSleepAndWake(t *testing.T) {
 	}
 }
 
-func TestControllerRestartForgetsCredentials(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	if err := h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep}); err != nil {
-		t.Fatal(err)
-	}
-
-	// A new Controller on the same state volume attaches to what runs.
-	h2 := h.restart()
-	h2.waitPhase("builder", api.PhaseReady)
-	h2.waitPhase("scout", api.PhaseAsleep)
-	st := h2.c.Status(context.Background())
-	if st.CredentialsLoaded || !strings.Contains(strings.Join(st.Warnings, "\n"), "credentials not loaded") {
-		t.Fatalf("status = %+v", st)
-	}
-	err := h2.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAwake})
-	var he *httpError
-	if !errors.As(err, &he) || he.status != http.StatusBadRequest || !strings.Contains(err.Error(), "anthropic has no value yet") || he.body.Fix != "a12s creds set anthropic" {
-		t.Fatalf("wake without credentials = %v", err)
-	}
-	if cs := h2.c.computerStatus(context.Background(), "scout"); cs.Phase != api.PhaseProvisioning || cs.Waiting == nil || cs.Error != nil {
-		t.Fatalf("scout = %+v", cs)
-	}
-	if err := h2.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAwake, Credentials: labCreds}); err != nil {
-		t.Fatal(err)
-	}
-	h2.waitPhase("scout", api.PhaseReady)
-}
-
 func TestDiedIsRestartedThenErrors(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
@@ -295,21 +266,6 @@ func TestDiedIsRestartedThenErrors(t *testing.T) {
 	h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep})
 	time.Sleep(20 * time.Millisecond)
 	if h.phase("scout") != api.PhaseAsleep {
-		t.Fatalf("scout = %s", h.phase("scout"))
-	}
-}
-
-func TestUpAsleepAppliesToNewComputersOnly(t *testing.T) {
-	h := newHarness(t)
-	h.up(labFleet(t, nil), false)
-	h.d.takeCalls()
-	h.up(labFleet(t, fifth), true)
-	h.waitPhase("fifth", api.PhaseAsleep)
-	calls := h.d.takeCalls()
-	if !slices.Contains(calls, "stage fifth 1") || hasCall(calls, "power fifth") {
-		t.Fatalf("calls = %v", calls)
-	}
-	if h.phase("scout") != api.PhaseReady {
 		t.Fatalf("scout = %s", h.phase("scout"))
 	}
 }

@@ -72,7 +72,6 @@ export const statusResponse: T.StatusResponse = {
         "orphaned": true,
         "sessionOverride": "sessionOverride"
       },
-      "inboxCleared": 1,
       "power": {
         "sleepAfterIdle": "sleepAfterIdle",
         "wakeOnMessage": [
@@ -104,7 +103,6 @@ export const statusResponse: T.StatusResponse = {
       "orphaned": true
     }
   ],
-  "credentialsLoaded": true,
   "warnings": [
     "warnings"
   ],
@@ -201,8 +199,7 @@ export const statusResponseMinimal: T.StatusResponse = {
       "autonomy": "autonomy",
       "generation": 1
     }
-  ],
-  "credentialsLoaded": true
+  ]
 };
 
 export const putFleetResponse: T.PutFleetResponse = {
@@ -325,7 +322,6 @@ export const putFleetResponse: T.PutFleetResponse = {
         "orphaned": true,
         "sessionOverride": "sessionOverride"
       },
-      "inboxCleared": 1,
       "power": {
         "sleepAfterIdle": "sleepAfterIdle",
         "wakeOnMessage": [
@@ -626,7 +622,6 @@ export const agentComputersResponse: T.AgentComputersResponse = {
           "orphaned": true,
           "sessionOverride": "sessionOverride"
         },
-        "inboxCleared": 1,
         "power": {
           "sleepAfterIdle": "sleepAfterIdle",
           "wakeOnMessage": [

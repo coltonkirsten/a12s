@@ -122,8 +122,8 @@ On Docker, drives are named volumes. Docker can't enforce a quota on them, so `s
 | `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
 | `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
 
-Power state is deliberately **not** in the file: sleep is an operation, not a definition. To create agent computers
-asleep, run `a12s up --asleep`.
+Power state is deliberately **not** in the file: sleep is an operation, not a definition. To have an agent computer
+asleep, run `a12s sleep <name>` after `a12s up`.
 
 Instructions and files are written onto the home drive before the agent computer first starts, and again when they
 change: a changed file is rewritten at the next idle boundary and the session continues. Files the agent wrote

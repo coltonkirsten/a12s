@@ -12,15 +12,12 @@ import (
 )
 
 type upOptions struct {
-	asleep, memoryOnly bool
-	image              string
+	image string
 }
 
 func runUp(g *globals, args []string) error {
 	fs := g.flags("up")
 	var o upOptions
-	fs.BoolVar(&o.asleep, "asleep", false, "create new agent computers asleep")
-	fs.BoolVar(&o.memoryOnly, "memory-only-credentials", false, "a new Controller keeps credential values in memory only")
 	fs.StringVar(&o.image, "controller-image", cli.DefaultControllerImage, "Controller image")
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -58,19 +55,18 @@ func (g *globals) up(o upOptions) error {
 	defer cancel()
 	cli.PullMissing(ctx, cli.FleetImages(f, o.image), os.Stderr)
 	c, err := cli.EnsureController(ctx, cli.StartOptions{
-		Fleet:                 f.Metadata.Name,
-		Image:                 o.image,
-		Log:                   func(s string) { fmt.Fprintln(os.Stderr, s) },
-		MemoryOnlyCredentials: o.memoryOnly,
+		Fleet: f.Metadata.Name,
+		Image: o.image,
+		Log:   func(s string) { fmt.Fprintln(os.Stderr, s) },
 	})
 	if err != nil {
 		return err
 	}
 	var resp api.PutFleetResponse
-	if err := c.Do(ctx, "PUT", "/v1/fleet", api.PutFleetRequest{Fleet: spec, Asleep: o.asleep}, &resp); err != nil {
+	if err := c.Do(ctx, "PUT", "/v1/fleet", api.PutFleetRequest{Fleet: spec}, &resp); err != nil {
 		return err
 	}
-	if err := g.finishUp(&resp, o.asleep, os.Stdout, os.Stderr); err != nil {
+	if err := g.finishUp(&resp, os.Stdout, os.Stderr); err != nil {
 		return err
 	}
 	if !g.json {
@@ -82,7 +78,7 @@ func (g *globals) up(o upOptions) error {
 }
 
 // finishUp reports what converged; any failure still fails the command.
-func (g *globals) finishUp(resp *api.PutFleetResponse, asleep bool, stdout, stderr io.Writer) error {
+func (g *globals) finishUp(resp *api.PutFleetResponse, stdout, stderr io.Writer) error {
 	failed := cli.UpErrors(resp)
 	if g.json {
 		enc := json.NewEncoder(stdout)
@@ -95,7 +91,7 @@ func (g *globals) finishUp(resp *api.PutFleetResponse, asleep bool, stdout, stde
 		}
 		return nil
 	}
-	for _, line := range cli.UpSummary(resp, asleep) {
+	for _, line := range cli.UpSummary(resp) {
 		fmt.Fprintln(stdout, line)
 	}
 	for _, line := range failed {

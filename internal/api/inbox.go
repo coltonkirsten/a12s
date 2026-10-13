@@ -121,8 +121,6 @@ type InboxListResponse struct {
 type ClearRequest struct {
 	// ThroughSeq nil means the current head.
 	ThroughSeq *int64 `json:"throughSeq,omitempty"`
-	// Orphan is required to clear the inbox of a Computer no longer in the Fleet.
-	Orphan bool `json:"orphan,omitempty"`
 }
 
 type ClearResponse struct {

@@ -98,13 +98,12 @@ type Message struct {
 
 // Enqueue is one send.
 type Enqueue struct {
-	Body           string            `json:"body"`
-	Sender         string            `json:"sender,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	Fresh          bool              `json:"fresh,omitempty"`
-	IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-	Expires        *int64            `json:"expires,omitempty"`
-	ReplaceKey     string            `json:"replaceKey,omitempty"`
+	Body       string            `json:"body"`
+	Sender     string            `json:"sender,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	Fresh      bool              `json:"fresh,omitempty"`
+	Expires    *int64            `json:"expires,omitempty"`
+	ReplaceKey string            `json:"replaceKey,omitempty"`
 }
 
 // APIError is a refused call: the HTTP status and the Controller's error.

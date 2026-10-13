@@ -33,9 +33,8 @@ The Controller runs in a container started by `a12s up` (`ghcr.io/coltonkirsten/
 - **Owns the inboxes** in `fleet.db`, a SQLite database (WAL, `synchronous=FULL`) on the `a12s-<fleet>-data`
   volume. It also keeps holds, scoped tokens, the certificate registry and power-policy state, so they survive a
   plain `down`/`up`.
-- **Holds the credentials** by name in `credentials.json` (0600) on its state volume, or in memory only with
-  `A12S_MEMORY_ONLY_CREDENTIALS=1` (`a12s up --memory-only-credentials`), and injects them into containers. It
-  never returns a value.
+- **Holds the credentials** by name in `credentials.json` (0600) on its state volume and injects them into
+  containers. It never returns a value.
 - **Is the CA** and issues a certificate per agent computer or Service start. The CA key lives on the Controller's state
   volume.
 - **Runs the egress proxy** on port 3128 of every internal network.

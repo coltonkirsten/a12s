@@ -111,7 +111,7 @@ Controller's `credentials.json` (0600, on its state volume; see [Credentials](cr
 ```text
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
 a12s sleep <svc> / a12s wake <svc>        # --all includes Services
-a12s shell <svc> [--root]                 # audited
+a12s shell <svc>                          # audited
 ```
 
 `a12s service status <svc>` shows the image ID the Service's ref is [pinned](fleet-file.md#pins) to; to roll out a

@@ -38,7 +38,7 @@ test('inbox.discarded is journaled once per Message id', async () => {
   const { join } = await import('node:path');
   const j = new Journal(join(mkdtempSync(join(tmpdir(), 'j-')), 'journal.db'), 'test');
   const rec = { id: 'm_1', seq: 3, body: 'hello', reason: 'expired' };
-  assert.deepEqual(j.journalInbox([rec, { id: 'm_2', seq: 4, body: 'b', reason: 'wake-clear' }]), ['m_1', 'm_2']);
+  assert.deepEqual(j.journalInbox([rec, { id: 'm_2', seq: 4, body: 'b', reason: 'inbox-clear' }]), ['m_1', 'm_2']);
   assert.deepEqual(j.journalInbox([rec]), ['m_1']);
   const evs = j.after(0, null, 100).filter((e) => e.type === 'inbox.discarded');
   assert.equal(evs.length, 2);

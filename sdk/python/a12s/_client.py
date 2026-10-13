@@ -3,7 +3,6 @@ from __future__ import annotations
 import queue
 import threading
 import time
-import uuid
 from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import closing, contextmanager
 from types import TracebackType
@@ -108,17 +107,15 @@ class Client:
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
-        idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
     ) -> EnqueueResponse:
         """Puts a Message in a Computer's inbox and returns at once.
 
         It is delivered at the Computer's next idle moment, batched with anything else pending, and works while the
-        Computer is busy or asleep. A retry with the same ``idempotency_key`` (random if unset) returns the original
-        Message; ``expires`` is in seconds, 0 meaning now or never.
+        Computer is busy or asleep. ``expires`` is in seconds, 0 meaning now or never.
         """
-        m = core.enqueue_body(body, sender, metadata, fresh, idempotency_key, expires, replace_key)
+        m = core.enqueue_body(body, sender, metadata, fresh, expires, replace_key)
         return from_json(EnqueueResponse, self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox", m))
 
     def prompt(
@@ -130,7 +127,6 @@ class Client:
         sender: str | None = None,
         metadata: dict[str, str] | None = None,
         fresh: bool = False,
-        idempotency_key: str | None = None,
         expires: int | None = None,
         replace_key: str | None = None,
     ) -> Reply:
@@ -144,7 +140,6 @@ class Client:
             sender=sender,
             metadata=metadata,
             fresh=fresh,
-            idempotency_key=idempotency_key,
             expires=expires,
             replace_key=replace_key,
         )
@@ -231,14 +226,9 @@ class Client:
             body["hold"] = True
         self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
 
-    def wake(self, computer: str, *, clear_inbox: bool = False) -> None:
-        """Starts a sleeping agent computer; its session resumes on the next Turn. ``clear_inbox`` discards the
-        pending Messages first."""
-        body: dict[str, Any] = {"state": "awake"}
-        if clear_inbox:
-            body["clearInbox"] = True
-            body["requestId"] = uuid.uuid4().hex
-        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
+    def wake(self, computer: str) -> None:
+        """Starts a sleeping agent computer; its session resumes on the next Turn."""
+        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "awake"})
 
     def hold(self, computer: str, *, reason: str | None = None) -> InboxList:
         """Holds the agent computer's inbox: Messages still queue, none is delivered until resume()."""

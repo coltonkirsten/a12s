@@ -1,4 +1,4 @@
-// Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run dashboard` bundles it for the browser).
+// Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run browser` bundles it for the browser).
 import {
   A12sError,
   Client,
@@ -17,7 +17,6 @@ import type {
   ComputerStatus,
   CredentialInfo,
   CredentialsResponse,
-  EnqueueRequest,
   EnqueueResponse,
   FleetResponse,
   FleetSpec,
@@ -26,6 +25,7 @@ import type {
   MergePatch,
   Message,
   PutFleetResponse,
+  SendRequest,
   ServiceStatus,
   StatusResponse,
   Token,
@@ -227,7 +227,7 @@ export class AgentComputer {
    * Puts a Message in the inbox; it is delivered at the next idle moment. Await it for the queued Message, or call
    * `wait()` on it (or on the awaited Message, at any time later) for the Turn that delivers it.
    */
-  send(text: string, opts: Omit<EnqueueRequest, "body"> = {}): Sending {
+  send(text: string, opts: Omit<SendRequest, "body"> = {}): Sending {
     return new Sending(
       this.client.send(this.name, { ...opts, body: text }).then((message) => ({
         ...message,
@@ -266,9 +266,9 @@ export class AgentComputer {
     return this.client.sleep(this.name, opts);
   }
 
-  /** Wakes it; `clearInbox` discards the pending Messages first. */
-  wake(opts: { clearInbox?: boolean } = {}): Promise<void> {
-    return this.client.wake(this.name, opts);
+  /** Wakes it; its session resumes on the next Turn. */
+  wake(): Promise<void> {
+    return this.client.wake(this.name);
   }
 
   /** Holds its inbox: Messages still queue, none is delivered until resume(). */

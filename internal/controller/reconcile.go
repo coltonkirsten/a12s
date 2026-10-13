@@ -21,7 +21,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/fleet"
-	"github.com/coltonkirsten/a12s/internal/inbox"
 	"github.com/coltonkirsten/a12s/internal/version"
 )
 
@@ -40,7 +39,7 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest, o wr
 	if req.Fleet == nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "fleet is required")
 	}
-	o.whole, o.creds, o.asleep = true, req.Credentials, req.Asleep
+	o.whole, o.creds = true, req.Credentials
 	return c.applySpec(ctx, func(*fleet.Spec) (*fleet.Spec, error) { return req.Fleet, nil }, o)
 }
 
@@ -53,7 +52,6 @@ type writeOpts struct {
 	ifMatch *int64
 	by      caller
 	creds   api.Credentials
-	asleep  bool
 }
 
 func (o writeOpts) touches(name string) bool { return o.whole || slices.Contains(o.only, name) }
@@ -152,14 +150,12 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	}
 	version = c.state.Version
 	maps.Copy(c.state.BundleHosts, hosts)
-	newServices := []string{}
 	for _, name := range f.ServiceNames() {
 		c.state.Manifests[name] = manifests[name]
 		srec := c.state.Services[name]
 		if srec == nil {
 			srec = &ServiceRecord{}
 			c.state.Services[name] = srec
-			newServices = append(newServices, name)
 		}
 		if o.touches(name) && srec.Restarts != 0 {
 			srec.Restarts = 0
@@ -176,7 +172,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		rec := c.state.Computers[name]
 		if rec == nil {
 			rec = &Record{DesiredPower: driver.PowerAwake}
-			if o.asleep || sleptMarks[name] {
+			if sleptMarks[name] {
 				// A Computer that went to sleep before `down` comes back asleep: the mark is Fleet data
 				// in fleet.db.
 				rec.DesiredPower = driver.PowerAsleep
@@ -191,17 +187,6 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	c.mu.Unlock()
 	if err != nil {
 		return api.PutFleetResponse{}, err
-	}
-	if c.inbox != nil {
-		for _, name := range newServices {
-			if _, ok, err := c.inbox.ServiceDesired(ctx, name); err == nil && !ok {
-				desired := driver.PowerAwake
-				if o.asleep {
-					desired = driver.PowerAsleep
-				}
-				_ = c.inbox.SetServiceDesired(ctx, name, string(desired))
-			}
-		}
 	}
 	if err := c.syncInboxes(ctx, f, api.PrincipalLocal); err != nil {
 		return api.PutFleetResponse{}, err
@@ -897,21 +882,6 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 	case api.PowerAsleep:
 		return c.sleep(ctx, name)
 	case api.PowerAwake:
-		if req.ClearInbox && c.inbox != nil {
-			// Recorded and applied before admission opens.
-			id := req.RequestID
-			if id == "" {
-				id = "wake-" + inbox.NewULID(time.Now())
-			}
-			through, n, err := c.inbox.WakeClear(ctx, name, id, api.PrincipalLocal)
-			if err != nil {
-				return err
-			}
-			c.logf("%s: wake --clear-inbox discarded %d pending messages (through seq %d)", name, n, through)
-			c.mu.Lock()
-			c.rtLocked(name).lastClear = n
-			c.mu.Unlock()
-		}
 		obs, ok, err := c.observeOne(ctx, name)
 		if err != nil {
 			return err

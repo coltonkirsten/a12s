@@ -199,9 +199,10 @@ def test_send_and_create_token_send_exactly_the_request_keys() -> None:
     transport, sent = recorder(ROUTES)
     client = Client("http://x", "t", http=httpx.Client(transport=transport))
 
-    req = FIXTURES["enqueueRequest"]
+    req = {k: v for k, v in FIXTURES["enqueueRequest"].items() if k != "idempotencyKey"}
     kwargs = {snake(k): v for k, v in req.items() if k != "body"}
     assert client.send("lead", req["body"], **kwargs) == from_json(EnqueueResponse, FIXTURES["enqueueResponse"])
+    assert sent[-1].pop("idempotencyKey")
     assert sent[-1] == req
     client.send("lead", FIXTURES["enqueueRequestMinimal"]["body"])
     assert set(sent[-1]) == set(FIXTURES["enqueueRequestMinimal"]) | {"idempotencyKey"}
@@ -219,8 +220,9 @@ async def test_async_client_parses_the_fixtures() -> None:
     assert await client.status() == from_json(Status, FIXTURES["statusResponse"], strict=True)
     assert await client.inbox("lead") == from_json(InboxList, FIXTURES["inboxListResponse"], strict=True)
     assert await client.services() == [from_json(ServiceStatus, FIXTURES["servicesResponse"]["services"][0])]
-    req = FIXTURES["enqueueRequest"]
+    req = {k: v for k, v in FIXTURES["enqueueRequest"].items() if k != "idempotencyKey"}
     await client.send("lead", req["body"], **{snake(k): v for k, v in req.items() if k != "body"})
+    assert sent[-1].pop("idempotencyKey")
     assert sent[-1] == req
     await client.create_token(**{snake(k): v for k, v in FIXTURES["tokenRequest"].items()})
     assert sent[-1] == FIXTURES["tokenRequest"]

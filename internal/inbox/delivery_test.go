@@ -299,23 +299,3 @@ func TestReturnNeverReplacesWithOverdue(t *testing.T) {
 		t.Fatalf("b is %s", m.State)
 	}
 }
-
-// A wake-clear accepted while a Batch was claimed discards its rows when they
-// come back.
-func TestWakeClearCoversReturnedClaim(t *testing.T) {
-	s, _ := newStore(t, nil)
-	a := enq(t, s, "builder", "local", api.EnqueueRequest{Body: "a"})
-	b := claim(t, s, "builder")
-	if _, n, err := s.WakeClear(context.Background(), "builder", "wake-1", "local"); err != nil || n != 0 {
-		t.Fatalf("clear %d %v", n, err)
-	}
-	later := enq(t, s, "builder", "local", api.EnqueueRequest{Body: "later"})
-	if _, err := s.Return(context.Background(), b.ID, ReturnOptions{Reason: "interrupted"}); err != nil {
-		t.Fatal(err)
-	}
-	ma, _ := s.Get(context.Background(), "builder", a.Message.ID, "", false)
-	ml, _ := s.Get(context.Background(), "builder", later.Message.ID, "", false)
-	if ma.State != api.MsgDiscarded || ml.State != api.MsgPending {
-		t.Fatalf("a %s, later %s", ma.State, ml.State)
-	}
-}

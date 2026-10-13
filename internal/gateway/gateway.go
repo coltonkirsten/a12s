@@ -5,7 +5,6 @@ package gateway
 import (
 	"crypto/subtle"
 	"crypto/tls"
-	"embed"
 	"encoding/json"
 	"io/fs"
 	"net"
@@ -17,15 +16,12 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 )
 
-//go:embed web
-var embedded embed.FS
-
 type Config struct {
 	Controller *url.URL
 	Token      string
 	// Key unlocks the gateway: in ?key= once (it becomes a cookie) or as a bearer token. Required.
 	Key string
-	// Web is the built app to serve; nil serves the built-in dashboard. Ignored when Dev is set.
+	// Web is the built app to serve. Ignored when Dev is set.
 	Web fs.FS
 	// Dev is a running dev server that gets every request except /v1/, websocket upgrades included.
 	Dev *url.URL
@@ -37,6 +33,9 @@ type Config struct {
 func Handler(cfg Config) http.Handler {
 	if cfg.Key == "" {
 		panic("gateway: Config.Key is required")
+	}
+	if cfg.Web == nil && cfg.Dev == nil {
+		panic("gateway: Config.Web or Config.Dev is required")
 	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -51,14 +50,10 @@ func Handler(cfg Config) http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", proxy)
-	switch {
-	case cfg.Dev != nil:
+	if cfg.Dev != nil {
 		mux.Handle("/", devProxy(cfg.Dev))
-	case cfg.Web != nil:
+	} else {
 		mux.Handle("/", http.FileServerFS(cfg.Web))
-	default:
-		builtin, _ := fs.Sub(embedded, "web")
-		mux.Handle("/", http.FileServerFS(builtin))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)

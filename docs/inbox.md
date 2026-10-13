@@ -65,7 +65,6 @@ Run the nightly dependency audit.
 | Sender label | `--from <label>` | Free-form, up to 64 chars of `[A-Za-z0-9._:@/#-]`. Defaults to the principal's name. |
 | Metadata | `--meta k=v` (repeatable) | Up to 16 string pairs, rendered as an escaped `meta` attribute. |
 | Fresh session | `--fresh` | Start a new session with this Message. |
-| Idempotency key | `--key <k>` | A retry with the same key returns the original Message. The CLI always sends one. |
 | Expiry | `--expires 0 \| <dur>` | See below. |
 | Replace key | `--replace <k>` | See below. |
 
@@ -112,8 +111,8 @@ restarting the agent computer.
 
 ## Holds
 
-A held inbox accepts Messages and doesn't deliver them. You can hold it yourself (`a12s inbox hold`, or
-`a12s stop <name> --hold`), and a12s holds it when delivery can't safely continue:
+A held inbox accepts Messages and doesn't deliver them. You can hold it yourself (`a12s inbox hold`), and a12s
+holds it when delivery can't safely continue:
 
 | Reason | When |
 |---|---|
@@ -129,10 +128,9 @@ new session).
 ```text
 a12s inbox <name> [--all] [--bodies]    list; --all includes ended Messages
 a12s inbox rm <name> <id>               withdraw one pending Message
-a12s inbox clear <name> [--yes]         discard every pending Message (--orphan for a removed agent computer's inbox)
+a12s inbox clear <name> [--yes]         discard every pending Message (also a removed agent computer's inbox)
 a12s inbox hold <name>                  stop delivering
 a12s inbox resume <name> [--new]        deliver again
-a12s wake <name> --clear-inbox          wake and discard what was pending at that moment
 ```
 
 Discarded, withdrawn, expired and replaced Messages are never erased silently: each is journaled on the agent computer as
@@ -166,9 +164,8 @@ agent_computers:
   as after an automatic sleep; with no `wakeOnMessage`, nothing is listed, so it stays asleep until `a12s wake`.
 - **A held sleep wins.** After `a12s sleep <name> --hold`, no Message wakes the agent computer until a manual
   `a12s wake`.
-- **Credentials.** A Controller started with `a12s up --memory-only-credentials` holds credentials only in memory.
-  After it restarts, auto-wake pauses until `a12s up` sends them again. By default the Controller stores them, so
-  auto-wake carries on after a restart.
+- **Credentials.** While a credential the agent computer uses has no value, auto-wake pauses until
+  `a12s creds set` sets it. The Controller stores the values, so auto-wake carries on after a restart.
 - A failed automatic wake pauses auto-wake for that agent computer until a manual `a12s wake` or `a12s up`.
 - `--expires 0` never wakes anything: a wake takes seconds. Send a window (`--expires 60s`) instead.
 

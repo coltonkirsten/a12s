@@ -108,7 +108,6 @@ class ComputerStatus:
     egress_mode: str | None = None
     warnings: list[str] | None = None
     inbox: InboxSummary | None = None
-    inbox_cleared: int | None = None
     power: PowerStatus | None = None
 
 
@@ -153,7 +152,6 @@ class Status:
     egress_enforcement: str
     agent_computers: list[ComputerStatus]
     orphaned_drives: list[DriveRow] | None = None
-    credentials_loaded: bool
     warnings: list[str] | None = None
     orphaned_inboxes: list[InboxSummary] | None = None
     services: list[ServiceStatus] | None = None

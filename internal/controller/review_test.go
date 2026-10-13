@@ -170,8 +170,7 @@ func TestPresetsSurviveRestart(t *testing.T) {
 	h.up(labFleet(t, nil), false)
 	h.d.RemoveComputer(context.Background(), "scout") // lost: must be staged again
 	h2 := h.restart()
-	// No credentials after the restart, but staged.
-	waitFor(t, func() bool { return h2.c.computerStatus(context.Background(), "scout").Waiting != nil })
+	h2.waitPhase("scout", api.PhaseReady)
 	if len(h.d.get("scout").spec.Preset) == 0 {
 		t.Fatal("scout was staged without its preset")
 	}

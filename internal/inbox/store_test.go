@@ -321,7 +321,7 @@ func TestClearHoldResumeOrphan(t *testing.T) {
 	enq(t, s, "builder", "local", api.EnqueueRequest{Body: "1"})
 	two := enq(t, s, "builder", "local", api.EnqueueRequest{Body: "2"})
 	enq(t, s, "builder", "local", api.EnqueueRequest{Body: "3"})
-	n, err := s.Clear(context.Background(), "builder", &two.Message.Seq, false, "inbox-clear", "local")
+	n, err := s.Clear(context.Background(), "builder", &two.Message.Seq, "inbox-clear", "local")
 	if err != nil || n != 2 {
 		t.Fatalf("clear through: %d %v", n, err)
 	}
@@ -335,15 +335,12 @@ func TestClearHoldResumeOrphan(t *testing.T) {
 	if sum.Held || sum.SessionOverride != api.SessionNew || sum.Pending != 1 || sum.Ended24h.Discarded != 2 {
 		t.Fatalf("summary %+v", sum)
 	}
-	// Remove builder from the Fleet: orphaned, enqueue refused, clear needs --orphan.
+	// Remove builder from the Fleet: orphaned, enqueue refused.
 	if err := s.SyncFleet(context.Background(), cfgs(map[string]Limits{"scout": BuiltinLimits()}), "local"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Enqueue(context.Background(), Enqueue{Computer: "builder", Principal: "local", Req: api.EnqueueRequest{Body: "x"}}, nil); !errors.Is(err, ErrUnknownInbox) {
 		t.Fatalf("enqueue to orphan: %v", err)
-	}
-	if _, err := s.Clear(context.Background(), "builder", nil, false, "inbox-clear", "local"); code(err) != api.ErrConflict {
-		t.Fatalf("clear orphan without flag: %v", err)
 	}
 	all, _ := s.Inboxes(context.Background())
 	if len(all) != 2 || !all[0].Orphaned || all[0].Pending != 1 {

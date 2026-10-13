@@ -57,7 +57,6 @@ func runSend(g *globals, args []string) error {
 	fs := g.flags("send")
 	from := fs.String("from", "", "sender label (default: your principal, local)")
 	fresh := fs.Bool("fresh", false, "start a new session with this message")
-	key := fs.String("key", "", "idempotency key (default: a random one, so a retry never queues twice)")
 	replace := fs.String("replace", "", "replace key: supersede your pending message with this key")
 	expires := fs.String("expires", "", "0 (now or never), or a window: 90s, 15m, 1h, 7d")
 	wait := fs.Bool("wait", false, "stream the turn that delivers it; exit 0 only if that turn completes")
@@ -80,10 +79,7 @@ func runSend(g *globals, args []string) error {
 		}
 		body = string(b)
 	}
-	req := api.EnqueueRequest{Body: body, Sender: *from, Fresh: *fresh, IdempotencyKey: *key, ReplaceKey: *replace}
-	if req.IdempotencyKey == "" {
-		req.IdempotencyKey = cli.NewRequestID()
-	}
+	req := api.EnqueueRequest{Body: body, Sender: *from, Fresh: *fresh, IdempotencyKey: cli.NewRequestID(), ReplaceKey: *replace}
 	if len(meta) > 0 {
 		req.Metadata = meta
 	}
@@ -224,7 +220,6 @@ func runInboxRm(g *globals, args []string) error {
 func runInboxClear(g *globals, args []string) error {
 	fs := g.flags("inbox clear")
 	yes := fs.Bool("yes", false, "do not ask for confirmation")
-	orphan := fs.Bool("orphan", false, "clear the inbox of an agent computer no longer in the Fleet")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -262,7 +257,7 @@ func runInboxClear(g *globals, args []string) error {
 		}
 	}
 	var res api.ClearResponse
-	if err := c.Do(ctx, "POST", computerPath(name, "/inbox/clear"), api.ClearRequest{ThroughSeq: &head, Orphan: *orphan}, &res); err != nil {
+	if err := c.Do(ctx, "POST", computerPath(name, "/inbox/clear"), api.ClearRequest{ThroughSeq: &head}, &res); err != nil {
 		return err
 	}
 	if g.json {
