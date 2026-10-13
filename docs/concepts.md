@@ -36,7 +36,7 @@ puts this together.
 | **Principal** (`via`) | Who really sent a Message: `local` (you, with the owner token), `token:<name>`, `service:<name>` or `computer:<name>`. Agents should trust `via`, not the sender's own label. |
 | **Grant** | A permission written on the side that acts: `grants.send` (may send to these agent computers), `uses` (may reach these Services). |
 | **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server. See [Services](services.md). |
-| **Drive** | A persistent volume: each agent computer's home drive, and a Service's state drive. |
+| **Drive** | A persistent volume: each agent computer's home drive, a drive per kept path of an [attached folder](fleet-file.md#attached-folders), and a Service's state drive. |
 | **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds skills, settings and anything else. |
 | **Harness**, **HarnessBundle** | The agent program (Claude Code or Codex), shipped as a pinned read-only bundle per version. |
 | **Controller** | The process `a12s up` starts in a container: it holds the Fleet and its version, reconciles it, owns the inboxes and serves the API. |

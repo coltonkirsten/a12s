@@ -76,7 +76,7 @@ agent_computers:
 | `apiVersion` | `a12s.ai/v1alpha1` |
 | `kind` | `Fleet` |
 | `metadata.name` | The Fleet name, a DNS label. Docker resources are named `a12s-<fleet>-…`. |
-| `defaults` | Any agent computer field, applied to every agent computer. |
+| `defaults` | Any agent computer field but `attach`, applied to every agent computer. |
 | `agent_computers` | Agent computers, by name (DNS labels). |
 | `services` | Services, by name. See [Services](services.md). |
 
@@ -94,6 +94,7 @@ agent_computers:
 | `credentials` | Credential names, added to `defaults.credentials`; set each value with `a12s creds set <name>`. See [Credentials](credentials.md). |
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Only the owner sets it: a prefix token can't. Default: Docker's default profile. |
+| `attach` | `{name: {host, readOnly, keep}}`: folders on this machine mounted into the home at `/home/agent/<name>`. See [Attached folders](#attached-folders). Only the owner sets it, never in `defaults`. |
 | `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |
 | `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
 | `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
@@ -106,6 +107,50 @@ change: a changed file is rewritten at the next idle boundary and the session co
 elsewhere on the home drive are kept; one of these files that the agent edited is overwritten.
 
 Scaling is editing `agent_computers:` and running `a12s up` again: only what changed is created, staged or removed.
+
+## Attached folders
+
+`attach` puts a folder of this machine into an agent computer, so the agent works on your project where it is
+instead of on a copy:
+
+```yaml
+agent_computers:
+  brain:
+    instructions: Work in ~/project.
+    egress: { allow: [registry.npmjs.org] }
+    attach:
+      project:                        # a DNS label: mounted at /home/agent/project
+        host: ../myapp                # relative to fleet.yaml, ~/…, or absolute
+        keep: [node_modules, .venv]   # stay inside a12s, never written to ../myapp
+      docs: { host: ~/notes, readOnly: true }
+```
+
+| Field | Meaning |
+|---|---|
+| `host` | The folder. In the Fleet file: relative to the file's directory, `~/…`, or absolute; `a12s up` checks that it is a folder, follows symlinks and sends the absolute path. Through the SDK and the HTTP API it must be absolute (a relative or `~` path is refused). Never `/`, a `.docker` folder, a socket, or `/run`, `/var/run` and the folders that hold them. |
+| `readOnly` | `true` mounts it read-only. Default `false`. |
+| `keep` | Paths under the folder (clean, relative, at most 16) that live on a drive of their own instead: `node_modules`, `.venv`, build output. The agent's installs stay inside a12s, Linux binaries never land in a macOS folder, and the many small files stay off the slower host mount. An empty directory appears in the host folder where each is mounted. Needs `readOnly: false`. |
+
+- The name is a DNS label (so no dotfiles like `.claude`), not `bin`, and not the first part of a `files` path. At
+  most 8 folders per agent computer.
+- The harness still starts in `/home/agent`: say in `instructions` where the project is.
+- What the agent writes appears on the host at once, and host edits appear in the agent computer at once. Nothing
+  merges: when you and the agent change the same file, the last save wins.
+- Ownership: with Docker Desktop (macOS), files the agent writes are yours on the host, and host files look like the
+  agent's inside. With Docker Engine on Linux the agent writes as uid 1000: the folder must be writable by uid 1000,
+  and what it writes is owned by uid 1000.
+- Docker Desktop must share the folder: /Users, /Volumes, /private, /tmp and /var/folders are shared by default; add
+  others under Settings > Resources > File sharing. A folder Docker can't see fails the agent computer (phase
+  `Error`) with that fix, whether it is missing or not shared.
+- Each kept path's drive is named `keep-<agent computer>-<name>-<path>-<digest>`. Like the home drive it survives
+  sleep, restarts, `a12s down` and removing the agent computer, `a12s drive ls` lists it (an orphan once the Fleet no
+  longer keeps that path), and `a12s drive rm` or `a12s down --purge` destroys it. The host folder itself is never
+  touched by a12s: `--purge` leaves it as it is.
+- Changing `attach` restages the agent computer at its next idle boundary, like any other change.
+- `a12s export` writes `host` back relative to the Fleet file when the folder is inside the file's directory or next to
+  it, else as `~/…` or absolute.
+
+See [Security: Attached folders](security.md#attached-folders) for what this opens up.
 
 ## Pins
 

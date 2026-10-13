@@ -55,7 +55,7 @@ are `{code, message, fix?, details?}` with a stable `code`. The main routes:
 | `GET /v1/agent-computers/{c}/events` | The agent computer's event stream (SSE, `Last-Event-ID`, `?turn=`) |
 | `POST /v1/agent-computers/{c}/turns/{id}/stop` | Stop a Turn |
 | `POST /v1/agent-computers/{c}/power` | Sleep or wake |
-| `GET /v1/drives`, `DELETE /v1/drives/{d}` | Home and state drives |
+| `GET /v1/drives`, `DELETE /v1/drives/{d}` | Home, keep and state drives |
 | `/v1/tokens` | Scoped tokens |
 | `GET /v1/credentials`, `PUT`, `DELETE /v1/credentials/{name}` | List credential names, set or remove a value |
 | `/v1/services/…` | Service list, status, create, change, remove, logs, power |
@@ -70,7 +70,7 @@ Messages. Nothing else exists on this listener.
 
 | Thing | Docker resource |
 |---|---|
-| Agent computer `C` | Container and internal network `a12s-<fleet>-C`; home drive volume `a12s-<fleet>-home-C` |
+| Agent computer `C` | Container and internal network `a12s-<fleet>-C`; home drive volume `a12s-<fleet>-home-C`; a volume `a12s-<fleet>-keep-C-…` per kept path of an attached folder |
 | Harness bundles | Read-only cache volume `a12s-<fleet>-bundles` |
 | Controller | Container `a12s-<fleet>-controller`, its state volume, bridge network `a12s-<fleet>` |
 | Inboxes | Volume `a12s-<fleet>-data` |
@@ -84,7 +84,9 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
 
 - **Mounts:** the home drive at `/home` (`/home/agent` for the agent; `/home/.a12s` root-only for the journal and
   session record), the bundle cache read-only at `/opt/a12s/bundles`, tmpfs
-  `/run/a12s` (secrets, TLS, computerd's socket) and `/tmp`.
+  `/run/a12s` (secrets, TLS, computerd's socket) and `/tmp`. Each attached folder is a bind mount at
+  `/home/agent/<name>` (read-only when asked), with each kept path's volume mounted over its path inside it;
+  computerd gives the root of each kept volume (named in `A12S_KEEP`) to uid 1000 before the harness starts.
 - **Instructions and files** are copied onto the home drive as one tar before the first start and again when they
   change, with a root-owned marker in `/home/.a12s-files` naming the applied digest. A copy overwrites those files
   and leaves the rest of the home drive alone.

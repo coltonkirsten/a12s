@@ -6,7 +6,8 @@ change.
 ## Isolation
 
 - The agent runs as uid 1000 on a read-only root filesystem with no privilege escalation, no added capabilities, no
-  Docker socket and no host mounts. Only the home drive and tmpfs are writable.
+  Docker socket and no host mounts unless the owner [attaches a folder](#attached-folders). Only the home drive,
+  tmpfs and attached folders are writable.
 - computerd runs as root with a minimal capability set (`CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`) and
   `no-new-privileges`. Nothing else in the container runs as root.
 - The journal and session record live in `/home/.a12s`, which the agent can neither open nor rename, so an agent
@@ -59,6 +60,27 @@ what the software needs; the cookbook's
 [browser-agent](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/browser-agent) profile does that
 for Chromium.
 
+## Attached folders
+
+[`attach`](fleet-file.md#attached-folders) mounts a folder of the machine running a12s into one agent computer. It
+widens the boundary on purpose: the agent can read everything in that folder and, unless it is `readOnly`, change
+and delete it. A prompt-injected agent can do the same, so attach only folders you would hand to the agent
+yourself, keep them under version control, and use `readOnly: true` for anything it only needs to read.
+
+- **Only the Fleet's owner sets it.** It comes from `fleet.yaml` or from an owner-token write. A prefix token's write
+  that adds, changes or drops an agent computer's `attach` is `403 forbidden` (it may change the rest of one the owner
+  gave a folder, and remove it); a narrow token, the gateway's included, can't write agent computers at all.
+  `defaults` can't carry it, so code that creates agent computers never gets a host folder by accident.
+- **Only that folder.** It is mounted at `/home/agent/<name>` and nothing above it is reachable. `/`, a `.docker`
+  folder, socket files and `/run`, `/var/run` (and folders that contain them) are refused, so the Docker socket
+  can't be attached. `a12s up` follows symlinks before it sends the path, so the checks see the real folder.
+- **Everything else stays.** The agent computer keeps its user, capabilities, read-only root filesystem, seccomp
+  profile and egress policy. `readOnly: true` makes the mount read-only in the kernel; the agent can't remount it.
+- **Kept paths stay inside.** Each `keep` path is a drive of its own mounted over that path, so what the agent
+  installs there (`node_modules`, `.venv`) never reaches the host folder. computerd hands only the root of each
+  such drive to the agent, after checking that it is exactly a mount point below its home.
+- **It is visible.** `a12s up` prints `<name> has <folder> at /home/agent/<name> (read-write)` for each one.
+
 ## Egress
 
 Every agent computer's and Service's only route out is the Controller's validating egress proxy.
@@ -105,14 +127,14 @@ Three kinds of bearer token call the owner API:
     drives or create, list or remove tokens.
   - Its specs may name any credential, so its agent computers can use the owner's keys without seeing them. It may
     set and remove only credentials whose names start with its prefix.
-  - It can't set a seccomp profile (`security.seccomp`): that loosens the sandbox, so only the owner sets one. A
-    write that adds, changes or drops one is `403 forbidden`.
+  - It can't set a seccomp profile (`security.seccomp`) or attach a host folder (`attach`): both widen the sandbox,
+    so only the owner sets them. A write that adds, changes or drops either is `403 forbidden`.
 - **A narrow token** (`a12s token create dash --actions status,events --agent-computers a,b`) may make only those
   actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on those agent computers (or `*`). It can't change the
   Fleet. Use it for read-only dashboards and webhooks; `a12s gateway` uses one.
 
 Inside a prefix token's lane, egress (`allow: ["*"]` included), image and resources are its call, and its agent
-computers can use any stored credential; only the seccomp profile stays with the owner. One rule, the prefix, is easier to get
+computers can use any stored credential; only the seccomp profile and attached folders stay with the owner. One rule, the prefix, is easier to get
 right than a dozen limits, and it leaves an app free to shape its own agent computers. Treat a prefix token like the
 owner token for the agent computers it creates, and give it only to programs you trust that far. What it can't do is
 reach, read or change anything outside its prefix.

@@ -16,7 +16,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 | Command | What it does |
 |---|---|
 | `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (harness, `image: slim` and the credential in `defaults`, and one agent computer, `assistant`) and a README. |
-| `a12s up [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `security.seccomp` file and sends the profile. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). |
+| `a12s up [--controller-image ref]` | Start the Controller if needed, validate the Fleet file and make the live Fleet match it, without asking: create, update or stage agent computers and Services, and remove the ones the file doesn't list, including those created through the SDK or API (drives are kept). It reads each `security.seccomp` file and sends the profile. It sends no credentials: an agent computer or Service whose credential isn't set on the Controller waits in Provisioning, and `up` prints a warning with the fix. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp). It resolves each [`attach`](fleet-file.md#attached-folders) host to the folder's absolute path (failing if it isn't a folder) and prints `<name> has <folder> at /home/agent/<name> (read-write)` for each. |
 | `a12s export` | Write the live Fleet back to the Fleet file's directory. See [Keeping changes made from code](#keeping-changes-made-from-code). |
 | `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, `allow: ["*"]`). |
 | `a12s down [--purge [--yes]]` | Remove the Fleet's containers, networks and Controller; keep drives and the inbox database. `--purge` also destroys them after listing them and asking. Credential values the Controller stored go with its state volume. |
@@ -31,6 +31,8 @@ the Fleet file's directory:
 
 - Instructions and files stay in `fleet.yaml`, multi-line ones as YAML block scalars.
 - A seccomp profile goes to `profiles/<name>.json`.
+- An `attach` host is written relative to `fleet.yaml` when the folder is inside its directory or next to it, else as
+  `~/…` or absolute.
 - Credential values are never written; the Fleet names credentials only.
 - It overwrites files that differ. Comments in `fleet.yaml` are lost.
 
@@ -79,10 +81,10 @@ the Fleet file's directory:
 | Command | What it does |
 |---|---|
 | `a12s creds set <name>` | Read a value from stdin (not echoed) and set it on the Fleet's Controller, starting the Controller if none runs; agent computers and Services that use it get it at once. Nothing is stored on the host. Before or after `a12s up`, either order works. Run it in the Fleet's directory (or with `-F`). For `anthropic` it refuses a value that isn't one unbroken `sk-ant-oat01-…` or `sk-ant-api03-…` string of about 108 characters and prints the fix; `--no-check` skips that. |
-| `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-` except set a seccomp profile, and nothing outside. See [Security: Tokens](security.md#tokens). |
+| `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-` except set a seccomp profile or attach a host folder, and nothing outside. See [Security: Tokens](security.md#tokens). |
 | `a12s token create <name> --actions a,b --agent-computers c,d` | Create a narrow token for those agent computers (or `'*'`), printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
-| `a12s drive ls` | Home drives (`home-<name>`) and Service state drives (`<svc>-state`): what's attached, orphans. |
+| `a12s drive ls` | Home drives (`home-<name>`), the drives of [kept paths](fleet-file.md#attached-folders) (`keep-…`) and Service state drives (`<svc>-state`): what's attached, orphans. |
 | `a12s drive rm <name> [--yes]` | Destroy one drive (asks first). With `down --purge`, the only commands that destroy data. |
 
 ## Other
