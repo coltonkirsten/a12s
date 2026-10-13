@@ -78,10 +78,11 @@ func validateAttach(c Computer) []string {
 			if k == "" || clean != k || k == "." || path.IsAbs(k) || clean == ".." || strings.HasPrefix(clean, "../") || !mountRE.MatchString(k) {
 				bad = append(bad, fmt.Sprintf("%s.keep: %q must be a clean path relative to the folder (letters, digits, . _ - /), like node_modules", field, k))
 			}
-			if seen[k] {
+			// A macOS folder is case-insensitive: node_modules and Node_modules are one path.
+			if seen[strings.ToLower(k)] {
 				bad = append(bad, fmt.Sprintf("%s.keep: %q is listed twice", field, k))
 			}
-			seen[k] = true
+			seen[strings.ToLower(k)] = true
 		}
 	}
 	return bad
@@ -98,11 +99,14 @@ func validateHost(host string) string {
 		return fmt.Sprintf("%q must be a clean absolute path", host)
 	case host == "/":
 		return "the whole filesystem can't be attached; name the project folder"
-	case strings.HasSuffix(host, ".sock") || slices.Contains(strings.Split(host, "/"), ".docker"):
+	}
+	// Lowercased: macOS file systems are case-insensitive, so /VAR/RUN is /var/run.
+	lower := strings.ToLower(host)
+	if strings.HasSuffix(lower, ".sock") || slices.Contains(strings.Split(lower, "/"), ".docker") {
 		return fmt.Sprintf("%q is or holds a Docker socket; attach a project folder", host)
 	}
 	for _, d := range socketDirs {
-		if within(host, d) || within(d, host) {
+		if within(lower, d) || within(d, lower) {
 			return fmt.Sprintf("%q is or contains %s, where the Docker socket lives; attach a project folder", host, d)
 		}
 	}

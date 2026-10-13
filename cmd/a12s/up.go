@@ -193,5 +193,29 @@ func (g *globals) resolveHost(host string) (string, error) {
 	} else if !fi.IsDir() {
 		return "", fmt.Errorf("%s is not a folder", real)
 	}
+	if err := refuseHomeSecrets(real); err != nil {
+		return "", err
+	}
 	return real, nil
+}
+
+// refuseHomeSecrets keeps ~/.a12s (every Fleet's owner token) and ~/.docker (Docker Desktop's socket) out of an
+// agent computer. Only the CLI knows the home directory, so the Controller can't check this.
+func refuseHomeSecrets(host string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	if real, err := filepath.EvalSymlinks(home); err == nil {
+		home = real
+	}
+	inside := func(p, dir string) bool { return p == dir || strings.HasPrefix(p, dir+"/") }
+	for _, secret := range []string{".a12s", ".docker"} {
+		// Lowercased: macOS file systems are case-insensitive.
+		s, h := strings.ToLower(filepath.Join(home, secret)), strings.ToLower(host)
+		if inside(h, s) || inside(s, h) {
+			return fmt.Errorf("%s is or contains %s, which holds the owner token or the Docker socket (fix: attach a project folder instead)", host, filepath.Join(home, secret))
+		}
+	}
+	return nil
 }

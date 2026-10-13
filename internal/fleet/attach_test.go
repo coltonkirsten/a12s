@@ -31,6 +31,10 @@ func TestValidateAttach(t *testing.T) {
 		{"keep dot", "    attach: { p: { host: /x/app, keep: [.] } }\n", "clean path relative"},
 		{"keep space", "    attach: { p: { host: /x/app, keep: ['my modules'] } }\n", "clean path relative"},
 		{"keep twice", "    attach: { p: { host: /x/app, keep: [a, a] } }\n", "listed twice"},
+		{"socket dir, other case", "    attach: { p: { host: /VAR/Run } }\n", "Docker socket"},
+		{"docker desktop dir, other case", "    attach: { p: { host: /Users/me/.Docker/run } }\n", "Docker socket"},
+		{"socket file, other case", "    attach: { p: { host: /x/Docker.SOCK } }\n", "Docker socket"},
+		{"keep twice, other case", "    attach: { p: { host: /x/app, keep: [node_modules, Node_Modules] } }\n", "listed twice"},
 		{"keep read-only", "    attach: { p: { host: /x/app, readOnly: true, keep: [a] } }\n", "needs a writable folder"},
 		{"unknown field", "    attach: { p: { host: /x/app, mode: rw } }\n", "field mode not found"},
 	}

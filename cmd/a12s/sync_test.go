@@ -124,3 +124,27 @@ func TestResolveHost(t *testing.T) {
 		}
 	}
 }
+
+// ~/.a12s holds every Fleet's owner token and ~/.docker Docker Desktop's socket: neither may be attached, nor any
+// folder holding them, such as the home directory itself.
+func TestResolveHostRefusesHomeSecrets(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{".a12s/team", ".docker/run", "code/app"} {
+		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	g := &globals{fleetPath: filepath.Join(home, "code", "fleet.yaml")}
+	for _, in := range []string{"~", "~/.a12s", "~/.a12s/team", "~/.docker/run", ".."} {
+		if _, err := g.resolveHost(in); err == nil || !strings.Contains(err.Error(), "attach a project folder instead") {
+			t.Errorf("resolveHost(%q) = %v, want refused", in, err)
+		}
+	}
+	if got, err := g.resolveHost("./app"); err != nil || got != filepath.Join(home, "code", "app") {
+		t.Errorf("a project folder: %q, %v", got, err)
+	}
+}
