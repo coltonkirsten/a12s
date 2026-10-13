@@ -65,6 +65,15 @@ export interface Change {
   when: "now" | "idle" | (string & {});
   /** The top-level spec fields that differ, for an update. */
   fields?: string[];
+  /** Every leaf that differs, for an update, with its value before and after (absent where the field is). */
+  diff?: FieldDiff[];
+}
+
+/** One leaf of a spec that differs: `path` is dotted field names ("grants.send"); lists and values are leaves. */
+export interface FieldDiff {
+  path: string;
+  before?: unknown;
+  after?: unknown;
 }
 
 export interface FleetResponse {
@@ -395,6 +404,16 @@ export interface PhaseData {
   error?: Failure;
 }
 
+/** A Service's phase, health or restart count changed. */
+export interface ServicePhaseData {
+  service: string;
+  phase: Phase;
+  /** "ok", or why the last health check failed. */
+  health?: string;
+  restarts: number;
+  error?: Failure;
+}
+
 export interface ToolStartedData {
   id: string;
   /** MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send`. */
@@ -451,6 +470,10 @@ export type EgressDeniedEvent = Ev<"egress.denied", EgressDeniedData>;
 export type FleetChangedEvent = Ev<"fleet.changed", FleetChangedData>;
 /** Made by the Controller, on the fleet-wide stream only. */
 export type PhaseEvent = Ev<"agent_computer.phase", PhaseData>;
+/** Made by the Controller, on the fleet-wide stream only, after any change to the agent computer's inbox (a burst is one event). */
+export type InboxChangedEvent = Ev<"inbox.changed", InboxSummary>;
+/** Made by the Controller, on the fleet-wide stream only; `agentComputer` is empty, the Service is in `data`. */
+export type ServicePhaseEvent = Ev<"service.phase", ServicePhaseData>;
 /** Made by the SDK, never journaled: the stream could not resume from its cursor and events were lost. */
 export type GapEvent = Ev<"gap", GapData>;
 
@@ -474,6 +497,8 @@ export type A12sEvent =
   | EgressDeniedEvent
   | FleetChangedEvent
   | PhaseEvent
+  | InboxChangedEvent
+  | ServicePhaseEvent
   | GapEvent;
 
 export type EventType = A12sEvent["type"];
@@ -537,6 +562,8 @@ export interface CredentialInfo {
   name: string;
   set: boolean;
   usedBy?: string[];
+  /** When the value last changed (RFC 3339); absent if unknown. */
+  updatedAt?: string;
 }
 
 export interface CredentialsResponse {
@@ -549,5 +576,7 @@ export interface Token {
   computers: string[];
   prefix?: string;
   createdAt: string;
+  /** When it last authenticated (RFC 3339, recorded at most once a minute); absent if never. */
+  lastUsedAt?: string;
   secret?: string;
 }

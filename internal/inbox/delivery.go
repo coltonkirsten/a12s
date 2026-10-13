@@ -227,6 +227,9 @@ func (s *Store) Claim(ctx context.Context, computer string) (*Batch, error) {
 		b, _, err = s.claimTx(tx, computer, s.now())
 		return err
 	})
+	if err == nil && b != nil {
+		s.changed(computer)
+	}
 	return b, err
 }
 

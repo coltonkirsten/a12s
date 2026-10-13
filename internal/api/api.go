@@ -32,6 +32,8 @@ type CredentialInfo struct {
 	Name   string   `json:"name"`
 	Set    bool     `json:"set"`
 	UsedBy []string `json:"usedBy,omitempty"`
+	// UpdatedAt is when the value last changed; absent if unknown.
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 }
 
 type CredentialsResponse struct {
@@ -83,6 +85,16 @@ type Change struct {
 	When string `json:"when"`
 	// Fields are the top-level spec fields that differ, for an update.
 	Fields []string `json:"fields,omitempty"`
+	// Diff is every leaf that differs, for an update.
+	Diff []FieldDiff `json:"diff,omitempty"`
+}
+
+// FieldDiff is one leaf of a spec that differs: Path is dotted JSON field names (objects are walked, lists and
+// values are leaves); Before or After is absent where the field is.
+type FieldDiff struct {
+	Path   string          `json:"path"`
+	Before json.RawMessage `json:"before,omitempty"`
+	After  json.RawMessage `json:"after,omitempty"`
 }
 
 const (

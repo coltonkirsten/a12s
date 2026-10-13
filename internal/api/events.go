@@ -46,6 +46,10 @@ const (
 	// Made by the Controller, on GET /v1/events only.
 	EventFleetChanged EventType = "fleet.changed"
 	EventPhase        EventType = "agent_computer.phase"
+	// EventInboxChanged carries the inbox's InboxSummary.
+	EventInboxChanged EventType = "inbox.changed"
+	// EventServicePhase has no agentComputer: the Service is named in its data.
+	EventServicePhase EventType = "service.phase"
 )
 
 // EgressDeniedData: the egress proxy refused a connection.
@@ -66,6 +70,15 @@ type FleetChangedData struct {
 type PhaseData struct {
 	Phase Phase    `json:"phase"`
 	Error *Failure `json:"error,omitempty"`
+}
+
+// ServicePhaseData: a Service's phase, health or restart count changed.
+type ServicePhaseData struct {
+	Service  string   `json:"service"`
+	Phase    Phase    `json:"phase"`
+	Health   string   `json:"health,omitempty"`
+	Restarts int      `json:"restarts"`
+	Error    *Failure `json:"error,omitempty"`
 }
 
 // SSEGap is sent instead of events when Last-Event-ID is unknown or ahead of

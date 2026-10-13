@@ -25,8 +25,10 @@ its own fleet.yaml, presets, images, Services and app code.
   text.delta {text}, tool.started {id, name, input}, tool.finished {id, name, isError, output},
   turn.finished {status, usage, tokens?: {input, output, cacheRead, cacheWrite}, error?}, egress.denied {host, port,
   reason}, diagnostic {message}, permission, session.changed {from, to}, resume.failed, lifecycle {phase},
-  harness.restarted, inbox.discarded. On the fleet-wide stream only: fleet.changed {version, by, names} and
-  agent_computer.phase {phase, error?}. SDK-made: gap (events lost; resync). `tokens` is the same for every harness
+  harness.restarted, inbox.discarded. On the fleet-wide stream only: fleet.changed {version, by, names},
+  agent_computer.phase {phase, error?}, inbox.changed (the inbox summary: {pending, claimed, held, holdReason?,
+  usage, …}; a burst of changes is one event) and service.phase {service, phase, health?, restarts, error?} (no
+  agentComputer). SDK-made: gap (events lost; resync). `tokens` is the same for every harness
   (input excludes cached input); `usage` is the harness's own.
 - via: who really sent a Message: local (owner CLI/SDK), token:<name>, service:<name>, computer:<name>. sender is
   only the sender's own label. Trust via, not sender.
@@ -166,6 +168,7 @@ a12s prompt <c> "…"                   # send and stream the Turn that delivers
 a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # enqueue and exit; busy or asleep
 a12s logs <c> --follow                # one agent computer's events
 a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2] [--no-open]
+a12s ui [--port 7013] [--no-open]     # the web console (npx a12s-console; Node.js 20+); args go to the console
 a12s inbox <c> [--bodies]             # pending Messages; inbox resume <c> releases a hold
 a12s stop <c> | sleep <c> | wake <c>
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
@@ -538,7 +541,7 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   "expires"? (seconds), "replaceKey"?} → {id, state, …}; GET /v1/status.
 - Events: GET /v1/events is one SSE stream for the whole Fleet (?agentComputers=a,b filters): id is an opaque
   string, Last-Event-ID resumes, `event: head` marks live, `event: gap` = events lost (resync). It also carries
-  fleet.changed and agent_computer.phase. GET /v1/agent-computers/{c}/events is one agent computer's journal (id =
+  fleet.changed, agent_computer.phase, inbox.changed and service.phase. GET /v1/agent-computers/{c}/events is one agent computer's journal (id =
   seq; ?turn=<id> replays one Turn). GET /v1/agent-computers/{c}/turns?limit=20 → {turns: [Turn]}, newest first.
 - One agent computer (owner or prefix token): PUT /v1/agent-computers/{c} with its spec as JSON (fleet.yaml's
   fields; seccomp is the profile object) creates or replaces it; add `If-None-Match: *` to only create (409 exists
@@ -548,14 +551,15 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
 - The whole Fleet: GET /v1/fleet → {version, fleet, drift} with ETag "<version>". PUT /v1/fleet {"fleet": …} with
   If-Match: "<version>" replaces it, or answers 412 version_mismatch if it changed since you read it.
 - Every write takes ?dryRun=true (check and list the changes, change nothing) and answers {version, changes: [{op:
-  create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?}], warnings, errors, …}. A
+  create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?, diff?: [{path, before?, after?}]}],
+  warnings, errors, …}; diff lists each changed leaf of an update (path "grants.send"; lists and values are leaves). A
   missing harness or image (in the spec and in defaults) is 400 missing_field; a credential with no value is 400
   missing_credential.
-- Credentials (owner or prefix token): GET /v1/credentials → {credentials: [{name, set, usedBy}]} (names, never
+- Credentials (owner or prefix token): GET /v1/credentials → {credentials: [{name, set, usedBy, updatedAt?}]} (names, never
   values); PUT /v1/credentials/{name} {"value": "…"} stores it and updates the agent computers and Services using it;
   DELETE /v1/credentials/{name} is 409 in_use while one uses it, 404 if none is stored.
 - Tokens (owner token): POST /v1/tokens {"name", "prefix"} or {"name", "actions", "computers"} → {name, …, secret}
-  (secret shown once); GET /v1/tokens; DELETE /v1/tokens/{name}.
+  (secret shown once); GET /v1/tokens (each with createdAt and lastUsedAt?, recorded at most once a minute); DELETE /v1/tokens/{name}.
 - A prefix token may do everything the owner can on agent computers, Services and credentials whose names start with
   its prefix (create/get/update/remove, send, inbox, events, power, stop, shell, Service logs and login). Their
   grants.send, uses and drives, defaults included, must be inside the prefix too (a default grant outside: override

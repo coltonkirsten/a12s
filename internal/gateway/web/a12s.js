@@ -469,6 +469,7 @@ function agentComputerOf(ev) {
 function wanted(names, ev) {
   if (!names) return true;
   if (ev.type === "fleet.changed") return (ev.data?.names ?? []).some((n) => names.has(n));
+  if (ev.type === "service.phase") return names.has(ev.data?.service);
   return names.has(agentComputerOf(ev));
 }
 var EventStream = class {

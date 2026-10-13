@@ -562,6 +562,7 @@ function agentComputerOf(ev: A12sEvent): string {
 function wanted(names: Set<string> | undefined, ev: A12sEvent): boolean {
   if (!names) return true;
   if (ev.type === "fleet.changed") return (ev.data?.names ?? []).some((n) => names.has(n));
+  if (ev.type === "service.phase") return names.has(ev.data?.service);
   return names.has(agentComputerOf(ev));
 }
 

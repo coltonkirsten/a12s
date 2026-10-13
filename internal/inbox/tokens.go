@@ -10,6 +10,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 )
@@ -46,40 +47,63 @@ func (s *Store) LookupToken(ctx context.Context, secret string) (*api.Token, err
 	if !strings.HasPrefix(secret, TokenPrefix) {
 		return nil, nil
 	}
-	var t api.Token
-	var a, c string
-	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT name, actions, computers, prefix, created_at FROM tokens WHERE hash = ?`, tokenHash(secret)).Scan(&t.Name, &a, &c, &t.Prefix, &created)
+	t, err := scanToken(s.db.QueryRowContext(ctx, `SELECT `+tokenCols+` FROM tokens WHERE hash = ?`, tokenHash(secret)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	return t, nil
+}
+
+const tokenCols = `name, actions, computers, prefix, created_at, last_used_at`
+
+func scanToken(row interface{ Scan(...any) error }) (*api.Token, error) {
+	var t api.Token
+	var a, c string
+	var created int64
+	var used sql.NullInt64
+	if err := row.Scan(&t.Name, &a, &c, &t.Prefix, &created, &used); err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal([]byte(a), &t.Actions)
 	_ = json.Unmarshal([]byte(c), &t.Computers)
 	t.CreatedAt = fromMS(created)
+	if used.Valid {
+		at := fromMS(used.Int64)
+		t.LastUsedAt = &at
+	}
 	return &t, nil
 }
 
+// TokenUsed records that a token authenticated, writing at most once a minute per token.
+func (s *Store) TokenUsed(ctx context.Context, name string) error {
+	now := s.now()
+	s.usedMu.Lock()
+	if last, ok := s.used[name]; ok && now.Sub(last) < time.Minute {
+		s.usedMu.Unlock()
+		return nil
+	}
+	s.used[name] = now
+	s.usedMu.Unlock()
+	_, err := s.db.ExecContext(ctx, `UPDATE tokens SET last_used_at = ? WHERE name = ?`, ms(now), name)
+	return err
+}
+
 func (s *Store) Tokens(ctx context.Context) ([]api.Token, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, actions, computers, prefix, created_at FROM tokens ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+tokenCols+` FROM tokens ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []api.Token{}
 	for rows.Next() {
-		var t api.Token
-		var a, c string
-		var created int64
-		if err := rows.Scan(&t.Name, &a, &c, &t.Prefix, &created); err != nil {
+		t, err := scanToken(rows)
+		if err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(a), &t.Actions)
-		_ = json.Unmarshal([]byte(c), &t.Computers)
-		t.CreatedAt = fromMS(created)
-		out = append(out, t)
+		out = append(out, *t)
 	}
 	return out, rows.Err()
 }
@@ -92,6 +116,9 @@ func (s *Store) DeleteToken(ctx context.Context, name string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return errf(404, api.ErrNotFound, "a12s token ls", "no token %q", name)
 	}
+	s.usedMu.Lock()
+	delete(s.used, name)
+	s.usedMu.Unlock()
 	return nil
 }
 

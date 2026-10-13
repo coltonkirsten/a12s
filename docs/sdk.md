@@ -204,7 +204,8 @@ What an agent sends to another agent computer is in `tools`: a call named `mcp__
 ### Events
 
 `events()` is the same stream before it's folded into Turns: every event as it happens. `fleet.events()` has every
-agent computer (or those named) and the Fleet's own events (`fleet.changed`, `agent_computer.phase`);
+agent computer (or those named) and the Fleet's own events (`fleet.changed`, `agent_computer.phase`,
+`inbox.changed` with the inbox's summary, and `service.phase` for Services, matched by the Service's name);
 `agent.events()` follows one. Every `events()` and `turns()` of one Fleet object shares one connection, however many
 agent computers they watch.
 
@@ -307,7 +308,8 @@ tok = fleet.tokens.create("dashboard", actions=["status", "events"], agent_compu
 `fleet.credentials` stores credential values in the Controller by name (the owner, or a prefix token for names
 inside its prefix). `set(name, value)` stores one;
 agent computers and Services that name it get the new value at once. `list()` returns a `CredentialInfo` per
-credential the Fleet names or the Controller stores: `name`, `set` and `usedBy` (`used_by`), never the value.
+credential the Fleet names or the Controller stores: `name`, `set`, `usedBy` (`used_by`) and `updatedAt`
+(`updated_at`, when the value last changed), never the value.
 `remove(name)` fails with `in_use` while an agent computer or Service names it. See
 [Credentials](credentials.md#from-code-and-the-api).
 

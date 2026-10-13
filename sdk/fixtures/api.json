@@ -112,7 +112,8 @@
         "set": true,
         "usedBy": [
           "usedBy"
-        ]
+        ],
+        "updatedAt": "2026-10-12T12:00:00Z"
       }
     ]
   },
@@ -347,6 +348,13 @@
         "when": "when",
         "fields": [
           "fields"
+        ],
+        "diff": [
+          {
+            "path": "path",
+            "before": {},
+            "after": {}
+          }
         ]
       }
     ]
@@ -529,6 +537,13 @@
         "when": "when",
         "fields": [
           "fields"
+        ],
+        "diff": [
+          {
+            "path": "path",
+            "before": {},
+            "after": {}
+          }
         ]
       }
     ],
@@ -741,6 +756,21 @@
     "sessionId": "sessionId",
     "reason": "reason",
     "at": "at"
+  },
+  "servicePhaseData": {
+    "service": "service",
+    "phase": "Ready",
+    "health": "health",
+    "restarts": 1,
+    "error": {
+      "reason": "reason",
+      "retryable": true
+    }
+  },
+  "servicePhaseDataMinimal": {
+    "service": "service",
+    "phase": "Ready",
+    "restarts": 1
   },
   "servicesResponse": {
     "services": [
@@ -1089,6 +1119,7 @@
     ],
     "prefix": "prefix",
     "createdAt": "2026-10-12T12:00:00Z",
+    "lastUsedAt": "2026-10-12T12:00:00Z",
     "secret": "secret"
   },
   "tokenMinimal": {

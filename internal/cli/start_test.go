@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net"
 	"slices"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 // loopback only, the token reaches it by env, and both data volumes mount.
 func TestControllerCreateOptions(t *testing.T) {
 	n := NamesFor("lab")
-	o := ControllerCreateOptions(n, "lab", DefaultControllerImage, "tok", map[string]string{"a12s.fleet": "lab", "a12s.role": "controller"})
+	o := ControllerCreateOptions(n, "lab", DefaultControllerImage, "tok", 7123, map[string]string{"a12s.fleet": "lab", "a12s.role": "controller"})
 	hc, cfg := o.HostConfig, o.Config
 	if len(hc.PortBindings) == 0 {
 		t.Fatal("API port not published")
@@ -18,6 +19,9 @@ func TestControllerCreateOptions(t *testing.T) {
 		for _, b := range bs {
 			if b.HostIP.String() != "127.0.0.1" {
 				t.Errorf("%s bound on %s, want 127.0.0.1 only", port, b.HostIP)
+			}
+			if b.HostPort != "7123" {
+				t.Errorf("%s published on host port %q, want the fixed 7123", port, b.HostPort)
 			}
 		}
 	}
@@ -30,5 +34,25 @@ func TestControllerCreateOptions(t *testing.T) {
 	}
 	if mounts["/var/lib/a12s"] != n.Volume || mounts["/var/lib/a12s-data"] != n.Data || string(hc.NetworkMode) != n.Network {
 		t.Errorf("mounts %v network %s", mounts, hc.NetworkMode)
+	}
+}
+
+// A new Controller container keeps the port controller.json had while it is free, so clients keep working.
+func TestFreeLoopbackPort(t *testing.T) {
+	p, err := freeLoopbackPort(0)
+	if err != nil || p <= 0 {
+		t.Fatalf("freeLoopbackPort(0) = %d, %v", p, err)
+	}
+	if again, err := freeLoopbackPort(p); err != nil || again != p {
+		t.Fatalf("free previous port %d: got %d, %v", p, again, err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	taken := ln.Addr().(*net.TCPAddr).Port
+	if other, err := freeLoopbackPort(taken); err != nil || other == taken || other <= 0 {
+		t.Fatalf("taken port %d: got %d, %v", taken, other, err)
 	}
 }

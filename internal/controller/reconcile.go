@@ -180,8 +180,9 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 			c.state.Services[name] = srec
 			newServices = append(newServices, name)
 		}
-		if o.touches(name) {
+		if o.touches(name) && srec.Restarts != 0 {
 			srec.Restarts = 0
+			c.publishServicePhaseLocked(name)
 		}
 	}
 	if len(o.creds) > 0 {
