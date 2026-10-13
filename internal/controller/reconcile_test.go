@@ -1,12 +1,15 @@
 package controller
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
-	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -36,13 +39,11 @@ func TestUpCreatesFourAndReUpIsANoOp(t *testing.T) {
 		}
 	}
 
-	// Missing pins were resolved; the preset hash matches the directory's.
-	want, _ := fleet.HashPreset("../../examples/lab/presets/scout")
+	// Missing pins were resolved.
 	l := res.Lock
-	if l.Images["slim"] != "sha256:slim1" || len(l.Images) != 1 || len(l.Seccomp) != 0 ||
-		l.Bundles["claude-code@2.1.280"] != "sha256:claude1" || l.Bundles["codex@0.154.0"] != "sha256:codex1" ||
-		l.Presets["./presets/scout"] != want {
-		t.Fatalf("lock = %+v (preset want %s)", l, want)
+	if l.Images["slim"] != "sha256:slim1" || len(l.Images) != 1 || len(l.Seccomp) != 0 || len(l.Presets) != 0 ||
+		l.Bundles["claude-code@2.1.280"] != "sha256:claude1" || l.Bundles["codex@0.154.0"] != "sha256:codex1" {
+		t.Fatalf("lock = %+v", l)
 	}
 
 	// Specs: pinned IDs run, presets travel, the default seccomp profile applies.
@@ -318,20 +319,19 @@ func TestAdmission(t *testing.T) {
 	ctx := context.Background()
 	check := func(what string, req api.PutFleetRequest, wantMsg string) {
 		t.Helper()
-		_, err := h.c.PutFleet(ctx, req)
+		_, err := h.c.PutFleet(ctx, req, writeOpts{})
 		var he *httpError
 		if !errors.As(err, &he) || he.status != http.StatusBadRequest || !strings.Contains(err.Error(), wantMsg) {
 			t.Errorf("%s: err = %v, want 400 containing %q", what, err, wantMsg)
 		}
 	}
 	creds := api.Credentials{"anthropic": []byte("k"), "openai": []byte("k")}
-	check("missing credential", api.PutFleetRequest{Fleet: labFleet(t, nil), Credentials: creds, Presets: labPresets(t)}, "github")
-	check("missing preset", api.PutFleetRequest{Fleet: labFleet(t, nil), Credentials: labCreds}, "./presets/scout")
+	check("missing credential", api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Credentials: creds}, "github")
 	lock := fleet.NewLock()
 	lock.Images["slim"] = "sha256:elsewhere"
-	check("pin mismatch", api.PutFleetRequest{Fleet: labFleet(t, nil), Lock: lock, Credentials: labCreds, Presets: labPresets(t)}, "sha256:elsewhere")
+	check("pin mismatch", api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: lock, Credentials: labCreds}, "sha256:elsewhere")
 	other := labFleet(t, func(f *fleet.Fleet) { f.Metadata.Name = "other" })
-	check("wrong fleet", api.PutFleetRequest{Fleet: other, Credentials: labCreds, Presets: labPresets(t)}, "other")
+	check("wrong fleet", api.PutFleetRequest{Fleet: specFor(other), Credentials: labCreds}, "other")
 	if calls := h.d.takeCalls(); len(calls) != 0 {
 		t.Fatalf("admission errors changed things: %v", calls)
 	}
@@ -421,7 +421,7 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 		"me/plain:1":       "has no ai.a12s.computerd.version label",
 		"me/nocomputerd:1": "has no computerd at /opt/a12s/computerd/dist/main.js",
 	} {
-		_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: withImage(ref), Credentials: labCreds, Presets: labPresets(t)})
+		_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: specFor(withImage(ref)), Credentials: labCreds}, writeOpts{})
 		if err == nil || !strings.Contains(err.Error(), "computers.scout.image: "+ref+" "+want) || !strings.Contains(err.Error(), "fix: ") {
 			t.Errorf("%s: err = %v", ref, err)
 		}
@@ -440,103 +440,96 @@ func TestCustomComputerImageAdmission(t *testing.T) {
 	defer func(v string) { version.Version = v }(version.Version)
 	version.Version = "v0.2.0"
 	h.d.setImage(version.Image(fleet.TierSlim), "sha256:slim020")
-	_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: withImage("me/old:1"), Credentials: labCreds, Presets: labPresets(t)})
+	_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: specFor(withImage("me/old:1")), Credentials: labCreds}, writeOpts{})
 	if err == nil || !strings.Contains(err.Error(), "computers.scout.image: me/old:1: its computerd is from a12s v0.1.0, which this Controller (v0.2.0) cannot drive  fix: rebuild it FROM") {
 		t.Fatalf("an older-minor 0.x image is refused: err = %v", err)
 	}
 }
 
-// Editing a preset is the everyday way to change an agent's instructions: up re-pins it and restages the Computer.
-func TestChangedPresetIsRepinnedAndApplied(t *testing.T) {
+// Editing instructions is the everyday way to change an agent: the files' digest changes and the Computer restages.
+func TestChangedInstructionsAreApplied(t *testing.T) {
 	h := newHarness(t)
-	res := h.up(labFleet(t, nil), nil, false)
-	before := res.Lock.Presets["./presets/scout"]
-	if got := h.d.get("scout").spec.PresetDigest; got != before {
-		t.Fatalf("spec preset digest = %q, want %q", got, before)
+	h.up(labFleet(t, nil), nil, false)
+	before := h.d.get("scout").spec.PresetDigest
+	if before == "" {
+		t.Fatal("scout's preset files were not sent to the driver")
 	}
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("You are scout, version 2.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	if err := fleet.WritePresetTar(dir, &buf); err != nil {
-		t.Fatal(err)
-	}
-	changed, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{
-		Fleet: labFleet(t, nil), Lock: res.Lock, Credentials: labCreds,
-		Presets: map[string][]byte{"./presets/scout": buf.Bytes()},
-	})
-	if err != nil {
-		t.Fatalf("up with a changed preset: %v", err)
-	}
-	after := changed.Lock.Presets["./presets/scout"]
-	if after == before || after == "" {
-		t.Fatalf("preset pin = %q, was %q", after, before)
-	}
+	changed := h.up(labFleet(t, func(f *fleet.Fleet) {
+		c := f.Computers["scout"]
+		c.Files, c.Home.Preset = nil, ""
+		c.Instructions = "You are scout, version 2.\n"
+		f.Computers["scout"] = c
+	}), nil, false)
 	if !slices.Equal(changed.Updated, []string{"scout"}) {
 		t.Fatalf("up = %+v, want scout updated", changed)
 	}
-	if spec := h.d.get("scout").spec; spec.PresetDigest != after || !bytes.Equal(spec.Preset, buf.Bytes()) {
-		t.Fatalf("scout spec preset = %q (%d bytes)", spec.PresetDigest, len(spec.Preset))
+	spec := h.d.get("scout").spec
+	if spec.PresetDigest == before {
+		t.Fatal("the preset digest did not change")
+	}
+	tr := tar.NewReader(bytes.NewReader(spec.Preset))
+	hdr, err := tr.Next()
+	if err != nil || hdr.Name != "CLAUDE.md" {
+		t.Fatalf("preset tar: %v %v", hdr, err)
+	}
+	body, _ := io.ReadAll(tr)
+	if string(body) != "You are scout, version 2.\n" {
+		t.Fatalf("CLAUDE.md = %q", body)
 	}
 }
 
-// A custom seccomp profile comes only from the Fleet: it is pinned, carried into the spec, and editing it restages
-// the Computer like any other generation change.
-func TestSeccompProfileIsPinnedAndApplied(t *testing.T) {
+// A custom seccomp profile comes only from the Fleet, inline: it is carried into the spec, and editing it restages
+// the Computer like any other generation change. A path is refused: only a Fleet file has paths.
+func TestSeccompProfileIsApplied(t *testing.T) {
 	h := newHarness(t)
 	chromium, err := os.ReadFile("../fleet/testdata/chromium-seccomp.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	const path = "./profiles/chromium.json"
-	withProfile := labFleet(t, func(f *fleet.Fleet) {
-		c := f.Computers["tester"]
-		c.Security.Seccomp = path
-		f.Computers["tester"] = c
-	})
-	put := func(profile string, lock *fleet.Lock) (api.PutFleetResponse, error) {
-		return h.c.PutFleet(context.Background(), api.PutFleetRequest{
-			Fleet: withProfile, Lock: lock, Credentials: labCreds, Presets: labPresets(t),
-			Seccomp: map[string]string{path: profile},
+	with := func(profile string) *fleet.Fleet {
+		return labFleet(t, func(f *fleet.Fleet) {
+			c := f.Computers["tester"]
+			c.Security.Seccomp = fleet.Seccomp{}
+			if profile != "" {
+				if err := c.Security.Seccomp.UnmarshalJSON([]byte(profile)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.Computers["tester"] = c
 		})
 	}
-
-	if _, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: withProfile, Credentials: labCreds, Presets: labPresets(t)}); err == nil || !strings.Contains(err.Error(), "computers.tester.security.seccomp") {
-		t.Fatalf("a profile that was not sent is refused: %v", err)
+	withPath := labFleet(t, func(f *fleet.Fleet) {
+		c := f.Computers["tester"]
+		c.Security.Seccomp = fleet.Seccomp{Path: "./profiles/chromium.json"}
+		f.Computers["tester"] = c
+	})
+	if _, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(withPath), Credentials: labCreds}, writeOpts{}); err == nil || !strings.Contains(err.Error(), "agent_computers.tester.security.seccomp") {
+		t.Fatalf("a path is refused: %v", err)
 	}
-	if _, err := put(`{"defaultAction":"SCMP_ACT_ERRNO","listenerPath":"/run/x.sock","syscalls":[]}`, nil); err == nil || !strings.Contains(err.Error(), "not a seccomp profile") {
+	if _, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(with(`{"defaultAction":"SCMP_ACT_ERRNO","listenerPath":"/run/x.sock","syscalls":[]}`)), Credentials: labCreds}, writeOpts{}); err == nil || !strings.Contains(err.Error(), "not a seccomp profile") {
 		t.Fatalf("a malformed profile is refused: %v", err)
 	}
 
-	res, err := put(string(chromium), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pin := res.Lock.Seccomp[path]
-	if pin != fleet.HashSeccomp(chromium) {
-		t.Fatalf("lock seccomp = %v", res.Lock.Seccomp)
-	}
-	if spec := h.d.get("tester").spec; spec.Seccomp != string(chromium) {
+	h.up(with(string(chromium)), nil, false)
+	var want, got any
+	_ = json.Unmarshal(chromium, &want)
+	spec := h.d.get("tester").spec
+	if err := json.Unmarshal([]byte(spec.Seccomp), &got); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("tester spec seccomp = %d bytes", len(spec.Seccomp))
 	}
 	if spec := h.d.get("scout").spec; spec.Seccomp != "" {
 		t.Fatal("scout keeps the default profile")
 	}
-	if st := h.c.computerStatus(context.Background(), "tester"); st.Seccomp != path {
+	if st := h.c.computerStatus(context.Background(), "tester"); st.Seccomp != fleet.HashSeccomp([]byte(spec.Seccomp)) {
 		t.Fatalf("status seccomp = %q", st.Seccomp)
 	}
 
 	edited := strings.Replace(string(chromium), `"defaultErrnoRet": 1`, `"defaultErrnoRet": 38`, 1)
-	changed, err := put(edited, res.Lock)
-	if err != nil {
-		t.Fatal(err)
+	changed := h.up(with(edited), nil, false)
+	if !slices.Equal(changed.Updated, []string{"tester"}) {
+		t.Fatalf("up = %+v", changed)
 	}
-	if changed.Lock.Seccomp[path] == pin || !slices.Equal(changed.Updated, []string{"tester"}) {
-		t.Fatalf("up = %+v, lock seccomp %v", changed, changed.Lock.Seccomp)
-	}
-	if spec := h.d.get("tester").spec; spec.Seccomp != edited {
+	if spec := h.d.get("tester").spec; !strings.Contains(spec.Seccomp, `"defaultErrnoRet":38`) {
 		t.Fatal("the edited profile was not applied")
 	}
 }

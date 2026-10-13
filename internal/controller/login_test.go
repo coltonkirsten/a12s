@@ -43,7 +43,7 @@ func TestServiceLogin(t *testing.T) {
 	for k, v := range labCreds {
 		creds[k] = v
 	}
-	if _, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: creds, Presets: labPresets(t)}); err != nil {
+	if _, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: creds}, writeOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	h.waitService("clock", api.PhaseReady)

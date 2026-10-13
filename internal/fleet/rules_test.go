@@ -61,7 +61,7 @@ func TestInboxValidation(t *testing.T) {
 }
 
 func TestPowerValidation(t *testing.T) {
-	const field = "computers.scout.power."
+	const field = "agent_computers.scout.power."
 	for _, c := range []struct {
 		p          Power
 		sub, value string
@@ -69,7 +69,7 @@ func TestPowerValidation(t *testing.T) {
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"*"}}}, "wakeOnMessage.from", `"*"`},
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"local"}, MaxWakesPerHour: p(0)}}, "wakeOnMessage.maxWakesPerHour", "0"},
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"local"}, MaxWakesPerHour: p(61)}}, "wakeOnMessage.maxWakesPerHour", "61"},
-		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"computer:nobody"}}}, "wakeOnMessage.from", "no Computer nobody"},
+		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"computer:nobody"}}}, "wakeOnMessage.from", "no agent computer nobody"},
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"service:clock"}}}, "wakeOnMessage.from", "no Service clock"},
 		{Power{SleepAfterIdle: p("30s")}, "sleepAfterIdle", "30s"},
 		{Power{SleepAfterIdle: p("8d")}, "sleepAfterIdle", "8d"},

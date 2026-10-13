@@ -22,37 +22,82 @@ type ControllerFile struct {
 // Controller keeps it in memory only.
 type Credentials map[string][]byte
 
-// PutFleetRequest is PUT /v1/fleet: `a12s up`.
+// PutFleetRequest is PUT /v1/fleet: `a12s up` and fleet.replace. If-Match carries the version it read.
 type PutFleetRequest struct {
-	Fleet       *fleet.Fleet `json:"fleet"`
-	Lock        *fleet.Lock  `json:"lock"`
-	Credentials Credentials  `json:"credentials,omitempty"`
-	// Asleep creates new Computers asleep.
+	Fleet       *fleet.Spec `json:"fleet"`
+	Lock        *fleet.Lock `json:"lock"`
+	Credentials Credentials `json:"credentials,omitempty"`
+	// Asleep creates new agent computers asleep.
 	Asleep bool `json:"asleep,omitempty"`
 	// Refresh names Services whose ref is resolved again and re-pinned.
 	Refresh []string `json:"refresh,omitempty"`
-	// Presets holds each home preset as a tar stream keyed by its path as
-	// written in the Fleet; the CLI sends them because the Controller cannot
-	// read the host.
-	Presets map[string][]byte `json:"presets,omitempty"`
-	// Seccomp holds each security.seccomp profile keyed by its path as written in the Fleet, sent for the same
-	// reason.
-	Seccomp map[string]string `json:"seccomp,omitempty"`
 }
 
+// PutFleetResponse answers every write to the Fleet: PUT /v1/fleet and the per-agent-computer and per-Service
+// routes.
 type PutFleetResponse struct {
+	// Version is the Fleet's version after the write (unchanged by a dry run or a write that changed nothing).
+	Version int64    `json:"version"`
+	DryRun  bool     `json:"dryRun,omitempty"`
+	Changes []Change `json:"changes"`
 	Created []string `json:"created"`
-	Updated []string `json:"updated"` // applied now (the Computer was idle or asleep)
-	Staged  []string `json:"staged"`  // waiting for the Computer's next idle boundary
+	Updated []string `json:"updated"` // applied now (the agent computer was idle or asleep)
+	Staged  []string `json:"staged"`  // waiting for the agent computer's next idle boundary
 	Removed []string `json:"removed"` // stopped and deleted; drives kept
 	// Lock is written back to fleet.lock by the CLI.
 	Lock *fleet.Lock `json:"lock"`
-	// Errors maps a Computer in PhaseError to why; the rest of the Fleet was
-	// still applied.
+	// Errors maps an agent computer or Service that did not converge to why; the rest was still applied.
 	Errors   map[string]string `json:"errors,omitempty"`
 	Warnings []string          `json:"warnings,omitempty"`
 	// Services failures are in Errors.
 	Services ServiceChanges `json:"services"`
+	// AgentComputer or Service is the written one, after a PUT or PATCH of it.
+	AgentComputer *AgentComputer `json:"agentComputer,omitempty"`
+	Service       *ServiceStatus `json:"service,omitempty"`
+}
+
+// Change is one entry of a write's change list.
+type Change struct {
+	Op   string `json:"op"`   // ChangeCreate, ChangeUpdate or ChangeRemove
+	Kind string `json:"kind"` // KindAgentComputer or KindService
+	Name string `json:"name"`
+	// When is "now", or "idle" for an update that waits for a busy agent computer's next idle boundary.
+	When string `json:"when"`
+	// Fields are the top-level spec fields that differ, for an update.
+	Fields []string `json:"fields,omitempty"`
+}
+
+const (
+	ChangeCreate = "create"
+	ChangeUpdate = "update"
+	ChangeRemove = "remove"
+
+	KindAgentComputer = "agentComputer"
+	KindService       = "service"
+
+	WhenNow  = "now"
+	WhenIdle = "idle"
+)
+
+// FleetResponse is GET /v1/fleet; the ETag header is the version too.
+type FleetResponse struct {
+	Version int64       `json:"version"`
+	Fleet   *fleet.Spec `json:"fleet"`
+	// Drift lists what changed through the API since the last whole-Fleet write (a12s up): an up from the file
+	// undoes it.
+	Drift []Change `json:"drift"`
+}
+
+// AgentComputer is GET /v1/agent-computers/{c}: its spec as written, with the defaults merged in, and its status.
+type AgentComputer struct {
+	Name      string          `json:"name"`
+	Spec      json.RawMessage `json:"spec"`
+	Effective json.RawMessage `json:"effective"`
+	Status    ComputerStatus  `json:"status"`
+}
+
+type AgentComputersResponse struct {
+	AgentComputers []AgentComputer `json:"agentComputers"`
 }
 
 type Phase string
@@ -83,8 +128,10 @@ type StatusResponse struct {
 	Fleet string `json:"fleet"`
 	// EgressEnforcement is "enforced" or "unenforced".
 	EgressEnforcement string           `json:"egressEnforcement"`
-	Computers         []ComputerStatus `json:"computers"`
-	OrphanedDrives    []DriveRow       `json:"orphanedDrives,omitempty"`
+	AgentComputers    []ComputerStatus `json:"agentComputers"`
+	// Computers is AgentComputers under its old name, for one release.
+	Computers      []ComputerStatus `json:"computers"`
+	OrphanedDrives []DriveRow       `json:"orphanedDrives,omitempty"`
 	// CredentialsLoaded is false after a Controller restart until `a12s up`
 	// or `a12s wake` sends credentials again.
 	CredentialsLoaded bool            `json:"credentialsLoaded"`
@@ -102,7 +149,7 @@ type ComputerStatus struct {
 	ActiveTurn    string   `json:"activeTurn,omitempty"`
 	Harness       Harness  `json:"harness"`
 	Image         string   `json:"image"` // slim or an image reference
-	// Seccomp is the Fleet's security.seccomp path when the Computer runs with a custom seccomp profile.
+	// Seccomp is the digest of the custom seccomp profile the agent computer runs with.
 	Seccomp    string `json:"seccomp,omitempty"`
 	Autonomy   string `json:"autonomy"`
 	Generation int64  `json:"generation"`
@@ -267,6 +314,13 @@ const (
 	ErrReplaced         ErrorCode = "replaced"
 	ErrWithdrawn        ErrorCode = "withdrawn"
 	ErrDiscarded        ErrorCode = "discarded"
+
+	ErrMissingField      ErrorCode = "missing_field"      // 400: e.g. no harness in the spec or the defaults
+	ErrMissingCredential ErrorCode = "missing_credential" // 400: a credential the spec uses has no value
+	ErrOutOfPrefix       ErrorCode = "out_of_prefix"      // 403: a name, or something it points at, outside the token's prefix
+	ErrExists            ErrorCode = "exists"             // 409: create on a name that is taken
+	ErrVersionMismatch   ErrorCode = "version_mismatch"   // 412: If-Match on a whole-Fleet write is stale
+	ErrInUse             ErrorCode = "in_use"             // 409: deleting a credential that is still used
 )
 
 // Duration is a time.Duration written as a Go duration string ("30s").

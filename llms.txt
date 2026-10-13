@@ -443,25 +443,34 @@ Last-Event-ID resumes; `event: head` {seq} marks live; `event: gap` = events los
 Routes, with the action a scoped token needs (owner: the owner token only):
 
 ```text
+GET /v1/fleet                                   owner
 PUT /v1/fleet                                   owner
 GET /v1/status                                  status
-GET /v1/computers/{c}/events                    events
-POST /v1/computers/{c}/turns/{id}/stop          stop
-POST /v1/computers/{c}/power                    power
+GET /v1/agent-computers                         status
+GET /v1/agent-computers/{c}                     status
+PUT /v1/agent-computers/{c}                     owner
+PATCH /v1/agent-computers/{c}                   owner
+DELETE /v1/agent-computers/{c}                  owner
+GET /v1/agent-computers/{c}/events              events
+POST /v1/agent-computers/{c}/turns/{id}/stop    stop
+POST /v1/agent-computers/{c}/power              power
 POST /v1/apply                                  owner
-POST /v1/computers/{c}/shell                    owner
+POST /v1/agent-computers/{c}/shell              owner
 GET /v1/drives                                  owner
 DELETE /v1/drives/{d}                           owner
-POST /v1/computers/{c}/inbox                    send
-GET /v1/computers/{c}/inbox                     inbox
-GET /v1/computers/{c}/inbox/{id}                send or inbox
-GET /v1/computers/{c}/inbox/{id}/events         send or inbox
-DELETE /v1/computers/{c}/inbox/{id}             send or inbox
-POST /v1/computers/{c}/inbox/clear              inbox
-POST /v1/computers/{c}/inbox/hold               inbox
-POST /v1/computers/{c}/inbox/resume             inbox
+POST /v1/agent-computers/{c}/inbox              send
+GET /v1/agent-computers/{c}/inbox               inbox
+GET /v1/agent-computers/{c}/inbox/{id}          send or inbox
+GET /v1/agent-computers/{c}/inbox/{id}/events   send or inbox
+DELETE /v1/agent-computers/{c}/inbox/{id}       send or inbox
+POST /v1/agent-computers/{c}/inbox/clear        inbox
+POST /v1/agent-computers/{c}/inbox/hold         inbox
+POST /v1/agent-computers/{c}/inbox/resume       inbox
 GET /v1/services                                status
 GET /v1/services/{s}                            status
+PUT /v1/services/{s}                            owner
+PATCH /v1/services/{s}                          owner
+DELETE /v1/services/{s}                         owner
 GET /v1/services/{s}/logs                       owner
 POST /v1/services/{s}/power                     owner
 POST /v1/services/{s}/shell                     owner

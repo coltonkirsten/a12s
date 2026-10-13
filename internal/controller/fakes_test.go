@@ -789,20 +789,34 @@ func labFleet(t *testing.T, edit func(f *fleet.Fleet)) *fleet.Fleet {
 	return f
 }
 
-func labPresets(t *testing.T) map[string][]byte {
-	t.Helper()
-	var buf bytes.Buffer
-	if err := fleet.WritePresetTar("../../examples/lab/presets/scout", &buf); err != nil {
-		t.Fatal(err)
+// specFor is what a12s up sends for f: each agent computer as written is its merged form, with the lab's preset
+// inlined as files.
+func specFor(f *fleet.Fleet) *fleet.Spec {
+	s := &fleet.Spec{APIVersion: f.APIVersion, Kind: f.Kind, Metadata: f.Metadata, Egress: f.Egress, Drives: f.Drives,
+		Services: f.Services, AgentComputers: map[string]json.RawMessage{}}
+	if d := f.Defaults; d.Home.Preset == "" {
+		if raw := fleet.SpecOf(d); string(raw) != "{}" {
+			s.Defaults = raw
+		}
 	}
-	return map[string][]byte{"./presets/scout": buf.Bytes()}
+	for name, c := range f.Computers {
+		if p := c.Home.Preset; p != "" {
+			files, err := fleet.InlineFiles(filepath.Join("../../examples/lab", p))
+			if err != nil {
+				panic(err)
+			}
+			c.Files, c.Home.Preset = files, ""
+		}
+		s.AgentComputers[name] = fleet.SpecOf(c)
+	}
+	return s
 }
 
 var labCreds = api.Credentials{"anthropic": []byte(`{"claudeAiOauth":{}}`), "openai": []byte("sk-test"), "github": []byte("ghp_test")}
 
 func (h *harness) up(f *fleet.Fleet, lock *fleet.Lock, asleep bool) api.PutFleetResponse {
 	h.t.Helper()
-	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Lock: lock, Credentials: labCreds, Asleep: asleep, Presets: labPresets(h.t)})
+	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Lock: lock, Credentials: labCreds, Asleep: asleep}, writeOpts{})
 	if err != nil {
 		h.t.Fatalf("PutFleet: %v", err)
 	}

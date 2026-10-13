@@ -16,13 +16,13 @@ const LockFile = "fleet.lock"
 // Lock entries are only ever added; an existing pin changes only by editing the file.
 type Lock struct {
 	// A12s is the a12s release this Fleet runs on; a release binary of another version refuses to apply it.
-	A12s     string            `yaml:"a12s,omitempty" json:"a12s,omitempty"`
-	Images   map[string]string `yaml:"images" json:"images"`
-	Bundles  map[string]string `yaml:"bundles" json:"bundles"`
-	Presets  map[string]string `yaml:"presets" json:"presets"`
+	A12s    string            `yaml:"a12s,omitempty" json:"a12s,omitempty"`
+	Images  map[string]string `yaml:"images" json:"images"`
+	Bundles map[string]string `yaml:"bundles" json:"bundles"`
+	// Presets and Seccomp are read from older lock files and no longer written: the content travels in the spec.
+	Presets  map[string]string `yaml:"presets,omitempty" json:"presets,omitempty"`
 	Services map[string]string `yaml:"services,omitempty" json:"services,omitempty"`
-	// Seccomp is each security.seccomp profile's digest, by its path in the Fleet file.
-	Seccomp map[string]string `yaml:"seccomp,omitempty" json:"seccomp,omitempty"`
+	Seccomp  map[string]string `yaml:"seccomp,omitempty" json:"seccomp,omitempty"`
 }
 
 func ServiceKey(name, ref string) string { return name + "@" + ref }

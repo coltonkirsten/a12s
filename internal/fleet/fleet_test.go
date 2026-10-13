@@ -167,7 +167,6 @@ computers:
 		{"bad kind", strings.Replace(base, "Fleet", "Manifest", 1) + c, "kind"},
 		{"bad fleet name", strings.Replace(base, "name: t", "name: Lab_1", 1) + c, "metadata.name"},
 		{"unknown field", base + c + "    color: blue\n", "field color not found"},
-		{"no computers", base, "at least one Computer"},
 		{"bad computer name", base + strings.Replace(c, "  c:", "  Big:", 1), "computers.Big"},
 		{"bad harness kind", base + strings.Replace(c, "codex", "aider", 1), "harness.kind"},
 		{"missing version", base + strings.Replace(c, ", version: 0.154.0", "", 1), "harness.version"},
@@ -338,7 +337,7 @@ func TestSecurityAndRemovedBrowserTier(t *testing.T) {
 		}
 	}
 	f, err := Parse([]byte(base + "defaults:\n  security: { seccomp: ./profiles/chromium.json }\ncomputers:\n  c:\n    harness: { kind: claude-code, version: 1.0.0 }\n    autonomy: full\n    image: me/agent:1\n"))
-	if err != nil || f.Computers["c"].Security.Seccomp != "./profiles/chromium.json" {
+	if err != nil || f.Computers["c"].Security.Seccomp.Path != "./profiles/chromium.json" {
 		t.Fatalf("security from defaults: %v %+v", err, f)
 	}
 }

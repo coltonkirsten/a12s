@@ -35,16 +35,16 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 	mux.HandleFunc("POST /v1/leases", computerOnly(leases))
 	mux.HandleFunc("DELETE /v1/leases", computerOnly(leases))
 	mux.HandleFunc("DELETE /v1/leases/{id}", computerOnly(leases))
-	mux.HandleFunc("POST /v1/computers/{c}/inbox", c.granted(c.handleEnqueue))
-	mux.HandleFunc("GET /v1/computers/{c}/inbox/{id}", c.ownMessages(c.handleInboxGet))
-	mux.HandleFunc("DELETE /v1/computers/{c}/inbox/{id}", c.ownMessages(c.handleWithdraw))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox", c.granted(c.handleEnqueue))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/inbox/{id}", c.ownMessages(c.handleInboxGet))
+	mux.HandleFunc("DELETE /v1/agent-computers/{c}/inbox/{id}", c.ownMessages(c.handleWithdraw))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p, _ := peerOf(r)
 		writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden,
 			Message: fmt.Sprintf("%s may not call %s %s on the mTLS listener", p, r.Method, r.URL.Path),
 			Fix:     "the mTLS listener serves inbox sends (with a grant) and leases only; owner calls go to the owner API"})
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return legacyPaths(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, entry, err := c.livePeer(r)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden, Message: err.Error(), Fix: "a certificate works only while its container runs; a12s injects a fresh one at every start"})
@@ -55,7 +55,7 @@ func (c *Controller) MTLSHandler(leases http.Handler) http.Handler {
 		k := caller{principal: p.String(), token: &api.Token{Name: p.String(), Actions: []string{api.ActionSend}, Computers: entry.Send}}
 		ctx := context.WithValue(context.WithValue(r.Context(), peerKey{}, p), callerKey{}, k)
 		mux.ServeHTTP(w, r.WithContext(ctx))
-	})
+	}))
 }
 
 func (c *Controller) livePeer(r *http.Request) (Principal, inbox.CertEntry, error) {

@@ -49,7 +49,7 @@ type TCPEgress struct {
 
 // Grants are written on the side that acts.
 type Grants struct {
-	Send []string `yaml:"send,omitempty" json:"send,omitempty"`
+	Send []string `yaml:"send,omitempty" json:"send,omitzero"`
 }
 
 type ServiceState struct {
@@ -179,7 +179,7 @@ func computerOnlyEgress(name string, n *yaml.Node) error {
 		return nil
 	}
 	if e := mapping(n.Content[i+1]); e.Kind == yaml.MappingNode && indexKey(e, "tcp") >= 0 {
-		return fmt.Errorf("computers.%s.egress.tcp: only a Service can declare TCP egress  fix: put the login in a Service that holds it and add it to computers.%s.uses", name, name)
+		return fmt.Errorf("agent_computers.%s.egress.tcp: only a Service can declare TCP egress  fix: put the login in a Service that holds it and add it to agent_computers.%s.uses", name, name)
 	}
 	return nil
 }
@@ -313,7 +313,7 @@ func (f *Fleet) validateGrants(field string, g Grants) []error {
 			errs = append(errs, fmt.Errorf("%s.grants.send: %s is a Service, and only Computers have inboxes  fix: remove it from %s.grants.send", field, to, field))
 		default:
 			if _, ok := f.Computers[to]; !ok {
-				errs = append(errs, fmt.Errorf("%s.grants.send: there is no Computer %s  fix: add computers.%s or remove it from %s.grants.send", field, to, to, field))
+				errs = append(errs, fmt.Errorf("%s.grants.send: there is no agent computer %s  fix: add agent_computers.%s or remove it from %s.grants.send", field, to, to, field))
 			}
 		}
 		if seen[to] {
@@ -327,7 +327,7 @@ func (f *Fleet) validateGrants(field string, g Grants) []error {
 func (f *Fleet) validateUses(field, self string, uses []Use) []error {
 	var errs []error
 	seen := map[string]bool{}
-	who := strings.TrimPrefix(strings.TrimPrefix(field, "computers."), "services.")
+	who := strings.TrimPrefix(strings.TrimPrefix(field, "agent_computers."), "services.")
 	for _, u := range uses {
 		switch {
 		case u.Name == self:
@@ -408,7 +408,7 @@ func (f *Fleet) GrantWarnings() []string {
 			field := ""
 			switch kind {
 			case "computer":
-				send, field = f.Computers[who].Grants.Send, "computers."+who+".grants.send"
+				send, field = f.Computers[who].Grants.Send, "agent_computers."+who+".grants.send"
 			case "service":
 				send, field = f.Services[who].Grants.Send, "services."+who+".grants.send"
 			default:

@@ -66,7 +66,7 @@ func TestErrorTable(t *testing.T) {
 				s.Credentials = []string{"postgres"}
 				f.Services["clock"] = s
 			})
-			_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
+			_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 			return err.Error()
 		}},
 		{"needs a login", func() string {

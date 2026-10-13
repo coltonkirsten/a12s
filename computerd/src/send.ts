@@ -32,7 +32,7 @@ export function sendToInbox(cfg: Config, tls: TlsMaterial, req: SendRequest): Pr
   if (typeof req.expires === 'number') payload.expires = req.expires;
   if (req.replaceKey) payload.replaceKey = req.replaceKey;
   const text = JSON.stringify(payload);
-  const url = new URL(`/v1/computers/${req.computer}/inbox`, cfg.controller);
+  const url = new URL(`/v1/agent-computers/${req.computer}/inbox`, cfg.controller);
   return new Promise((resolve, reject) => {
     const r = request(
       url,

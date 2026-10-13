@@ -59,8 +59,8 @@ func UpSummary(r *api.PutFleetResponse, asleep bool) []string {
 func SeccompLines(f *fleet.Fleet) []string {
 	var out []string
 	for _, name := range f.ComputerNames() {
-		if p := f.Computers[name].Security.Seccomp; p != "" {
-			out = append(out, fmt.Sprintf("%s runs with custom seccomp profile %s", name, p))
+		if p := f.Computers[name].Security.Seccomp; !p.IsZero() {
+			out = append(out, fmt.Sprintf("%s runs with its own seccomp profile", name))
 		}
 	}
 	return out

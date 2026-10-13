@@ -169,7 +169,7 @@ func TestApplyWaitsForTheResume(t *testing.T) {
 	}
 	applied := make(chan struct{})
 	go func() {
-		h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: labFleet(t, nil), Lock: res.Lock, Credentials: labCreds, Presets: labPresets(t)})
+		h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: res.Lock, Credentials: labCreds}, writeOpts{})
 		close(applied)
 	}()
 	select {

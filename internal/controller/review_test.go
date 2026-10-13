@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -154,7 +153,7 @@ func TestRestartFinishesRemovals(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, fifth), nil, false)
 	st := readState(t, h.dir) // as if the Controller died right after saving the smaller Fleet
-	delete(st.Fleet.Computers, "fifth")
+	delete(st.Spec.AgentComputers, "fifth")
 	if err := st.save(filepath.Join(h.dir, stateFile)); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +164,7 @@ func TestRestartFinishesRemovals(t *testing.T) {
 	}
 }
 
-// Presets survive a restart; without the bytes, staging is refused.
+// Preset files survive a restart: they are part of the stored spec.
 func TestPresetsSurviveRestart(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
@@ -174,19 +173,6 @@ func TestPresetsSurviveRestart(t *testing.T) {
 	h2.waitPhase("scout", api.PhaseError) // no credentials after the restart, but staged
 	if len(h.d.get("scout").spec.Preset) == 0 {
 		t.Fatal("scout was staged without its preset")
-	}
-
-	h.d.RemoveComputer(context.Background(), "scout")
-	if err := os.RemoveAll(filepath.Join(h.dir, presetDir)); err != nil {
-		t.Fatal(err)
-	}
-	h3 := h2.restart()
-	h3.waitPhase("scout", api.PhaseError)
-	if h.d.get("scout").spec.Name != "" {
-		t.Fatal("scout was staged without preset bytes")
-	}
-	if cs := h3.c.computerStatus(context.Background(), "scout"); !strings.Contains(cs.Error.Reason, "not stored") {
-		t.Fatalf("scout error = %+v", cs.Error)
 	}
 }
 
@@ -236,7 +222,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	h2.waitPhase("builder", api.PhaseReady)
 	h.d.takeCalls()
 	fresh := api.Credentials{"anthropic": []byte(`{"new":1}`), "openai": []byte("sk-new"), "github": []byte("ghp_new")}
-	if _, err := h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: labFleet(t, nil), Lock: res.Lock, Credentials: fresh, Presets: labPresets(t)}); err != nil {
+	if _, err := h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: res.Lock, Credentials: fresh}, writeOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.d.file("builder", "/run/a12s/secrets/openai", "1000:1000", "0600"); string(got) != "sk-new" {
@@ -244,7 +230,7 @@ func TestCredentialsAreInjectedAfterRestart(t *testing.T) {
 	}
 	// Known material is not injected again.
 	h.d.takeCalls()
-	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: labFleet(t, nil), Lock: res.Lock, Credentials: fresh, Presets: labPresets(t)})
+	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: res.Lock, Credentials: fresh}, writeOpts{})
 	if calls := h.d.takeCalls(); hasCall(calls, "write") {
 		t.Fatalf("re-injected unchanged material: %v", calls)
 	}

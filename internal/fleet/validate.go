@@ -62,13 +62,10 @@ func (f *Fleet) Validate() error {
 	isService := f.hasService
 	errs = append(errs, validatePower("defaults.power", f.Defaults.Power, isComputer, isService)...)
 
-	if len(f.Computers) == 0 {
-		bad("computers", "at least one Computer is required")
-	}
 	attached := map[string][]string{} // drive -> computers
 	for _, name := range f.ComputerNames() {
 		c := f.Computers[name]
-		field := "computers." + name
+		field := "agent_computers." + name
 		if !nameRE.MatchString(name) {
 			bad(field, "name must be a lowercase DNS label of at most 40 characters")
 		}
@@ -124,8 +121,16 @@ func (c Computer) validate(field string, drives map[string]Drive) []error {
 			bad("image", "%q is neither %s nor a valid image reference: %v", c.Image, TierSlim, err)
 		}
 	}
-	if p := c.Security.Seccomp; p != "" && (path.IsAbs(p) || strings.Contains(p, "\\")) {
+	if p := c.Security.Seccomp.Path; p != "" && (path.IsAbs(p) || strings.Contains(p, "\\")) {
 		bad("security.seccomp", "%q must be a path relative to the Fleet file", p)
+	}
+	if prof := c.Security.Seccomp.Profile; len(prof) > 0 {
+		if _, err := ValidateSeccomp(prof); err != nil {
+			bad("security.seccomp", "%v", err)
+		}
+	}
+	for _, msg := range validateFiles(c) {
+		errs = append(errs, fmt.Errorf("%s.%s", field, msg))
 	}
 	switch c.Autonomy {
 	case AutonomyFull, AutonomyRestricted:

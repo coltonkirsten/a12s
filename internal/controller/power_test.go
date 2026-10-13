@@ -156,7 +156,7 @@ func TestManualSleepSuppresses(t *testing.T) {
 	h2 := startHarnessScaled(t, h.dir, h.d, powerScale)
 	h.stop()
 	_ = h2
-	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Credentials: labCreds, Presets: labPresets(t)})
+	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	time.Sleep(50 * time.Millisecond)
 	if h2.phase("scout") != api.PhaseAsleep || h2.message("scout", m.ID).State != api.MsgPending {
 		t.Fatal("a restart lost the manual mark")
@@ -192,7 +192,7 @@ func TestCredentialsPaused(t *testing.T) {
 	if h2.phase("scout") != api.PhaseAsleep {
 		t.Fatal("woke without credentials")
 	}
-	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: f, Lock: res.Lock, Credentials: labCreds, Presets: labPresets(t)})
+	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Lock: res.Lock, Credentials: labCreds}, writeOpts{})
 	h2.waitMessage("scout", m.ID, api.MsgDelivered)
 }
 

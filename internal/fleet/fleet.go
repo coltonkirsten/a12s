@@ -39,16 +39,16 @@ const (
 // AllowAll is the egress host that permits any public host on any port.
 const AllowAll = "*"
 
-// Fleet has defaults already applied to every Computer.
+// Fleet is the effective Fleet: defaults already applied to every agent computer. Spec is the Fleet as written.
 type Fleet struct {
-	APIVersion string              `yaml:"apiVersion" json:"apiVersion"`
-	Kind       string              `yaml:"kind" json:"kind"`
-	Metadata   Metadata            `yaml:"metadata" json:"metadata"`
-	Egress     FleetEgress         `yaml:"egress,omitempty" json:"egress,omitzero"`
-	Defaults   Computer            `yaml:"defaults,omitempty" json:"defaults,omitzero"`
-	Drives     map[string]Drive    `yaml:"drives,omitempty" json:"drives,omitempty"`
-	Computers  map[string]Computer `yaml:"computers" json:"computers"`
-	Services   map[string]Service  `yaml:"services,omitempty" json:"services,omitempty"`
+	APIVersion string              `json:"apiVersion"`
+	Kind       string              `json:"kind"`
+	Metadata   Metadata            `json:"metadata"`
+	Egress     FleetEgress         `json:"egress,omitzero"`
+	Defaults   Computer            `json:"defaults,omitzero"`
+	Drives     map[string]Drive    `json:"drives,omitempty"`
+	Computers  map[string]Computer `json:"agent_computers"`
+	Services   map[string]Service  `json:"services,omitempty"`
 }
 
 type Metadata struct {
@@ -70,22 +70,27 @@ type Drive struct {
 	Access string `yaml:"access" json:"access"`
 }
 
-// Computer has the Fleet defaults already merged in.
+// Computer is one agent computer's spec. In a Fleet it has the defaults merged in; in a Spec it is as written.
+// Lists are omitzero, not omitempty, so an explicit empty list still replaces the defaults' one.
 type Computer struct {
-	Harness     Harness      `yaml:"harness,omitempty" json:"harness,omitzero"`
-	Image       string       `yaml:"image,omitempty" json:"image,omitempty"`
-	Resources   Resources    `yaml:"resources,omitempty" json:"resources,omitzero"`
-	Home        Home         `yaml:"home,omitempty" json:"home,omitzero"`
-	Autonomy    string       `yaml:"autonomy,omitempty" json:"autonomy,omitempty"`
-	Credentials []string     `yaml:"credentials,omitempty" json:"credentials,omitempty"`
-	Drives      []DriveMount `yaml:"drives,omitempty" json:"drives,omitempty"`
-	Egress      Egress       `yaml:"egress,omitempty" json:"egress,omitzero"`
-	Security    Security     `yaml:"security,omitempty" json:"security,omitzero"`
+	Harness Harness `yaml:"harness,omitempty" json:"harness,omitzero"`
+	Image   string  `yaml:"image,omitempty" json:"image,omitempty"`
+	// Instructions become CLAUDE.md (claude-code) or AGENTS.md (codex) on the home drive.
+	Instructions string `yaml:"instructions,omitempty" json:"instructions,omitempty"`
+	// Files are more text files for the home drive, by path relative to it.
+	Files       map[string]string `yaml:"files,omitempty" json:"files,omitempty"`
+	Resources   Resources         `yaml:"resources,omitempty" json:"resources,omitzero"`
+	Home        Home              `yaml:"home,omitempty" json:"home,omitzero"`
+	Autonomy    string            `yaml:"autonomy,omitempty" json:"autonomy,omitempty"`
+	Credentials []string          `yaml:"credentials,omitempty" json:"credentials,omitzero"`
+	Drives      []DriveMount      `yaml:"drives,omitempty" json:"drives,omitzero"`
+	Egress      Egress            `yaml:"egress,omitempty" json:"egress,omitzero"`
+	Security    Security          `yaml:"security,omitempty" json:"security,omitzero"`
 	// Inbox is Controller state, not container config: never hashed into a generation.
 	Inbox Inbox `yaml:"inbox,omitempty" json:"inbox,omitzero"`
 	// Power is Controller state, never hashed into a generation. Off unless set.
 	Power  Power  `yaml:"power,omitempty" json:"power,omitzero"`
-	Uses   []Use  `yaml:"uses,omitempty" json:"uses,omitempty"`
+	Uses   []Use  `yaml:"uses,omitempty" json:"uses,omitzero"`
 	Grants Grants `yaml:"grants,omitempty" json:"grants,omitzero"`
 }
 
@@ -121,9 +126,8 @@ func (c Computer) Tier() string {
 
 // Security is set only by the Fleet's owner: nothing an image carries can loosen the sandbox.
 type Security struct {
-	// Seccomp is a seccomp profile (Docker's JSON format), relative to the Fleet file, that replaces the substrate's
-	// default profile. Capabilities and no-new-privileges are unchanged by it.
-	Seccomp string `yaml:"seccomp,omitempty" json:"seccomp,omitempty"`
+	// Seccomp replaces the substrate's default seccomp profile. Capabilities and no-new-privileges are unchanged by it.
+	Seccomp Seccomp `yaml:"seccomp,omitempty" json:"seccomp,omitzero"`
 }
 
 type Harness struct {
@@ -142,7 +146,8 @@ type Resources struct {
 
 type Home struct {
 	Size Bytes `yaml:"size,omitempty" json:"size,omitzero"`
-	// Preset is a directory, relative to the Fleet file, copied once onto an empty home.
+	// Preset is a directory, relative to the Fleet file. It exists only in the file: a12s up sends its contents as
+	// files, and the Controller refuses it.
 	Preset string `yaml:"preset,omitempty" json:"preset,omitempty"`
 }
 
@@ -153,7 +158,7 @@ type DriveMount struct {
 }
 
 type Egress struct {
-	Allow []string `yaml:"allow" json:"allow"`
+	Allow []string `yaml:"allow" json:"allow,omitzero"`
 }
 
 func (e Egress) AllowsAll() bool {

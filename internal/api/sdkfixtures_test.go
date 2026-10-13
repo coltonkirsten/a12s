@@ -30,6 +30,8 @@ func TestSDKFixtures(t *testing.T) {
 	}{
 		{"statusResponse", "StatusResponse", StatusResponse{}},
 		{"putFleetResponse", "PutFleetResponse", PutFleetResponse{}},
+		{"fleetResponse", "FleetResponse", FleetResponse{}},
+		{"agentComputersResponse", "AgentComputersResponse", AgentComputersResponse{}},
 		{"enqueueRequest", "EnqueueRequest", EnqueueRequest{}},
 		{"enqueueResponse", "EnqueueResponse", EnqueueResponse{}},
 		{"message", "Message", Message{}},

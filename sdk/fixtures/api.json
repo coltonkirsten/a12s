@@ -1,4 +1,110 @@
 {
+  "agentComputersResponse": {
+    "agentComputers": [
+      {
+        "name": "name",
+        "spec": {},
+        "effective": {},
+        "status": {
+          "name": "name",
+          "phase": "Ready",
+          "error": {
+            "reason": "reason",
+            "retryable": true
+          },
+          "resumePending": true,
+          "session": "session",
+          "activeTurn": "activeTurn",
+          "harness": {
+            "kind": "kind",
+            "version": "version",
+            "model": "model"
+          },
+          "image": "image",
+          "seccomp": "seccomp",
+          "autonomy": "autonomy",
+          "generation": 1,
+          "stagedGeneration": 1,
+          "credentialGeneration": 1,
+          "homeSize": "1",
+          "drives": [
+            "drives"
+          ],
+          "egressMode": "egressMode",
+          "warnings": [
+            "warnings"
+          ],
+          "inbox": {
+            "computer": "computer",
+            "held": true,
+            "holdReason": "holdReason",
+            "diagnostic": "diagnostic",
+            "pending": 1,
+            "claimed": 1,
+            "limits": {
+              "maxMessages": {
+                "value": 1,
+                "source": "source"
+              },
+              "maxBytes": {
+                "value": 1,
+                "source": "source"
+              }
+            },
+            "usage": {
+              "messages": 1,
+              "bytes": 1
+            },
+            "overLimit": true,
+            "ended24h": {
+              "expired": 1,
+              "replaced": 1,
+              "withdrawn": 1,
+              "discarded": 1
+            },
+            "orphaned": true,
+            "sessionOverride": "sessionOverride"
+          },
+          "inboxCleared": 1,
+          "power": {
+            "sleepAfterIdle": "sleepAfterIdle",
+            "wakeOnMessage": [
+              "wakeOnMessage"
+            ],
+            "maxWakesPerHour": 1,
+            "autoWake": "autoWake",
+            "reason": "reason",
+            "fix": "fix",
+            "wakesLastHour": 1,
+            "nextWakeAt": "2026-10-12T12:00:00Z",
+            "idleSince": "2026-10-12T12:00:00Z",
+            "sleptBy": "sleptBy",
+            "sleptAt": "2026-10-12T12:00:00Z"
+          }
+        }
+      }
+    ]
+  },
+  "agentComputersResponseMinimal": {
+    "agentComputers": [
+      {
+        "name": "name",
+        "spec": {},
+        "effective": {},
+        "status": {
+          "name": "name",
+          "phase": "Ready",
+          "harness": {
+            "kind": "kind",
+            "version": "version"
+          },
+          "image": "image",
+          "autonomy": "autonomy",
+          "generation": 1
+        }
+      }
+    ]
+  },
   "diagnosticData": {
     "message": "message",
     "data": {},
@@ -72,6 +178,127 @@
     "seq": 1,
     "ts": "2026-10-12T12:00:00Z",
     "type": "text.delta"
+  },
+  "fleetResponse": {
+    "version": 1,
+    "fleet": {
+      "apiVersion": "apiVersion",
+      "kind": "kind",
+      "metadata": {
+        "name": "name"
+      },
+      "egress": {
+        "enforcement": "enforcement",
+        "allowPrivate": [
+          "allowPrivate"
+        ]
+      },
+      "defaults": {},
+      "drives": {
+        "k": {
+          "size": "1",
+          "access": "access"
+        }
+      },
+      "agent_computers": {
+        "k": {}
+      },
+      "services": {
+        "k": {
+          "image": "image",
+          "manifest": {
+            "a12s": 1,
+            "name": "name",
+            "version": "version",
+            "user": "0:0",
+            "health": {},
+            "ports": {
+              "k": {
+                "port": 0
+              }
+            },
+            "credentials": [
+              {
+                "name": ""
+              }
+            ],
+            "login": {
+              "command": null,
+              "produces": ""
+            },
+            "state": {
+              "at": ""
+            },
+            "tmpfs": [
+              "tmpfs"
+            ],
+            "resources": {}
+          },
+          "config": {
+            "k": null
+          },
+          "credentials": [
+            "credentials"
+          ],
+          "egress": {
+            "allow": [
+              "allow"
+            ],
+            "tcp": [
+              {
+                "name": "name",
+                "host": "host",
+                "port": 1
+              }
+            ]
+          },
+          "grants": {
+            "send": [
+              "send"
+            ]
+          },
+          "uses": [
+            {
+              "name": "name",
+              "mcp": true
+            }
+          ],
+          "resources": {
+            "cpu": "1m",
+            "memory": "1"
+          },
+          "state": {
+            "size": "1"
+          },
+          "publish": [
+            "publish"
+          ]
+        }
+      }
+    },
+    "drift": [
+      {
+        "op": "op",
+        "kind": "kind",
+        "name": "name",
+        "when": "when",
+        "fields": [
+          "fields"
+        ]
+      }
+    ]
+  },
+  "fleetResponseMinimal": {
+    "version": 1,
+    "fleet": null,
+    "drift": [
+      {
+        "op": "op",
+        "kind": "kind",
+        "name": "name",
+        "when": "when"
+      }
+    ]
   },
   "inboxListResponse": {
     "computer": "computer",
@@ -210,6 +437,19 @@
     "bytes": 1
   },
   "putFleetResponse": {
+    "version": 1,
+    "dryRun": true,
+    "changes": [
+      {
+        "op": "op",
+        "kind": "kind",
+        "name": "name",
+        "when": "when",
+        "fields": [
+          "fields"
+        ]
+      }
+    ],
     "created": [
       "created"
     ],
@@ -256,9 +496,135 @@
       "removed": [
         "removed"
       ]
+    },
+    "agentComputer": {
+      "name": "name",
+      "spec": {},
+      "effective": {},
+      "status": {
+        "name": "name",
+        "phase": "Ready",
+        "error": {
+          "reason": "reason",
+          "retryable": true
+        },
+        "resumePending": true,
+        "session": "session",
+        "activeTurn": "activeTurn",
+        "harness": {
+          "kind": "kind",
+          "version": "version",
+          "model": "model"
+        },
+        "image": "image",
+        "seccomp": "seccomp",
+        "autonomy": "autonomy",
+        "generation": 1,
+        "stagedGeneration": 1,
+        "credentialGeneration": 1,
+        "homeSize": "1",
+        "drives": [
+          "drives"
+        ],
+        "egressMode": "egressMode",
+        "warnings": [
+          "warnings"
+        ],
+        "inbox": {
+          "computer": "computer",
+          "held": true,
+          "holdReason": "holdReason",
+          "diagnostic": "diagnostic",
+          "pending": 1,
+          "claimed": 1,
+          "limits": {
+            "maxMessages": {
+              "value": 1,
+              "source": "source"
+            },
+            "maxBytes": {
+              "value": 1,
+              "source": "source"
+            }
+          },
+          "usage": {
+            "messages": 1,
+            "bytes": 1
+          },
+          "overLimit": true,
+          "ended24h": {
+            "expired": 1,
+            "replaced": 1,
+            "withdrawn": 1,
+            "discarded": 1
+          },
+          "orphaned": true,
+          "sessionOverride": "sessionOverride"
+        },
+        "inboxCleared": 1,
+        "power": {
+          "sleepAfterIdle": "sleepAfterIdle",
+          "wakeOnMessage": [
+            "wakeOnMessage"
+          ],
+          "maxWakesPerHour": 1,
+          "autoWake": "autoWake",
+          "reason": "reason",
+          "fix": "fix",
+          "wakesLastHour": 1,
+          "nextWakeAt": "2026-10-12T12:00:00Z",
+          "idleSince": "2026-10-12T12:00:00Z",
+          "sleptBy": "sleptBy",
+          "sleptAt": "2026-10-12T12:00:00Z"
+        }
+      }
+    },
+    "service": {
+      "name": "name",
+      "phase": "Ready",
+      "error": {
+        "reason": "reason",
+        "retryable": true
+      },
+      "image": "image",
+      "pin": "pin",
+      "generation": 1,
+      "restarts": 1,
+      "health": "health",
+      "healthSince": "healthSince",
+      "send": [
+        "send"
+      ],
+      "uses": [
+        "uses"
+      ],
+      "usedBy": [
+        "usedBy"
+      ],
+      "publish": [
+        "publish"
+      ],
+      "ports": [
+        "ports"
+      ],
+      "stateDrive": "stateDrive",
+      "egressMode": "egressMode",
+      "warnings": [
+        "warnings"
+      ],
+      "spec": {}
     }
   },
   "putFleetResponseMinimal": {
+    "version": 1,
+    "changes": [
+      {
+        "op": "op",
+        "kind": "kind",
+        "name": "name",
+        "when": "when"
+      }
+    ],
     "created": [
       "created"
     ],
@@ -328,7 +694,8 @@
         "egressMode": "egressMode",
         "warnings": [
           "warnings"
-        ]
+        ],
+        "spec": {}
       }
     ]
   },
@@ -346,6 +713,85 @@
   "statusResponse": {
     "fleet": "fleet",
     "egressEnforcement": "egressEnforcement",
+    "agentComputers": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "error": {
+          "reason": "reason",
+          "retryable": true
+        },
+        "resumePending": true,
+        "session": "session",
+        "activeTurn": "activeTurn",
+        "harness": {
+          "kind": "kind",
+          "version": "version",
+          "model": "model"
+        },
+        "image": "image",
+        "seccomp": "seccomp",
+        "autonomy": "autonomy",
+        "generation": 1,
+        "stagedGeneration": 1,
+        "credentialGeneration": 1,
+        "homeSize": "1",
+        "drives": [
+          "drives"
+        ],
+        "egressMode": "egressMode",
+        "warnings": [
+          "warnings"
+        ],
+        "inbox": {
+          "computer": "computer",
+          "held": true,
+          "holdReason": "holdReason",
+          "diagnostic": "diagnostic",
+          "pending": 1,
+          "claimed": 1,
+          "limits": {
+            "maxMessages": {
+              "value": 1,
+              "source": "source"
+            },
+            "maxBytes": {
+              "value": 1,
+              "source": "source"
+            }
+          },
+          "usage": {
+            "messages": 1,
+            "bytes": 1
+          },
+          "overLimit": true,
+          "ended24h": {
+            "expired": 1,
+            "replaced": 1,
+            "withdrawn": 1,
+            "discarded": 1
+          },
+          "orphaned": true,
+          "sessionOverride": "sessionOverride"
+        },
+        "inboxCleared": 1,
+        "power": {
+          "sleepAfterIdle": "sleepAfterIdle",
+          "wakeOnMessage": [
+            "wakeOnMessage"
+          ],
+          "maxWakesPerHour": 1,
+          "autoWake": "autoWake",
+          "reason": "reason",
+          "fix": "fix",
+          "wakesLastHour": 1,
+          "nextWakeAt": "2026-10-12T12:00:00Z",
+          "idleSince": "2026-10-12T12:00:00Z",
+          "sleptBy": "sleptBy",
+          "sleptAt": "2026-10-12T12:00:00Z"
+        }
+      }
+    ],
     "computers": [
       {
         "name": "name",
@@ -509,13 +955,27 @@
         "egressMode": "egressMode",
         "warnings": [
           "warnings"
-        ]
+        ],
+        "spec": {}
       }
     ]
   },
   "statusResponseMinimal": {
     "fleet": "fleet",
     "egressEnforcement": "egressEnforcement",
+    "agentComputers": [
+      {
+        "name": "name",
+        "phase": "Ready",
+        "harness": {
+          "kind": "kind",
+          "version": "version"
+        },
+        "image": "image",
+        "autonomy": "autonomy",
+        "generation": 1
+      }
+    ],
     "computers": [
       {
         "name": "name",
