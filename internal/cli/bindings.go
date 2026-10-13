@@ -103,6 +103,20 @@ func NeededByServices(f *fleet.Fleet, services ...string) map[string][]string {
 
 // ResolveBound skips unbound names: a Service waiting on a login should not
 // block the rest. A binding that does not read is still an error.
+// AllBound is every credential the bindings file binds, with who in the Fleet file needs it.
+func AllBound(b *Bindings, f *fleet.Fleet) map[string][]string {
+	need := Needed(f)
+	for n, who := range NeededByServices(f) {
+		need[n] = append(need[n], who...)
+	}
+	for n := range b.Credentials {
+		if _, ok := need[n]; !ok {
+			need[n] = []string{"the bindings file"}
+		}
+	}
+	return need
+}
+
 func (b *Bindings) ResolveBound(need map[string][]string) (api.Credentials, error) {
 	creds := api.Credentials{}
 	var errs []error

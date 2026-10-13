@@ -110,16 +110,12 @@ func (g *globals) up(o upOptions) error {
 	if err != nil {
 		return err
 	}
-	// Unbound names may already be in the Controller's store; it refuses what is set nowhere.
-	creds, err := b.ResolveBound(cli.Needed(f))
+	// Every bound credential goes, so agent computers created from code can name it too; unbound names may already be
+	// in the Controller's store, and it refuses what is set nowhere.
+	creds, err := b.ResolveBound(cli.AllBound(b, f))
 	if err != nil {
 		return err
 	}
-	svcCreds, err := b.ResolveBound(cli.NeededByServices(f))
-	if err != nil {
-		return err
-	}
-	maps.Copy(creds, svcCreds)
 
 	ctx, cancel := interruptible()
 	defer cancel()

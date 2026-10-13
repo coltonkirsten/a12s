@@ -43,10 +43,7 @@ func runDiff(g *globals, args []string) error {
 	}
 	creds := api.Credentials{}
 	if b, err := cli.LoadBindings(g.bindings()); err == nil {
-		bound, _ := b.ResolveBound(cli.Needed(f))
-		svc, _ := b.ResolveBound(cli.NeededByServices(f))
-		maps.Copy(creds, bound)
-		maps.Copy(creds, svc)
+		creds, _ = b.ResolveBound(cli.AllBound(b, f))
 	}
 	lock, err := fleet.LoadLock(g.lockPath())
 	if err != nil {
