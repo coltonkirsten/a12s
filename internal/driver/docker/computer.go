@@ -134,11 +134,11 @@ func explainMountError(err error, attach []driver.Attach) error {
 	if !strings.Contains(msg, "bind source path does not exist") && !strings.Contains(msg, "is not shared from the host") && !strings.Contains(msg, "mounts denied") {
 		return err
 	}
-	what := "an attached folder"
+	what, matched := "an attached folder", ""
 	for _, a := range attach {
-		if strings.Contains(msg, a.Host) {
-			what = fmt.Sprintf("attach.%s (%s)", path.Base(a.Target), a.Host)
-			break
+		// The longest match wins: /Users/me/app is also a prefix of a missing /Users/me/app2.
+		if strings.Contains(msg, a.Host) && len(a.Host) > len(matched) {
+			what, matched = fmt.Sprintf("attach.%s (%s)", path.Base(a.Target), a.Host), a.Host
 		}
 	}
 	return fmt.Errorf("%w; fix: Docker can't see %s: check that it exists and, with Docker Desktop, that it is inside a shared folder (Settings > Resources > File sharing; /Users, /Volumes, /private, /tmp and /var/folders by default), then apply the Fleet again", err, what)

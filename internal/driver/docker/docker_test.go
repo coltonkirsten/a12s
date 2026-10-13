@@ -366,10 +366,11 @@ func TestCheckSpecAttach(t *testing.T) {
 }
 
 func TestExplainMountError(t *testing.T) {
-	attach := []driver.Attach{{Host: "/Users/me/app", Target: "/home/agent/project"}, {Host: "/opt/data", Target: "/home/agent/data"}}
+	attach := []driver.Attach{{Host: "/Users/me/app", Target: "/home/agent/project"}, {Host: "/Users/me/app2", Target: "/home/agent/second"}, {Host: "/opt/data", Target: "/home/agent/data"}}
 	for msg, want := range map[string]string{
 		`invalid mount config for type "bind": bind source path does not exist: /host_mnt/Users/me/app`: "attach.project (/Users/me/app)",
 		`invalid mount config for type "bind": bind source path does not exist: /opt/data`:              "attach.data (/opt/data)",
+		`invalid mount config for type "bind": bind source path does not exist: /Users/me/app2`:         "attach.second (/Users/me/app2)",
 		`mounts denied: The path /elsewhere is not shared from the host and is not known to Docker.`:    "an attached folder",
 		`Error response from daemon: No such image: a12s/slim:dev`:                                      "",
 	} {
