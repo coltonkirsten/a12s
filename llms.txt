@@ -6,7 +6,7 @@
 > SDK (`a12s` on PyPI), a browser gateway, or an HTTP API.
 
 This file is for coding agents building ON a12s, and it is meant to be enough on its own: every command, field,
-method and file layout below is exact, so copy them rather than guessing. Current release: v0.3.0 (CLI, images,
+method and file layout below is exact, so copy them rather than guessing. Current release: v0.4.0 (CLI, images,
 svckit, npm and PyPI packages all share the version). You never edit or vendor a12s itself: a project changes only
 its own fleet.yaml, presets, images, Services and app code.
 
@@ -83,7 +83,7 @@ kind: Fleet
 metadata: { name: team }              # DNS label; also names ~/.a12s/team/
 defaults:                             # applies to every agent computer (not Services); maps merge, lists replace
   harness: { kind: claude-code, version: 2.1.280, model: haiku }   # model: haiku | sonnet | opus | a full model id
-  image: slim                         # slim | your image built FROM ghcr.io/coltonkirsten/a12s/slim:0.3.0
+  image: slim                         # slim | your image built FROM ghcr.io/coltonkirsten/a12s/slim:0.4.0
   credentials: [anthropic]            # names; values come from a12s.bindings.yaml (never committed)
   egress: { allow: [] }               # deny by default; the model API needs no entry (see below)
 agent_computers:
@@ -131,7 +131,7 @@ Agent computer fields (all optional except a harness, image and credential, whic
 Top level also takes `services:` (see Services) and `drives:`. Change anything (instructions and preset files
 included) and run `a12s up`: it applies at each agent computer's next idle moment, never mid-Turn, and keeps the
 session. Changed files are written again; other files the agent made in its home stay.
-fleet.lock pins `a12s: v0.3.0` and every image, bundle and Service digest; `a12s up` adds missing pins and never
+fleet.lock pins `a12s: v0.4.0` and every image, bundle and Service digest; `a12s up` adds missing pins and never
 moves one: to pick up a rebuilt image, give it a new tag.
 
 `a12s up` makes the running Fleet match the file: it removes agent computers created from code and undoes changes
@@ -350,7 +350,7 @@ node:24-bookworm-slim (Debian, apt) plus git, ripgrep, python3, curl, ca-certifi
 
 ```dockerfile
 # images/agent/Dockerfile
-FROM ghcr.io/coltonkirsten/a12s/slim:0.3.0
+FROM ghcr.io/coltonkirsten/a12s/slim:0.4.0
 RUN apt-get update && apt-get install -y --no-install-recommends jq ffmpeg && rm -rf /var/lib/apt/lists/*
 ```
 
@@ -363,7 +363,7 @@ agent_computers:
   worker: { image: my-agent:1 }
 ```
 
-- The tag is the release without the v (slim:0.3.0). Admission needs the `ai.a12s.computerd.version` label FROM
+- The tag is the release without the v (slim:0.4.0). Admission needs the `ai.a12s.computerd.version` label FROM
   slim sets (same minor as the CLI) and computerd at /opt/a12s/computerd/dist/main.js; don't remove either.
 - The Dockerfile runs as root; don't set USER, ENTRYPOINT or CMD (a12s ignores them: computerd starts as root and
   runs the agent as uid 1000 with /home mounted over). Install system-wide (/usr, /opt), not into /home/agent.
@@ -395,7 +395,7 @@ the a12s module; needs Go 1.26):
 
 ```sh
 mkdir clock && cd clock && go mod init example.com/clock
-go get github.com/coltonkirsten/a12s/services/svckit@v0.3.0
+go get github.com/coltonkirsten/a12s/services/svckit@v0.4.0
 ```
 
 ```go

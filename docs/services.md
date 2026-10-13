@@ -124,7 +124,7 @@ whose `Send` and `Get` enqueue and read back Messages as far as the grants allow
 `ParseDuration` reads `0`, `90s`, `15m`, `1h` or `7d`. A clock that sends on an interval:
 
 ```sh
-go mod init example.com/clock && go get github.com/coltonkirsten/a12s/services/svckit@v0.3.0
+go mod init example.com/clock && go get github.com/coltonkirsten/a12s/services/svckit@v0.4.0
 ```
 
 ```go
