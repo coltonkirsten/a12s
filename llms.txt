@@ -20,12 +20,16 @@ its own fleet.yaml, images, Services and app code.
   delivered at its next idle moment, batched with anything else pending. `send(...).wait()` (CLI: `--wait`) returns
   the Turn that delivered it. Two Messages sent back to back to an idle agent computer usually run as two Turns (the
   first starts at once), so count results across Turns, never expect them in one.
-- Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted.
-- Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one.
+- Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted. When
+  background work ends, Claude Code starts a Turn by itself: turn.started {reason: "background"}, no Messages.
+- Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one. The harness
+  process lives across Turns, so background work (a sub-agent or Bash run with run_in_background) outlives its Turn.
+  status shows it as background {tasks}; the agent computer stays Ready (Messages run at once) but never idle.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
   turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input},
   tool.finished {id, name, isError, output}, turn.finished {status, usage (the harness's own), tokens?: {input
-  (without cached), output, cacheRead, cacheWrite}, error?}, egress.denied {host, port, reason}; fleet-wide only:
+  (without cached), output, cacheRead, cacheWrite}, error?}, egress.denied {host, port, reason}, task.started and
+  task.finished {id, kind, description, status? (completed | failed | stopped | killed)}; fleet-wide only:
   agent_computer.phase {phase, error?, waiting?}; SDK-made: gap (events lost; resync). Others: docs/api.md.
 - via: who really sent a Message: local (owner CLI/SDK), token:<name>, service:<name>, computer:<name>. sender is
   only the sender's own label. Trust via, not sender.
@@ -167,7 +171,7 @@ a12s gateway --web dir | --dev url | -- npm run dev [--port 7012] [--allow statu
 a12s ui [--port 7013] [--no-open]     # the web console (npx github:coltonkirsten/a12s-console; Node.js 20+); args go to the console
 a12s inbox <c> [--bodies]             # pending Messages (human table; --json for machines)
 a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Messages still queue), release, withdraw
-a12s stop <c> | sleep <c> [--hold] | wake <c>   # end the Turn; sleep (--hold: only wake wakes it); wake
+a12s stop <c> | sleep <c> [--hold] | wake <c>   # end the Turn and background work; sleep (--hold: only wake wakes it); wake
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f]
 a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names
@@ -228,7 +232,7 @@ const box = await lead.inbox({ bodies: true });     // {held, holdReason?, pendi
                                                     //   [{id, seq, state, sender, via, body?, replaceKey?, …}], …}
 await lead.message(m.id); await lead.withdraw(m.id); // withdraw: a pending Message is removed, never delivered
 await lead.hold({ reason: "triage" }); await lead.resume();   // hold delivery (sends still queue); release it
-await lead.stop(); await lead.wake();               // stop the active Turn; wake a sleeping one
+await lead.stop(); await lead.wake();               // stop the active Turn and background work; wake a sleeping one
 await lead.sleep();                                 // a sender listed in wakeOnMessage wakes it
 await lead.sleep({ hold: true });                   // until wake(): NO Message wakes it. Py: sleep(hold=True)
 await coder.remove();                               // stops and removes it; its home drive and inbox are kept
@@ -447,6 +451,10 @@ SDK objects (Python names; TypeScript is camelCase):
 - An agent can only `send` to agent computers in its grants.send; anything else gets 403 no_grant. A grant may name
   an agent computer that doesn't exist yet (the write warns), so a pair can be created from code one after the other.
 - Every Claude Code Turn logs one or two `egress.denied` events for telemetry hosts: harmless.
+- Background work survives Turns, not the session: stop, sleep (manual or sleepAfterIdle), restart_harness, a
+  fresh=true Message and a config change end it (task.finished status killed or stopped). sleepAfterIdle and staged
+  config changes wait while it runs, so a never-ending one (a dev server) keeps the agent computer awake until
+  `a12s stop <c>`.
 - Nothing is delivered? `a12s inbox <c>` (held? says why; `a12s inbox resume <c>`), `a12s status` (asleep?
   `a12s wake <c>`), `a12s doctor`.
 - attach: Docker Desktop must share the folder (/Users, /Volumes, /private, /tmp, /var/folders by default; else

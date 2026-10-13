@@ -105,18 +105,27 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
 | `POST /v1/turns` | `{requestId, session: current\|new\|<id>, prompt, cwd, inbox?}` → `{turnId, sessionId}` once durably accepted. One Turn at a time (`409` when busy). A repeated `requestId` with the same body returns the original Turn. |
 | `GET /v1/events` | One SSE stream per agent computer; `Last-Event-ID` and `?turn=`. An expired cursor gets an explicit `gap`. |
 | `GET /v1/turns/{id}` | A Turn's summary: dispatched, resume failed, finished, error. |
-| `POST /v1/turns/{id}/stop` | Idempotent stop. |
-| `GET /v1/status` | Phase, session, active Turn, harness version, credential generation, owed continuation. |
+| `POST /v1/turns/{id}/stop` | Idempotent stop; it also ends the session's background work. |
+| `POST /v1/stop` | Stops whatever Turn runs and the session's background work. |
+| `GET /v1/status` | Phase, session, active Turn, background task count, harness version, credential generation, owed continuation. |
 | `POST /v1/diagnostics`, `POST /v1/journal/inbox` | The Controller journals diagnostics and ended Messages. |
 | `POST /v1/continuation/cancel` | Drop an owed `restart_harness` continuation (used by `inbox resume --new`). |
 
 ### Adapters
 
-- **Claude Code:** the Claude Agent SDK (`query()`) driving the bundle's `claude` binary as uid 1000, with an explicit
-  session id and `resume`. User, project and local settings load, so the agent's own skills and MCP config work.
-  Stop interrupts, then sends SIGTERM after 10 s and SIGKILL after 5 s more. One process per Turn.
+- **Claude Code:** the Claude Agent SDK (`query()`) in streaming-input mode driving the bundle's `claude` binary as
+  uid 1000, with an explicit session id and `resume`. User, project and local settings load, so the agent's own
+  skills and MCP config work. One process per session, kept across Turns so background sub-agents and shells
+  survive them: a Turn is one prompt pushed into it (priority `later`, so it never joins a running turn), ending at
+  its `result`. The CLI's `command_lifecycle` frames tell a pushed prompt's turn from one the CLI starts by itself
+  when background work ends; computerd journals the latter as a Turn with reason `background` once it calls the
+  model. `task_started` / `task_notification` frames of background tasks become `task.started` / `task.finished`.
+  Ending the session closes stdin (the CLI stops its tasks and exits); a running turn is interrupted first, then
+  SIGTERM after 10 s and SIGKILL after 5 s more.
 - **Codex:** `codex app-server` over JSON-RPC on stdio, one long-lived child per agent computer: `thread/start` or
-  `thread/resume`, `turn/start`, `turn/interrupt`. Every server request is answered: approvals are granted (approval
+  `thread/resume`, `turn/start`, `turn/interrupt`. A command still running when its turn completes stays a
+  background terminal: it is a background task until its late `item/completed`. Stop and a new thread restart the
+  app-server, which ends them. Every server request is answered: approvals are granted (approval
   policy `never`, `danger-full-access`), user input and elicitation are declined.
 - Both get the `a12s` system tools MCP server; each used Service's MCP port is registered as `a12s-<svc>` through a
   stdio-to-HTTP bridge.

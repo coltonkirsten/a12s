@@ -12,6 +12,17 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   relative or `~/` host against fleet.yaml; `a12s export` writes it back. A folder Docker can't see (missing, or not
   shared with Docker Desktop) puts the agent computer in Error with the fix. Custom images need a rebuild FROM the
   new slim, whose computerd hands kept drives to the agent. See docs/fleet-file.md#attached-folders.
+- Changed: background work survives the end of a Turn. Claude Code now runs as one process per session instead of
+  one per Turn, so a sub-agent or Bash command the agent runs with `run_in_background` keeps going after its Turn
+  ends, and when it finishes Claude Code starts a Turn by itself to report: `turn.started` has
+  `reason: "background"` and no Messages (`turns()` shows it as `reason`). Background tasks are journaled as
+  `task.started` / `task.finished`, and status shows `background: {tasks}` while any run. Meanwhile the agent
+  computer stays Ready, so a Message runs at once, but it is not idle: `sleepAfterIdle` and config changes that
+  restart it wait for the background work to end. Codex commands still running at the end of a Turn are tracked
+  the same way (Codex never starts a Turn by itself). What ends the session and its background work: `a12s stop`
+  (and `stop()`), sleep, `restart_harness`, a `--fresh` Message, applying a config change, the agent computer
+  stopping. `a12s stop <name>` and `stop()` without a Turn id stop whatever runs, background work included, through
+  the new `POST /v1/agent-computers/{c}/stop`. See docs/concepts.md#background-work.
 
 ## v0.7.1 (2026-10-13)
 
