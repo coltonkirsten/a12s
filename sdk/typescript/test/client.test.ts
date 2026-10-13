@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { A12sClient, A12sError, A12sGapError, A12sStreamError } from "../src/index.js";
-import { connect, fleetName } from "../src/node.js";
+import { connect, Fleet, fleetName } from "../src/node.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
@@ -36,7 +36,7 @@ test("prompt: enqueue, wait for delivery, stream the turn across a reconnect", a
   let eventsCalls = 0;
   const { client, close } = await fake((req, res, body) => {
     assert.equal(req.headers.authorization, "Bearer tok");
-    if (req.method === "POST" && req.url === "/v1/computers/lead/inbox") {
+    if (req.method === "POST" && req.url === "/v1/agent-computers/lead/inbox") {
       const m = JSON.parse(body);
       assert.equal(m.body, "split this");
       assert.ok(m.idempotencyKey, "the client always sends an idempotency key");
@@ -44,13 +44,13 @@ test("prompt: enqueue, wait for delivery, stream the turn across a reconnect", a
       return;
     }
     res.writeHead(200, { "content-type": "text/event-stream" });
-    if (req.url === "/v1/computers/lead/inbox/m_1/events") {
+    if (req.url === "/v1/agent-computers/lead/inbox/m_1/events") {
       res.write(ev(1, "snapshot", "", { message: { id: "m_1", state: "pending" }, held: false }));
       res.write(": keepalive\n\n");
       res.end(ev(2, "delivered", "", { turn: "t_9" }));
       return;
     }
-    assert.equal(req.url, "/v1/computers/lead/events?turn=t_9");
+    assert.equal(req.url, "/v1/agent-computers/lead/events?turn=t_9");
     eventsCalls++;
     if (eventsCalls === 1) {
       res.write("event: head\ndata: {\"seq\":0}\n\n");
@@ -197,6 +197,7 @@ test("connect: url, fleet name, nearest fleet.yaml, the only running Fleet", asy
   await write("other", 52012);
   await assert.rejects(connect({ home, cwd: nowhere }), /several Fleets are running \(other, proj\)/);
   assert.equal((await connect({ home, fleet: "other" })).url, "http://127.0.0.1:52012");
+  assert.equal((await Fleet.connect({ home, fleet: "other" })).url, "http://127.0.0.1:52012");
 
   const project = join(nowhere, "app", "src");
   await mkdir(project, { recursive: true });
@@ -216,10 +217,10 @@ test("events: every Computer merged, ready() after each stream is live, then tur
   const { client, close } = await fake((req, res) => {
     if (req.url === "/v1/status") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ fleet: "f", computers: [{ name: "lead" }, { name: "w1" }, { name: "w2" }] }));
+      res.end(JSON.stringify({ fleet: "f", agentComputers: [{ name: "lead" }, { name: "w1" }, { name: "w2" }] }));
       return;
     }
-    if (req.url === "/v1/computers/w2/events") {
+    if (req.url === "/v1/agent-computers/w2/events") {
       res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ code: "asleep", message: "asleep" }));
       return;
     }

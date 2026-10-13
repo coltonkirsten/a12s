@@ -21,8 +21,71 @@ export interface Harness {
   model?: string;
 }
 
-/** A parsed fleet.yaml. a12s validates it; the client passes it through. */
-export type Fleet = Record<string, unknown> & { metadata: { name: string } };
+export interface AgentComputerSpec {
+  harness?: { kind: "claude-code" | "codex" | (string & {}); version?: string; model?: string };
+  image?: string;
+  instructions?: string;
+  /** File contents by path, written into the agent computer's home. */
+  files?: Record<string, string>;
+  resources?: { cpu?: string | number; memory?: string | number };
+  home?: { size?: string | number; preset?: string };
+  autonomy?: "full" | "restricted";
+  /** Credential names; their values come from `a12s up` or the credentials API. */
+  credentials?: string[];
+  drives?: Array<{ name: string; at: string; readOnly?: boolean }>;
+  egress?: { allow?: string[] };
+  /** `seccomp` is the profile JSON itself. */
+  security?: { seccomp?: Record<string, unknown> };
+  inbox?: { maxMessages?: number; maxBytes?: string; intro?: string };
+  power?: { sleepAfterIdle?: string; wakeOnMessage?: { from: string[]; maxWakesPerHour?: number } };
+  uses?: Array<string | { name: string; mcp?: boolean }>;
+  grants?: { send?: string[] };
+}
+
+/** A JSON merge patch of T: a key set to null is deleted. */
+export type MergePatch<T> = { [K in keyof T]?: T[K] | null };
+
+/** A Fleet as written: the defaults and each agent computer before the defaults are merged in. */
+export interface FleetSpec {
+  apiVersion: string;
+  kind: string;
+  metadata: { name: string };
+  egress?: { enforcement?: string; allowPrivate?: string[] };
+  defaults?: AgentComputerSpec;
+  drives?: Record<string, { size?: string | number; access: string }>;
+  agent_computers: Record<string, AgentComputerSpec>;
+  services?: Record<string, Record<string, unknown>>;
+}
+
+export interface Change {
+  op: "create" | "update" | "remove" | (string & {});
+  kind: "agentComputer" | "service" | (string & {});
+  name: string;
+  /** "idle" for an update that waits for a busy agent computer's next idle boundary. */
+  when: "now" | "idle" | (string & {});
+  /** The top-level spec fields that differ, for an update. */
+  fields?: string[];
+}
+
+export interface FleetResponse {
+  version: number;
+  fleet: FleetSpec | null;
+  /** What changed through the API since the last whole-Fleet write: `a12s up` from the file undoes it. */
+  drift: Change[];
+}
+
+export interface AgentComputerData {
+  name: string;
+  /** As written. */
+  spec: AgentComputerSpec;
+  /** With the Fleet's defaults merged in. */
+  effective: AgentComputerSpec;
+  status: ComputerStatus;
+}
+
+export interface AgentComputersResponse {
+  agentComputers: AgentComputerData[];
+}
 
 export interface Lock {
   a12s?: string;
@@ -35,16 +98,12 @@ export interface Lock {
 }
 
 export interface PutFleetRequest {
-  fleet: Fleet;
+  fleet: FleetSpec;
   lock?: Lock;
   /** Credential values by name, base64-encoded (Go []byte). Kept in the Controller's memory only. */
   credentials?: Record<string, string>;
   asleep?: boolean;
   refresh?: string[];
-  /** Home presets as base64 tar streams, keyed by their path in the Fleet. */
-  presets?: Record<string, string>;
-  /** security.seccomp profiles (JSON text), keyed by their path in the Fleet. */
-  seccomp?: Record<string, string>;
 }
 
 export interface ServiceChanges {
@@ -54,6 +113,10 @@ export interface ServiceChanges {
 }
 
 export interface PutFleetResponse {
+  /** The Fleet's version after the write; unchanged by a dry run or a write that changed nothing. */
+  version: number;
+  dryRun?: boolean;
+  changes: Change[];
   created: string[] | null;
   updated: string[] | null;
   staged: string[] | null;
@@ -62,6 +125,10 @@ export interface PutFleetResponse {
   errors?: Record<string, string>;
   warnings?: string[];
   services: ServiceChanges;
+  /** The written agent computer, after a PUT or PATCH of one. */
+  agentComputer?: AgentComputerData;
+  /** The written Service, after a PUT or PATCH of one. */
+  service?: ServiceStatus;
 }
 
 export interface LimitValue {
@@ -154,11 +221,15 @@ export interface ServiceStatus {
   stateDrive?: string;
   egressMode?: string;
   warnings?: string[];
+  /** The Service as written in the Fleet. */
+  spec?: Record<string, unknown>;
 }
 
 export interface StatusResponse {
   fleet: string;
   egressEnforcement: string;
+  agentComputers: ComputerStatus[];
+  /** @deprecated `agentComputers` under its old name. */
   computers: ComputerStatus[];
   orphanedDrives?: DriveRow[];
   credentialsLoaded: boolean;
@@ -402,9 +473,11 @@ export interface ApiErrorBody {
   details?: Record<string, string>;
 }
 
+export type TokenAction = "send" | "inbox" | "status" | "events" | "power" | "stop";
+
 export interface TokenRequest {
   name: string;
-  actions: Array<"send" | "inbox" | "status" | "events" | "power" | "stop">;
+  actions: TokenAction[];
   computers: string[];
 }
 

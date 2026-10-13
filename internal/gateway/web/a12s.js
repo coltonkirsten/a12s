@@ -52,6 +52,15 @@ var A12sError = class extends Error {
     this.details = body.details;
   }
 };
+var NotFound = class extends A12sError {
+  constructor(status, body) {
+    super(status, body);
+    this.name = "NotFound";
+  }
+};
+function apiError(status, body) {
+  return status === 404 ? new NotFound(status, body) : new A12sError(status, body);
+}
 var A12sGapError = class extends Error {
   after;
   data;
@@ -81,15 +90,16 @@ var A12sClient = class {
   headers(extra = {}) {
     return this.token ? { authorization: `Bearer ${this.token}`, ...extra } : extra;
   }
-  async request(method, path, body, signal) {
+  /** @internal */
+  async request(method, path, body, opts = {}) {
     const res = await this.fetchImpl(this.url + path, {
       method,
-      headers: this.headers(body === void 0 ? {} : { "content-type": "application/json" }),
+      headers: this.headers({ ...body === void 0 ? {} : { "content-type": "application/json" }, ...opts.headers }),
       body: body === void 0 ? void 0 : JSON.stringify(body),
-      signal
+      signal: opts.signal
     });
     const text = await res.text();
-    if (!res.ok) throw new A12sError(res.status, parseError(res.status, text));
+    if (!res.ok) throw apiError(res.status, parseError(res.status, text));
     return text ? JSON.parse(text) : void 0;
   }
   /** Every Computer and Service: phase, session, active Turn, inbox, power. */
@@ -97,8 +107,8 @@ var A12sClient = class {
     return this.request("GET", "/v1/status");
   }
   async computer(name) {
-    const c = (await this.status()).computers.find((x) => x.name === name);
-    if (!c) throw new A12sError(404, { code: "not_found", message: `no Computer ${name}` });
+    const c = (await this.status()).agentComputers.find((x) => x.name === name);
+    if (!c) throw new NotFound(404, { code: "not_found", message: `no Computer ${name}` });
     return c;
   }
   /**
@@ -108,7 +118,7 @@ var A12sClient = class {
   send(computer, msg) {
     const m = typeof msg === "string" ? { body: msg } : { ...msg };
     m.idempotencyKey ??= globalThis.crypto.randomUUID();
-    return this.request("POST", `/v1/computers/${enc(computer)}/inbox`, m);
+    return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox`, m);
   }
   /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends: what `a12s prompt` does. */
   async prompt(computer, body, opts = {}) {
@@ -135,8 +145,8 @@ var A12sClient = class {
     }
     return new EventStream((name, live, signal) => {
       const q = opts.turn ? `?turn=${enc(opts.turn)}` : "";
-      return this.stream(name, `/v1/computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
-    }, names ?? (async () => (await this.status()).computers.map((c) => c.name)), opts.signal);
+      return this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
+    }, names ?? (async () => (await this.status()).agentComputers.map((c) => c.name)), opts.signal);
   }
   /**
    * Finished Turns of one Computer, several or all, as they end: who sent the work (`messages`), what the agent said
@@ -151,27 +161,27 @@ var A12sClient = class {
     if (opts.bodies) q.set("bodies", "true");
     if (opts.after !== void 0) q.set("after", String(opts.after));
     const qs = q.toString();
-    return this.request("GET", `/v1/computers/${enc(computer)}/inbox${qs ? "?" + qs : ""}`);
+    return this.request("GET", `/v1/agent-computers/${enc(computer)}/inbox${qs ? "?" + qs : ""}`);
   }
   message(computer, id) {
-    return this.request("GET", `/v1/computers/${enc(computer)}/inbox/${enc(id)}`);
+    return this.request("GET", `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}`);
   }
   /** Withdraws a pending Message; a 409 A12sError names its state if it is too late. */
   withdraw(computer, id) {
-    return this.request("DELETE", `/v1/computers/${enc(computer)}/inbox/${enc(id)}`);
+    return this.request("DELETE", `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}`);
   }
   /** Interrupts a Turn (default: the active one). The Turn ends `interrupted`; nothing is replayed. */
   async stop(computer, turn) {
     const id = turn ?? (await this.computer(computer)).activeTurn;
-    if (id) await this.request("POST", `/v1/computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
+    if (id) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
   }
   /** Stops the Computer's processes and keeps its disks, session and inbox. */
   async sleep(computer) {
-    await this.request("POST", `/v1/computers/${enc(computer)}/power`, { state: "asleep" });
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "asleep" });
   }
   /** Starts a sleeping Computer; its session resumes on the next Turn. */
   async wake(computer) {
-    await this.request("POST", `/v1/computers/${enc(computer)}/power`, { state: "awake" });
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "awake" });
   }
   async services() {
     return (await this.request("GET", "/v1/services")).services ?? [];
@@ -190,7 +200,7 @@ var A12sClient = class {
   /** Waits until the Message is delivered and returns the Turn that carries it. */
   async deliveredIn(computer, id, signal) {
     while (!signal?.aborted) {
-      for await (const ev of this.stream(computer, `/v1/computers/${enc(computer)}/inbox/${enc(id)}/events`, void 0, {
+      for await (const ev of this.stream(computer, `/v1/agent-computers/${enc(computer)}/inbox/${enc(id)}/events`, void 0, {
         signal,
         once: true
       })) {
@@ -234,7 +244,7 @@ var A12sClient = class {
         continue;
       }
       if (!res.ok) {
-        const err = new A12sError(res.status, parseError(res.status, await res.text()));
+        const err = apiError(res.status, parseError(res.status, await res.text()));
         if (res.status !== 503 && res.status !== 502) throw err;
         opts.live?.();
         await sleep(opts.reconnectMs ?? 1e3, opts.signal);
@@ -502,6 +512,241 @@ function sleep(ms, signal) {
   });
 }
 
+// src/fleet.ts
+var enc2 = encodeURIComponent;
+var maxReplaceTries = 5;
+var Fleet = class _Fleet {
+  /** The lower-level client the handles use, for API calls that have no method here. */
+  client;
+  agentComputers;
+  services;
+  tokens;
+  /** No discovery: `url` and `token` as given, by default the page's own origin. */
+  constructor(opts = {}) {
+    this.client = new A12sClient(opts);
+    this.agentComputers = new AgentComputers(this.client);
+    this.services = new Services(this.client);
+    this.tokens = new Tokens(this.client);
+  }
+  /**
+   * In a browser: the Fleet behind the page's own origin, which is `a12s gateway` serving the page (no token
+   * needed). In Node: found like {@link connect} finds it. Pass `url` and `token` to reach anything else.
+   */
+  static async connect(opts = {}) {
+    return new _Fleet(opts);
+  }
+  get url() {
+    return this.client.url;
+  }
+  async get() {
+    const r = await this.client.request("GET", "/v1/fleet");
+    return { version: r.version, spec: r.fleet ?? emptySpec(), drift: r.drift ?? [] };
+  }
+  /**
+   * Reads the Fleet, lets `fn` change it (in place, or by returning a new spec) and writes it back only if nobody
+   * wrote in between; otherwise it reads again and retries, up to 5 times. `spec.defaults` is always present.
+   */
+  async replace(fn) {
+    for (let attempt = 1; ; attempt++) {
+      const cur = await this.get();
+      cur.spec.defaults ??= {};
+      const next = await fn(cur.spec) ?? cur.spec;
+      try {
+        await this.client.request("PUT", "/v1/fleet", { fleet: next }, {
+          headers: { "if-match": `"${cur.version}"` }
+        });
+      } catch (err) {
+        if (attempt < maxReplaceTries && err instanceof A12sError && err.code === "version_mismatch") continue;
+        throw err;
+      }
+      return this.get();
+    }
+  }
+  /** Live events of the named agent computers, or (no argument) all of them, merged. See {@link A12sClient.events}. */
+  events(agentComputers, opts = {}) {
+    return this.client.events(agentComputers, opts);
+  }
+  /** Finished Turns of the named agent computers, or all of them, as they end. */
+  turns(agentComputers, opts = {}) {
+    return this.client.turns(agentComputers, opts);
+  }
+  /** Every agent computer and Service: phase, session, active Turn, inbox, power. */
+  status() {
+    return this.client.status();
+  }
+};
+function emptySpec() {
+  return { apiVersion: "a12s.ai/v1alpha1", kind: "Fleet", metadata: { name: "" }, agent_computers: {} };
+}
+function writeHeaders(opts) {
+  return opts.replace ? {} : { "if-none-match": "*" };
+}
+var AgentComputers = class {
+  constructor(client) {
+    this.client = client;
+  }
+  /** Adds an agent computer to the Fleet and starts it. Fails with code `exists` if the name is taken. */
+  async create(name, spec = {}) {
+    const { replace, ...body } = spec;
+    const r = await this.client.request("PUT", `/v1/agent-computers/${enc2(name)}`, body, {
+      headers: writeHeaders({ replace })
+    });
+    return r.agentComputer ? new AgentComputer(this.client, r.agentComputer) : this.get(name);
+  }
+  /** Throws {@link NotFound} if there is none. */
+  async get(name) {
+    return new AgentComputer(this.client, await this.client.request("GET", `/v1/agent-computers/${enc2(name)}`));
+  }
+  async list() {
+    const r = await this.client.request("GET", "/v1/agent-computers");
+    return (r.agentComputers ?? []).map((d) => new AgentComputer(this.client, d));
+  }
+};
+var AgentComputer = class {
+  constructor(client, data) {
+    this.client = client;
+    this.name = data.name;
+    this.set(data);
+  }
+  name;
+  spec;
+  /** The spec with the Fleet's defaults merged in. */
+  effective;
+  status;
+  set(d) {
+    this.spec = d.spec;
+    this.effective = d.effective;
+    this.status = d.status;
+    return this;
+  }
+  get path() {
+    return `/v1/agent-computers/${enc2(this.name)}`;
+  }
+  async reload() {
+    return this.set(await this.client.request("GET", this.path));
+  }
+  /** Changes the spec: a key set to null goes back to the Fleet's default. A busy one picks it up when idle. */
+  async update(changes) {
+    const r = await this.client.request("PATCH", this.path, changes);
+    return r.agentComputer ? this.set(r.agentComputer) : this.reload();
+  }
+  /** Removes it from the Fleet and stops it; its drives are kept. */
+  async remove() {
+    await this.client.request("DELETE", this.path);
+  }
+  /** Sends a Message, waits for the Turn that delivers it and resolves when that Turn ends. */
+  prompt(text, opts = {}) {
+    return this.client.prompt(this.name, text, opts);
+  }
+  /** Puts a Message in the inbox and returns at once; it is delivered at the next idle moment. */
+  send(text, opts = {}) {
+    return this.client.send(this.name, { ...opts, body: text });
+  }
+  events(opts = {}) {
+    return this.client.events(this.name, opts);
+  }
+  turns(opts = {}) {
+    return this.client.turns(this.name, opts);
+  }
+  /** Stops its processes and keeps its disks, session and inbox. */
+  sleep() {
+    return this.client.sleep(this.name);
+  }
+  wake() {
+    return this.client.wake(this.name);
+  }
+  /** Interrupts a Turn (default: the active one). */
+  stop(turn) {
+    return this.client.stop(this.name, turn);
+  }
+  inbox(opts = {}) {
+    return this.client.inbox(this.name, opts);
+  }
+  message(id) {
+    return this.client.message(this.name, id);
+  }
+  /** Withdraws a pending Message; a 409 A12sError names its state if it is too late. */
+  withdraw(id) {
+    return this.client.withdraw(this.name, id);
+  }
+};
+var Services = class {
+  constructor(client) {
+    this.client = client;
+  }
+  /** Adds a Service to the Fleet. Fails with code `exists` if the name is taken. */
+  async create(name, spec = {}) {
+    const { replace, ...body } = spec;
+    const r = await this.client.request("PUT", `/v1/services/${enc2(name)}`, body, {
+      headers: writeHeaders({ replace })
+    });
+    return r.service ? new Service(this.client, r.service) : this.get(name);
+  }
+  /** Throws {@link NotFound} if there is none. */
+  async get(name) {
+    return new Service(this.client, await this.client.service(name));
+  }
+  async list() {
+    return (await this.client.services()).map((s) => new Service(this.client, s));
+  }
+};
+var Service = class {
+  constructor(client, status) {
+    this.client = client;
+    this.name = status.name;
+    this.status = status;
+  }
+  name;
+  status;
+  /** As written in the Fleet. */
+  get spec() {
+    return this.status.spec ?? {};
+  }
+  get path() {
+    return `/v1/services/${enc2(this.name)}`;
+  }
+  async reload() {
+    this.status = await this.client.service(this.name);
+    return this;
+  }
+  /** Changes the spec as a JSON merge patch: a key set to null is removed. */
+  async update(changes) {
+    const r = await this.client.request("PATCH", this.path, changes);
+    if (!r.service) return this.reload();
+    this.status = r.service;
+    return this;
+  }
+  /** Removes it from the Fleet and stops it; its state drive is kept. */
+  async remove() {
+    await this.client.request("DELETE", this.path);
+  }
+  sleep() {
+    return this.power("asleep");
+  }
+  wake() {
+    return this.power("awake");
+  }
+  async power(state) {
+    this.status = await this.client.request("POST", `${this.path}/power`, { state });
+    return this;
+  }
+};
+var Tokens = class {
+  constructor(client) {
+    this.client = client;
+  }
+  /** A scoped token for another program; owner only. The secret is in the result once. */
+  create(name, opts) {
+    return this.client.createToken({ name, actions: opts.actions, computers: opts.agentComputers ?? ["*"] });
+  }
+  async list() {
+    return (await this.client.request("GET", "/v1/tokens")).tokens ?? [];
+  }
+  async remove(name) {
+    await this.client.request("DELETE", `/v1/tokens/${enc2(name)}`);
+  }
+};
+
 // src/index.ts
 async function connect(opts = {}) {
   return new A12sClient(opts);
@@ -511,7 +756,14 @@ export {
   A12sError,
   A12sGapError,
   A12sStreamError,
+  AgentComputer,
+  AgentComputers,
   EventStream,
+  Fleet,
+  NotFound,
+  Service,
+  Services,
+  Tokens,
   TurnStream,
   connect
 };

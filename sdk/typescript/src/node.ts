@@ -4,9 +4,18 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { A12sClient, type A12sClientOptions } from "./client.js";
+import { Fleet as PageFleet } from "./fleet.js";
 
 export * from "./client.js";
+export * from "./fleet.js";
 export * from "./types.js";
+
+export class Fleet extends PageFleet {
+  /** A running Fleet, as its owner, found like {@link connect} finds it. */
+  static override async connect(opts: ConnectOptions = {}): Promise<Fleet> {
+    return new Fleet(await discover(opts));
+  }
+}
 
 export interface ConnectOptions extends A12sClientOptions {
   /** The Fleet's name (`metadata.name`). Default: found as described on {@link connect}. */
@@ -18,6 +27,8 @@ export interface ConnectOptions extends A12sClientOptions {
 }
 
 /**
+ * @deprecated Use `Fleet.connect()`, which finds the Fleet the same way. Kept for one release.
+ *
  * A client for a running Fleet, as its owner. It uses the first of:
  * 1. `url` (and `token`), or `$A12S_URL` (and `$A12S_TOKEN`);
  * 2. the Fleet named by `fleet`;
@@ -26,8 +37,12 @@ export interface ConnectOptions extends A12sClientOptions {
  * For 2–4 it reads `~/.a12s/<fleet>/controller.json`, which `a12s up` writes.
  */
 export async function connect(opts: ConnectOptions = {}): Promise<A12sClient> {
+  return new A12sClient(await discover(opts));
+}
+
+async function discover(opts: ConnectOptions): Promise<A12sClientOptions> {
   const url = opts.url ?? process.env.A12S_URL;
-  if (url) return new A12sClient({ url, token: opts.token ?? process.env.A12S_TOKEN, fetch: opts.fetch });
+  if (url) return { url, token: opts.token ?? process.env.A12S_TOKEN, fetch: opts.fetch };
   const home = join(opts.home ?? homedir(), ".a12s");
   const fleet = opts.fleet ?? (await fleetNameNearby(opts.cwd ?? process.cwd())) ?? (await onlyRunningFleet(home));
   const path = join(home, fleet, "controller.json");
@@ -37,7 +52,7 @@ export async function connect(opts: ConnectOptions = {}): Promise<A12sClient> {
   } catch (err) {
     throw new Error(`Fleet ${fleet} isn't running (no ${path}): run a12s up in its directory first`, { cause: err });
   }
-  return new A12sClient({ url: `http://127.0.0.1:${cf.port}`, token: cf.token, fetch: opts.fetch });
+  return { url: `http://127.0.0.1:${cf.port}`, token: cf.token, fetch: opts.fetch };
 }
 
 async function fleetNameNearby(cwd: string): Promise<string | undefined> {
