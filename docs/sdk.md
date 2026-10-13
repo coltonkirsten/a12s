@@ -283,17 +283,21 @@ Every change adds one to the version. The HTTP API also checks a write without m
 like an agent computer. `create` takes the [Service fields](services.md) of the Fleet file.
 
 `fleet.tokens.create(name, …)` makes a [scoped token](#least-privilege) for another program (owner only); the secret
-is in the result once. `list()` and `remove(name)` manage them.
+is in the result once. With a prefix it is a prefix token; with actions, a narrow one. `list()` and `remove(name)`
+manage them.
 
 ```ts
+const app = await fleet.tokens.create("bizapp", { prefix: "biz-" });
 const tok = await fleet.tokens.create("dashboard", { actions: ["status", "events"], agentComputers: ["lead"] });
 ```
 
 ```python
+app = fleet.tokens.create("bizapp", prefix="biz-")
 tok = fleet.tokens.create("dashboard", actions=["status", "events"], agent_computers=["lead"])
 ```
 
-`fleet.credentials` stores credential values in the Controller by name (owner only). `set(name, value)` stores one;
+`fleet.credentials` stores credential values in the Controller by name (the owner, or a prefix token for names
+inside its prefix). `set(name, value)` stores one;
 agent computers and Services that name it get the new value at once. `list()` returns a `CredentialInfo` per
 credential the Fleet names or the Controller stores: `name`, `set` and `usedBy` (`used_by`), never the value.
 `remove(name)` fails with `in_use` while an agent computer or Service names it. See
@@ -369,7 +373,8 @@ app.post("/ask", requireLogin, async (req, res) => res.json(await lead.send(req.
 ```
 
 The Controller's port is in `~/.a12s/<fleet>/controller.json`; Messages arrive `via="token:web"`, with your `sender`.
-A server that creates agent computers for its users needs the owner token; keep it on the server.
+A server that creates agent computers for its users uses a prefix token
+(`a12s token create web --prefix web-`) and names them `web-…`; keep it on the server.
 
 With a bundler, `npm install @coltonkirsten/a12s` and `import { Fleet } from "@coltonkirsten/a12s"` work the same
 way: in a browser, `Fleet.connect()` talks to the page's own origin.
@@ -411,12 +416,19 @@ with `onGap: "throw"`, `A12sGapError`. A failed Turn is not an error: `prompt()`
 
 ## Least privilege
 
-The owner token can do anything. Give another program a scoped token instead:
+The owner token can do anything. Give another program a scoped token instead, and connect with
+`Fleet.connect({ url, token })` / `a12s.Fleet(url=…, token=…)`:
 
 ```sh
-a12s token create dashboard --actions status,events --computers '*'
+a12s token create bizapp --prefix biz-                               # an app's own lane
+a12s token create dashboard --actions status,events --agent-computers '*'   # read-only
 ```
 
-Then `Fleet.connect({ url, token })` / `a12s.Fleet(url=…, token=…)`. Actions: `send`, `inbox`, `status`, `events`,
-`power`, `stop`. A token with `send` sees only its own Messages. Creating, changing and removing agent computers,
-Services and tokens, and `fleet.get()` and `fleet.replace()`, need the owner token.
+- A **prefix token** may do everything the owner can with agent computers, Services and credentials whose names start
+  with its prefix: `fleet.agentComputers.create("biz-a", …)`, send, events, sleep, remove. Lists show only those
+  names; anything outside, or a spec whose `grants.send`, `uses` or drives (also from `defaults`) point outside,
+  raises `out_of_prefix`. It can't call `fleet.get()`, `fleet.replace()` or `fleet.tokens`. See
+  [Security: Tokens](security.md#tokens).
+- A **narrow token** may make only its actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on its agent
+  computers. A token with `send` sees only its own Messages. Creating, changing and removing agent computers, Services
+  and tokens, and `fleet.get()` and `fleet.replace()`, need the owner token or a prefix token where allowed.

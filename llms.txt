@@ -167,7 +167,8 @@ a12s inbox <c> [--bodies]             # pending Messages; inbox resume <c> relea
 a12s stop <c> | sleep <c> | wake <c>
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
-a12s token create <name> --actions send,events,status,inbox,power,stop --computers c1,c2|'*'   # prints it once
+a12s token create <name> --prefix biz- # prints it once: owner powers on biz-* names, nothing outside
+a12s token create <name> --actions send,events,status,inbox,power,stop --agent-computers c1,c2|'*'   # narrow
 a12s creds set <name>                 # see Setup
 a12s doctor                           # every check, with its fix
 a12s down                             # stop all, keep disks;  down --purge deletes them (asks)
@@ -226,8 +227,9 @@ await fleet.status();                               // every agent computer and 
 
 const clock = await fleet.services.get("clock");    // fleet.services: create, get, list
 await clock.sleep(); await clock.wake();            // Service: reload, update, sleep, wake, remove
+const app = await fleet.tokens.create("bizapp", { prefix: "biz-" });  // owner only; app.secret shown once
 const tok = await fleet.tokens.create("web", { actions: ["send", "status"], agentComputers: ["lead"] });
-tok.secret;                                         // shown once; fleet.tokens.list(), remove(name)
+tok.secret;                                         // fleet.tokens.list(), remove(name)
 
 const { version, spec, drift } = await fleet.get(); // the whole Fleet as written (FleetSpec)
 await fleet.credentials.set("stripe", key);         // agent computers using it get it at once; values never read back
@@ -278,6 +280,7 @@ lead.inbox(bodies=True); lead.message(m.id); lead.withdraw(m.id); lead.stop(); l
 coder.remove()                        # stops and removes it; its drives are kept
 fleet.status().agent_computers        # every agent computer: phase, inbox, power
 fleet.services.get("clock").sleep()   # Service: reload, update, sleep, wake, remove
+app = fleet.tokens.create("bizapp", prefix="biz-")   # owner only; app.secret once
 tok = fleet.tokens.create("web", actions=["send", "status"], agent_computers=["lead"])   # tok.secret once
 state = fleet.get()                   # state.version, state.spec (FleetSpec, a dict), state.drift
 fleet.credentials.set("stripe", key)  # agent computers using it get it at once; values are never read back
@@ -490,7 +493,8 @@ the dev server's own port: the key becomes a cookie that /v1/ and /a12s.js need.
 token: Fleet.connect({ url: "http://127.0.0.1:7012", token: key }). The page may use status, events, send and
 inbox on every agent computer, not create or change them; narrow with `--allow status,events` and `--computers worker`. Messages from the page arrive
 via token:gateway-7012. Loopback only; to serve other people, run your own server with login that calls a12s with a
-scoped token (`a12s token create web --actions send,status --computers lead`).
+scoped token: narrow (`a12s token create web --actions send,status --agent-computers lead`) or, if it creates
+agent computers, a prefix token (`--prefix web-`).
 
 ```html
 <!-- web/index.html: live events of worker and a send box, no build step -->
@@ -527,9 +531,9 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
 - Messages: POST /v1/agent-computers/{c}/inbox {"body", "idempotencyKey", "sender"?, "metadata"?, "fresh"?,
   "expires"? (seconds), "replaceKey"?} → {id, state, …}; GET /v1/status; GET /v1/agent-computers/{c}/events (SSE;
   id = seq; Last-Event-ID resumes; `event: head` {seq} marks live; `event: gap` = events lost).
-- One agent computer (owner token): PUT /v1/agent-computers/{c} with its spec as JSON (fleet.yaml's fields; seccomp
-  is the profile object) creates or replaces it; add `If-None-Match: *` to only create (409 exists if taken).
-  PATCH is a JSON merge patch (null removes a key, so it falls back to the default); DELETE removes it, drives kept.
+- One agent computer (owner or prefix token): PUT /v1/agent-computers/{c} with its spec as JSON (fleet.yaml's
+  fields; seccomp is the profile object) creates or replaces it; add `If-None-Match: *` to only create (409 exists
+  if taken). PATCH is a JSON merge patch (null removes a key, so it falls back to the default); DELETE removes it, drives kept.
   GET /v1/agent-computers/{c} → {name, spec, effective, status}; GET /v1/agent-computers lists them. The same
   PUT/PATCH/DELETE exist on /v1/services/{s}. These writes change only that one; last write wins.
 - The whole Fleet: GET /v1/fleet → {version, fleet, drift} with ETag "<version>". PUT /v1/fleet {"fleet": …} with
@@ -538,9 +542,17 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?}], warnings, errors, …}. A
   missing harness or image (in the spec and in defaults) is 400 missing_field; a credential with no value is 400
   missing_credential.
-- Credentials (owner token): GET /v1/credentials → {credentials: [{name, set, usedBy}]} (names, never values);
-  PUT /v1/credentials/{name} {"value": "…"} stores it and updates the agent computers and Services using it;
+- Credentials (owner or prefix token): GET /v1/credentials → {credentials: [{name, set, usedBy}]} (names, never
+  values); PUT /v1/credentials/{name} {"value": "…"} stores it and updates the agent computers and Services using it;
   DELETE /v1/credentials/{name} is 409 in_use while one uses it, 404 if none is stored.
+- Tokens (owner token): POST /v1/tokens {"name", "prefix"} or {"name", "actions", "computers"} → {name, …, secret}
+  (secret shown once); GET /v1/tokens; DELETE /v1/tokens/{name}.
+- A prefix token may do everything the owner can on agent computers, Services and credentials whose names start with
+  its prefix (create/get/update/remove, send, inbox, events, power, stop, shell, Service logs and login). Their
+  grants.send, uses and drives, defaults included, must be inside the prefix too (a default grant outside: override
+  it with the agent computer's own grants); its specs may name any credential. Reads list only names inside it.
+  Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), /v1/apply, drives and tokens are 403 forbidden.
+  Egress, image, seccomp and resources are its call: trust it like the owner for its agent computers.
 - The old /v1/computers/... paths still work for one release.
 
 ## API surface

@@ -35,8 +35,9 @@ agent_computers:
 
 - **It replaces only the seccomp filter.** The agent computer keeps `no-new-privileges`, the same capabilities, the
   read-only root filesystem and everything else above. There is no privileged mode and no capability option.
-- **Only the Fleet's owner sets it.** It comes from `fleet.yaml` or from an owner-token write through the SDK or the
-  HTTP API, never from an image label or file, so a pulled image can't loosen its own sandbox.
+- **Only the Fleet's owner, or a prefix token for its own agent computers, sets it.** It comes from `fleet.yaml` or
+  from a write through the SDK or the HTTP API, never from an image label or file, so a pulled image can't loosen its
+  own sandbox.
 - **It travels inline.** In the Fleet file it is a path relative to the file (or the profile itself, as a mapping);
   `a12s up` reads the file and sends the profile's JSON. Through the SDK and the HTTP API, `security.seccomp` is the
   profile's JSON object; a path there is refused.
@@ -84,10 +85,37 @@ Every agent computer's and Service's only route out is the Controller's validati
 - The owner API listens on `127.0.0.1` with a random bearer token in `~/.a12s/<fleet>/controller.json` (0600).
 - `a12s gateway` listens on `127.0.0.1`, answers only loopback host names, and needs a key made for each run (a
   cookie after the printed link is opened, or a bearer token) before it forwards `/v1/` with its scoped token.
-  Scoped tokens carry an allowlist of actions and agent computers. Changing the Fleet (creating, changing or
-  removing agent computers and Services, `PUT /v1/fleet`) takes the owner token.
+- Other programs get one of the [tokens](#tokens) below instead of the owner token.
 - Inside the Fleet, Services and agent computers call the Controller with their certificates and can do only what their
   `grants` say. Messages carry `via`, the authenticated principal, which no caller can set.
+
+## Tokens
+
+Three kinds of bearer token call the owner API:
+
+- **The owner token** (the CLI, the console, `~/.a12s/<fleet>/controller.json`) may do everything.
+- **A prefix token** (`a12s token create bizapp --prefix biz-`) gives an app its own lane. For agent computers,
+  Services and credentials whose names start with `biz-` it may do everything the owner can: create, read, change,
+  remove, send, read inboxes and events, sleep, wake, stop, shell, logs and Service login. Outside the prefix it
+  sees and does nothing:
+  - Reads are filtered: status, the agent computer and Service lists and the credential list show only names inside
+    the prefix (status drops Fleet-wide warnings and orphans). Naming anything outside is `403 out_of_prefix`.
+  - What its agent computers and Services point at must be inside the prefix too: `grants.send`, `uses` and
+    `drives`, including what they inherit from `defaults`. A default that points outside makes the write fail with
+    `out_of_prefix`; the agent computer's own value (`grants: {send: []}`) overrides it.
+  - It can't read or change the whole Fleet (`GET`/`PUT /v1/fleet`, `/v1/apply`), so not `defaults`, drives or
+    top-level egress, and it can't remove drives or create, list or remove tokens.
+  - Its specs may name any credential, so its agent computers can use the owner's keys without seeing them. It may
+    set and remove only credentials whose names start with its prefix.
+- **A narrow token** (`a12s token create dash --actions status,events --agent-computers a,b`) may make only those
+  actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on those agent computers (or `*`). It can't change the
+  Fleet. Use it for read-only dashboards and webhooks; `a12s gateway` uses one.
+
+There is no ceiling inside a prefix token's lane: egress (`allow: ["*"]` included), image, seccomp profile and
+resources are its call, and its agent computers can use any stored credential. A cap on those would not hold anyway,
+since an agent computer with the owner's API key and open egress can send that key anywhere. Treat a prefix token like
+the owner token for the agent computers it creates, and give it only to programs you trust that far. What it can't do
+is reach, read or change anything outside its prefix.
 
 ## Secrets
 

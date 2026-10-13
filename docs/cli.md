@@ -101,7 +101,8 @@ Commit the result, check it with `a12s diff`, and run `a12s up`: the file it sen
 | Command | What it does |
 |---|---|
 | `a12s creds set <name>` | Read a value from stdin (not echoed), store it at `~/.a12s/<fleet>/<name>` (0600) and bind it in the Fleet's bindings file. If the Fleet's Controller is running, also set it there: agent computers and Services that use it get it at once. Otherwise the next `a12s up` sends it. Run it in the Fleet's directory (or with `-F`). `down --purge` keeps these files. |
-| `a12s token create <name> --actions a,b --computers c,d` | Create a scoped API token for those agent computers (or `'*'`); it's printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
+| `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-`, and nothing outside. See [Security: Tokens](security.md#tokens). |
+| `a12s token create <name> --actions a,b --agent-computers c,d` | Create a narrow token for those agent computers (or `'*'`), printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. `--computers` is the old name of `--agent-computers`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
 | `a12s drive ls` | Drives, sizes, what's attached, orphans. |
 | `a12s drive rm <name> [--yes]` | Destroy one drive (asks first). With `down --purge`, the only commands that destroy data. |

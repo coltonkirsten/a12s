@@ -55,7 +55,7 @@ that needs an interactive sign-in uses [`a12s service login`](services.md#creden
 ## From code and the API
 
 The SDKs and the API set, list and remove credentials on the running Fleet by name. These calls take the owner
-token.
+token, or a [prefix token](security.md#tokens) for names that start with its prefix.
 
 ```ts
 await fleet.credentials.set("stripe-test", process.env.STRIPE_KEY!);
