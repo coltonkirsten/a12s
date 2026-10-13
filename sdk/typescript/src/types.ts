@@ -15,6 +15,13 @@ export interface Failure {
   retryable: boolean;
 }
 
+/** Credentials an agent computer or Service waits for, in Provisioning; it starts by itself once they are set. */
+export interface Waiting {
+  credentials: string[];
+  /** The commands that set them, e.g. "a12s creds set dbname". */
+  fix: string;
+}
+
 export interface Harness {
   kind: string;
   version: string;
@@ -178,6 +185,7 @@ export interface ComputerStatus {
   name: string;
   phase: Phase;
   error?: Failure;
+  waiting?: Waiting;
   resumePending?: boolean;
   session?: string;
   activeTurn?: string;
@@ -216,6 +224,7 @@ export interface ServiceStatus {
   name: string;
   phase: Phase;
   error?: Failure;
+  waiting?: Waiting;
   image: string;
   pin?: string;
   generation: number;
@@ -402,6 +411,7 @@ export interface FleetChangedData {
 export interface PhaseData {
   phase: Phase;
   error?: Failure;
+  waiting?: Waiting;
 }
 
 /** A Service's phase, health or restart count changed. */
@@ -412,6 +422,7 @@ export interface ServicePhaseData {
   health?: string;
   restarts: number;
   error?: Failure;
+  waiting?: Waiting;
 }
 
 export interface ToolStartedData {

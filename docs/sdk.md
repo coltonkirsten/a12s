@@ -87,8 +87,10 @@ coder = fleet.agent_computers.create(
 - `security.seccomp` is the profile's JSON object itself (in the Fleet file it is a path).
 - A name that is taken fails with `A12sError` code `exists`; pass `replace: true` (`replace=True`) to overwrite it.
 - A field that neither the spec nor `defaults` sets (harness, image) fails with `missing_field`. A credential the
-  Controller holds no value for fails with `missing_credential`. `a12s up` sends every credential bound in the
-  bindings file, and [`fleet.credentials.set`](#services-tokens-and-credentials) sets one from code.
+  Controller holds no value for doesn't fail: `create` returns with a warning (`console.warn`, `A12sWarning`) and the
+  agent computer waits in `Provisioning` (`status.waiting`: `{credentials, fix}`) until the value is set, then
+  starts. `a12s up` sends every credential bound in the bindings file, and
+  [`fleet.credentials.set`](#services-tokens-and-credentials) sets one from code.
 - A grant may name an agent computer that doesn't exist yet (the write warns), so two that send to each other can be
   created one after the other.
 

@@ -68,8 +68,9 @@ type FleetChangedData struct {
 
 // PhaseData: an agent computer's phase changed.
 type PhaseData struct {
-	Phase Phase    `json:"phase"`
-	Error *Failure `json:"error,omitempty"`
+	Phase   Phase    `json:"phase"`
+	Error   *Failure `json:"error,omitempty"`
+	Waiting *Waiting `json:"waiting,omitempty"`
 }
 
 // ServicePhaseData: a Service's phase, health or restart count changed.
@@ -79,6 +80,7 @@ type ServicePhaseData struct {
 	Health   string   `json:"health,omitempty"`
 	Restarts int      `json:"restarts"`
 	Error    *Failure `json:"error,omitempty"`
+	Waiting  *Waiting `json:"waiting,omitempty"`
 }
 
 // SSEGap is sent instead of events when Last-Event-ID is unknown or ahead of

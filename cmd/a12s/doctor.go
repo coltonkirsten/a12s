@@ -177,6 +177,10 @@ func doctor(ctx context.Context, g *globals) []check {
 		ok("egress proxy enforcing")
 	}
 	for _, cs := range st.AgentComputers {
+		if cs.Waiting != nil {
+			warn(cs.Waiting.Fix, "%s waits: %s", cs.Name, cs.Waiting)
+			continue
+		}
 		switch cs.Phase {
 		case api.PhaseError:
 			reason := ""
@@ -191,6 +195,10 @@ func doctor(ctx context.Context, g *globals) []check {
 		}
 	}
 	for _, ss := range st.Services {
+		if ss.Waiting != nil {
+			warn(ss.Waiting.Fix, "service %s waits: %s", ss.Name, ss.Waiting)
+			continue
+		}
 		switch ss.Phase {
 		case api.PhaseReady, api.PhaseAsleep:
 			ok("service %s %s", ss.Name, ss.Phase)

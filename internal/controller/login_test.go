@@ -20,7 +20,7 @@ func TestServiceLogin(t *testing.T) {
 		f.Services["clock"] = s
 	})
 	h.up(f, nil, false)
-	h.waitService("clock", api.PhaseError)
+	waitFor(t, func() bool { return h.c.serviceStatus("clock").Waiting != nil })
 	l, err := h.c.StartLogin(context.Background(), "clock")
 	if err != nil {
 		t.Fatal(err)

@@ -152,7 +152,8 @@ credentials:
 The CLI reads the bindings on the host and sends the values to the Controller with `up` (every credential the file
 binds, so agent computers created from code can name them too) and `wake`. `a12s creds set <name>` reads a value
 from stdin, stores it at `~/.a12s/<fleet>/<name>` (0600), binds it for you and, when the Fleet's Controller is
-running, sets it there too.
+running, sets it there too. A credential set nowhere doesn't fail `up`: what names it waits, and starts once it is set
+([Credentials](credentials.md#from-code-and-the-api)).
 
 ## fleet.lock
 

@@ -222,31 +222,37 @@ func TestServiceAdmission(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "services.pg") || !strings.Contains(err.Error(), "/var/lib/postgresql/data") || !strings.Contains(err.Error(), "fix:") {
 		t.Fatalf("uncovered volume: %v", err)
 	}
-	// A static credential with no material is refused at admission...
+	// A credential with no value leaves only that Service waiting, with the command that sets it...
 	f = withServices(t, h.d, func(f *fleet.Fleet) {
 		s := f.Services["clock"]
 		s.Credentials = []string{"postgres"}
 		f.Services["clock"] = s
 	})
-	_, err = h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
-	if err == nil || !strings.Contains(err.Error(), "services.clock: ") || !strings.Contains(err.Error(), "postgres") || !strings.Contains(err.Error(), "fix: a12s creds set postgres") {
-		t.Fatalf("missing credential: %v", err)
+	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
+	if err != nil || len(res.Errors) > 0 || !slices.Contains(res.Warnings, "services.clock: credential postgres has no value yet; it starts when you set it (a12s creds set postgres)") {
+		t.Fatalf("missing credential: %v %+v", err, res)
 	}
-	// ...but one the Service's own login produces leaves only it waiting.
+	if s := h.c.serviceStatus("clock"); s.Phase != api.PhaseProvisioning || s.Waiting == nil || s.Waiting.Fix != "a12s creds set postgres" {
+		t.Fatalf("clock = %+v", s)
+	}
+	// ...and one the Service's own login produces names the login.
 	f = withServices(t, h.d, func(f *fleet.Fleet) {
 		s := f.Services["clock"]
 		s.Credentials = []string{"gh-oauth"}
 		s.Manifest = &fleet.ServiceManifest{Login: &fleet.ServiceLogin{Command: []string{"login"}, Produces: "gh-oauth"}}
 		f.Services["clock"] = s
 	})
-	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
+	res, err = h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	if err != nil || len(res.Errors) > 0 {
 		t.Fatalf("login credential: %v %+v", err, res.Errors)
 	}
-	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "fix: a12s service login clock") }) {
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "(a12s service login clock, then a12s up)") }) {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
-	h.waitService("clock", api.PhaseError)
+	waitFor(t, func() bool {
+		w := h.c.serviceStatus("clock").Waiting
+		return w != nil && w.Fix == "a12s service login clock, then a12s up"
+	})
 	h.waitPhase("scout", api.PhaseReady) // the rest of the Fleet runs
 }
 

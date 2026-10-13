@@ -13,6 +13,12 @@ export const statusResponse: T.StatusResponse = {
         "reason": "reason",
         "retryable": true
       },
+      "waiting": {
+        "credentials": [
+          "credentials"
+        ],
+        "fix": "fix"
+      },
       "resumePending": true,
       "session": "session",
       "activeTurn": "activeTurn",
@@ -91,6 +97,12 @@ export const statusResponse: T.StatusResponse = {
       "error": {
         "reason": "reason",
         "retryable": true
+      },
+      "waiting": {
+        "credentials": [
+          "credentials"
+        ],
+        "fix": "fix"
       },
       "resumePending": true,
       "session": "session",
@@ -221,6 +233,12 @@ export const statusResponse: T.StatusResponse = {
       "error": {
         "reason": "reason",
         "retryable": true
+      },
+      "waiting": {
+        "credentials": [
+          "credentials"
+        ],
+        "fix": "fix"
       },
       "image": "image",
       "pin": "pin",
@@ -364,6 +382,12 @@ export const putFleetResponse: T.PutFleetResponse = {
         "reason": "reason",
         "retryable": true
       },
+      "waiting": {
+        "credentials": [
+          "credentials"
+        ],
+        "fix": "fix"
+      },
       "resumePending": true,
       "session": "session",
       "activeTurn": "activeTurn",
@@ -441,6 +465,12 @@ export const putFleetResponse: T.PutFleetResponse = {
     "error": {
       "reason": "reason",
       "retryable": true
+    },
+    "waiting": {
+      "credentials": [
+        "credentials"
+      ],
+      "fix": "fix"
     },
     "image": "image",
     "pin": "pin",
@@ -680,6 +710,12 @@ export const agentComputersResponse: T.AgentComputersResponse = {
           "reason": "reason",
           "retryable": true
         },
+        "waiting": {
+          "credentials": [
+            "credentials"
+          ],
+          "fix": "fix"
+        },
         "resumePending": true,
         "session": "session",
         "activeTurn": "activeTurn",
@@ -902,6 +938,12 @@ export const phaseData: T.PhaseData = {
   "error": {
     "reason": "reason",
     "retryable": true
+  },
+  "waiting": {
+    "credentials": [
+      "credentials"
+    ],
+    "fix": "fix"
   }
 };
 
@@ -917,6 +959,12 @@ export const servicePhaseData: T.ServicePhaseData = {
   "error": {
     "reason": "reason",
     "retryable": true
+  },
+  "waiting": {
+    "credentials": [
+      "credentials"
+    ],
+    "fix": "fix"
   }
 };
 
@@ -1113,6 +1161,12 @@ export const servicesResponse: { services: T.ServiceStatus[] } = {
       "error": {
         "reason": "reason",
         "retryable": true
+      },
+      "waiting": {
+        "credentials": [
+          "credentials"
+        ],
+        "fix": "fix"
       },
       "image": "image",
       "pin": "pin",

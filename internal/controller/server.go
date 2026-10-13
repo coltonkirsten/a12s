@@ -215,10 +215,15 @@ func (c *Controller) awake(name string) (computerdClient, error) {
 	if known {
 		_, known = c.state.Fleet.Computers[name]
 	}
-	phase := c.rtLocked(name).phase
+	r := c.rtLocked(name)
+	phase, waiting := r.phase, r.waiting
 	c.mu.Unlock()
 	if !known {
 		return nil, errorf(http.StatusNotFound, api.ErrNotFound, "no computer %q in the Fleet", name)
+	}
+	if waiting != nil {
+		return nil, &httpError{status: http.StatusServiceUnavailable, body: api.Error{Code: api.ErrAsleep,
+			Message: fmt.Sprintf("%s is %s: %s", name, phase, waiting), Fix: waiting.Fix}}
 	}
 	if phase != api.PhaseReady && phase != api.PhaseBusy {
 		return nil, errorf(http.StatusServiceUnavailable, api.ErrAsleep, "%s is %s", name, phase)
@@ -365,7 +370,8 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 			needCreds = needCreds || len(comp.Credentials) > 0
 		}
 	}
-	res.CredentialsLoaded = len(c.creds) > 0 || !needCreds
+	// Only a memory-only Controller loses its values on a restart; a credential never set shows as waiting instead.
+	res.CredentialsLoaded = len(c.creds) > 0 || !needCreds || !c.cfg.MemoryOnlyCredentials
 	unenforced := false // in any Computer's active generation
 	for _, rec := range c.state.Computers {
 		unenforced = unenforced || rec.Active.Unenforced
@@ -464,7 +470,7 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 		}
 	}
 	r := c.rtLocked(name)
-	cs.Phase, cs.Error, cs.ActiveTurn = r.phase, r.failure, r.activeTurn
+	cs.Phase, cs.Error, cs.Waiting, cs.ActiveTurn = r.phase, r.failure, r.waiting, r.activeTurn
 	c.mu.Unlock()
 	defer func() { out.Power = c.powerStatus(ctx, name, out.Phase) }()
 

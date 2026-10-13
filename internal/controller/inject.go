@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/coltonkirsten/a12s/internal/api"
 )
 
 const (
@@ -60,7 +62,7 @@ func (c *Controller) inject(ctx context.Context, name string, withCert bool) err
 	case !ok || rec == nil:
 		return fmt.Errorf("inject %s: not in the Fleet", name)
 	case len(missing) > 0:
-		return &credentialsMissing{names: missing}
+		return &credentialsMissing{credentialWait(missing, "", "")}
 	case err != nil:
 		return err
 	}
@@ -114,8 +116,27 @@ func missingCredentials(names []string, have map[string][]byte) []string {
 	return missing
 }
 
-type credentialsMissing struct{ names []string }
+// credentialsMissing is not a failure: the agent computer or Service waits for the values.
+type credentialsMissing struct{ waiting *api.Waiting }
 
-func (e *credentialsMissing) Error() string {
-	return "credentials missing (" + strings.Join(e.names, ", ") + "), run a12s up"
+func (e *credentialsMissing) Error() string { return e.waiting.String() }
+
+// credentialWait says how to set each missing credential: the Service login that produces one, else a12s creds set.
+func credentialWait(missing []string, service, produces string) *api.Waiting {
+	var fixes []string
+	for _, n := range missing {
+		if n == produces {
+			fixes = append(fixes, "a12s service login "+service+", then a12s up")
+		} else {
+			fixes = append(fixes, "a12s creds set "+n)
+		}
+	}
+	return &api.Waiting{Credentials: slices.Clone(missing), Fix: strings.Join(fixes, "; ")}
+}
+
+func sameWaiting(a, b *api.Waiting) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Fix == b.Fix && slices.Equal(a.Credentials, b.Credentials)
 }

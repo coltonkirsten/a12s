@@ -58,7 +58,8 @@ computer's only route out is the Controller's egress proxy. See [Architecture](a
 ## Lifecycle
 
 An agent computer moves through `Provisioning → Starting → Ready ⇄ Busy → Stopping → Asleep`, plus `Error`, which carries a
-reason.
+reason. One that names a credential with no value yet stays in `Provisioning` with `waiting` (the credentials and the
+fix) and starts once they are set.
 
 **Sleep** closes admission, interrupts the active Turn (it ends `interrupted`), allows a short flush and stops the
 container. An asleep agent computer uses no CPU or RAM.
@@ -125,7 +126,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
 
 The fleet-wide stream (`GET /v1/events`) adds two events the Controller makes: `fleet.changed`
-`{version, by, names}` when a write changes the Fleet, and `agent_computer.phase` `{phase, error?}` when an agent
+`{version, by, names}` when a write changes the Fleet, and `agent_computer.phase` `{phase, error?, waiting?}` when an agent
 computer's phase changes.
 
 The SDKs type these ([SDK](sdk.md)); `turns()` folds them into one record per Turn. The Controller keeps the last 200

@@ -20,6 +20,7 @@ import (
 type runtime struct {
 	phase         api.Phase
 	failure       *api.Failure
+	waiting       *api.Waiting
 	activeTurn    string
 	resumePending bool
 	// transition is set while the Controller itself stops, stages or
@@ -100,25 +101,41 @@ func (c *Controller) setPhase(name string, phase api.Phase, failure *api.Failure
 	c.setPhaseLocked(name, phase, failure)
 }
 
-// setPhaseLocked also tells GET /v1/events; the hub has its own lock and never blocks.
 func (c *Controller) setPhaseLocked(name string, phase api.Phase, failure *api.Failure) {
+	c.setStateLocked(name, phase, failure, nil)
+}
+
+// setStateLocked also tells GET /v1/events; the hub has its own lock and never blocks.
+func (c *Controller) setStateLocked(name string, phase api.Phase, failure *api.Failure, waiting *api.Waiting) {
 	r := c.rtLocked(name)
-	if r.phase == phase && (failure == nil) == (r.failure == nil) && (failure == nil || *failure == *r.failure) {
+	if r.phase == phase && (failure == nil) == (r.failure == nil) && (failure == nil || *failure == *r.failure) &&
+		sameWaiting(waiting, r.waiting) {
 		return
 	}
 	switch {
 	case failure != nil:
 		c.logf("%s: %s -> Error: %s (retryable: %v)", name, r.phase, failure.Reason, failure.Retryable)
+	case waiting != nil:
+		c.logf("%s: %s -> %s: %s", name, r.phase, phase, waiting)
 	default:
 		c.logf("%s: %s -> %s", name, r.phase, phase)
 	}
-	r.phase, r.failure = phase, failure
+	r.phase, r.failure, r.waiting = phase, failure, waiting
 	if phase != api.PhaseBusy {
 		r.activeTurn = ""
 	}
 	if c.hub != nil {
-		c.publishControllerEvent(name, api.EventPhase, api.PhaseData{Phase: phase, Error: failure}, nil, nil)
+		c.publishControllerEvent(name, api.EventPhase, api.PhaseData{Phase: phase, Error: failure, Waiting: waiting}, nil, nil)
 	}
+}
+
+// waitForCredentials leaves the Computer stopped in Provisioning; setting the credentials starts it.
+func (c *Controller) waitForCredentials(name string, missing []string) error {
+	w := credentialWait(missing, "", "")
+	c.mu.Lock()
+	c.setStateLocked(name, api.PhaseProvisioning, nil, w)
+	c.mu.Unlock()
+	return &credentialsMissing{w}
 }
 
 func (c *Controller) fail(name string, err error, retryable bool) error {
@@ -164,15 +181,15 @@ func (c *Controller) observeOne(ctx context.Context, name string) (driver.Comput
 }
 
 func (c *Controller) start(ctx context.Context, name string) error {
-	c.setPhase(name, api.PhaseStarting, nil)
 	c.mu.Lock()
 	comp := c.state.Fleet.Computers[name]
 	gen := c.state.Computers[name].Generation
 	missing := missingCredentials(comp.Credentials, c.creds)
 	c.mu.Unlock()
 	if len(missing) > 0 {
-		return c.fail(name, &credentialsMissing{names: missing}, true)
+		return c.waitForCredentials(name, missing)
 	}
+	c.setPhase(name, api.PhaseStarting, nil)
 	if err := c.verifyAddr(ctx, name); err != nil {
 		return c.fail(name, err, true)
 	}

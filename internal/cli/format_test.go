@@ -41,6 +41,8 @@ func TestWriteStatus(t *testing.T) {
 			{Name: "builder", Phase: api.PhaseBusy, Session: "2f00", ActiveTurn: "t_41", Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, HomeSize: gi, Drives: []string{"a12s-repo"},
 				Warnings: []string{"resume failed"}},
 			{Name: "tester", Phase: api.PhaseError, ResumePending: true, Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"}, Error: &api.Failure{Reason: "image missing", Retryable: true}, EgressMode: api.EgressAllowAll},
+			{Name: "job-1", Phase: api.PhaseProvisioning, Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"},
+				EgressMode: api.EgressEnforced, Waiting: &api.Waiting{Credentials: []string{"dbname"}, Fix: "a12s creds set dbname"}},
 		},
 		OrphanedDrives: []api.DriveRow{{Name: "ux-old", Kind: api.DriveWork}},
 	}
@@ -67,7 +69,11 @@ func TestWriteStatus(t *testing.T) {
 	if r := row(out, "scout"); strings.Contains(r, "EGRESS") {
 		t.Errorf("enforced row marked %q", r)
 	}
-	for _, w := range []string{"orphaned drive ux-old", "builder: resume failed", "tester: error: image missing"} {
+	if r := row(out, "job-1"); !strings.Contains(r, "Provisioning (waiting for dbname)") {
+		t.Errorf("job-1 row %q", r)
+	}
+	for _, w := range []string{"orphaned drive ux-old", "builder: resume failed", "tester: error: image missing",
+		"job-1: credential dbname has no value yet; it starts when you set it (a12s creds set dbname)"} {
 		if !strings.Contains(out, "warning: "+w) {
 			t.Errorf("no warning %q:\n%s", w, out)
 		}

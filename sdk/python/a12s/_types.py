@@ -14,6 +14,14 @@ class Failure:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class Waiting:
+    """Credentials an agent computer or Service waits for, in Provisioning; it starts by itself once they are set."""
+
+    credentials: list[str]
+    fix: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Harness:
     kind: str
     version: str
@@ -84,6 +92,7 @@ class ComputerStatus:
     name: str
     phase: str
     error: Failure | None = None
+    waiting: Waiting | None = None
     resume_pending: bool | None = None
     session: str | None = None
     active_turn: str | None = None
@@ -120,6 +129,7 @@ class ServiceStatus:
     name: str
     phase: str
     error: Failure | None = None
+    waiting: Waiting | None = None
     image: str
     pin: str | None = None
     generation: int

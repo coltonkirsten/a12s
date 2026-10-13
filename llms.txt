@@ -29,8 +29,8 @@ its own fleet.yaml, presets, images, Services and app code.
   turn.finished {status, usage, tokens?: {input, output, cacheRead, cacheWrite}, error?}, egress.denied {host, port,
   reason}, diagnostic {message}, permission, session.changed {from, to}, resume.failed, lifecycle {phase},
   harness.restarted, inbox.discarded. On the fleet-wide stream only: fleet.changed {version, by, names},
-  agent_computer.phase {phase, error?}, inbox.changed (the inbox summary: {pending, claimed, held, holdReason?,
-  usage, …}; a burst of changes is one event) and service.phase {service, phase, health?, restarts, error?} (no
+  agent_computer.phase {phase, error?, waiting?}, inbox.changed (the inbox summary: {pending, claimed, held, holdReason?,
+  usage, …}; a burst of changes is one event) and service.phase {service, phase, health?, restarts, error?, waiting?} (no
   agentComputer). SDK-made: gap (events lost; resync). `tokens` is the same for every harness
   (input excludes cached input); `usage` is the harness's own.
 - via: who really sent a Message: local (owner CLI/SDK), token:<name>, service:<name>, computer:<name>. sender is
@@ -41,6 +41,7 @@ its own fleet.yaml, presets, images, Services and app code.
 - Service: a non-agent container in the same Fleet (a clock, a webhook bridge, an MCP server). No harness, no inbox.
 - phase (exact strings, capitalized): Provisioning, Starting, Ready, Busy, Stopping, Asleep, Error; a Service can also
   be Unhealthy. `status.phase` in the SDKs, `.phase` of each `a12s status --json` entry, agent_computer.phase events.
+  One waiting for a credential with no value yet stays Provisioning with `waiting: {credentials, fix}`.
 
 ## Setup (once per machine)
 
@@ -64,7 +65,8 @@ API key (`sk-ant-api…`). Not a copy of your interactive Claude login. Codex: `
   a12s.bindings.yaml (created if missing). If the Fleet's Controller is running it also sets the value there, and
   agent computers using it get it at once; otherwise `a12s up` sends it.
 - `a12s up` sends every credential bound in a12s.bindings.yaml, so agent computers created from code can name any of
-  them. From code: `fleet.credentials.set(name, value)`. A credential set nowhere fails with 400 missing_credential.
+  them. From code: `fleet.credentials.set(name, value)`. Order doesn't matter: what names a credential with no value
+  yet is created with a warning and waits in Provisioning (`waiting` in its status), then starts once it is set.
 - The Controller stores credential values in its state volume (credentials.json, 0600), so they survive a restart
   of Docker or the Controller; `a12s down` removes them. No API call returns a value.
   `a12s up --memory-only-credentials` (when it starts a new Controller) keeps them in memory only.
@@ -79,8 +81,9 @@ a12s up                               # creates the agent computers, returns whe
 a12s send assistant "Reply with the single word pong." --wait
 ```
 
-Order: `creds set` runs in the Fleet's directory (after `a12s init dir`, cd into dir first) and BEFORE the first
-`a12s up`; up refuses an agent computer whose credential has no value (400 missing_credential) and applies nothing.
+`creds set` runs in the Fleet's directory (after `a12s init dir`, cd into dir first). Before or after `a12s up` both
+work: an agent computer whose credential has no value yet waits (up prints the warning and the fix) and starts once
+`creds set` gives it one.
 `a12s init` writes `harness: { kind: claude-code, version: 2.1.280 }` with no model key (the harness's default
 model): add `model: haiku` to that line yourself.
 
@@ -128,7 +131,7 @@ Agent computer fields (all optional except a harness, image and credential, whic
   file /run/a12s/secrets/<name> (the agent can read that file, but not list the directory: put the exact path in its
   instructions). A list on one agent computer REPLACES the defaults' list: with defaults [anthropic] write
   `credentials: [anthropic, stripe]`, not `[stripe]` (without anthropic every Turn fails "Not logged in"; the write
-  warns). Set a credential's value before creating an agent computer that names it, else 400 missing_credential.
+  warns). A credential with no value yet doesn't fail the write: it warns and the agent computer waits until it is set.
 - egress: {allow: [hosts]}. HTTPS to those hosts only; plain http and private addresses are refused. The harness's
   own API and sign-in hosts are always added, so `allow: []` still lets Claude Code work. Allow everything public:
   `allow: ["*"]` (quote it: a bare * is YAML alias syntax and fails to parse).
@@ -615,10 +618,11 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
 - Every write takes ?dryRun=true (check it exactly as the write would, list the changes, change nothing) and answers {version, changes: [{op:
   create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?, diff?: [{path, before?, after?}]}],
   warnings, errors, …}; diff lists each changed leaf of an update (path "grants.send"; lists and values are leaves). A
-  missing harness or image (in the spec and in defaults) is 400 missing_field; a credential with no value is 400
-  missing_credential.
+  missing harness or image (in the spec and in defaults) is 400 missing_field; a credential with no value is a warning,
+  and the agent computer or Service waits for it.
 - Credentials (owner or prefix token): GET /v1/credentials → {credentials: [{name, set, usedBy, updatedAt?}]} (names, never
-  values); PUT /v1/credentials/{name} {"value": "…"} stores it and updates the agent computers and Services using it;
+  values); PUT /v1/credentials/{name} {"value": "…"} stores it and updates the agent computers and Services using it
+  (starting the ones that waited for it);
   DELETE /v1/credentials/{name} is 409 in_use while one uses it, 404 if none is stored.
 - Tokens (owner token): POST /v1/tokens {"name", "prefix"} or {"name", "actions", "computers"} → {name, …, secret}
   (secret shown once); GET /v1/tokens (each with createdAt and lastUsedAt?, recorded at most once a minute); DELETE /v1/tokens/{name}.
@@ -629,7 +633,7 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), /v1/apply, drives and tokens are 403 forbidden.
   Egress, image, seccomp and resources are its call: trust it like the owner for its agent computers.
 - The old /v1/computers/... paths still work for one release.
-- Error codes (`code`, stable): invalid, missing_field, missing_credential, bad_metadata, bad_expires (400);
+- Error codes (`code`, stable): invalid, missing_field, bad_metadata, bad_expires (400);
   unauthorized (401); forbidden, no_grant, out_of_prefix (403); not_found, unknown_request (404); busy, conflict,
   exists, in_use, idempotency_conflict, not_idle, attached (409); gone (410); version_mismatch (412);
   body_too_large, exceeds_inbox (413); inbox_full (429); asleep (503).

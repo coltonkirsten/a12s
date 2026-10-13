@@ -60,18 +60,6 @@ func TestErrorTable(t *testing.T) {
 			m := &fleet.ServiceManifest{User: &fleet.ServiceUser{UID: 9, GID: 9}, Health: &fleet.ServiceHealth{Exec: []string{"true"}}}
 			return fleet.ValidateService("pg", fleet.Service{Image: "postgres:17"}, m, "postgres:17", []string{"/data"}).Error()
 		}},
-		{"credential with no binding", func() string {
-			f := withServices(t, h.d, func(f *fleet.Fleet) {
-				s := f.Services["clock"]
-				s.Credentials = []string{"postgres"}
-				f.Services["clock"] = s
-			})
-			_, err := h.c.PutFleet(ctx, api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
-			return err.Error()
-		}},
-		{"needs a login", func() string {
-			return h.c.serviceCredentialError("clock", []string{"gh"}).Error() + withLogin(h)
-		}},
 		{"service without login", func() string {
 			_, err := h.c.StartLogin(ctx, "clock")
 			var he *httpError
@@ -92,7 +80,3 @@ func TestErrorTable(t *testing.T) {
 		}
 	}
 }
-
-// withLogin returns "" (serviceCredentialError's text already carries the
-// login fix when the manifest declares a login); kept to document the case.
-func withLogin(*harness) string { return "" }

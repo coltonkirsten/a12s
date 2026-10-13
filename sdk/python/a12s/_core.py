@@ -321,7 +321,7 @@ async def until_turn_finished_async(events: AsyncIterator[Event]) -> AsyncGenera
 
 
 def warn_writes(res: Any) -> None:
-    """A write's warnings (a grant to an agent computer that doesn't exist yet, a missing harness credential) as
-    A12sWarning, so they reach the developer instead of being dropped."""
+    """A write's warnings (a grant to an agent computer that doesn't exist yet, a missing harness credential, a credential
+    with no value yet) as A12sWarning, so they reach the developer instead of being dropped."""
     for w in (res.get("warnings") if isinstance(res, dict) else None) or []:
         warnings.warn(str(w), A12sWarning, stacklevel=3)

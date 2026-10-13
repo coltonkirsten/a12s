@@ -99,9 +99,9 @@ $ a12s up
 
 The login runs in a memory-only container of the pinned image (everything writable is tmpfs, no state drive), on the
 Service's network under its egress policy. The credential comes back over the exec stream and is written on the host,
-not through the Controller; `a12s up` then sends it like any other credential. A Service whose login credential is
-missing waits in
-`Error: gh needs a login  fix: a12s service login gh` while the rest of the Fleet runs.
+not through the Controller; `a12s up` then sends it like any other credential. Until then the Service waits in
+`Provisioning` with `waiting: {credentials: [gh-oauth], fix: "a12s service login gh, then a12s up"}` while the rest of
+the Fleet runs.
 
 Honest limits: a Service program can copy its own secret into its state drive, and a refresh token the vendor rotates
 on use is lost at sleep ("log in again after a sleep"). Secrets at rest are your bound files on the host and the

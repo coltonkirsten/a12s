@@ -106,16 +106,6 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	creds := maps.Clone(c.creds)
 	c.mu.Unlock()
 	maps.Copy(creds, o.creds)
-	for _, name := range f.ComputerNames() {
-		if !o.touches(name) {
-			continue
-		}
-		if missing := missingCredentials(f.Computers[name].Credentials, creds); len(missing) > 0 {
-			return api.PutFleetResponse{}, &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrMissingCredential,
-				Message: fmt.Sprintf("agent_computers.%s: credentials %s have no value", name, strings.Join(missing, ", ")),
-				Fix:     "fleet.credentials.set(name, value), or a12s creds set <name> and a12s up"}}
-		}
-	}
 	changes := c.diff(oldFleet, f, o)
 	lockIn := o.lock
 	if lockIn == nil {
@@ -128,16 +118,15 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if err != nil {
 		return api.PutFleetResponse{}, err
 	}
-	if err := serviceCredentialErrors(f, manifests, creds); err != nil {
-		return api.PutFleetResponse{}, err
-	}
 	admitSeccomp(f, &admitWarnings)
+	waits := credentialWaits(f, manifests, creds, o)
 	if o.dryRun {
 		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
 			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 		if o.by.prefix() != "" {
 			res.Warnings = nil
 		}
+		res.Warnings = append(res.Warnings, waits...)
 		return res, nil
 	}
 
@@ -271,9 +260,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	for _, name := range svcNames {
 		o := souts[name]
 		_, existed := previousServices[name]
-		var waiting *serviceWaiting
-		if errors.As(o.err, &waiting) {
-			res.Warnings = append(res.Warnings, name+": "+waiting.Error())
+		if errors.As(o.err, new(*credentialsMissing)) {
 			o.err = nil
 		}
 		switch {
@@ -314,6 +301,9 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	for _, name := range names {
 		o := outcomes[name]
 		_, existed := previous[name]
+		if errors.As(o.err, new(*credentialsMissing)) {
+			o.err = nil
+		}
 		switch {
 		case o.err != nil:
 			if res.Errors == nil {
@@ -344,7 +334,24 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		// Fleet-wide, so they may name what the token must not see.
 		res.Warnings, res.Lock = nil, nil
 	}
+	res.Warnings = append(res.Warnings, waits...)
 	return res, nil
+}
+
+// credentialWaits names what this write touches that will wait for a credential with no value yet.
+func credentialWaits(f *fleet.Fleet, manifests map[string]*fleet.ServiceManifest, creds api.Credentials, o writeOpts) []string {
+	var out []string
+	for _, name := range f.ComputerNames() {
+		if missing := missingCredentials(f.Computers[name].Credentials, creds); o.touches(name) && len(missing) > 0 {
+			out = append(out, "agent_computers."+name+": "+credentialWait(missing, "", "").String())
+		}
+	}
+	for _, name := range f.ServiceNames() {
+		if missing := missingCredentials(f.Services[name].Credentials, creds); o.touches(name) && len(missing) > 0 {
+			out = append(out, "services."+name+": "+serviceWait(name, manifests[name], missing).String())
+		}
+	}
+	return out
 }
 
 // admitFields refuses what only a Fleet file may hold, and names fields that neither the spec nor the defaults set.
@@ -824,6 +831,9 @@ func (c *Controller) Apply(ctx context.Context, req api.ApplyRequest) (api.Apply
 				c.retryIfFreed(ctx, name)
 				return
 			}
+			if errors.As(err, new(*credentialsMissing)) {
+				err = nil
+			}
 			errs[i] = err
 			applied[i] = err == nil
 		})
@@ -919,7 +929,7 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 		_, err = c.converge(ctx, name, obs, ok)
 		var cm *credentialsMissing
 		if errors.As(err, &cm) {
-			return errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
+			return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid, Message: name + ": " + err.Error(), Fix: cm.waiting.Fix}}
 		}
 		return err
 	}
