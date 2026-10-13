@@ -222,7 +222,11 @@ func (c *Controller) handleStop(w http.ResponseWriter, r *http.Request) {
 // handleStopAll stops the running Turn, if any, and the session's background work.
 func (c *Controller) handleStopAll(w http.ResponseWriter, r *http.Request) {
 	cl, err := c.awake(r.PathValue("c"))
-	var res api.StopResponse
+	res := api.StopResponse{Turns: []string{}}
+	if he := (*httpError)(nil); errors.As(err, &he) && he.body.Code == api.ErrAsleep {
+		writeJSON(w, http.StatusOK, res) // nothing runs on an agent computer that is not awake
+		return
+	}
 	if err == nil {
 		res, err = cl.StopAll(r.Context())
 	}

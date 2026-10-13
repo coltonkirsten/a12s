@@ -34,6 +34,10 @@ func TestBackgroundWorkKeepsItAwakeAndDeliverable(t *testing.T) {
 	if cs := h.c.computerStatus(context.Background(), "scout"); cs.Background != nil {
 		t.Fatalf("background after sleep = %+v", cs.Background)
 	}
+	res := h.api("POST", "/v1/agent-computers/scout/stop", `{}`)
+	if stop := decodeBody[api.StopResponse](t, res); res.StatusCode != 200 || len(stop.Turns) != 0 || stop.Background != 0 {
+		t.Fatalf("stop while asleep = %d %+v", res.StatusCode, stop)
+	}
 }
 
 // A Turn the harness starts by itself makes the agent computer Busy: Messages wait for it, then go at once.
