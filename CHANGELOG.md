@@ -2,7 +2,10 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.4.3 (2026-10-12)
+
+The second pass of the cold-agent loop: a seccomp profile with an unknown architecture is refused when written,
+`a12s token create` is easy to capture in a script, and llms.txt states the traps the agents still fell into.
 
 ### Fixed
 - **A seccomp profile with an unknown architecture is refused at the write** (`400 invalid`, naming the field), not
