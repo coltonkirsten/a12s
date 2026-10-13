@@ -99,7 +99,6 @@ func TestServiceAdmissionErrors(t *testing.T) {
 		{"tier image", "  clock2:\n    image: slim\n", "services.clock2.image", `"slim"`},
 		{"name clash", "  scout:\n    image: x/y:1\n", "services.scout", "already a Computer"},
 		{"grant to a service", "  clock2:\n    image: x/y:1\n    grants: { send: [pg] }\n", "services.clock2.grants.send", "pg is a Service"},
-		{"grant to nobody", "  clock2:\n    image: x/y:1\n    grants: { send: [ghost] }\n", "services.clock2.grants.send", "no agent computer ghost"},
 		{"grant wildcard", "  clock2:\n    image: x/y:1\n    grants: { send: [\"*\"] }\n", "services.clock2.grants.send", `"*"`},
 		{"uses itself", "  clock2:\n    image: x/y:1\n    uses: [clock2]\n", "services.clock2.uses", "itself"},
 		{"uses unknown", "  clock2:\n    image: x/y:1\n    uses: [ghost]\n", "fix: add services.ghost or remove it from services.clock2.uses", "no Service ghost"},

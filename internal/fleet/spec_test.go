@@ -57,3 +57,15 @@ func TestMergePatch(t *testing.T) {
 		t.Fatalf("MergePatch = %s, %v", got, err)
 	}
 }
+
+// A grant to an agent computer that doesn't exist yet is a warning, so a pair can be created one at a time.
+func TestDanglingGrantWarns(t *testing.T) {
+	y := strings.Replace(strings.Replace(specYAML, "KEY", "agent_computers", 1), "b: { credentials: [] }", "b: { credentials: [], grants: { send: [later] } }", 1)
+	f, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(f.GrantWarnings(), "\n"); !strings.Contains(w, "agent_computers.b.grants.send: there is no agent computer later") {
+		t.Fatalf("warnings = %q", w)
+	}
+}

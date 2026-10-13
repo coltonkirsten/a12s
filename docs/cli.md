@@ -16,7 +16,7 @@ Exit codes: `0` success, `1` failure, `130` interrupted. Errors end with a `fix:
 
 | Command | What it does |
 |---|---|
-| `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (one agent computer, `hello`, on `image: slim`), `fleet.lock` (pinning this a12s release), an empty bindings file, `.gitignore` and a README. |
+| `a12s init [dir] [--harness claude-code\|codex]` | Scaffold `fleet.yaml` (harness, `image: slim` and the credential in `defaults`, and one agent computer, `assistant`), `fleet.lock` (pinning this a12s release), an empty bindings file, `.gitignore` and a README. |
 | `a12s up [--asleep] [--controller-image ref]` | Start the Controller if needed, validate and apply the Fleet file: create, update or stage agent computers and Services, remove the ones the file doesn't list (including those created through the SDK or API), pin new digests in `fleet.lock`. It reads each `home.preset` directory and `security.seccomp` file and sends their contents. It prints `<name> runs with its own seccomp profile` for each agent computer with [`security.seccomp`](security.md#seccomp), and a hint when the file still uses the old `computers:` key. `--asleep` creates new agent computers asleep. |
 | `a12s apply --interrupt [--grace 30s]` | Apply staged changes to busy agent computers now, interrupting their Turns after the grace period. |
 | `a12s status [<name>]` | Phase, session, active Turn, harness version, inbox, power policy, `seccomp sha256:…` for a custom seccomp profile, and warnings (orphaned drives, unenforced egress, `allow: ["*"]`, published ports). |

@@ -59,17 +59,16 @@ API key (`sk-ant-api…`). Not a copy of your interactive Claude login. Codex: `
 ## New project
 
 ```sh
-a12s init myproj && cd myproj         # fleet.yaml (one agent computer "hello"), fleet.lock, bindings, .gitignore
+a12s init myproj && cd myproj         # fleet.yaml (defaults + one agent computer "assistant"), fleet.lock, bindings, .gitignore
 a12s creds set anthropic              # see Setup for pasting the token
 a12s up                               # creates the agent computers, returns when they are Ready
-a12s prompt hello "Reply with the single word pong."
+a12s prompt assistant "Reply with the single word pong."
 ```
 
 `a12s init` is optional: a hand-written fleet.yaml works; `a12s up` writes fleet.lock and `creds set` writes the
 bindings file. Commit fleet.yaml, fleet.lock and presets; never commit a12s.bindings.yaml. A Message sent right
-after `a12s up` is delivered as soon as the agent computer is Ready. `a12s init` sets the harness on `hello`
-itself; to create agent computers from code with only a name and instructions, put harness, image and credentials
-in `defaults:` (as below).
+after `a12s up` is delivered as soon as the agent computer is Ready. `a12s init` puts harness, image and credentials
+in `defaults:`, so an agent computer created from code needs only a name and instructions.
 
 ## fleet.yaml
 
@@ -319,9 +318,8 @@ with fleet.turns(["lead", "worker1"]) as turns:       # watch first, then send
 ```
 
 A worker's result is in its send call (`t.tools`, name `mcp__a12s__send`, input `{computer, body}`), not in t.text.
-Without fresh, lead remembers earlier tasks and may repeat an old answer. To make the pair from code instead: a
-grant must name an agent computer that exists, so add both in one write with
-`fleet.replace(lambda f: f.agent_computers.update(lead={...}, worker1={...}))`.
+Without fresh, lead remembers earlier tasks and may repeat an old answer. To make the pair from code instead, create
+them one after the other: a grant may name an agent computer that doesn't exist yet (the write warns).
 
 ## Custom images
 

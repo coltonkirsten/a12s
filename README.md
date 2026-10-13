@@ -92,7 +92,7 @@ a12s prompt pong "ping"
 
 Then run the code above in the same folder (`python hello.py`, or `node hello.mjs`): it creates the agent computer
 `hello` from the defaults, prompts it and removes it. `a12s down` stops everything and keeps the disks. `a12s init`
-writes a starter Fleet if you'd rather not type one.
+writes a starter Fleet like this one if you'd rather not type it.
 
 ## How it works
 

@@ -311,10 +311,6 @@ func (f *Fleet) validateGrants(field string, g Grants) []error {
 			errs = append(errs, fmt.Errorf("%s.grants.send: %q: there is no wildcard  fix: name each Computer", field, to))
 		case f.hasService(to):
 			errs = append(errs, fmt.Errorf("%s.grants.send: %s is a Service, and only Computers have inboxes  fix: remove it from %s.grants.send", field, to, field))
-		default:
-			if _, ok := f.Computers[to]; !ok {
-				errs = append(errs, fmt.Errorf("%s.grants.send: there is no agent computer %s  fix: add agent_computers.%s or remove it from %s.grants.send", field, to, to, field))
-			}
 		}
 		if seen[to] {
 			errs = append(errs, fmt.Errorf("%s.grants.send: %s is listed twice", field, to))
@@ -397,6 +393,21 @@ func (f *Fleet) validateAllowPrivate() []error {
 // Computer never wakes it.
 func (f *Fleet) GrantWarnings() []string {
 	var out []string
+	// A grant may name an agent computer that doesn't exist yet, so two that send to each other can be created one at
+	// a time.
+	dangling := func(field string, send []string) {
+		for _, to := range send {
+			if _, ok := f.Computers[to]; !ok && !f.hasService(to) && !strings.Contains(to, "*") {
+				out = append(out, fmt.Sprintf("%s.grants.send: there is no agent computer %s (yet); sends to it fail until it exists", field, to))
+			}
+		}
+	}
+	for _, name := range f.ComputerNames() {
+		dangling("agent_computers."+name, f.Computers[name].Grants.Send)
+	}
+	for _, name := range f.ServiceNames() {
+		dangling("services."+name, f.Services[name].Grants.Send)
+	}
 	for _, name := range f.ComputerNames() {
 		w := f.Computers[name].Power.WakeOnMessage
 		if w == nil {

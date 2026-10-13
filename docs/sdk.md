@@ -88,8 +88,8 @@ coder = fleet.agent_computers.create(
 - A field that neither the spec nor `defaults` sets (harness, image) fails with `missing_field`. A credential the
   Controller holds no value for fails with `missing_credential`: `a12s up` sends the credentials that the Fleet
   file's agent computers name, so keep one there that names each credential your code uses.
-- A grant must name an agent computer that exists. To add several that grant to each other, add them together with
-  [`fleet.replace`](#the-whole-fleet).
+- A grant may name an agent computer that doesn't exist yet (the write warns), so two that send to each other can be
+  created one after the other.
 
 ### Get, list, update, remove
 
