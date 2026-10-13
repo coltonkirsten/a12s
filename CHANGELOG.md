@@ -2,7 +2,14 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.5.0 (2026-10-12)
+
+The obvious guess is now the right one: a plain sleep is woken by a listed sender, `send()` hands back the Turn
+that answers it (`prompt` is gone), naming a credential before it has a value waits instead of failing, the npm
+package is the only way into a Fleet from a browser, and sleepAfterIdle takes seconds.
+
+Upgrading: set `a12s: v0.5.0` in fleet.lock and delete its `slim` pin, rebuild custom images FROM
+`ghcr.io/coltonkirsten/a12s/slim:0.5.0` under new tags (admission needs the same minor as the CLI), then `a12s up`.
 
 ### Breaking
 - **`a12s gateway` no longer serves the SDK at `/a12s.js`, and the npm package drops its `./browser.js` export.** A
