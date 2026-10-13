@@ -105,7 +105,7 @@ whose `Send` and `Get` enqueue and read back Messages as far as the grants allow
 `ParseDuration` reads `0`, `90s`, `15m`, `1h` or `7d`. A clock that sends on an interval:
 
 ```sh
-go mod init example.com/clock && go get github.com/coltonkirsten/a12s/services/svckit@v0.5.0
+go mod init example.com/clock && go get github.com/coltonkirsten/a12s/services/svckit@v0.7.0
 ```
 
 ```go
@@ -174,9 +174,5 @@ language does the same with the files and variables in [What a Service gets](#wh
 `POST $A12S_API/v1/agent-computers/{c}/inbox` (the body of [Sending a Message](api.md#sending-a-message)) and reads
 back with `GET …/inbox/{id}`, presenting the certificate in `/run/a12s/tls/`.
 
-Complete Services to copy from are in the v0.2.1 source:
-[cron, a GitHub webhook bridge, an MCP bridge (stdio MCP server over HTTP) and a Postgres MCP server](https://github.com/coltonkirsten/a12s/tree/v0.2.1/services).
-Their images stay published as `ghcr.io/coltonkirsten/a12s/svc-<name>:0.2.1`, but their svckit sends on
-`/v1/computers/...`, which the Controller no longer serves: rebuild them with the current svckit to send Messages;
-[the v0.2.1 Services page](https://github.com/coltonkirsten/a12s/blob/v0.2.1/docs/services.md#the-reference-services)
-lists their config.
+A complete, runnable Go Service (this clock, with its Fleet and a program that watches the agent's Turns) is in the
+cookbook: [examples/go-service](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/go-service).

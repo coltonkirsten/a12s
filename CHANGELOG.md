@@ -2,12 +2,16 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.7.0 (2026-10-13)
 
-Upgrading: install the new release and `a12s up`. The new Controller drops the fields this release removes from the
-Fleet it stored (`home`, `autonomy`, `inbox.intro`, work `drives`, the top-level `egress`, a Service's `publish` and
-`egress.tcp`, a manifest's `login`) and keeps the rest running. A write that sets one of them is refused, so take them
-out of fleet.yaml and out of the specs your code writes.
+A deletion release: the v0.4 aliases, the gateway dashboard, rarely used flags, `home`, `autonomy`, work drives,
+`a12s service login`, `a12s apply` and the Service networking extras are gone, and llms.txt is down to the core path.
+
+Upgrading: install the new release, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.7.0` under new
+tags, and `a12s up`. The new Controller drops the fields this release removes from the Fleet it stored (`home`,
+`autonomy`, `inbox.intro`, work `drives`, the top-level `egress`, a Service's `publish` and `egress.tcp`, a manifest's
+`login`) and keeps the rest running. A write that sets one of them is refused, so take them out of fleet.yaml and out
+of the specs your code writes.
 
 ### Breaking
 - **The v0.4 names are gone.** A Fleet file's `computers:` key is refused: rename it to `agent_computers:`. The
@@ -68,6 +72,17 @@ out of fleet.yaml and out of the specs your code writes.
   webhooks on your own server and send with the SDK), a Service's `egress.tcp`, and the top-level `egress:`
   (`allowPrivate`, `enforcement`, `unenforced`). Egress is always enforced: on a Docker Engine older than 28, upgrade
   it. `GET /v1/status` no longer carries `egressEnforcement`, and Service status no longer carries `publish`.
+
+### Changed
+- llms.txt is cut from 726 lines (v0.6.0) to 451: one SDK block for TypeScript and Python (with the Python naming
+  rules), a short HTTP section next to the generated API surface, and shorter event and error lists (docs/api.md has
+  them all). The Go Service walkthrough, the gateway example page and the hand-off recipe moved to the cookbook:
+  [go-service](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/go-service),
+  [gateway-page](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/gateway-page),
+  [hand-off](https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/hand-off). docs/services.md points
+  at go-service instead of the v0.2.1 reference Services, whose svckit no longer reaches the Controller.
+- llms.txt showed `env:` as a Service key, which the Fleet refuses: a Service's environment goes in
+  `config: { env: {...} }`.
 
 ## v0.6.0 (2026-10-13)
 

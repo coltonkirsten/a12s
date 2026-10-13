@@ -278,8 +278,8 @@ To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`
 
 ## The whole Fleet
 
-`fleet.get()` returns the Fleet as written (`spec`, a `FleetSpec` with `defaults`, `agent_computers`, `services`,
-`drives`) and its `version`. `fleet.replace(fn)` reads it, lets `fn` change it (in place, or by returning a new
+`fleet.get()` returns the Fleet as written (`spec`, a `FleetSpec` with `defaults`, `agent_computers` and
+`services`) and its `version`. `fleet.replace(fn)` reads it, lets `fn` change it (in place, or by returning a new
 one) and writes it back only if nobody wrote in between; otherwise it reads again and retries, up to 5 times.
 
 ```ts

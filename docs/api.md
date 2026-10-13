@@ -74,7 +74,7 @@ revokes one. The [API surface in llms.txt](../llms.txt) lists, per route, the ac
 
 ## Changing the Fleet
 
-The Fleet is the desired state: `defaults`, `agent_computers`, `services` and `drives`, as in the
+The Fleet is the desired state: `defaults`, `agent_computers` and `services`, as in the
 [Fleet file](fleet-file.md), in JSON. Two kinds of write change it.
 
 **One agent computer or Service.** `PUT /v1/agent-computers/{c}` takes its spec, the Fleet file's fields for one
@@ -183,7 +183,7 @@ one stream per agent computer would stall a page that watches more than a few.
 
 ```text
 id: 42
-data: {"v":1,"agentComputer":"analyst","computer":"analyst","session":"…","turn":"t_9","seq":42,"ts":"…","type":"text.delta","data":{"text":"Hel"}}
+data: {"v":1,"agentComputer":"analyst","session":"…","turn":"t_9","seq":42,"ts":"…","type":"text.delta","data":{"text":"Hel"}}
 ```
 
 - **Where it starts.** With no cursor, the stream starts live. With `Last-Event-ID: <seq>` it replays everything
@@ -211,11 +211,12 @@ Every error is JSON with a stable `code`, a `message`, and usually a `fix` line 
 | `missing_field` | 400 | A required field (harness, image) is set neither on the agent computer nor in `defaults`. |
 | `unauthorized` | 401 | Missing or unknown token. |
 | `forbidden`, `no_grant` | 403 | The token or the sender lacks that action, agent computer or grant. |
-| `out_of_prefix` | 403 | A prefix token named something, or wrote a spec that points at something (`grants.send`, `uses`, a drive, also from `defaults`), whose name doesn't start with its prefix. |
+| `out_of_prefix` | 403 | A prefix token named something, or wrote a spec that points at something (`grants.send`, `uses`, also from `defaults`), whose name doesn't start with its prefix. |
 | `not_found`, `unknown_request` | 404 | No such agent computer, Service, Message or Turn. |
 | `busy`, `conflict`, `not_idle`, `idempotency_conflict` | 409 | The agent computer is busy, or the request conflicts with an earlier one. |
 | `exists` | 409 | A create-only write (`If-None-Match: *`) named an agent computer or Service that exists. |
 | `in_use` | 409 | Removing a credential that an agent computer or Service still names; the message lists them. |
+| `attached` | 409 | `DELETE /v1/drives/{d}` on a drive an agent computer or Service is using. |
 | `withdrawn`, `discarded`, `expired`, `replaced`, `already_claimed`, `already_delivered` | 409 | The Message already ended or was taken. |
 | `gone` | 410 | It existed and is gone. |
 | `version_mismatch` | 412 | `If-Match` names an old Fleet version: someone wrote in between. Read and retry. |
