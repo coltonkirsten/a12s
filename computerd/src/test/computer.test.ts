@@ -423,3 +423,35 @@ test('background: restart_harness from a background turn waits for it; credentia
   await until(() => adapter.restarts === 2);
   await computer.shutdown(100);
 });
+
+test('background: a background turn that starts while a Message is admitted blocks the credential restart and shows as active', async () => {
+  const cfg = testConfig();
+  writeFileSync(join(cfg.secretsDir, '.generation'), '1\n');
+  const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
+  const adapter = new StubAdapter();
+  const computer = new Computer(cfg, journal, adapter, {}, 60_000);
+  await computer.start();
+  const first = await computer.submitTurn({ requestId: 'r0', session: 'new', prompt: 'x' });
+  adapter.finish();
+  await until(() => journal.turnInfo(first.turnId)?.finished === 'completed');
+  writeFileSync(join(cfg.secretsDir, '.generation'), '2\n');
+  // The harness starts a turn by itself right after the Message's Turn is accepted, before its credential check.
+  const accept = journal.acceptTurn.bind(journal);
+  journal.acceptTurn = (...args) => {
+    const ev = accept(...args);
+    if (args[0] === 'r1') adapter.backgroundTurn();
+    return ev;
+  };
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'current', prompt: 'y' });
+  assert.equal(adapter.restarts, 0, 'the restart would have killed the background turn');
+  assert.equal(computer.status().credentialGeneration, 1);
+  const bg = String(computer.status().activeTurn);
+  assert.notEqual(bg, t.turnId, 'activeTurn is the background turn the harness is running');
+  adapter.finishBackground();
+  await until(() => journal.turnInfo(bg)?.finished === 'completed');
+  assert.equal(computer.status().activeTurn, t.turnId);
+  adapter.finish();
+  await until(() => computer.status().credentialGeneration === 2);
+  assert.equal(adapter.restarts, 1, 'applied at the idle boundary');
+  await computer.shutdown(100);
+});

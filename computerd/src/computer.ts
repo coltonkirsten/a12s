@@ -95,9 +95,9 @@ export class Computer {
     return this.active || this.background || this.restarting ? 'busy' : 'ready';
   }
 
-  /** The turn the harness is running or about to run: a requested one first. */
+  /** The turn the harness is running: one it started by itself runs first, ahead of a requested one queued behind it. */
   private get running(): ActiveTurn | null {
-    return this.active ?? this.background;
+    return this.background ?? this.active;
   }
 
   private get sessionPath(): string {
@@ -220,7 +220,9 @@ export class Computer {
       const generation = credentialGeneration(this.cfg);
       // Rotated credentials must not stay in a long-lived harness, but restarting it would end background work:
       // with some running, the rotation waits for the idle boundary.
-      if (this.wire(turnId) && generation !== this.ackedGeneration && this.adapter.backgroundTasks() === 0) {
+      // A background turn may have started during the awaits above; a restart would kill it.
+      const quiet = this.adapter.backgroundTasks() === 0 && !this.background;
+      if (this.wire(turnId) && generation !== this.ackedGeneration && quiet) {
         await this.adapter.restart();
         this.ackedGeneration = generation;
       }

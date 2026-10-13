@@ -119,12 +119,15 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
   survive them: a Turn is one prompt pushed into it (priority `later`, so it never joins a running turn), ending at
   its `result`. The CLI's `command_lifecycle` frames tell a pushed prompt's turn from one the CLI starts by itself
   when background work ends; computerd journals the latter as a Turn with reason `background` once it calls the
-  model. `task_started` / `task_notification` frames of background tasks become `task.started` / `task.finished`.
+  model. `task_started` / `task_notification` frames of background tasks become `task.started` / `task.finished`;
+  the count in status follows the CLI's full live set (`background_tasks_changed`), and a task that leaves it with
+  no notification is finished after 2 s.
   Ending the session closes stdin (the CLI stops its tasks and exits); a running turn is interrupted first, then
   SIGTERM after 10 s and SIGKILL after 5 s more.
 - **Codex:** `codex app-server` over JSON-RPC on stdio, one long-lived child per agent computer: `thread/start` or
   `thread/resume`, `turn/start`, `turn/interrupt`. A command still running when its turn completes stays a
-  background terminal: it is a background task until its late `item/completed`. Stop and a new thread restart the
+  background terminal: it is a background task until its late `item/completed`. After a failed or interrupted turn
+  nothing is counted, since no late completion is guaranteed. Stop and a new thread restart the
   app-server, which ends them. Every server request is answered: approvals are granted (approval
   policy `never`, `danger-full-access`), user input and elicitation are declined.
 - Both get the `a12s` system tools MCP server; each used Service's MCP port is registered as `a12s-<svc>` through a
