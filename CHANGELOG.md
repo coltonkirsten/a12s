@@ -2,6 +2,11 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+- Fixed: `a12s creds set` (or any command that starts the Controller) before the first `a12s up` on a new install or
+  release failed with "controller image … not found locally"; it now pulls the Controller image like `up` does.
+
 ## v0.7.0 (2026-10-13)
 
 A deletion release: the v0.4 aliases, the gateway dashboard, rarely used flags, `home`, `autonomy`, work drives,
