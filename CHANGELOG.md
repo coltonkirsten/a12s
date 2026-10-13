@@ -79,6 +79,9 @@ Agent computers and Services can be created, changed and removed while the Fleet
   longer drops ones it doesn't send. `a12s up --memory-only-credentials` keeps them out of the state volume.
 
 ### Changed
+- `a12s up` replaces a running Controller of another release (its volumes, and the agent computers, stay), and a
+  new Controller attaches itself to every agent computer's and Service's network. Upgrading is now: install the new
+  release, set `a12s:` in `fleet.lock`, `a12s up`.
 - A ComputerStatus's `seccomp` (and `a12s status`) shows the profile's `sha256:` digest instead of its path; `a12s up`
   prints `<name> runs with its own seccomp profile`.
 - `a12s up` makes the running Fleet match the file, so it removes agent computers created through the SDK or API
