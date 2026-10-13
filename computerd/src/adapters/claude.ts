@@ -202,12 +202,12 @@ export class ClaudeAdapter implements Adapter {
     const frame = m as unknown as { type: string; subtype?: string; command_uuid?: string; state?: string };
     if (frame.type === 'command_lifecycle') {
       live.lifecycle = true;
-      if (frame.state === 'started' && live.pending && live.pending.uuid === frame.command_uuid && !live.ending) this.open(live, live.pending);
+      if (frame.state === 'started' && live.pending && live.pending.uuid === frame.command_uuid) this.open(live, live.pending);
       return;
     }
     if (m.type === 'system') {
       if (m.subtype === 'task_started' || m.subtype === 'task_updated' || m.subtype === 'task_notification') return this.task(live, m);
-      if (m.subtype === 'init' && !live.current && !live.ending) {
+      if (m.subtype === 'init' && !live.current) {
         // A CLI without lifecycle frames starts a pushed prompt at the next init; one with them announced it already.
         if (live.pending && !live.lifecycle) this.open(live, live.pending);
         else this.open(live, { uuid: null, out: new EventQueue(), mapper: null, announced: false });
@@ -218,14 +218,15 @@ export class ClaudeAdapter implements Adapter {
     if (!turn?.mapper) return;
     if (m.type === 'system' && m.subtype === 'init') live.initSeen = true;
     const events = turn.mapper.map(m);
-    if (!turn.announced && ((m.type === 'system' && m.subtype === 'status') || events.some((ev) => ev.type !== 'turn.finished'))) {
+    if (!turn.announced && !live.ending && ((m.type === 'system' && m.subtype === 'status') || events.some((ev) => ev.type !== 'turn.finished'))) {
       turn.announced = true;
       this.listener?.backgroundTurn({ sessionId: live.sessionId, events: turn.out });
     }
-    if (!turn.announced && events.length) {
+    if (!turn.announced) {
       // On resume the CLI reports tasks the previous process left behind and closes that turn without a model call.
+      if (!events.some((ev) => ev.type === 'turn.finished')) return;
       live.current = null;
-      if (live.ending) this.closeInput(live);
+      if (live.ending && !live.pending) this.closeInput(live);
       return;
     }
     for (const ev of events) {
@@ -245,7 +246,7 @@ export class ClaudeAdapter implements Adapter {
       turn.out.push(ev);
       turn.out.end();
       live.current = null;
-      if (live.ending) this.closeInput(live);
+      if (live.ending && !live.pending) this.closeInput(live);
     }
   }
 
@@ -258,6 +259,8 @@ export class ClaudeAdapter implements Adapter {
     if (live.pending === turn) live.pending = null;
     turn.mapper = new ClaudeMapper(live.sessionId, live.resuming && !live.initSeen, turn.uuid);
     live.current = turn;
+    // A queued prompt survives the interrupt of the turn before it.
+    if (live.ending) live.query.interrupt().catch(() => {});
   }
 
   private task(live: Live, m: SDKMessage & { type: 'system' }): void {
@@ -310,7 +313,7 @@ export class ClaudeAdapter implements Adapter {
   private end(live: Live): void {
     if (live.ending) return;
     live.ending = true;
-    if (!live.current) return this.closeInput(live);
+    if (!live.current && !live.pending) return this.closeInput(live);
     live.query.interrupt().catch(() => {});
     live.timers.push(
       setTimeout(() => {
@@ -320,7 +323,10 @@ export class ClaudeAdapter implements Adapter {
     );
   }
 
-  /** End of input makes the CLI stop its background tasks and exit. */
+  /**
+   * End of input makes the CLI stop its background tasks and exit, but only after running the prompts it has queued,
+   * and interrupting those needs stdin: callers wait until none is pending.
+   */
   private closeInput(live: Live): void {
     live.input.end();
     live.timers.push(

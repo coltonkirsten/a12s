@@ -5,7 +5,8 @@
 //   `slow <ms>`  the turn takes <ms> before its result
 //   `crash`      the process dies mid-turn, after receipt
 // FAKE_SELF_MS keeps a self-started turn open that long before its result. FAKE_ORPHAN makes a resumed process
-// report a task the previous one left behind, in a turn without a model call, as the real CLI does.
+// report a task the previous one left behind, in a turn without a model call, as the real CLI does. FAKE_DONE_FILE
+// gets a line for each prompt turn that ran to completion.
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -42,6 +43,7 @@ interface Prompt {
 type Work = { kind: 'prompt'; prompt: Prompt } | { kind: 'notification'; task: string };
 const queue: Work[] = [];
 let running: { uuid: string | null; end: () => void } | null = null;
+let eof = false;
 const tasks = new Map<string, NodeJS.Timeout>();
 let taskSeq = 0;
 
@@ -52,7 +54,10 @@ process.on('SIGTERM', () => {
 function next(): void {
   if (running) return;
   const work = queue.shift();
-  if (!work) return;
+  if (!work) {
+    if (eof) shutdown();
+    return;
+  }
   if (work.kind === 'notification') return selfTurn(work.task);
   promptTurn(work.prompt);
 }
@@ -62,6 +67,7 @@ function finishTurn(subtype = 'success', isError = false, reply = 'pong'): void 
   running = null;
   result(subtype, isError, reply);
   if (r?.uuid) command(r.uuid, isError ? 'cancelled' : 'completed');
+  if (r?.uuid && !isError && process.env.FAKE_DONE_FILE) appendFileSync(process.env.FAKE_DONE_FILE, `${r.uuid}\n`);
   setImmediate(next);
 }
 
@@ -113,7 +119,8 @@ function promptTurn(m: Prompt): void {
   const slow = /^slow (\d+)$/.exec(body);
   if (slow) {
     text('slow');
-    return void setTimeout(() => finishTurn(), Number(slow[1]));
+    const turn = running;
+    return void setTimeout(() => running === turn && finishTurn(), Number(slow[1]));
   }
   if (mode === 'refresh') {
     // Like a real token refresh: write a temp file and rename it over the credentials symlink.
@@ -151,11 +158,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   queue.push({ kind: 'prompt', prompt });
   next();
 });
-// End of input stops the background tasks and exits, as the real CLI does.
+// Like the real CLI, end of input lets the running and queued prompts finish, then stops the background tasks and exits.
 process.stdin.on('end', () => {
+  eof = true;
+  if (!running && !queue.length) shutdown();
+});
+
+function shutdown(): void {
   for (const [id, timer] of tasks) {
     clearTimeout(timer);
     out({ type: 'system', subtype: 'task_notification', task_id: id, status: 'stopped', output_file: '', summary: '' });
   }
   process.exit(0);
-});
+}

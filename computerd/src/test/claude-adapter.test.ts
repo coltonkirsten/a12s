@@ -186,6 +186,21 @@ test('claude: stop ends the turn and the session with its background work', asyn
   assert.equal(spawns(), 1);
 });
 
+test('claude: stop while a prompt waits behind a turn the CLI started itself stops that prompt too', async () => {
+  const env: Record<string, string> = { FAKE_SELF_MS: '1000' };
+  const { cfg, adapter, input, background } = setup('normal', undefined, env);
+  env.FAKE_DONE_FILE = join(cfg.runDir, 'done');
+  const run = await adapter.startTurn({ ...input, prompt: 'bg 50' });
+  await collect(run.events);
+  await until(() => background.length === 1);
+  const next = await adapter.startTurn({ ...input, sessionId: run.sessionId, prompt: 'slow 1500' });
+  await adapter.stop();
+  assert.equal(finished(await collect(next.events)).status, 'interrupted');
+  await adapter.restart();
+  const completed = readFileSync(env.FAKE_DONE_FILE, 'utf8').trim().split('\n');
+  assert.equal(completed.length, 1, 'only the first prompt ran to completion: the queued one never outlives the stop');
+});
+
 test('claude: a new session or a restart ends the live one and its background work', async () => {
   const { adapter, input, tasks, spawns } = setup('normal');
   const run = await adapter.startTurn({ ...input, prompt: 'bg 10000' });
