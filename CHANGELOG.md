@@ -7,7 +7,8 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - Added: `attach` mounts a folder of this machine into an agent computer at `/home/agent/<name>`
   (`attach: { project: { host: ../myapp, readOnly: false, keep: [node_modules] } }`), so an agent works on your
   project in place. `keep` paths live on drives of their own (`keep-…` in `a12s drive ls`) and never reach the
-  folder. Only the owner sets it (a prefix token gets `403 forbidden`), and not in `defaults`. `a12s up` resolves a
+  folder. Only the owner sets it (a prefix token gets `403 forbidden`, also for changing the image of an agent computer
+  with one), and not in `defaults`; `a12s up` refuses `~`, `~/.a12s` and `~/.docker`. `a12s up` resolves a
   relative or `~/` host against fleet.yaml; `a12s export` writes it back. A folder Docker can't see (missing, or not
   shared with Docker Desktop) puts the agent computer in Error with the fix. Custom images need a rebuild FROM the
   new slim, whose computerd hands kept drives to the agent. See docs/fleet-file.md#attached-folders.

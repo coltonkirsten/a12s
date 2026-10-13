@@ -71,9 +71,17 @@ yourself, keep them under version control, and use `readOnly: true` for anything
   that adds, changes or drops an agent computer's `attach` is `403 forbidden` (it may change the rest of one the owner
   gave a folder, and remove it); a narrow token, the gateway's included, can't write agent computers at all.
   `defaults` can't carry it, so code that creates agent computers never gets a host folder by accident.
-- **Only that folder.** It is mounted at `/home/agent/<name>` and nothing above it is reachable. `/`, a `.docker`
-  folder, socket files and `/run`, `/var/run` (and folders that contain them) are refused, so the Docker socket
-  can't be attached. `a12s up` follows symlinks before it sends the path, so the checks see the real folder.
+- **Only the owner picks its image.** computerd runs as root, so the image decides what root can do to a writable
+  host folder (on Linux, leave a setuid-root file in it). A prefix token's write that changes the image of an agent
+  computer with an attached folder is `403 forbidden`.
+- **Only that folder.** It is mounted at `/home/agent/<name>` and nothing above it is reachable. The checks are on
+  the path, compared without case (macOS folders are case-insensitive):
+  - Every write (CLI, SDK, HTTP API) refuses `/`, a path ending in `.sock`, any path with a `.docker` component,
+    and `/run`, `/var/run`, `/private/var/run`, anything inside them and the folders that contain them.
+  - `a12s up` also follows symlinks first, so those checks see the real folder, and refuses `~/.a12s` (every
+    Fleet's owner token) and `~/.docker`, anything inside them and the folders that contain them, the home
+    directory itself included. The Controller doesn't know your home directory: code that writes `attach` through
+    the SDK or the HTTP API must not send one of those folders itself.
 - **Everything else stays.** The agent computer keeps its user, capabilities, read-only root filesystem, seccomp
   profile and egress policy. `readOnly: true` makes the mount read-only in the kernel; the agent can't remount it.
 - **Kept paths stay inside.** Each `keep` path is a drive of its own mounted over that path, so what the agent

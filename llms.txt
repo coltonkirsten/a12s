@@ -128,7 +128,8 @@ Agent computer fields (all optional except a harness, image and credential, whic
   not bin; at most 8), so the agent works on your project in place. host: in fleet.yaml relative to it, ~/… or
   absolute (`a12s up` sends the absolute path; from the SDK or HTTP API it must be absolute). readOnly: true mounts it
   read-only. keep: [node_modules, .venv]: paths under it that live on a12s drives instead of in your folder (needs
-  readOnly false). Only the owner sets it (not a prefix token, not the gateway), never in defaults. See gotchas.
+  readOnly false). Not ~, ~/.a12s or ~/.docker. Only the owner sets it (not a prefix token, not the gateway), never
+  in defaults, and only the owner changes the image of an agent computer with one. See gotchas.
 
 Top level also takes `services:` (see Services). Change anything and run `a12s up`: it applies at each agent
 computer's next idle moment, never mid-Turn, and keeps the session; changed files are written again, other files in

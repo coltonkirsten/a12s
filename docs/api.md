@@ -60,8 +60,8 @@ profile's `sha256:` digest) when the agent computer runs with its own seccomp pr
   start with the prefix it may call every route the owner can, except the whole-Fleet ones (`GET`/`PUT /v1/fleet`),
   drives and tokens. What its agent computers and Services send to and use (`grants.send`, `uses`, those from
   `defaults` included) must be inside the prefix too; its specs may name any credential.
-  It can't add, change or drop an agent computer's own `security.seccomp` or `attach` (`403 forbidden`): only the
-  owner sets them.
+  It can't add, change or drop an agent computer's own `security.seccomp` or `attach`, or change the `image` of one
+  with `attach` (`403 forbidden`): only the owner does.
   `GET /v1/status`, `/v1/agent-computers`, `/v1/services` and `/v1/credentials` list only names inside it, and its
   status and write responses carry no Fleet-wide warnings. Anything outside is `403 out_of_prefix`; the whole-Fleet
   routes, drives and tokens are `403 forbidden`. See [Security: Tokens](security.md#tokens).

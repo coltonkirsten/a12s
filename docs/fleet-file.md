@@ -127,7 +127,7 @@ agent_computers:
 
 | Field | Meaning |
 |---|---|
-| `host` | The folder. In the Fleet file: relative to the file's directory, `~/…`, or absolute; `a12s up` checks that it is a folder, follows symlinks and sends the absolute path. Through the SDK and the HTTP API it must be absolute (a relative or `~` path is refused). Never `/`, a `.docker` folder, a socket, or `/run`, `/var/run` and the folders that hold them. |
+| `host` | The folder. In the Fleet file: relative to the file's directory, `~/…`, or absolute; `a12s up` checks that it is a folder, follows symlinks and sends the absolute path. Through the SDK and the HTTP API it must be absolute (a relative or `~` path is refused). Never `/`, a `.docker` folder, a `.sock` file, or `/run`, `/var/run` and the folders that hold them; `a12s up` also refuses `~/.a12s`, `~/.docker` and the folders that hold them (so not `~` itself). See [Security](security.md#attached-folders). |
 | `readOnly` | `true` mounts it read-only. Default `false`. |
 | `keep` | Paths under the folder (clean, relative, at most 16) that live on a drive of their own instead: `node_modules`, `.venv`, build output. The agent's installs stay inside a12s, Linux binaries never land in a macOS folder, and the many small files stay off the slower host mount. An empty directory appears in the host folder where each is mounted. Needs `readOnly: false`. |
 
