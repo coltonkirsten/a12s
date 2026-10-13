@@ -20,20 +20,20 @@ func runWake(g *globals, args []string) error { return power(g, "wake", api.Powe
 
 func power(g *globals, verb string, state api.Power, args []string) error {
 	fs := g.flags(verb)
-	all := fs.Bool("all", false, "every Computer in the Fleet")
+	all := fs.Bool("all", false, "every agent computer in the Fleet")
 	var clearInbox, allowWake *bool
 	if state == api.PowerAsleep {
 		allowWake = fs.Bool("allow-wake", false, "leave the power policy in charge: a listed sender's message may wake it")
 	}
 	if state == api.PowerAwake {
-		clearInbox = fs.Bool("clear-inbox", false, "discard the pending messages (journaled, not erased) before the Computer takes work")
+		clearInbox = fs.Bool("clear-inbox", false, "discard the pending messages (journaled, not erased) before the agent computer takes work")
 	}
 	names, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
 	if *all == (len(names) > 0) {
-		return usageError(verb + " needs Computer or Service names, or --all")
+		return usageError(verb + " needs agent computer or Service names, or --all")
 	}
 	c, f, err := g.connect()
 	if err != nil {
@@ -60,7 +60,7 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 	}
 	if len(services) > 0 {
 		if (clearInbox != nil && *clearInbox) || (allowWake != nil && *allowWake) {
-			return usageError("--clear-inbox and --allow-wake are for Computers; a Service has no inbox or power policy")
+			return usageError("--clear-inbox and --allow-wake are for agent computers; a Service has no inbox or power policy")
 		}
 		if err := powerServices(ctx, g, c, f, verb, state, services); err != nil {
 			return err
@@ -121,7 +121,7 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 
 func runApply(g *globals, args []string) error {
 	fs := g.flags("apply")
-	interrupt := fs.Bool("interrupt", false, "interrupt busy Computers' active turns")
+	interrupt := fs.Bool("interrupt", false, "interrupt busy agent computers' active turns")
 	grace := fs.Duration("grace", 30*time.Second, "how long an interrupted turn may take to finish")
 	pos, err := parse(fs, args)
 	if err != nil {

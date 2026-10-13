@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import uuid
 from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import closing, contextmanager
 from types import TracebackType
@@ -97,7 +98,7 @@ class Client:
         for c in self.status().agent_computers:
             if c.name == name:
                 return c
-        raise A12sError(404, "not_found", f"no Computer {name}")
+        raise A12sError(404, "not_found", f"no agent computer {name}")
 
     def send(
         self,
@@ -172,15 +173,16 @@ class Client:
         """Live events of one Computer, several, or (None) every Computer in the Fleet, merged.
 
         Each event carries its ``computer``. A dropped stream reconnects after ``reconnect`` seconds without losing or
-        repeating events. With one Computer, ``turn`` replays that Turn from its start and ``after`` resumes after a
-        journal seq. When a stream can't resume from its cursor, ``on_gap="yield"`` yields a ``gap`` event and carries
+        repeating events. With one Computer, ``turn`` replays that Turn from its start (the stream ends after its
+        turn.finished) and ``after`` resumes after a journal seq. When a stream can't resume from its cursor, ``on_gap="yield"`` yields a ``gap`` event and carries
         on live and ``"throw"`` raises A12sGapError; either way events were lost: resync from ``status()``.
         """
         names = core.stream_names(computers, turn, after)
 
         def source(name: str, live: Callable[[], None], cancel: _Cancel) -> Iterator[Event]:
             state = core.StreamState(name, after, on_gap, live)
-            return self._stream(core.events_path(name, turn), state, reconnect, cancel)
+            events = self._stream(core.events_path(name, turn), state, reconnect, cancel)
+            return events if turn is None else core.until_turn_finished(events)
 
         return EventStream(source, names if names is not None else lambda: [c.name for c in self.status().agent_computers])
 
@@ -214,13 +216,31 @@ class Client:
         if id:
             self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
 
-    def sleep(self, computer: str) -> None:
-        """Stops the Computer's processes and keeps its disks, session and inbox."""
-        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "asleep"})
+    def sleep(self, computer: str, *, allow_wake: bool = False) -> None:
+        """Stops the agent computer's processes and keeps its disks, session and inbox. It stays asleep until wake();
+        with ``allow_wake`` its power policy (wakeOnMessage) may wake it instead."""
+        body: dict[str, Any] = {"state": "asleep"}
+        if allow_wake:
+            body["allowWake"] = True
+        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
 
-    def wake(self, computer: str) -> None:
-        """Starts a sleeping Computer; its session resumes on the next Turn."""
-        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "awake"})
+    def wake(self, computer: str, *, clear_inbox: bool = False) -> None:
+        """Starts a sleeping agent computer; its session resumes on the next Turn. ``clear_inbox`` discards the
+        pending Messages first."""
+        body: dict[str, Any] = {"state": "awake"}
+        if clear_inbox:
+            body["clearInbox"] = True
+            body["requestId"] = uuid.uuid4().hex
+        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
+
+    def hold(self, computer: str, *, reason: str | None = None) -> InboxList:
+        """Holds the agent computer's inbox: Messages still queue, none is delivered until resume()."""
+        body = {"reason": reason} if reason else {}
+        return from_json(InboxList, self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox/hold", body))
+
+    def resume(self, computer: str) -> InboxList:
+        """Releases a hold; the pending Messages are delivered at the next idle moment."""
+        return from_json(InboxList, self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox/resume", {}))
 
     def services(self) -> list[ServiceStatus]:
         res = self._request("GET", "/v1/services")

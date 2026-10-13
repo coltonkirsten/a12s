@@ -217,7 +217,7 @@ computers:
     harness: { kind: codex, version: 0.154.0 }
     image: slim
     drives: [{ name: d, at: /w, readOnly: true }]
-`, "attached to more than one Computer: c, e"},
+`, "attached to more than one agent computer: c, e"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -2,6 +2,32 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+From running nine apps written by cold agents that had only llms.txt.
+
+### Added
+- **`hold()` and `resume()` on an agent computer** in both SDKs (`POST …/inbox/hold|resume`): hold delivery while
+  Messages still queue, then release it.
+- **`sleep({ allowWake })` / `sleep(allow_wake=True)` and `wake({ clearInbox })` / `wake(clear_inbox=True)`** in both
+  SDKs, as the CLI's `--allow-wake` and `--clear-inbox`. A plain `sleep()` still holds it asleep until `wake()`.
+- **`Fleet.connect({ token })` / `a12s.Fleet(token=…)`** without a URL finds this machine's Fleet as before and uses
+  the given token (a prefix or narrow token's secret) instead of the owner token.
+- **A write's warnings reach SDK users**: `console.warn` in TypeScript, `warnings.warn(a12s.A12sWarning)` in Python.
+- **A warning when an agent computer lacks its harness's credential** (claude-code: `anthropic`, codex: `openai`):
+  a `credentials` list on one agent computer replaces the defaults' list, so `[stripe]` silently dropped
+  `anthropic` and every Turn failed "Not logged in".
+- **`a12s creds set anthropic` checks the value**: one unbroken `sk-ant-oat01-…` or `sk-ant-api03-…` string of about
+  108 characters, else it refuses with the fix line (a setup token pasted in pieces used to surface later as a 401).
+  `--no-check` skips the check.
+
+### Fixed
+- **A Turn replay ends**: `events({ turn })` / `events(turn=…)` stop after that Turn's `turn.finished`; they used to
+  wait forever because the server keeps the stream open.
+- **`a12s prompt … 2>&1`** no longer glues event lines onto the agent's text.
+- **`a12s status`** says the orphaned-drive warning once, and CLI and API messages say "agent computer" instead of
+  "Computer". `a12s up` prints `created a, b` instead of `created a, b (asleep: none)`.
+
 ## v0.4.1 (2026-10-12)
 
 What a web console needs from the API, and the console itself: `a12s ui`. Live inbox and Service events on the

@@ -104,7 +104,7 @@ func inboxCounts(fleetName string) string {
 	for i := range st.OrphanedInboxes {
 		add(&st.OrphanedInboxes[i])
 	}
-	return fmt.Sprintf("inbox: %d pending across %d Computers, %d held", pending, computers, held)
+	return fmt.Sprintf("inbox: %d pending across %d agent computers, %d held", pending, computers, held)
 }
 
 func confirmPurge(in io.Reader, out io.Writer, fleetName string, drives []cli.Drive, data []string, counts string) bool {

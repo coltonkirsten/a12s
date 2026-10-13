@@ -288,3 +288,20 @@ test("events: ready() rejects when a Computer doesn't exist", async () => {
 test("events: turn and after need one Computer", () => {
   assert.throws(() => new A12sClient({ url: "http://x" }).events(["a", "b"], { after: 1 }), TypeError);
 });
+
+test("events: a Turn replay ends after its turn.finished although the server keeps the stream open", async () => {
+  const { client, close } = await fake((req, res) => {
+    assert.equal(req.url, "/v1/agent-computers/lead/events?turn=t_9");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(ev(10, "text.delta", "t_9", { text: "hi" }));
+    res.write(ev(11, "turn.finished", "t_9", { status: "completed", usage: {} }));
+    res.write('event: head\ndata: {"seq":11}\n\n');
+  });
+  try {
+    const types: string[] = [];
+    for await (const e of client.events("lead", { turn: "t_9" })) types.push(e.type);
+    assert.deepEqual(types, ["text.delta", "turn.finished"]);
+  } finally {
+    close();
+  }
+});

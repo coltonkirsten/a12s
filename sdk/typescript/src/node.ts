@@ -34,7 +34,8 @@ export interface ConnectOptions extends A12sClientOptions {
  * 2. the Fleet named by `fleet`;
  * 3. the Fleet file in `$A12S_FLEET`, else the nearest `fleet.yaml` in the current directory or a parent;
  * 4. the only Fleet with a running Controller on this machine.
- * For 2–4 it reads `~/.a12s/<fleet>/controller.json`, which `a12s up` writes.
+ * For 2–4 it reads `~/.a12s/<fleet>/controller.json`, which `a12s up` writes: its URL always, and its owner token
+ * unless `token` is given (a prefix or narrow token on this machine).
  */
 export async function connect(opts: ConnectOptions = {}): Promise<A12sClient> {
   return new A12sClient(await discover(opts));
@@ -52,7 +53,7 @@ async function discover(opts: ConnectOptions): Promise<A12sClientOptions> {
   } catch (err) {
     throw new Error(`Fleet ${fleet} isn't running (no ${path}): run a12s up in its directory first`, { cause: err });
   }
-  return { url: `http://127.0.0.1:${cf.port}`, token: cf.token, fetch: opts.fetch };
+  return { url: `http://127.0.0.1:${cf.port}`, token: opts.token ?? cf.token, fetch: opts.fetch };
 }
 
 async function fleetNameNearby(cwd: string): Promise<string | undefined> {

@@ -36,6 +36,8 @@ its own fleet.yaml, presets, images, Services and app code.
   tool `mcp__a12s__send` (args: computer, body; optional fresh boolean, expires seconds, replaceKey string) that
   returns a receipt, never an answer. Grants are one-way: for a reply, the other side needs its own grant back.
 - Service: a non-agent container in the same Fleet (a clock, a webhook bridge, an MCP server). No harness, no inbox.
+- phase (exact strings, capitalized): Provisioning, Starting, Ready, Busy, Stopping, Asleep, Error; a Service can also
+  be Unhealthy. `status.phase` in the SDKs, `.phase` of each `a12s status --json` entry, agent_computer.phase events.
 
 ## Setup (once per machine)
 
@@ -53,6 +55,8 @@ API key (`sk-ant-api…`). Not a copy of your interactive Claude login. Codex: `
   token is printed wrapped over two or more terminal lines: pasting it interactively stores only the first piece and
   the Turn fails to authenticate. Join it first, e.g. `pbpaste | tr -d ' \n' | a12s creds set anthropic`, or
   `printf %s "$TOKEN" | a12s creds set anthropic`.
+- `creds set anthropic` refuses a value that isn't one unbroken sk-ant-oat01-… or sk-ant-api03-… string of about 108
+  characters (spaces or line breaks inside, a cut-off paste, another secret) and prints the fix; `--no-check` skips it.
 - Run it in the Fleet's directory: it stores the value at ~/.a12s/<fleet>/<name> (0600) and binds it in
   a12s.bindings.yaml (created if missing). If the Fleet's Controller is running it also sets the value there, and
   agent computers using it get it at once; otherwise `a12s up` sends it.
@@ -113,7 +117,10 @@ Agent computer fields (all optional except a harness, image and credential, whic
   CLAUDE.md (AGENTS.md for codex) is an error: keep one. No instructions or files is fine: `hello: {}` with defaults
   works.
 - credentials: [names]. anthropic → Claude Code, openai → Codex, github → GH_TOKEN/GITHUB_TOKEN, any other name →
-  file /run/a12s/secrets/<name>.
+  file /run/a12s/secrets/<name> (the agent can read that file, but not list the directory: put the exact path in its
+  instructions). A list on one agent computer REPLACES the defaults' list: with defaults [anthropic] write
+  `credentials: [anthropic, stripe]`, not `[stripe]` (without anthropic every Turn fails "Not logged in"; the write
+  warns). Set a credential's value before creating an agent computer that names it, else 400 missing_credential.
 - egress: {allow: [hosts]}. HTTPS to those hosts only; plain http and private addresses are refused. The harness's
   own API and sign-in hosts are always added, so `allow: []` still lets Claude Code work. Allow everything public:
   `allow: ["*"]` (quote it: a bare * is YAML alias syntax and fails to parse).
@@ -125,6 +132,9 @@ Agent computer fields (all optional except a harness, image and credential, whic
 - inbox: {maxMessages, maxBytes (≤1Mi), intro}. Bodies are at most 64 KiB.
 - power: {sleepAfterIdle: 15m, wakeOnMessage: {from: [local, service:clock, computer:lead, token:web],
   maxWakesPerHour: 6}}. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
+  A manual sleep (`a12s sleep`, SDK `sleep()`) holds it asleep until `wake`, ignoring wakeOnMessage (status says
+  "auto-wake suppressed"); `a12s sleep <c> --allow-wake`, `sleep(allow_wake=True)` or `sleep({ allowWake: true })`
+  sleeps it like sleepAfterIdle does, so a listed sender's Message wakes it.
 - security: {seccomp: ./profiles/x.json}: a Docker-format seccomp profile, relative to fleet.yaml, replacing
   Docker's default for that agent computer only; `a12s up` reads the file and sends the profile itself. From the SDK
   or the HTTP API, `seccomp` is the profile's JSON object. Set it only when the image's software needs blocked
@@ -141,7 +151,9 @@ made through the SDK or API (GET /v1/fleet lists them as `drift`). When it would
 asks `apply anyway? [y/N]`; without a terminal (CI) it fails unless `--force`. `a12s diff` shows what up would
 change; `a12s export` writes the live Fleet back to the file instead (long instructions and files go to
 presets/<name>/, seccomp profiles to profiles/<name>.json; comments in fleet.yaml are lost, so overwriting a file
-that differs needs --force). Give each agent computer one owner: the file or your code.
+that differs needs --force). Exporting onto your fleet.yaml makes the drift part of the file (up then undoes nothing);
+to look first, export a copy: `cp -r . /tmp/copy && a12s -F /tmp/copy/fleet.yaml export --force`. Give each agent
+computer one owner: the file or your code.
 
 ## What the agent sees
 
@@ -166,14 +178,17 @@ a12s export [--force]                 # write the live Fleet back to fleet.yaml,
 a12s status                           # phase, inbox, power, warnings (--json for machines)
 a12s prompt <c> "…"                   # send and stream the Turn that delivers it; --new = fresh session
 a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # enqueue and exit; busy or asleep
-a12s logs <c> --follow                # one agent computer's events
+a12s logs <c> [--follow]              # its journal, one "<seq> <type> <data JSON>" line per event, then exits;
+                                      #   --follow keeps following (Ctrl-C). Types as in Words: turn.finished, …
 a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2] [--no-open]
 a12s ui [--port 7013] [--no-open]     # the web console (npx a12s-console; Node.js 20+); args go to the console
-a12s inbox <c> [--bodies]             # pending Messages; inbox resume <c> releases a hold
-a12s stop <c> | sleep <c> | wake <c>
+a12s inbox <c> [--bodies]             # pending Messages (human table; --json for machines)
+a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Messages still queue), release, withdraw
+a12s stop <c> | sleep <c> [--allow-wake] | wake <c> [--clear-inbox]
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
-a12s token create <name> --prefix biz- # prints it once: owner powers on biz-* names, nothing outside
+a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix; prints the secret (a12st_…)
+                                      #   once, on its own line: owner powers on biz-* names, nothing outside
 a12s token create <name> --actions send,events,status,inbox,power,stop --agent-computers c1,c2|'*'   # narrow
 a12s creds set <name>                 # see Setup
 a12s doctor                           # every check, with its fix
@@ -181,7 +196,9 @@ a12s down                             # stop all, keep disks;  down --purge dele
 ```
 
 Every command finds the Fleet from -F path/fleet.yaml, $A12S_FLEET, or the nearest fleet.yaml upward. `<c>` is an
-agent computer's name.
+agent computer's name. Every command takes `--json` (before or after it) for scripts: `a12s status --json` is
+{fleet, agentComputers: [{name, phase, inbox: {pending, held, …}, …}], …} (phase directly on each entry);
+`a12s inbox desk --json` is the inbox object below; `a12s --json token create bizapp --prefix biz- | jq -r .secret`.
 
 ## TypeScript SDK (npm install @coltonkirsten/a12s; Node 20+, ESM; browsers via the gateway)
 
@@ -196,7 +213,9 @@ await hello.remove();
 import { Fleet, A12sError, NotFound } from "@coltonkirsten/a12s";
 const fleet = await Fleet.connect();  // nearest fleet.yaml's Fleet, else the only running one, as owner (no token);
                                       // or Fleet.connect({ fleet }), Fleet.connect({ url, token }), env A12S_URL +
-                                      // A12S_TOKEN; in a page served by the gateway: same origin, no arguments
+                                      // A12S_TOKEN; in a page served by the gateway: same origin, no arguments.
+                                      // Fleet.connect({ token }): this machine's Fleet, found the same way, under
+                                      // another token (e.g. a prefix token's secret) instead of the owner's
 
 // create takes any agent computer field (as in fleet.yaml); the rest comes from defaults. Resolves once it is up.
 const coder = await fleet.agentComputers.create("coder", {
@@ -222,13 +241,16 @@ for await (const t of turns) { t.agentComputer; t.text; t.status; t.tokens?.outp
 const evs = lead.events();                          // live from now; fleet.events(names?) for several or all
 await evs.ready();
 for await (const ev of evs) { if (ev.type === "text.delta") ev.data.text; }   // typed by ev.type
-lead.events({ turn: r.id });                        // replay one Turn from its start
-const past = await lead.turns({ limit: 20 });       // its last finished Turns, newest first
+lead.events({ turn: r.id });                        // replay one Turn from its start; ends after its turn.finished
+const past = await lead.turns({ limit: 20 });       // its last finished Turns (an array), newest first
 
 await lead.update({ instructions: "…", power: null }); // JSON merge patch: null goes back to the default;
                                                        // a busy one picks it up at its next idle moment
-await lead.inbox({ bodies: true }); await lead.message(m.id); await lead.withdraw(m.id);
-await lead.stop(); await lead.sleep(); await lead.wake();
+const box = await lead.inbox({ bodies: true });     // {computer, held, holdReason?, pending, claimed, messages:
+                                                    //   [{id, seq, state, sender, via, body?, replaceKey?, …}], …}
+await lead.message(m.id); await lead.withdraw(m.id); // withdraw: a pending Message is removed, never delivered
+await lead.hold({ reason: "triage" }); await lead.resume();   // hold delivery (sends still queue); release it
+await lead.stop(); await lead.sleep(); await lead.wake();     // sleep({ allowWake: true }), wake({ clearInbox: true })
 await coder.remove();                               // stops and removes it; its drives are kept
 await fleet.status();                               // every agent computer and Service: phase, inbox, power
 
@@ -244,6 +266,7 @@ await fleet.credentials.list();                     // [{name, set, usedBy}]; re
 await fleet.replace((f) => { f.defaults!.power = { sleepAfterIdle: "15m" }; });  // If-Match, retried on conflict
 // errors: A12sError {status, code, message, fix}, NotFound (a 404, subclass of A12sError); streams:
 // A12sStreamError, A12sGapError (onGap: "throw"). A failed Turn is not an error: prompt() returns it, status "failed".
+// A write's warnings (a grant to a missing agent computer, a missing harness credential) go to console.warn.
 ```
 
 events() and turns() start live (nothing from before they connect), and every events() and turns() of one Fleet
@@ -265,7 +288,8 @@ hello.remove()
 
 ```python
 import a12s
-fleet = a12s.Fleet()                  # same discovery; a12s.Fleet(fleet="team"), a12s.Fleet(url=…, token=…)
+fleet = a12s.Fleet()                  # same discovery; a12s.Fleet(fleet="team"), a12s.Fleet(url=…, token=…);
+                                      # a12s.Fleet(token=secret): this machine's Fleet under another token
 coder = fleet.agent_computers.create("coder", instructions="You write and run Python.",
                                      egress={"allow": ["pypi.org"]}, power={"sleepAfterIdle": "30m"})
 # keyword arguments are agent computer fields; nested keys camelCase as in fleet.yaml; replace=True overwrites
@@ -283,22 +307,28 @@ with fleet.turns(["lead", "worker1"]) as turns:   # entering waits until connect
         break
 for ev in lead.events():              # ev.type, ev.agent_computer, ev.turn, ev.data (dict, camelCase keys)
     pass                              # lead.events(turn=r.id) replays one Turn; fleet.events() has them all
-lead.turns(limit=20)                  # its last finished Turns, newest first (without limit: live, as they end)
+lead.turns(limit=20)                  # a list of its last finished Turns, newest first (without limit: live, as they
+                                      # end); on AsyncFleet: past = await lead.turns(limit=20)
 lead.update(instructions="…")         # changes only these fields; applies at its next idle moment
-lead.inbox(bodies=True); lead.message(m.id); lead.withdraw(m.id); lead.stop(); lead.sleep(); lead.wake()
+box = lead.inbox(bodies=True)         # box.held, box.pending, box.messages[i].id/.body/.state/.via
+lead.message(m.id); lead.withdraw(m.id)   # withdraw: a pending Message is removed, never delivered
+lead.hold(reason="triage"); lead.resume() # hold delivery (sends still queue); release it
+lead.stop(); lead.sleep(); lead.wake()    # sleep(allow_wake=True): wakeOnMessage may wake it; wake(clear_inbox=True)
 coder.remove()                        # stops and removes it; its drives are kept
 fleet.status().agent_computers        # every agent computer: phase, inbox, power
 fleet.services.get("clock").sleep()   # Service: reload, update, sleep, wake, remove
 app = fleet.tokens.create("bizapp", prefix="biz-")   # owner only; app.secret once
 tok = fleet.tokens.create("web", actions=["send", "status"], agent_computers=["lead"])   # tok.secret once
-state = fleet.get()                   # state.version, state.spec (FleetSpec, a dict), state.drift
+state = fleet.get()                   # a FleetState (attributes, not a dict): .version, .spec (FleetSpec, a dict),
+                                      # .drift (list of Change: op, kind, name, fields); there is no fleet.reload()
 fleet.credentials.set("stripe", key)  # agent computers using it get it at once; values are never read back
 fleet.credentials.list()              # [CredentialInfo(name, set, used_by)]; remove(name) raises in_use while used
 fleet.replace(lambda f: f.defaults.update(power={"sleepAfterIdle": "15m"}))   # If-Match, retried on conflict
 fleet.close()                         # or: with a12s.Fleet() as fleet:
 # async: fleet = a12s.AsyncFleet(); the same objects with await / async for / async with; await fleet.aclose()
 # errors: a12s.A12sError (status, code, fix; a12s.NotFound is one), a12s.A12sStreamError, a12s.A12sGapError;
-# a failed Turn is returned with status "failed", not raised
+# a failed Turn is returned with status "failed", not raised. A write's warnings arrive as warnings.warn(A12sWarning).
+# lead.events(turn=r.id) replays one Turn and ends after its turn.finished
 ```
 
 Iteration blocks until the next Turn or event; it has no timeout. To bound it, run it in a thread or use
@@ -343,6 +373,8 @@ with fleet.turns(["lead", "worker1"]) as turns:       # watch first, then send
 ```
 
 A worker's result is in its send call (`t.tools`, name `mcp__a12s__send`, input `{computer, body}`), not in t.text.
+The receiver's Turn can finish before the sender's (a send happens mid-Turn), so match Turns by agent computer and
+content, never by arrival order.
 Without fresh, lead remembers earlier tasks and may repeat an old answer. To make the pair from code instead, create
 them one after the other: a grant may name an agent computer that doesn't exist yet (the write warns).
 
@@ -400,6 +432,10 @@ the a12s module; needs Go 1.26):
 mkdir clock && cd clock && go mod init example.com/clock
 go get github.com/coltonkirsten/a12s/services/svckit@v0.4.1
 ```
+
+svckit is a package inside the module github.com/coltonkirsten/a12s (there is no separate svckit module or tag): go get
+writes `require github.com/coltonkirsten/a12s v0.4.1` to go.mod and fills go.sum. Don't hand-write either; run
+`go mod tidy` after writing main.go. The Dockerfile below copies both.
 
 ```go
 // main.go
@@ -531,6 +567,9 @@ agent computers, a prefix token (`--prefix web-`).
 
 With a bundler (React, Vite): `npm install @coltonkirsten/a12s`, then in the app
 `import { Fleet } from "@coltonkirsten/a12s"; const fleet = await Fleet.connect();` and run `a12s gateway -- npm run dev`.
+Import the npm package there, never "/a12s.js" (only an unbundled page can import that; Vite fails to resolve it).
+No Vite or dev-server config is needed: the gateway runs the command, waits for the http://localhost:<port> URL it
+prints (or `--dev-port <port>`), and proxies it, hot reload included.
 
 ## HTTP API (any language)
 
@@ -542,7 +581,8 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
 - Events: GET /v1/events is one SSE stream for the whole Fleet (?agentComputers=a,b filters): id is an opaque
   string, Last-Event-ID resumes, `event: head` marks live, `event: gap` = events lost (resync). It also carries
   fleet.changed, agent_computer.phase, inbox.changed and service.phase. GET /v1/agent-computers/{c}/events is one agent computer's journal (id =
-  seq; ?turn=<id> replays one Turn). GET /v1/agent-computers/{c}/turns?limit=20 → {turns: [Turn]}, newest first.
+  seq; ?turn=<id> replays one Turn and then stays open: stop reading at its turn.finished).
+  GET /v1/agent-computers/{c}/turns?limit=20 → {turns: [Turn]}, newest first.
 - One agent computer (owner or prefix token): PUT /v1/agent-computers/{c} with its spec as JSON (fleet.yaml's
   fields; seccomp is the profile object) creates or replaces it; add `If-None-Match: *` to only create (409 exists
   if taken). PATCH is a JSON merge patch (null removes a key, so it falls back to the default); DELETE removes it, drives kept.
@@ -550,6 +590,8 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   PUT/PATCH/DELETE exist on /v1/services/{s}. These writes change only that one; last write wins.
 - The whole Fleet: GET /v1/fleet → {version, fleet, drift} with ETag "<version>". PUT /v1/fleet {"fleet": …} with
   If-Match: "<version>" replaces it, or answers 412 version_mismatch if it changed since you read it.
+- A write on one agent computer also answers `agentComputer: {name, spec, effective, status}` (a Service write:
+  `service`), e.g. `curl … -X PATCH … | jq .agentComputer.spec.instructions`. POST …/inbox needs only "body".
 - Every write takes ?dryRun=true (check it exactly as the write would, list the changes, change nothing) and answers {version, changes: [{op:
   create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?, diff?: [{path, before?, after?}]}],
   warnings, errors, …}; diff lists each changed leaf of an update (path "grants.send"; lists and values are leaves). A
@@ -567,6 +609,10 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), /v1/apply, drives and tokens are 403 forbidden.
   Egress, image, seccomp and resources are its call: trust it like the owner for its agent computers.
 - The old /v1/computers/... paths still work for one release.
+- Error codes (`code`, stable): invalid, missing_field, missing_credential, bad_metadata, bad_expires (400);
+  unauthorized (401); forbidden, no_grant, out_of_prefix (403); not_found, unknown_request (404); busy, conflict,
+  exists, in_use, idempotency_conflict, not_idle, attached (409); gone (410); version_mismatch (412);
+  body_too_large, exceeds_inbox (413); inbox_full (429); asleep (503).
 
 ## API surface
 
@@ -621,13 +667,13 @@ SDK objects (Python names; TypeScript is camelCase):
 
 - Fleet: TypeScript get, replace, events, turns, status; Python close, status, events, turns, get, replace; Python AsyncFleet aclose, status, events, turns, get, replace
 - AgentComputers: TypeScript create, get, list; Python create, get, list
-- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, update, sleep, wake, stop, inbox, message, withdraw, remove
+- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, hold, resume, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, update, sleep, wake, hold, resume, stop, inbox, message, withdraw, remove
 - Services: TypeScript create, get, list; Python create, get, list
 - Service: TypeScript reload, update, remove, sleep, wake; Python reload, update, sleep, wake, remove
 - Tokens: TypeScript create, list, remove; Python create, list, remove
 - Credentials: TypeScript set, list, remove; Python set, list, remove
 
-Deprecated one release (name-first): TypeScript A12sClient status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, createToken, putFleet; Python Client close, status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, services, service, create_token, put_fleet
+Deprecated one release (name-first): TypeScript A12sClient status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, hold, resume, services, service, createToken, putFleet; Python Client close, status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, hold, resume, services, service, create_token, put_fleet
 <!-- /api-surface -->
 
 ## Patterns and gotchas

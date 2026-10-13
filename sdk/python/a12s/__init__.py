@@ -18,7 +18,7 @@ from ._afleet import (
     AsyncServices,
     AsyncTokens,
 )
-from ._errors import A12sError, A12sGapError, A12sStreamError, NotFound
+from ._errors import A12sError, A12sGapError, A12sStreamError, A12sWarning, NotFound
 from ._fleet import AgentComputer, AgentComputers, Credentials, Fleet, FleetState, Service, Services, Tokens
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
@@ -54,6 +54,7 @@ __all__ = [
     "A12sError",
     "A12sGapError",
     "A12sStreamError",
+    "A12sWarning",
     "AgentComputer",
     "AgentComputerInfo",
     "AgentComputerSpec",

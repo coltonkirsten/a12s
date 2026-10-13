@@ -165,15 +165,26 @@ class AgentComputer:
         """Changes the given fields (maps merge, lists replace). It applies at the next idle moment; the session
         continues."""
         res = self._fleet._client._request("PATCH", ac_path(self.name), dict(changes))
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):
             self._set(res["agentComputer"])
         return self
 
-    def sleep(self) -> None:
-        self._fleet._client.sleep(self.name)
+    def sleep(self, *, allow_wake: bool = False) -> None:
+        """Puts it to sleep until wake(). With ``allow_wake``, its power policy (wakeOnMessage) may wake it."""
+        self._fleet._client.sleep(self.name, allow_wake=allow_wake)
 
-    def wake(self) -> None:
-        self._fleet._client.wake(self.name)
+    def wake(self, *, clear_inbox: bool = False) -> None:
+        """Wakes it; ``clear_inbox`` discards the pending Messages first."""
+        self._fleet._client.wake(self.name, clear_inbox=clear_inbox)
+
+    def hold(self, *, reason: str | None = None) -> InboxList:
+        """Holds its inbox: Messages still queue, none is delivered until resume()."""
+        return self._fleet._client.hold(self.name, reason=reason)
+
+    def resume(self) -> InboxList:
+        """Releases a hold on its inbox."""
+        return self._fleet._client.resume(self.name)
 
     def stop(self, turn: str | None = None) -> None:
         """Interrupts a Turn (default: the active one)."""
@@ -201,6 +212,7 @@ class AgentComputers:
         """Creates an agent computer and returns once it is up. A taken name raises A12sError ``exists`` unless
         ``replace``."""
         res = self._fleet._client._request("PUT", ac_path(name), dict(spec), write_headers(replace))
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):
             return AgentComputer(self._fleet, res["agentComputer"])
         return self.get(name)
@@ -235,6 +247,7 @@ class Service:
 
     def update(self, **changes: Any) -> Service:
         res = self._fleet._client._request("PATCH", service_path(self.name), changes)
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("service"), dict):
             self._set(res["service"])
         return self
@@ -256,6 +269,7 @@ class Services:
 
     def create(self, name: str, *, replace: bool = False, **spec: Any) -> Service:
         res = self._fleet._client._request("PUT", service_path(name), spec, write_headers(replace))
+        core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("service"), dict):
             return Service(self._fleet, res["service"])
         return self.get(name)
@@ -381,7 +395,7 @@ class Fleet:
             spec = fn(state.spec)
             body = {"fleet": dict(spec if spec is not None else state.spec)}
             try:
-                self._client._request("PUT", "/v1/fleet", body, {"if-match": f'"{state.version}"'})
+                core.warn_writes(self._client._request("PUT", "/v1/fleet", body, {"if-match": f'"{state.version}"'}))
             except A12sError as err:
                 if err.code == "version_mismatch" and attempt < _REPLACE_TRIES - 1:
                     continue

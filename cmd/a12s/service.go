@@ -151,7 +151,7 @@ func splitTargets(names []string, isService func(string) bool, isComputer func(s
 		}
 	}
 	if len(unknown) > 0 {
-		return nil, nil, fmt.Errorf("no Computer or Service named %s in the Fleet file", strings.Join(unknown, ", "))
+		return nil, nil, fmt.Errorf("no agent computer or Service named %s in the Fleet file", strings.Join(unknown, ", "))
 	}
 	return computers, services, nil
 }

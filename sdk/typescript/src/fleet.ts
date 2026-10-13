@@ -106,9 +106,11 @@ export class Fleet {
       cur.spec.defaults ??= {};
       const next = (await fn(cur.spec)) ?? cur.spec;
       try {
-        await this.client.request<PutFleetResponse>("PUT", "/v1/fleet", { fleet: next }, {
-          headers: { "if-match": `"${cur.version}"` },
-        });
+        warnWrites(
+          await this.client.request<PutFleetResponse>("PUT", "/v1/fleet", { fleet: next }, {
+            headers: { "if-match": `"${cur.version}"` },
+          }),
+        );
       } catch (err) {
         if (attempt < maxReplaceTries && err instanceof A12sError && err.code === "version_mismatch") continue;
         throw err;
@@ -160,6 +162,7 @@ export class AgentComputers {
     const r = await this.client.request<PutFleetResponse>("PUT", `/v1/agent-computers/${enc(name)}`, body, {
       headers: writeHeaders({ replace }),
     });
+    warnWrites(r);
     return r.agentComputer ? new AgentComputer(this.client, r.agentComputer) : this.get(name);
   }
 
@@ -208,6 +211,7 @@ export class AgentComputer {
   /** Changes the spec: a key set to null goes back to the Fleet's default. A busy one picks it up when idle. */
   async update(changes: MergePatch<AgentComputerSpec>): Promise<this> {
     const r = await this.client.request<PutFleetResponse>("PATCH", this.path, changes);
+    warnWrites(r);
     return r.agentComputer ? this.set(r.agentComputer) : this.reload();
   }
 
@@ -251,13 +255,24 @@ export class AgentComputer {
     }));
   }
 
-  /** Stops its processes and keeps its disks, session and inbox. */
-  sleep(): Promise<void> {
-    return this.client.sleep(this.name);
+  /** Stops its processes and keeps its disks, session and inbox until wake(); `allowWake` lets wakeOnMessage wake it. */
+  sleep(opts: { allowWake?: boolean } = {}): Promise<void> {
+    return this.client.sleep(this.name, opts);
   }
 
-  wake(): Promise<void> {
-    return this.client.wake(this.name);
+  /** Wakes it; `clearInbox` discards the pending Messages first. */
+  wake(opts: { clearInbox?: boolean } = {}): Promise<void> {
+    return this.client.wake(this.name, opts);
+  }
+
+  /** Holds its inbox: Messages still queue, none is delivered until resume(). */
+  hold(opts: { reason?: string } = {}): Promise<InboxListResponse> {
+    return this.client.hold(this.name, opts);
+  }
+
+  /** Releases a hold on its inbox. */
+  resume(): Promise<InboxListResponse> {
+    return this.client.resume(this.name);
   }
 
   /** Interrupts a Turn (default: the active one). */
@@ -288,6 +303,7 @@ export class Services {
     const r = await this.client.request<PutFleetResponse>("PUT", `/v1/services/${enc(name)}`, body, {
       headers: writeHeaders({ replace }),
     });
+    warnWrites(r);
     return r.service ? new Service(this.client, r.service) : this.get(name);
   }
 
@@ -331,6 +347,7 @@ export class Service {
   /** Changes the spec as a JSON merge patch: a key set to null is removed. */
   async update(changes: Record<string, unknown>): Promise<this> {
     const r = await this.client.request<PutFleetResponse>("PATCH", this.path, changes);
+    warnWrites(r);
     if (!r.service) return this.reload();
     this.status = r.service;
     return this;
@@ -395,4 +412,10 @@ export class Credentials {
   async remove(name: string): Promise<void> {
     await this.client.request("DELETE", `/v1/credentials/${enc(name)}`);
   }
+}
+
+/** A write's warnings (a grant to an agent computer that doesn't exist yet, a missing harness credential) go to the
+ * console instead of being dropped. */
+function warnWrites(r: PutFleetResponse | undefined): void {
+  for (const w of r?.warnings ?? []) console.warn(`a12s: ${w}`);
 }

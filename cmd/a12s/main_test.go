@@ -42,7 +42,7 @@ func TestExitCodes(t *testing.T) {
 		t.Errorf("code %d: %s", code, b.String())
 	}
 	b.Reset()
-	if code := run([]string{"stop"}, &b); code != 2 || !strings.HasPrefix(b.String(), "a12s: stop needs one Computer name") {
+	if code := run([]string{"stop"}, &b); code != 2 || !strings.HasPrefix(b.String(), "a12s: stop needs one agent computer name") {
 		t.Errorf("code %d: %s", code, b.String())
 	}
 	b.Reset()
@@ -253,10 +253,10 @@ func TestFinishUpPartialFailure(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	err := g.finishUp(onDisk, fleet.NewLock(), resp, false, &out, &errOut)
-	if err == nil || !strings.Contains(err.Error(), "1 Computer(s) or Service(s) did not converge") {
+	if err == nil || !strings.Contains(err.Error(), "1 agent computer(s) or Service(s) did not converge") {
 		t.Fatalf("err = %v", err)
 	}
-	if out.String() != "created scout, tester (asleep: none)\n" {
+	if out.String() != "created scout, tester\n" {
 		t.Errorf("stdout %q", out.String())
 	}
 	if !strings.Contains(errOut.String(), "tester: image a12s/browser:dev not found\n") {
@@ -282,7 +282,7 @@ func TestStaleGatewayTokensSparesLiveSiblings(t *testing.T) {
 
 func TestPageMaySaysTheScopeInOneLine(t *testing.T) {
 	got := pageMay(api.Token{Name: "gateway-7012", Actions: []string{"status", "send"}, Computers: []string{"lead", "worker1"}})
-	want := "the page may read status, send Messages, on Computers lead, worker1 (token:gateway-7012; change with --allow, --computers)"
+	want := "the page may read status, send Messages, on agent computers lead, worker1 (token:gateway-7012; change with --allow, --computers)"
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

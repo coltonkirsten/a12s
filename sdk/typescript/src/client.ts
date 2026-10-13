@@ -157,7 +157,7 @@ export class A12sClient {
 
   async computer(name: string): Promise<ComputerStatus> {
     const c = (await this.status()).agentComputers.find((x) => x.name === name);
-    if (!c) throw new NotFound(404, { code: "not_found", message: `no Computer ${name}` });
+    if (!c) throw new NotFound(404, { code: "not_found", message: `no agent computer ${name}` });
     return c;
   }
 
@@ -194,11 +194,12 @@ export class A12sClient {
   events(computers?: string | string[], opts: EventsOptions = {}): EventStream {
     const names = typeof computers === "string" ? [computers] : computers;
     if ((opts.turn !== undefined || opts.after !== undefined) && names?.length !== 1) {
-      throw new TypeError("events: turn and after need exactly one Computer");
+      throw new TypeError("events: turn and after need exactly one agent computer");
     }
     return new EventStream((name, live, signal) => {
       const q = opts.turn ? `?turn=${enc(opts.turn)}` : "";
-      return this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
+      const events = this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
+      return opts.turn ? untilTurnFinished(events) : events;
     }, names ?? (async () => (await this.status()).agentComputers.map((c) => c.name)), opts.signal);
   }
 
@@ -254,14 +255,33 @@ export class A12sClient {
     if (id) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
   }
 
-  /** Stops the Computer's processes and keeps its disks, session and inbox. */
-  async sleep(computer: string): Promise<void> {
-    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "asleep" });
+  /**
+   * Stops the agent computer's processes and keeps its disks, session and inbox. It stays asleep until wake(); with
+   * `allowWake` its power policy (wakeOnMessage) may wake it instead.
+   */
+  async sleep(computer: string, opts: { allowWake?: boolean } = {}): Promise<void> {
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
+      state: "asleep",
+      ...(opts.allowWake ? { allowWake: true } : {}),
+    });
   }
 
-  /** Starts a sleeping Computer; its session resumes on the next Turn. */
-  async wake(computer: string): Promise<void> {
-    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "awake" });
+  /** Starts a sleeping agent computer; its session resumes on the next Turn. `clearInbox` discards pending Messages. */
+  async wake(computer: string, opts: { clearInbox?: boolean } = {}): Promise<void> {
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
+      state: "awake",
+      ...(opts.clearInbox ? { clearInbox: true, requestId: crypto.randomUUID() } : {}),
+    });
+  }
+
+  /** Holds the inbox: Messages still queue, none is delivered until resume(). */
+  hold(computer: string, opts: { reason?: string } = {}): Promise<InboxListResponse> {
+    return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox/hold`, opts.reason ? { reason: opts.reason } : {});
+  }
+
+  /** Releases a hold; pending Messages are delivered at the next idle moment. */
+  resume(computer: string): Promise<InboxListResponse> {
+    return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox/resume`, {});
   }
 
   async services(): Promise<ServiceStatus[]> {
@@ -567,6 +587,18 @@ function wanted(names: Set<string> | undefined, ev: A12sEvent): boolean {
 }
 
 type Source = (computer: string, live: () => void, signal: AbortSignal) => AsyncGenerator<A12sEvent>;
+
+/** A Turn replay: its events up to and including its turn.finished. The server keeps the stream open after. */
+async function* untilTurnFinished(events: AsyncGenerator<A12sEvent>): AsyncGenerator<A12sEvent> {
+  try {
+    for await (const ev of events) {
+      yield ev;
+      if (ev.type === "turn.finished") return;
+    }
+  } finally {
+    await events.return(undefined);
+  }
+}
 
 /** Events of one or more Computers, merged in arrival order. Iterate it with `for await`. */
 export class EventStream implements AsyncIterableIterator<A12sEvent> {

@@ -568,7 +568,7 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 		return name, true
 	}
 	if !stale {
-		c.logf("egress proxy: refused a connection on %s: no verified Computer for that address", local)
+		c.logf("egress proxy: refused a connection on %s: no verified agent computer for that address", local)
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
@@ -578,7 +578,7 @@ func (c *Controller) identify(local netip.Addr) (string, bool) {
 	defer c.mu.Unlock()
 	name, ok = c.proxyIPs[local]
 	if !ok {
-		c.logf("egress proxy: refused a connection on %s: no verified Computer for that address", local)
+		c.logf("egress proxy: refused a connection on %s: no verified agent computer for that address", local)
 	}
 	return name, ok
 }
@@ -613,7 +613,7 @@ func (c *Controller) authorizeLease(computer, drive string) error {
 	defer c.mu.Unlock()
 	rec := c.state.Computers[computer]
 	if c.state.Fleet == nil || rec == nil {
-		return fmt.Errorf("%s is not a Computer of this Fleet", computer)
+		return fmt.Errorf("%s is not an agent computer of this Fleet", computer)
 	}
 	if d, ok := c.state.Fleet.Drives[drive]; !ok || d.Access != fleet.AccessSharedWrite {
 		return fmt.Errorf("drive %s is not a shared-write drive", drive)

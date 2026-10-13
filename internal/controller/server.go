@@ -434,7 +434,7 @@ func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 			}
 		}
 		if len(orphans) > 0 {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("orphaned drives (no Computer in the Fleet uses them): %s; a12s drive rm <name> destroys one", strings.Join(orphans, ", ")))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("orphaned drives (no agent computer in the Fleet uses them): %s; a12s drive rm <name> destroys one", strings.Join(orphans, ", ")))
 		}
 	}
 	return res

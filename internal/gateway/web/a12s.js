@@ -109,7 +109,7 @@ var A12sClient = class {
   }
   async computer(name) {
     const c = (await this.status()).agentComputers.find((x) => x.name === name);
-    if (!c) throw new NotFound(404, { code: "not_found", message: `no Computer ${name}` });
+    if (!c) throw new NotFound(404, { code: "not_found", message: `no agent computer ${name}` });
     return c;
   }
   /**
@@ -142,11 +142,12 @@ var A12sClient = class {
   events(computers, opts = {}) {
     const names = typeof computers === "string" ? [computers] : computers;
     if ((opts.turn !== void 0 || opts.after !== void 0) && names?.length !== 1) {
-      throw new TypeError("events: turn and after need exactly one Computer");
+      throw new TypeError("events: turn and after need exactly one agent computer");
     }
     return new EventStream((name, live, signal) => {
       const q = opts.turn ? `?turn=${enc(opts.turn)}` : "";
-      return this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
+      const events = this.stream(name, `/v1/agent-computers/${enc(name)}/events${q}`, opts.after, { ...opts, signal, live });
+      return opts.turn ? untilTurnFinished(events) : events;
     }, names ?? (async () => (await this.status()).agentComputers.map((c) => c.name)), opts.signal);
   }
   /**
@@ -195,13 +196,30 @@ var A12sClient = class {
     const id = turn ?? (await this.computer(computer)).activeTurn;
     if (id) await this.request("POST", `/v1/agent-computers/${enc(computer)}/turns/${enc(id)}/stop`, {});
   }
-  /** Stops the Computer's processes and keeps its disks, session and inbox. */
-  async sleep(computer) {
-    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "asleep" });
+  /**
+   * Stops the agent computer's processes and keeps its disks, session and inbox. It stays asleep until wake(); with
+   * `allowWake` its power policy (wakeOnMessage) may wake it instead.
+   */
+  async sleep(computer, opts = {}) {
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
+      state: "asleep",
+      ...opts.allowWake ? { allowWake: true } : {}
+    });
   }
-  /** Starts a sleeping Computer; its session resumes on the next Turn. */
-  async wake(computer) {
-    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, { state: "awake" });
+  /** Starts a sleeping agent computer; its session resumes on the next Turn. `clearInbox` discards pending Messages. */
+  async wake(computer, opts = {}) {
+    await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
+      state: "awake",
+      ...opts.clearInbox ? { clearInbox: true, requestId: crypto.randomUUID() } : {}
+    });
+  }
+  /** Holds the inbox: Messages still queue, none is delivered until resume(). */
+  hold(computer, opts = {}) {
+    return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox/hold`, opts.reason ? { reason: opts.reason } : {});
+  }
+  /** Releases a hold; pending Messages are delivered at the next idle moment. */
+  resume(computer) {
+    return this.request("POST", `/v1/agent-computers/${enc(computer)}/inbox/resume`, {});
   }
   async services() {
     return (await this.request("GET", "/v1/services")).services ?? [];
@@ -472,6 +490,16 @@ function wanted(names, ev) {
   if (ev.type === "service.phase") return names.has(ev.data?.service);
   return names.has(agentComputerOf(ev));
 }
+async function* untilTurnFinished(events) {
+  try {
+    for await (const ev of events) {
+      yield ev;
+      if (ev.type === "turn.finished") return;
+    }
+  } finally {
+    await events.return(void 0);
+  }
+}
 var EventStream = class {
   constructor(source, names, signal) {
     this.source = source;
@@ -729,9 +757,11 @@ var Fleet = class _Fleet {
       cur.spec.defaults ??= {};
       const next = await fn(cur.spec) ?? cur.spec;
       try {
-        await this.client.request("PUT", "/v1/fleet", { fleet: next }, {
-          headers: { "if-match": `"${cur.version}"` }
-        });
+        warnWrites(
+          await this.client.request("PUT", "/v1/fleet", { fleet: next }, {
+            headers: { "if-match": `"${cur.version}"` }
+          })
+        );
       } catch (err) {
         if (attempt < maxReplaceTries && err instanceof A12sError && err.code === "version_mismatch") continue;
         throw err;
@@ -777,6 +807,7 @@ var AgentComputers = class {
     const r = await this.client.request("PUT", `/v1/agent-computers/${enc2(name)}`, body, {
       headers: writeHeaders({ replace })
     });
+    warnWrites(r);
     return r.agentComputer ? new AgentComputer(this.client, r.agentComputer) : this.get(name);
   }
   /** Throws {@link NotFound} if there is none. */
@@ -814,6 +845,7 @@ var AgentComputer = class {
   /** Changes the spec: a key set to null goes back to the Fleet's default. A busy one picks it up when idle. */
   async update(changes) {
     const r = await this.client.request("PATCH", this.path, changes);
+    warnWrites(r);
     return r.agentComputer ? this.set(r.agentComputer) : this.reload();
   }
   /** Removes it from the Fleet and stops it; its drives are kept. */
@@ -846,12 +878,21 @@ var AgentComputer = class {
       tools: t.tools.map((tc) => ({ ...tc, isError: tc.isError ?? false }))
     }));
   }
-  /** Stops its processes and keeps its disks, session and inbox. */
-  sleep() {
-    return this.client.sleep(this.name);
+  /** Stops its processes and keeps its disks, session and inbox until wake(); `allowWake` lets wakeOnMessage wake it. */
+  sleep(opts = {}) {
+    return this.client.sleep(this.name, opts);
   }
-  wake() {
-    return this.client.wake(this.name);
+  /** Wakes it; `clearInbox` discards the pending Messages first. */
+  wake(opts = {}) {
+    return this.client.wake(this.name, opts);
+  }
+  /** Holds its inbox: Messages still queue, none is delivered until resume(). */
+  hold(opts = {}) {
+    return this.client.hold(this.name, opts);
+  }
+  /** Releases a hold on its inbox. */
+  resume() {
+    return this.client.resume(this.name);
   }
   /** Interrupts a Turn (default: the active one). */
   stop(turn) {
@@ -878,6 +919,7 @@ var Services = class {
     const r = await this.client.request("PUT", `/v1/services/${enc2(name)}`, body, {
       headers: writeHeaders({ replace })
     });
+    warnWrites(r);
     return r.service ? new Service(this.client, r.service) : this.get(name);
   }
   /** Throws {@link NotFound} if there is none. */
@@ -910,6 +952,7 @@ var Service = class {
   /** Changes the spec as a JSON merge patch: a key set to null is removed. */
   async update(changes) {
     const r = await this.client.request("PATCH", this.path, changes);
+    warnWrites(r);
     if (!r.service) return this.reload();
     this.status = r.service;
     return this;
@@ -966,6 +1009,9 @@ var Credentials = class {
     await this.client.request("DELETE", `/v1/credentials/${enc2(name)}`);
   }
 };
+function warnWrites(r) {
+  for (const w of r?.warnings ?? []) console.warn(`a12s: ${w}`);
+}
 
 // src/index.ts
 async function connect(opts = {}) {

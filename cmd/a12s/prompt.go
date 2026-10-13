@@ -27,7 +27,7 @@ func runPrompt(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) < 2 {
-		return usageError("prompt needs a Computer name and the prompt text")
+		return usageError("prompt needs an agent computer name and the prompt text")
 	}
 	name, text := pos[0], strings.Join(pos[1:], " ")
 	c, f, err := g.connect()
@@ -50,7 +50,7 @@ func runPrompt(g *globals, args []string) error {
 		}
 	}
 	if cs == nil {
-		return fmt.Errorf("fleet %s has no Computer %q", st.Fleet, name)
+		return fmt.Errorf("fleet %s has no agent computer %q", st.Fleet, name)
 	}
 	if cs.Phase == api.PhaseAsleep || cs.Phase == api.PhaseStopping {
 		if p := cs.Power; cs.Phase == api.PhaseAsleep && p != nil && p.AutoWake == api.AutoWakeOn && slices.Contains(p.WakeOnMessage, api.PrincipalLocal) {
@@ -106,7 +106,7 @@ func runPrompt(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout), json: g.json}
+	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout) || sameFile(os.Stdout, os.Stderr), json: g.json}
 	if g.json {
 		b, _ := json.Marshal(map[string]any{"message": res, "turn": turn})
 		fmt.Println(string(b))
@@ -282,7 +282,7 @@ type turnPrinter struct {
 	turn, kind  string
 	mine        string // the caller's Message id, for the batch line
 	out, errOut io.Writer
-	tty         bool // stdout is a terminal (shared with stderr)
+	tty         bool // stdout and stderr end up in one place (a terminal, or 2>&1)
 	json        bool // print each event as a JSON line instead
 	midLine     bool // stdout's last text did not end a line
 	status      string
@@ -358,7 +358,7 @@ func runStop(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usageError("stop needs one Computer name")
+		return usageError("stop needs one agent computer name")
 	}
 	name := pos[0]
 	c, _, err := g.connect()
@@ -408,7 +408,7 @@ func runStop(g *globals, args []string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("fleet %s has no Computer %q", st.Fleet, name)
+	return fmt.Errorf("fleet %s has no agent computer %q", st.Fleet, name)
 }
 
 func runLogs(g *globals, args []string) error {
@@ -420,7 +420,7 @@ func runLogs(g *globals, args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usageError("logs needs one Computer name")
+		return usageError("logs needs one agent computer name")
 	}
 	if *since < 0 {
 		return usageError("--since must not be negative")
@@ -454,4 +454,10 @@ func runLogs(g *globals, args []string) error {
 		return nil
 	}
 	return err
+}
+
+func sameFile(a, b *os.File) bool {
+	ai, err1 := a.Stat()
+	bi, err2 := b.Stat()
+	return err1 == nil && err2 == nil && os.SameFile(ai, bi)
 }

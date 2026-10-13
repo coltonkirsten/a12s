@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "a12s"
 version = "0.0.0.dev0"
-description = "Python client for a12s: send work to agent Computers, stream their events and Turns"
+description = "Python client for a12s: send work to agent computers, stream their events and Turns"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["httpx>=0.27"]

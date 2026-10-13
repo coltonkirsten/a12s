@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from types import TracebackType
@@ -57,7 +58,7 @@ class AsyncClient:
         for c in (await self.status()).agent_computers:
             if c.name == name:
                 return c
-        raise A12sError(404, "not_found", f"no Computer {name}")
+        raise A12sError(404, "not_found", f"no agent computer {name}")
 
     async def send(
         self,
@@ -126,7 +127,8 @@ class AsyncClient:
 
         def source(name: str, live: Callable[[], None]) -> AsyncGenerator[Event, None]:
             state = core.StreamState(name, after, on_gap, live)
-            return self._stream(core.events_path(name, turn), state, reconnect)
+            events = self._stream(core.events_path(name, turn), state, reconnect)
+            return events if turn is None else core.until_turn_finished_async(events)
 
         async def all_names() -> list[str]:
             return [c.name for c in (await self.status()).agent_computers]
@@ -163,13 +165,33 @@ class AsyncClient:
         if id:
             await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
 
-    async def sleep(self, computer: str) -> None:
-        """Stops the Computer's processes and keeps its disks, session and inbox."""
-        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "asleep"})
+    async def sleep(self, computer: str, *, allow_wake: bool = False) -> None:
+        """See Client.sleep."""
+        body: dict[str, Any] = {"state": "asleep"}
+        if allow_wake:
+            body["allowWake"] = True
+        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
 
-    async def wake(self, computer: str) -> None:
-        """Starts a sleeping Computer; its session resumes on the next Turn."""
-        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "awake"})
+    async def wake(self, computer: str, *, clear_inbox: bool = False) -> None:
+        """See Client.wake."""
+        body: dict[str, Any] = {"state": "awake"}
+        if clear_inbox:
+            body["clearInbox"] = True
+            body["requestId"] = uuid.uuid4().hex
+        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
+
+    async def hold(self, computer: str, *, reason: str | None = None) -> InboxList:
+        """See Client.hold."""
+        body = {"reason": reason} if reason else {}
+        return from_json(
+            InboxList, await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox/hold", body)
+        )
+
+    async def resume(self, computer: str) -> InboxList:
+        """See Client.resume."""
+        return from_json(
+            InboxList, await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox/resume", {})
+        )
 
     async def services(self) -> list[ServiceStatus]:
         res = await self._request("GET", "/v1/services")

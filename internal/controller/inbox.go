@@ -97,7 +97,7 @@ func inboxFail(w http.ResponseWriter, err error) {
 	case errors.As(err, &ie):
 		writeJSON(w, ie.Status, api.Error{Code: ie.Code, Message: ie.Message, Fix: ie.Fix, Details: ie.Details})
 	case errors.Is(err, inbox.ErrUnknownInbox):
-		writeJSON(w, http.StatusNotFound, api.Error{Code: api.ErrNotFound, Message: "no such Computer in the Fleet", Fix: "a12s status lists the Computers"})
+		writeJSON(w, http.StatusNotFound, api.Error{Code: api.ErrNotFound, Message: "no such agent computer in the Fleet", Fix: "a12s status lists the agent computers"})
 	default:
 		fail(w, err)
 	}
