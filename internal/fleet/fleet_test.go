@@ -319,6 +319,8 @@ func TestValidateSeccomp(t *testing.T) {
 		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["read"],"action":"SCMP_ACT_NOTIFY"}]}`,
 		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"action":"SCMP_ACT_ALLOW"}]}`,
 		`{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["read"],"action":"SCMP_ACT_ALLOW"}]} {}`,
+		`{"defaultAction":"SCMP_ACT_ALLOW","archMap":[{"architecture":"SCMP_ARCH_AARCH64","subArchitectures":["SCMP_ARCH_32"]}]}`,
+		`{"defaultAction":"SCMP_ACT_ALLOW","architectures":["x86_64"]}`,
 	} {
 		if _, err := ValidateSeccomp([]byte(bad)); err == nil {
 			t.Errorf("accepted %q", bad)
