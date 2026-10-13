@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -147,6 +148,20 @@ type Failure struct {
 	Retryable bool   `json:"retryable"`
 }
 
+// Waiting is an admitted agent computer or Service left in Provisioning because credentials it names have no value
+// yet. It starts by itself once they are set.
+type Waiting struct {
+	Credentials []string `json:"credentials"`
+	Fix         string   `json:"fix"` // the commands that set them
+}
+
+func (w *Waiting) String() string {
+	if len(w.Credentials) == 1 {
+		return fmt.Sprintf("credential %s has no value yet; it starts when you set it (%s)", w.Credentials[0], w.Fix)
+	}
+	return fmt.Sprintf("credentials %s have no value yet; it starts when you set them (%s)", strings.Join(w.Credentials, ", "), w.Fix)
+}
+
 type Harness struct {
 	Kind    string `json:"kind"`
 	Version string `json:"version"`
@@ -162,8 +177,8 @@ type StatusResponse struct {
 	// Computers is AgentComputers under its old name, for one release.
 	Computers      []ComputerStatus `json:"computers"`
 	OrphanedDrives []DriveRow       `json:"orphanedDrives,omitempty"`
-	// CredentialsLoaded is false after a Controller restart until `a12s up`
-	// or `a12s wake` sends credentials again.
+	// CredentialsLoaded is false after a memory-only Controller restarted,
+	// until `a12s up` or `a12s wake` sends credentials again.
 	CredentialsLoaded bool            `json:"credentialsLoaded"`
 	Warnings          []string        `json:"warnings,omitempty"`
 	OrphanedInboxes   []InboxSummary  `json:"orphanedInboxes,omitempty"`
@@ -174,6 +189,7 @@ type ComputerStatus struct {
 	Name          string   `json:"name"`
 	Phase         Phase    `json:"phase"`
 	Error         *Failure `json:"error,omitempty"`
+	Waiting       *Waiting `json:"waiting,omitempty"`
 	ResumePending bool     `json:"resumePending,omitempty"`
 	Session       string   `json:"session,omitempty"`
 	ActiveTurn    string   `json:"activeTurn,omitempty"`
@@ -345,12 +361,11 @@ const (
 	ErrWithdrawn        ErrorCode = "withdrawn"
 	ErrDiscarded        ErrorCode = "discarded"
 
-	ErrMissingField      ErrorCode = "missing_field"      // 400: e.g. no harness in the spec or the defaults
-	ErrMissingCredential ErrorCode = "missing_credential" // 400: a credential the spec uses has no value
-	ErrOutOfPrefix       ErrorCode = "out_of_prefix"      // 403: a name, or something it points at, outside the token's prefix
-	ErrExists            ErrorCode = "exists"             // 409: create on a name that is taken
-	ErrVersionMismatch   ErrorCode = "version_mismatch"   // 412: If-Match on a whole-Fleet write is stale
-	ErrInUse             ErrorCode = "in_use"             // 409: deleting a credential that is still used
+	ErrMissingField    ErrorCode = "missing_field"    // 400: e.g. no harness in the spec or the defaults
+	ErrOutOfPrefix     ErrorCode = "out_of_prefix"    // 403: a name, or something it points at, outside the token's prefix
+	ErrExists          ErrorCode = "exists"           // 409: create on a name that is taken
+	ErrVersionMismatch ErrorCode = "version_mismatch" // 412: If-Match on a whole-Fleet write is stale
+	ErrInUse           ErrorCode = "in_use"           // 409: deleting a credential that is still used
 )
 
 // Duration is a time.Duration written as a Go duration string ("30s").

@@ -166,12 +166,14 @@ The response's `state` is `pending` until a Turn takes it, then `claimed` and `d
 `GET /v1/events` is the whole Fleet on one connection: every agent computer's events, plus the Controller's own:
 
 - `fleet.changed` `{version, by, names}`: the Fleet's version moved.
-- `agent_computer.phase` `{phase, error?}`: an agent computer's phase changed.
+- `agent_computer.phase` `{phase, error?, waiting?}`: an agent computer's phase changed. `waiting`
+  `{credentials, fix}` is set while it stays `Provisioning` for credentials with no value yet.
 - `inbox.changed`: an agent computer's inbox changed (a Message arrived, was withdrawn, delivered or expired; a hold
   or resume; a clear). Its data is the inbox summary of `GET /v1/agent-computers/{c}/inbox` without `messages`
   (`{computer, pending, claimed, held, holdReason?, limits, usage, overLimit, ended24h, …}`). Changes within about
   100 ms are one event.
-- `service.phase` `{service, phase, health?, restarts, error?}`: a Service's phase, health or restart count changed.
+- `service.phase` `{service, phase, health?, restarts, error?, waiting?}`: a Service's phase, health or restart count
+  changed.
   Its `agentComputer` is empty; it is filtered by the Service's name.
 
 All of it is filtered to what the token may watch (a prefix token sees only its prefix) and to `?agentComputers=a,b`. A browser opens at most six connections per origin, so
@@ -212,7 +214,6 @@ Every error is JSON with a stable `code`, a `message`, and usually a `fix` line 
 |---|---|---|
 | `invalid`, `bad_metadata`, `bad_expires` | 400 | The request or the Fleet is wrong; the message names the field. |
 | `missing_field` | 400 | A required field (harness, image) is set neither on the agent computer nor in `defaults`. |
-| `missing_credential` | 400 | The agent computer names a credential the Controller holds no value for; set it with `PUT /v1/credentials/{name}`, or `a12s creds set` it and run `a12s up`. |
 | `unauthorized` | 401 | Missing or unknown token. |
 | `forbidden`, `no_grant` | 403 | The token or the sender lacks that action, agent computer or grant. |
 | `out_of_prefix` | 403 | A prefix token named something, or wrote a spec that points at something (`grants.send`, `uses`, a drive, also from `defaults`), whose name doesn't start with its prefix. |

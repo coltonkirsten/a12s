@@ -12,9 +12,10 @@ type ServiceChanges struct {
 }
 
 type ServiceStatus struct {
-	Name  string   `json:"name"`
-	Phase Phase    `json:"phase"`
-	Error *Failure `json:"error,omitempty"`
+	Name    string   `json:"name"`
+	Phase   Phase    `json:"phase"`
+	Error   *Failure `json:"error,omitempty"`
+	Waiting *Waiting `json:"waiting,omitempty"`
 	// Image is the reference as written; Pin the image ID it runs.
 	Image      string `json:"image"`
 	Pin        string `json:"pin,omitempty"`

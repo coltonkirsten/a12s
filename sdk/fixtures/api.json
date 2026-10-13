@@ -12,6 +12,12 @@
             "reason": "reason",
             "retryable": true
           },
+          "waiting": {
+            "credentials": [
+              "credentials"
+            ],
+            "fix": "fix"
+          },
           "resumePending": true,
           "session": "session",
           "activeTurn": "activeTurn",
@@ -521,6 +527,12 @@
     "error": {
       "reason": "reason",
       "retryable": true
+    },
+    "waiting": {
+      "credentials": [
+        "credentials"
+      ],
+      "fix": "fix"
     }
   },
   "phaseDataMinimal": {
@@ -605,6 +617,12 @@
           "reason": "reason",
           "retryable": true
         },
+        "waiting": {
+          "credentials": [
+            "credentials"
+          ],
+          "fix": "fix"
+        },
         "resumePending": true,
         "session": "session",
         "activeTurn": "activeTurn",
@@ -682,6 +700,12 @@
       "error": {
         "reason": "reason",
         "retryable": true
+      },
+      "waiting": {
+        "credentials": [
+          "credentials"
+        ],
+        "fix": "fix"
       },
       "image": "image",
       "pin": "pin",
@@ -765,6 +789,12 @@
     "error": {
       "reason": "reason",
       "retryable": true
+    },
+    "waiting": {
+      "credentials": [
+        "credentials"
+      ],
+      "fix": "fix"
     }
   },
   "servicePhaseDataMinimal": {
@@ -780,6 +810,12 @@
         "error": {
           "reason": "reason",
           "retryable": true
+        },
+        "waiting": {
+          "credentials": [
+            "credentials"
+          ],
+          "fix": "fix"
         },
         "image": "image",
         "pin": "pin",
@@ -832,6 +868,12 @@
         "error": {
           "reason": "reason",
           "retryable": true
+        },
+        "waiting": {
+          "credentials": [
+            "credentials"
+          ],
+          "fix": "fix"
         },
         "resumePending": true,
         "session": "session",
@@ -911,6 +953,12 @@
         "error": {
           "reason": "reason",
           "retryable": true
+        },
+        "waiting": {
+          "credentials": [
+            "credentials"
+          ],
+          "fix": "fix"
         },
         "resumePending": true,
         "session": "session",
@@ -1041,6 +1089,12 @@
         "error": {
           "reason": "reason",
           "retryable": true
+        },
+        "waiting": {
+          "credentials": [
+            "credentials"
+          ],
+          "fix": "fix"
         },
         "image": "image",
         "pin": "pin",

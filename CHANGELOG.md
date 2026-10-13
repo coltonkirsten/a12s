@@ -25,6 +25,13 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ### Changed
 - **sleepAfterIdle accepts 1s to 7d** (e.g. `5s`); the 1m floor is gone.
+- **Naming a credential that has no value yet no longer fails**, so the order of `creds set` / `credentials.set` and
+  `a12s up` / `create` doesn't matter. The write succeeds with a warning (`agent_computers.job-1: credential dbname has
+  no value yet; it starts when you set it (a12s creds set dbname)`), and the agent computer or Service waits in
+  `Provisioning` with `waiting: {credentials, fix}` in its status, `a12s status` and the `agent_computer.phase` /
+  `service.phase` events. Setting the value starts it; `a12s up` and SDK `create()` return instead of waiting for
+  it. A Service missing a credential now waits in `Provisioning` instead of `Error`. The error code
+  `missing_credential` is gone. What to do: nothing.
 
 ## v0.4.3 (2026-10-12)
 

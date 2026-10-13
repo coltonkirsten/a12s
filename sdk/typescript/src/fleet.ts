@@ -156,7 +156,11 @@ function writeHeaders(opts: CreateOptions): Record<string, string> {
 export class AgentComputers {
   constructor(private readonly client: A12sClient) {}
 
-  /** Adds an agent computer to the Fleet and starts it. Fails with code `exists` if the name is taken. */
+  /**
+   * Adds an agent computer to the Fleet and starts it. One that names a credential with no value yet resolves at once,
+   * waiting in Provisioning (`status.waiting`, and a console warning); it starts when the value is set. Fails with
+   * code `exists` if the name is taken.
+   */
   async create(name: string, spec: AgentComputerSpec & CreateOptions = {}): Promise<AgentComputer> {
     const { replace, ...body } = spec;
     const r = await this.client.request<PutFleetResponse>("PUT", `/v1/agent-computers/${enc(name)}`, body, {
@@ -453,8 +457,8 @@ export class Credentials {
   }
 }
 
-/** A write's warnings (a grant to an agent computer that doesn't exist yet, a missing harness credential) go to the
- * console instead of being dropped. */
+/** A write's warnings (a grant to an agent computer that doesn't exist yet, a missing harness credential, a credential
+ * with no value yet) go to the console instead of being dropped. */
 function warnWrites(r: PutFleetResponse | undefined): void {
   for (const w of r?.warnings ?? []) console.warn(`a12s: ${w}`);
 }

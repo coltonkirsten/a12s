@@ -77,7 +77,12 @@ fleet.credentials.remove("stripe-test")
 - `remove` deletes a stored value. While an agent computer or Service still names the credential it fails with
   `in_use` (409); remove the name from their `credentials` first. A name with no stored value is `not_found`.
 - An agent computer created from code may name any credential the Controller holds, whether it was set from code or
-  sent by `a12s up` from the bindings file. A name with no value fails with `missing_credential`.
+  sent by `a12s up` from the bindings file.
+- The order doesn't matter. An agent computer or Service that names a credential with no value yet is created anyway:
+  the write warns (`agent_computers.job-1: credential dbname has no value yet; it starts when you set it (a12s creds
+  set dbname)`) and it waits in `Provisioning` with `waiting: {credentials: [dbname], fix: "a12s creds set dbname"}`
+  in its status and `agent_computer.phase` event. Setting the value (`creds set`, `credentials.set`, or `a12s up`
+  sending it from the bindings file) starts it.
 - `a12s up` adds and replaces values but never removes one it doesn't send, so a credential set from code stays until
   you remove it or run `a12s down`.
 

@@ -262,10 +262,10 @@ func TestControllerRestartForgetsCredentials(t *testing.T) {
 	}
 	err := h2.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAwake})
 	var he *httpError
-	if !errors.As(err, &he) || he.status != http.StatusBadRequest || !strings.Contains(err.Error(), "credentials missing") {
+	if !errors.As(err, &he) || he.status != http.StatusBadRequest || !strings.Contains(err.Error(), "anthropic has no value yet") || he.body.Fix != "a12s creds set anthropic" {
 		t.Fatalf("wake without credentials = %v", err)
 	}
-	if cs := h2.c.computerStatus(context.Background(), "scout"); cs.Phase != api.PhaseError || !strings.Contains(cs.Error.Reason, "run a12s up") {
+	if cs := h2.c.computerStatus(context.Background(), "scout"); cs.Phase != api.PhaseProvisioning || cs.Waiting == nil || cs.Error != nil {
 		t.Fatalf("scout = %+v", cs)
 	}
 	if err := h2.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAwake, Credentials: labCreds}); err != nil {
@@ -325,8 +325,6 @@ func TestAdmission(t *testing.T) {
 			t.Errorf("%s: err = %v, want 400 containing %q", what, err, wantMsg)
 		}
 	}
-	creds := api.Credentials{"anthropic": []byte("k"), "openai": []byte("k")}
-	check("missing credential", api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Credentials: creds}, "github")
 	lock := fleet.NewLock()
 	lock.Images["slim"] = "sha256:elsewhere"
 	check("pin mismatch", api.PutFleetRequest{Fleet: specFor(labFleet(t, nil)), Lock: lock, Credentials: labCreds}, "sha256:elsewhere")

@@ -54,6 +54,7 @@ type ServiceActive struct {
 type serviceRuntime struct {
 	phase   api.Phase
 	failure *api.Failure
+	waiting *api.Waiting
 	// transition is set while the Controller itself stops, stages or
 	// removes the Service: deaths seen then are expected.
 	transition   bool
@@ -64,13 +65,6 @@ type serviceRuntime struct {
 	// published is the last service.phase event, so one is sent only on a change.
 	published *api.ServicePhaseData
 }
-
-// serviceWaiting is a Service in Error for want of a credential: `a12s up` reports it as a
-// warning, not a failure, since the rest of the Fleet is fine.
-type serviceWaiting struct{ err error }
-
-func (e *serviceWaiting) Error() string { return e.err.Error() }
-func (e *serviceWaiting) Unwrap() error { return e.err }
 
 const MaxServiceBackoff = 5 * time.Minute
 
@@ -90,17 +84,24 @@ func (c *Controller) setServicePhase(name string, phase api.Phase, failure *api.
 }
 
 func (c *Controller) setServicePhaseLocked(name string, phase api.Phase, failure *api.Failure) {
+	c.setServiceStateLocked(name, phase, failure, nil)
+}
+
+func (c *Controller) setServiceStateLocked(name string, phase api.Phase, failure *api.Failure, waiting *api.Waiting) {
 	r := c.srtLocked(name)
-	if r.phase == phase && (failure == nil) == (r.failure == nil) && (failure == nil || *failure == *r.failure) {
+	if r.phase == phase && (failure == nil) == (r.failure == nil) && (failure == nil || *failure == *r.failure) && sameWaiting(waiting, r.waiting) {
 		c.publishServicePhaseLocked(name)
 		return
 	}
-	if failure != nil {
+	switch {
+	case failure != nil:
 		c.logf("service %s: %s -> Error: %s", name, r.phase, failure.Reason)
-	} else {
+	case waiting != nil:
+		c.logf("service %s: %s -> %s: %s", name, r.phase, phase, waiting)
+	default:
 		c.logf("service %s: %s -> %s", name, r.phase, phase)
 	}
-	r.phase, r.failure = phase, failure
+	r.phase, r.failure, r.waiting = phase, failure, waiting
 	c.publishServicePhaseLocked(name)
 }
 
@@ -111,12 +112,12 @@ func (c *Controller) publishServicePhaseLocked(name string) {
 	if r == nil || c.hub == nil {
 		return
 	}
-	d := api.ServicePhaseData{Service: name, Phase: r.phase, Health: r.health, Error: r.failure}
+	d := api.ServicePhaseData{Service: name, Phase: r.phase, Health: r.health, Error: r.failure, Waiting: r.waiting}
 	if rec := c.state.Services[name]; rec != nil {
 		d.Restarts = rec.Restarts
 	}
 	if p := r.published; p != nil && p.Phase == d.Phase && p.Health == d.Health && p.Restarts == d.Restarts &&
-		(p.Error == nil) == (d.Error == nil) && (d.Error == nil || *p.Error == *d.Error) {
+		(p.Error == nil) == (d.Error == nil) && (d.Error == nil || *p.Error == *d.Error) && sameWaiting(p.Waiting, d.Waiting) {
 		return
 	}
 	r.published = &d
@@ -229,25 +230,6 @@ func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, lock *
 		out[name] = m
 	}
 	return out, nil
-}
-
-// serviceCredentialErrors refuses a credential with no material unless the Service's own login
-// produces it; then only that Service waits in Error.
-func serviceCredentialErrors(f *fleet.Fleet, manifests map[string]*fleet.ServiceManifest, creds api.Credentials) error {
-	var errs []error
-	for _, name := range f.ServiceNames() {
-		m := manifests[name]
-		for _, cred := range missingCredentials(f.Services[name].Credentials, creds) {
-			if m != nil && m.Login != nil && m.Login.Produces == cred {
-				continue
-			}
-			errs = append(errs, fmt.Errorf("services.%s: credential %s has no binding  fix: a12s creds set %s (or add it to a12s.bindings.yaml)", name, cred, cred))
-		}
-	}
-	if len(errs) > 0 {
-		return errorf(http.StatusBadRequest, api.ErrInvalid, "%v", errors.Join(errs...))
-	}
-	return nil
 }
 
 func serviceUser(m *fleet.ServiceManifest) string {
@@ -529,35 +511,31 @@ func (c *Controller) stopService(ctx context.Context, name string, gen int64) er
 	})
 }
 
-// serviceCredentialError: a credential the Service's own login produces "needs a login";
-// anything else is "not loaded".
-func (c *Controller) serviceCredentialError(name string, missing []string) error {
-	c.mu.Lock()
-	m := c.state.Manifests[name]
-	loaded := len(c.creds) > 0
-	c.mu.Unlock()
-	if m != nil && m.Login != nil && slices.Contains(missing, m.Login.Produces) {
-		return fmt.Errorf("%s needs a login  fix: a12s service login %s", name, name)
+func serviceWait(name string, m *fleet.ServiceManifest, missing []string) *api.Waiting {
+	produces := ""
+	if m != nil && m.Login != nil {
+		produces = m.Login.Produces
 	}
-	if !loaded {
-		return fmt.Errorf("credentials not loaded (the Controller restarted)  fix: a12s up")
-	}
-	return fmt.Errorf("no material for credentials %s  fix: a12s up (check the bindings file)", strings.Join(missing, ", "))
+	return credentialWait(missing, name, produces)
 }
 
 // startService powers on the staged generation, injects its credentials
 // and config, and waits for its health check: Starting -> Ready, or
 // Unhealthy once the startup grace has passed.
 func (c *Controller) startService(ctx context.Context, name string) error {
-	c.setServicePhase(name, api.PhaseStarting, nil)
 	c.mu.Lock()
 	s := c.state.Fleet.Services[name]
 	gen := c.state.Services[name].Generation
-	missing := missingCredentials(s.Credentials, c.creds)
-	c.mu.Unlock()
-	if len(missing) > 0 {
-		return &serviceWaiting{c.failService(name, c.serviceCredentialError(name, missing))}
+	var w *api.Waiting
+	if missing := missingCredentials(s.Credentials, c.creds); len(missing) > 0 {
+		w = serviceWait(name, c.state.Manifests[name], missing)
+		c.setServiceStateLocked(name, api.PhaseProvisioning, nil, w)
 	}
+	c.mu.Unlock()
+	if w != nil {
+		return &credentialsMissing{w}
+	}
+	c.setServicePhase(name, api.PhaseStarting, nil)
 	if err := c.verifyAddr(ctx, name); err != nil {
 		return c.failService(name, err)
 	}
@@ -609,7 +587,7 @@ func (c *Controller) injectService(ctx context.Context, name string, withCert bo
 		return err
 	}
 	if missing := missingCredentials(s.Credentials, material); len(missing) > 0 {
-		return c.serviceCredentialError(name, missing)
+		return &credentialsMissing{credentialWait(missing, "", "")}
 	}
 	for _, cred := range s.Credentials {
 		if err := c.drv.ServiceWrite(ctx, name, secretsDir+"/"+cred, user, "0400", secretsDirMode, material[cred]); err != nil {
@@ -901,9 +879,9 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 			return err
 		}
 		_, err = c.convergeService(ctx, name, obs, ok)
-		var waiting *serviceWaiting
-		if errors.As(err, &waiting) {
-			return withFix(http.StatusConflict, api.ErrInvalid, waiting.Error())
+		var cm *credentialsMissing
+		if errors.As(err, &cm) {
+			return &httpError{status: http.StatusConflict, body: api.Error{Code: api.ErrInvalid, Message: name + ": " + err.Error(), Fix: cm.waiting.Fix}}
 		}
 		return err
 	}
@@ -1023,7 +1001,7 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 		}
 	}
 	r := c.srtLocked(name)
-	out.Phase, out.Error, out.Health = r.phase, r.failure, r.health
+	out.Phase, out.Error, out.Waiting, out.Health = r.phase, r.failure, r.waiting, r.health
 	if !r.healthSince.IsZero() {
 		out.HealthSince = r.healthSince.UTC().Format(time.RFC3339)
 	}
@@ -1138,10 +1116,4 @@ func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow b
 			done = nil // container output ended (it stopped); audit lines continue
 		}
 	}
-}
-
-// withFix makes an API error from a message carrying "  fix: …".
-func withFix(status int, code api.ErrorCode, msg string) error {
-	m, fix, _ := strings.Cut(msg, "  fix: ")
-	return &httpError{status: status, body: api.Error{Code: code, Message: m, Fix: fix}}
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -98,7 +99,6 @@ func TestAgentComputerAdmissionCodes(t *testing.T) {
 		code   api.ErrorCode
 	}{
 		{`{"image":"slim"}`, 400, api.ErrMissingField},
-		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","credentials":["hubspot"]}`, 400, api.ErrMissingCredential},
 		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","home":{"preset":"./p"}}`, 400, api.ErrInvalid},
 		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","bogus":1}`, 400, api.ErrInvalid},
 		{`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","files":{"../x":"y"}}`, 400, api.ErrInvalid},
@@ -107,6 +107,40 @@ func TestAgentComputerAdmissionCodes(t *testing.T) {
 		if e := apiError(t, r); r.StatusCode != tc.status || e.Code != tc.code {
 			t.Errorf("%s: %d %s (%s), want %d %s", tc.body, r.StatusCode, e.Code, e.Message, tc.status, tc.code)
 		}
+	}
+}
+
+// Naming a credential with no value admits the agent computer, which waits in Provisioning until the value is set.
+func TestCreateWaitsForCredential(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), nil, false)
+	res := decodeBody[api.PutFleetResponse](t, h.api("PUT", "/v1/agent-computers/job-1",
+		`{"harness":{"kind":"claude-code","version":"2.1.280"},"image":"slim","credentials":["anthropic","dbname"]}`))
+	want := "agent_computers.job-1: credential dbname has no value yet; it starts when you set it (a12s creds set dbname)"
+	if !slices.Contains(res.Warnings, want) || len(res.Errors) != 0 || !slices.Contains(res.Created, "job-1") {
+		t.Fatalf("create = %+v", res)
+	}
+	cs := res.AgentComputer.Status
+	if cs.Phase != api.PhaseProvisioning || cs.Error != nil || cs.Waiting == nil ||
+		!slices.Equal(cs.Waiting.Credentials, []string{"dbname"}) || cs.Waiting.Fix != "a12s creds set dbname" {
+		t.Fatalf("status = %+v", cs)
+	}
+	if h.d.get("job-1").running {
+		t.Fatal("started without its credential")
+	}
+	if r := h.api("POST", "/v1/agent-computers/job-1/inbox", `{"body":"hi"}`); r.StatusCode >= 300 {
+		t.Fatalf("send while waiting = %d %s", r.StatusCode, apiError(t, r).Message)
+	}
+
+	if r := h.api("PUT", "/v1/credentials/dbname", `{"value":"db.example"}`); r.StatusCode != 200 {
+		t.Fatalf("set = %d", r.StatusCode)
+	}
+	h.waitPhase("job-1", api.PhaseReady)
+	if cs := h.c.computerStatus(context.Background(), "job-1"); cs.Waiting != nil {
+		t.Fatalf("still waiting: %+v", cs.Waiting)
+	}
+	if got := h.d.file("job-1", secretsDir+"/dbname", "1000:1000", "0600"); string(got) != "db.example" {
+		t.Fatalf("dbname = %q", got)
 	}
 }
 

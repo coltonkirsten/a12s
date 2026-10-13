@@ -184,6 +184,9 @@ func WriteServices(w io.Writer, services []api.ServiceStatus) {
 			pub = "PUBLISHED " + strings.Join(s.Publish, ",") + " (reachable outside uses)"
 		}
 		ph := string(s.Phase)
+		if s.Waiting != nil {
+			ph += " (waiting for " + strings.Join(s.Waiting.Credentials, ", ") + ")"
+		}
 		if s.EgressMode == api.EgressAllowAll {
 			ph += `  EGRESS ALLOW "*"`
 		}
@@ -218,6 +221,9 @@ func phase(c api.ComputerStatus) string {
 	}
 	if c.ResumePending {
 		p += " (resumePending)"
+	}
+	if c.Waiting != nil {
+		p += " (waiting for " + strings.Join(c.Waiting.Credentials, ", ") + ")"
 	}
 	return p
 }
@@ -268,6 +274,9 @@ func StatusWarnings(st *api.StatusResponse) []string {
 			}
 			add(fmt.Sprintf("%s: error: %s (%s)", c.Name, c.Error.Reason, retry))
 		}
+		if c.Waiting != nil {
+			add(c.Name + ": " + c.Waiting.String())
+		}
 		for _, s := range c.Warnings {
 			add(c.Name + ": " + s)
 		}
@@ -275,6 +284,9 @@ func StatusWarnings(st *api.StatusResponse) []string {
 	for _, sv := range st.Services {
 		if sv.Error != nil {
 			add(fmt.Sprintf("%s: error: %s", sv.Name, sv.Error.Reason))
+		}
+		if sv.Waiting != nil {
+			add(sv.Name + ": " + sv.Waiting.String())
 		}
 		for _, s := range sv.Warnings {
 			add(sv.Name + ": " + s)
@@ -559,6 +571,9 @@ func WriteServiceDetail(w io.Writer, s api.ServiceStatus) {
 		{"used by", dash(s.UsedBy)},
 		{"publish", dash(s.Publish)},
 		{"state drive", s.StateDrive},
+	}
+	if s.Waiting != nil {
+		rows = append(rows, []string{"waiting", s.Waiting.String()})
 	}
 	if s.Error != nil {
 		rows = append(rows, []string{"error", s.Error.Reason})

@@ -60,6 +60,7 @@ from ._types import (
     ToolCall,
     Turn,
     TurnInboxMessage,
+    Waiting,
 )
 
 __all__ = [
@@ -120,6 +121,7 @@ __all__ = [
     "Turn",
     "TurnInboxMessage",
     "TurnStream",
+    "Waiting",
     "connect",
     "connect_async",
 ]

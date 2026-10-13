@@ -207,8 +207,9 @@ class AsyncAgentComputers:
         self._fleet = fleet
 
     async def create(self, name: str, *, replace: bool = False, **spec: Unpack[AgentComputerSpec]) -> AsyncAgentComputer:
-        """Creates an agent computer and returns once it is up. A taken name raises A12sError ``exists`` unless
-        ``replace``."""
+        """Creates an agent computer and returns once it is up, or once it waits in Provisioning for a credential with
+        no value yet (an A12sWarning names it; it starts when the value is set). A taken name raises A12sError
+        ``exists`` unless ``replace``."""
         res = await self._fleet._client._request("PUT", ac_path(name), dict(spec), write_headers(replace))
         core.warn_writes(res)
         if isinstance(res, dict) and isinstance(res.get("agentComputer"), dict):

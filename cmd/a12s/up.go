@@ -111,7 +111,7 @@ func (g *globals) up(o upOptions) error {
 		return err
 	}
 	// Every bound credential goes, so agent computers created from code can name it too; unbound names may already be
-	// in the Controller's store, and it refuses what is set nowhere.
+	// in the Controller's store, and what is set nowhere waits for its value.
 	creds, err := b.ResolveBound(cli.AllBound(b, f))
 	if err != nil {
 		return err
