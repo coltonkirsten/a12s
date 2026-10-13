@@ -11,6 +11,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -90,7 +91,7 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 
 	created, err := d.cli.ContainerCreate(ctx, d.createOptions(spec))
 	if err != nil {
-		return fmt.Errorf("stage %s: create container: %w", spec.Name, err)
+		return fmt.Errorf("stage %s: create container: %w", spec.Name, explainMountError(err, spec.Attach))
 	}
 	if err := d.checkBundle(ctx, created.ID, spec); err != nil {
 		return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
@@ -126,6 +127,42 @@ func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driv
 	return state == appliedMarker(spec.FilesDigest), nil
 }
 
+// explainMountError names the attached folder Docker refused and the fix. Docker Desktop reports a folder it doesn't
+// share exactly like a missing one, so the fix covers both.
+func explainMountError(err error, attach []driver.Attach) error {
+	msg := err.Error()
+	if !strings.Contains(msg, "bind source path does not exist") && !strings.Contains(msg, "is not shared from the host") && !strings.Contains(msg, "mounts denied") {
+		return err
+	}
+	what := "an attached folder"
+	for _, a := range attach {
+		if strings.Contains(msg, a.Host) {
+			what = fmt.Sprintf("attach.%s (%s)", path.Base(a.Target), a.Host)
+			break
+		}
+	}
+	return fmt.Errorf("%w; fix: Docker can't see %s: check that it exists and, with Docker Desktop, that it is inside a shared folder (Settings > Resources > File sharing; /Users, /Volumes, /private, /tmp and /var/folders by default), then apply the Fleet again", err, what)
+}
+
+// boundFolders reads a staged container's attached folders back from its bind mounts.
+func boundFolders(c container.InspectResponse) []driver.Attach {
+	var out []driver.Attach
+	if c.HostConfig == nil {
+		return nil
+	}
+	for _, m := range c.HostConfig.Mounts {
+		if m.Type == mount.TypeBind {
+			// Docker Desktop stores a host path as seen from its VM, under /host_mnt.
+			host := m.Source
+			if strings.HasPrefix(host, "/host_mnt/") {
+				host = strings.TrimPrefix(host, "/host_mnt")
+			}
+			out = append(out, driver.Attach{Host: host, Target: m.Target})
+		}
+	}
+	return out
+}
+
 var mountPointRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 func checkSpec(s driver.ComputerSpec) error {
@@ -142,6 +179,19 @@ func checkSpec(s driver.ComputerSpec) error {
 		return errors.New("bundle kind and version are required")
 	case driver.ShortImageID(s.Bundle.Image) == "":
 		return fmt.Errorf("bundle image %q must be the image ID EnsureBundle returned", s.Bundle.Image)
+	}
+	for _, a := range s.Attach {
+		if !path.IsAbs(a.Host) || path.Clean(a.Host) != a.Host || a.Host == "/" {
+			return fmt.Errorf("attach host %q must be a clean absolute path other than /", a.Host)
+		}
+		if !mountPointRE.MatchString(a.Target) || path.Clean(a.Target) != a.Target || path.Dir(a.Target) != agentHome {
+			return fmt.Errorf("attach target %q must be a folder directly in %s", a.Target, agentHome)
+		}
+		for _, k := range a.Keep {
+			if k.Drive == "" || !mountPointRE.MatchString(k.Target) || path.Clean(k.Target) != k.Target || !strings.HasPrefix(k.Target, a.Target+"/") {
+				return fmt.Errorf("keep %q must be a drive mounted below %s", k.Target, a.Target)
+			}
+		}
 	}
 	return nil
 }
@@ -164,6 +214,13 @@ func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateO
 	mounts := []mount.Mount{
 		volume(d.VolumeName(spec.HomeDrive), homeMount, false),
 		volume(d.BundleVolume(), driver.BundleRoot, true),
+	}
+	for _, a := range spec.Attach {
+		// CreateMountpoint stays off: a missing host folder must fail, not appear empty.
+		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: a.Host, Target: a.Target, ReadOnly: a.ReadOnly})
+		for _, k := range a.Keep {
+			mounts = append(mounts, volume(d.VolumeName(k.Drive), k.Target, false))
+		}
 	}
 	security := []string{"no-new-privileges:true"}
 	if spec.Seccomp != "" {
@@ -474,7 +531,7 @@ func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Pow
 			return nil
 		}
 		if _, err := d.cli.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
-			return fmt.Errorf("power %s awake: %w", computer, err)
+			return fmt.Errorf("power %s awake: %w", computer, explainMountError(err, boundFolders(c)))
 		}
 	case driver.PowerAsleep:
 		if !running {

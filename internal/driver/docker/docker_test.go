@@ -3,9 +3,11 @@ package docker
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
 	"io"
 	"net/netip"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -294,3 +296,102 @@ func TestServiceContainerHardening(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateOptionsAttach(t *testing.T) {
+	d := &Driver{fleet: "lab"}
+	spec := driver.ComputerSpec{
+		Name: "brain", Generation: 1, Image: "a12s/slim:dev", Tier: "slim",
+		Bundle:    driver.BundleRef{Kind: "claude-code", Version: "2.1.280", Image: "sha256:0123456789abcdef0123"},
+		HomeDrive: driver.HomeDriveID("brain"),
+		Attach: []driver.Attach{
+			{Host: "/Users/me/docs", Target: "/home/agent/docs", ReadOnly: true},
+			{Host: "/Users/me/app", Target: "/home/agent/project", Keep: []driver.Keep{
+				{Drive: "keep-brain-project-node_modules-0a1b2c3d", Target: "/home/agent/project/node_modules"},
+			}},
+		},
+	}
+	if err := checkSpec(spec); err != nil {
+		t.Fatal(err)
+	}
+	o := d.createOptions(spec)
+	type m struct {
+		typ      mount.Type
+		src, dst string
+		ro       bool
+	}
+	var got []m
+	for _, x := range o.HostConfig.Mounts {
+		got = append(got, m{x.Type, x.Source, x.Target, x.ReadOnly})
+		if x.Type == mount.TypeBind && x.BindOptions != nil && x.BindOptions.CreateMountpoint {
+			t.Errorf("%s: a missing host folder must fail, not be created", x.Target)
+		}
+	}
+	want := []m{
+		{mount.TypeVolume, "a12s-lab-home-brain", "/home", false},
+		{mount.TypeVolume, "a12s-lab-bundles", "/opt/a12s/bundles", true},
+		{mount.TypeBind, "/Users/me/docs", "/home/agent/docs", true},
+		{mount.TypeBind, "/Users/me/app", "/home/agent/project", false},
+		{mount.TypeVolume, "a12s-lab-keep-brain-project-node_modules-0a1b2c3d", "/home/agent/project/node_modules", false},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mounts =\n%+v\nwant\n%+v", got, want)
+	}
+	if !slices.Contains(o.Config.Env, "A12S_KEEP=/home/agent/project/node_modules") {
+		t.Errorf("env lacks A12S_KEEP: %q", o.Config.Env)
+	}
+}
+
+func TestCheckSpecAttach(t *testing.T) {
+	base := driver.ComputerSpec{
+		Name: "brain", Generation: 1, Image: "a12s/slim:dev", HomeDrive: driver.HomeDriveID("brain"),
+		Bundle: driver.BundleRef{Kind: "claude-code", Version: "2.1.280", Image: "sha256:0123456789abcdef0123"},
+	}
+	for _, a := range []driver.Attach{
+		{Host: "app", Target: "/home/agent/app"},
+		{Host: "/", Target: "/home/agent/app"},
+		{Host: "/x/../y", Target: "/home/agent/app"},
+		{Host: "/x", Target: "/home/agent"},
+		{Host: "/x", Target: "/home/agent/a/b"},
+		{Host: "/x", Target: "/run/a12s"},
+		{Host: "/x", Target: "/home/agent/app", Keep: []driver.Keep{{Drive: "d", Target: "/home/agent/other"}}},
+		{Host: "/x", Target: "/home/agent/app", Keep: []driver.Keep{{Drive: "d", Target: "/home/agent/app/../../.."}}},
+		{Host: "/x", Target: "/home/agent/app", Keep: []driver.Keep{{Target: "/home/agent/app/node_modules"}}},
+	} {
+		s := base
+		s.Attach = []driver.Attach{a}
+		if err := checkSpec(s); err == nil {
+			t.Errorf("checkSpec accepted %+v", a)
+		}
+	}
+}
+
+func TestExplainMountError(t *testing.T) {
+	attach := []driver.Attach{{Host: "/Users/me/app", Target: "/home/agent/project"}, {Host: "/opt/data", Target: "/home/agent/data"}}
+	for msg, want := range map[string]string{
+		`invalid mount config for type "bind": bind source path does not exist: /host_mnt/Users/me/app`: "attach.project (/Users/me/app)",
+		`invalid mount config for type "bind": bind source path does not exist: /opt/data`:              "attach.data (/opt/data)",
+		`mounts denied: The path /elsewhere is not shared from the host and is not known to Docker.`:    "an attached folder",
+		`Error response from daemon: No such image: a12s/slim:dev`:                                      "",
+	} {
+		got := explainMountError(errors.New(msg), attach).Error()
+		if want == "" && got != msg || want != "" && (!strings.Contains(got, "Docker can't see "+want) || !strings.Contains(got, "File sharing")) {
+			t.Errorf("%s\n -> %s, want %q", msg, got, want)
+		}
+	}
+}
+
+func TestKeepDriveID(t *testing.T) {
+	a, b := driver.KeepDriveID("brain", "a-b", "c"), driver.KeepDriveID("brain", "a", "b-c")
+	if a == b || !driver.IsKeepDrive(a) || driver.IsKeepDrive("home-brain") {
+		t.Errorf("ids %s %s", a, b)
+	}
+	if id := driver.KeepDriveID("brain", "project", ".venv"); !strings.HasPrefix(id, "keep-brain-project-venv-") || !volumeNameRE.MatchString(id) {
+		t.Errorf("id %s", id)
+	}
+	if id := driver.KeepDriveID("brain", "project", "packages/web/node_modules"); !strings.HasPrefix(id, "keep-brain-project-packages_web_node_modules-") || !volumeNameRE.MatchString(id) {
+		t.Errorf("id %s", id)
+	}
+}
+
+// volumeNameRE is what Docker accepts as a volume name.
+var volumeNameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]+$`)

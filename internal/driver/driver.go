@@ -120,6 +120,9 @@ type DriveState struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"` // substrate object name
 	AttachedTo []string `json:"attachedTo,omitempty"`
+	// Computer and Path are a keep drive's owner and mount point, as it was created.
+	Computer string `json:"computer,omitempty"`
+	Path     string `json:"path,omitempty"`
 }
 
 type EventType string
