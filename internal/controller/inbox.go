@@ -321,7 +321,7 @@ func (c *Controller) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Prefix != "" {
 		if len(req.Actions) > 0 || len(req.Computers) > 0 {
-			writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "a prefix token has no actions or computers: it may do everything inside its prefix", Fix: "pass either --prefix, or --actions with --agent-computers"})
+			writeJSON(w, http.StatusBadRequest, api.Error{Code: api.ErrInvalid, Message: "a prefix token has no actions or agent computers: it may do everything inside its prefix", Fix: "pass either --prefix, or --actions with --agent-computers"})
 			return
 		}
 		if !prefixRE.MatchString(req.Prefix) {

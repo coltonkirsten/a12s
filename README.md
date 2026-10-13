@@ -134,7 +134,7 @@ flowchart LR
   [Architecture](docs/architecture.md)
 - Coding agents: [`llms.txt`](https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt) is everything an agent needs to build on a12s, on one page.
 
-a12s is early (`a12s.ai/v1alpha1`). It runs on Docker Desktop on macOS (arm64) and Docker Engine on Linux (amd64,
+a12s is early (`a12s.ai/v1alpha1`). It runs on Docker Desktop on macOS (arm64) and Docker Engine 28+ on Linux (amd64,
 arm64). The Fleet file and API may change before 1.0; [CHANGELOG](CHANGELOG.md) says what changed.
 
 ## Contributing

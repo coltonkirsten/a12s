@@ -4,8 +4,15 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.7.1 (2026-10-13)
+
 - Fixed: `a12s creds set` (or any command that starts the Controller) before the first `a12s up` on a new install or
   release failed with "controller image … not found locally"; it now pulls the Controller image like `up` does.
+- Fixed: the README `a12s init` writes said `creds set` is once per machine; credentials belong to the Fleet's
+  Controller and `a12s down` removes them. It also names `openai` for `init --harness codex`. `a12s init`'s help no
+  longer mentions a .gitignore.
+- Docs: Linux needs Docker Engine 28 or later (README, llms.txt); llms.txt names the package `a12s ui` runs
+  (`github:coltonkirsten/a12s-console`); `a12s drive ls` shows no sizes.
 
 ## v0.7.0 (2026-10-13)
 

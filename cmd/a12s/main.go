@@ -28,7 +28,7 @@ type command struct {
 
 func commands() []command {
 	return []command{
-		{"init", "[dir] [--harness claude-code|codex]", "scaffold fleet.yaml and .gitignore", runInit},
+		{"init", "[dir] [--harness claude-code|codex]", "scaffold fleet.yaml and a README", runInit},
 		{"up", "", "apply the Fleet file to the live Fleet: create, update, stage or remove agent computers", runUp},
 		{"export", "", "write the live Fleet back to the Fleet file", runExport},
 		{"status", "[<name>]", "state, session, active turn, harness version, warnings", runStatus},
