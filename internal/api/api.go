@@ -31,6 +31,8 @@ type PutFleetRequest struct {
 	Asleep bool `json:"asleep,omitempty"`
 	// Refresh names Services whose ref is resolved again and re-pinned.
 	Refresh []string `json:"refresh,omitempty"`
+	// File marks the Fleet as read from a Fleet file (a12s up): later API changes are drift from it.
+	File bool `json:"file,omitempty"`
 }
 
 // PutFleetResponse answers every write to the Fleet: PUT /v1/fleet and the per-agent-computer and per-Service
@@ -81,8 +83,8 @@ const (
 
 // FleetResponse is GET /v1/fleet; the ETag header is the version too.
 type FleetResponse struct {
-	Version int64       `json:"version"`
-	Fleet   *fleet.Spec `json:"fleet"`
+	Version int64      `json:"version"`
+	Fleet   fleet.Spec `json:"fleet"`
 	// Drift lists what changed through the API since the last whole-Fleet write (a12s up): an up from the file
 	// undoes it.
 	Drift []Change `json:"drift"`

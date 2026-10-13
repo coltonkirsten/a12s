@@ -112,7 +112,7 @@ func scaffold(dirName, harness string) (string, string, error) {
 kind: Fleet
 metadata: { name: %s }
 
-computers:
+agent_computers:
   hello:
     harness: %s
     image: slim

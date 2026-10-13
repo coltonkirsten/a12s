@@ -26,6 +26,7 @@ from a12s import (
 )
 from a12s._core import TurnBuilder
 from a12s._parse import _fields, from_json
+from a12s._types import AgentComputersResponse, FleetResponse
 
 FIXTURES: dict[str, Any] = json.loads((Path(__file__).parents[2] / "fixtures" / "api.json").read_text())
 
@@ -39,6 +40,8 @@ PARSED: dict[str, tuple[type, Callable[[Any], Any]]] = {
     "token": (Token, lambda f: f),
     "event": (Event, lambda f: f),
     "turnStartedData": (TurnInboxMessage, lambda f: f["inbox"]["messages"][0] if "inbox" in f else None),
+    "fleetResponse": (FleetResponse, lambda f: f),
+    "agentComputersResponse": (AgentComputersResponse, lambda f: f),
 }
 # Requests the client builds from keyword arguments, and responses it passes through as dicts.
 REQUESTS = {"enqueueRequest", "tokenRequest"}
@@ -137,13 +140,15 @@ def recorder(routes: dict[str, Any]) -> tuple[httpx.MockTransport, list[Any]]:
 
 ROUTES = {
     "GET /v1/status": FIXTURES["statusResponse"],
-    "POST /v1/computers/lead/inbox": FIXTURES["enqueueResponse"],
-    "GET /v1/computers/lead/inbox": FIXTURES["inboxListResponse"],
-    "GET /v1/computers/lead/inbox/m_1": FIXTURES["message"],
+    "POST /v1/agent-computers/lead/inbox": FIXTURES["enqueueResponse"],
+    "GET /v1/agent-computers/lead/inbox": FIXTURES["inboxListResponse"],
+    "GET /v1/agent-computers/lead/inbox/m_1": FIXTURES["message"],
     "GET /v1/services": FIXTURES["servicesResponse"],
     "GET /v1/services/svc": FIXTURES["servicesResponse"]["services"][0],
     "POST /v1/tokens": FIXTURES["token"],
     "PUT /v1/fleet": FIXTURES["putFleetResponse"],
+    "GET /v1/fleet": FIXTURES["fleetResponse"],
+    "GET /v1/agent-computers": FIXTURES["agentComputersResponse"],
 }
 
 
@@ -157,6 +162,13 @@ def test_client_parses_every_fixture_off_the_wire() -> None:
     assert client.services() == services
     assert client.service("svc") == services[0]
     assert client.put_fleet({"fleet": {"metadata": {"name": "f"}}}) == FIXTURES["putFleetResponse"]
+
+    fleet = a12s.Fleet("http://x", "t", http=httpx.Client(transport=transport))
+    state = fleet.get()
+    assert state.version == FIXTURES["fleetResponse"]["version"] and state.spec == FIXTURES["fleetResponse"]["fleet"]
+    acs = fleet.agent_computers.list()
+    want = from_json(AgentComputersResponse, FIXTURES["agentComputersResponse"], strict=True).agent_computers[0]
+    assert (acs[0].name, acs[0].spec, acs[0].effective, acs[0].status) == (want.name, want.spec, want.effective, want.status)
     with pytest.raises(a12s.A12sError) as e:
         client.withdraw("lead", "m_1")
     err = FIXTURES["error"]

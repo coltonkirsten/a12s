@@ -816,7 +816,7 @@ var labCreds = api.Credentials{"anthropic": []byte(`{"claudeAiOauth":{}}`), "ope
 
 func (h *harness) up(f *fleet.Fleet, lock *fleet.Lock, asleep bool) api.PutFleetResponse {
 	h.t.Helper()
-	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Lock: lock, Credentials: labCreds, Asleep: asleep}, writeOpts{})
+	res, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Lock: lock, Credentials: labCreds, Asleep: asleep, File: true}, writeOpts{})
 	if err != nil {
 		h.t.Fatalf("PutFleet: %v", err)
 	}

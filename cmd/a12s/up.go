@@ -112,7 +112,7 @@ func (g *globals) up(asleep bool, image string, refresh []string) error {
 	for _, name := range refresh {
 		delete(lock.Services, fleet.ServiceKey(name, f.Services[name].Image))
 	}
-	req := api.PutFleetRequest{Fleet: spec, Lock: lock, Credentials: creds, Asleep: asleep, Refresh: refresh}
+	req := api.PutFleetRequest{Fleet: spec, Lock: lock, Credentials: creds, Asleep: asleep, Refresh: refresh, File: true}
 	var resp api.PutFleetResponse
 	if err := c.Do(ctx, "PUT", "/v1/fleet", req, &resp); err != nil {
 		return err

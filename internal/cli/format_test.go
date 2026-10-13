@@ -36,7 +36,7 @@ func TestWriteStatus(t *testing.T) {
 		Fleet:             "lab",
 		EgressEnforcement: "enforced",
 		CredentialsLoaded: true,
-		Computers: []api.ComputerStatus{
+		AgentComputers: []api.ComputerStatus{
 			{Name: "scout", Phase: api.PhaseAsleep, Session: "9c41aa07-1111", Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"}, HomeSize: gi},
 			{Name: "builder", Phase: api.PhaseBusy, Session: "2f00", ActiveTurn: "t_41", Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, HomeSize: gi, Drives: []string{"a12s-repo"},
 				Warnings: []string{"resume failed"}},
@@ -44,7 +44,7 @@ func TestWriteStatus(t *testing.T) {
 		},
 		OrphanedDrives: []api.DriveRow{{Name: "ux-old", Kind: api.DriveWork}},
 	}
-	st.Computers[0].EgressMode = api.EgressEnforced
+	st.AgentComputers[0].EgressMode = api.EgressEnforced
 	var b strings.Builder
 	WriteStatus(&b, st)
 	row := func(out, name string) string {
@@ -79,7 +79,7 @@ func TestWriteStatus(t *testing.T) {
 	st.EgressEnforcement = "unenforced"
 	st.CredentialsLoaded = false
 	st.Warnings = []string{"egress is UNENFORCED for this Fleet: allowlists are not a firewall here"} // duplicate dropped
-	st.Computers[0].EgressMode = api.EgressUnenforced
+	st.AgentComputers[0].EgressMode = api.EgressUnenforced
 	b.Reset()
 	WriteStatus(&b, st)
 	out = b.String()

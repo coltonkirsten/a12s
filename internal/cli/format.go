@@ -86,7 +86,7 @@ func ShortID(id string) string {
 // never the local Fleet file, which may not be applied.
 func WriteStatus(w io.Writer, st *api.StatusResponse) {
 	var rows [][]string
-	for _, c := range st.Computers {
+	for _, c := range st.AgentComputers {
 		cells := []string{c.Name, phase(c)}
 		if c.Session != "" {
 			cells = append(cells, "session "+ShortID(c.Session))
@@ -229,7 +229,7 @@ func StatusWarnings(st *api.StatusResponse) []string {
 	for _, s := range st.Warnings {
 		add(s)
 	}
-	for _, c := range st.Computers {
+	for _, c := range st.AgentComputers {
 		if c.Error != nil {
 			retry := "not retryable"
 			if c.Error.Retryable {

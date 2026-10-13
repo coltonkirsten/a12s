@@ -40,13 +40,14 @@ func (c *Controller) PutFleet(ctx context.Context, req api.PutFleetRequest, o wr
 	if req.Fleet == nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "fleet is required")
 	}
-	o.whole, o.lock, o.creds, o.asleep, o.refresh = true, req.Lock, req.Credentials, req.Asleep, req.Refresh
+	o.whole, o.file, o.lock, o.creds, o.asleep, o.refresh = true, req.File, req.Lock, req.Credentials, req.Asleep, req.Refresh
 	return c.applySpec(ctx, func(*fleet.Spec) (*fleet.Spec, error) { return req.Fleet, nil }, o)
 }
 
 // writeOpts says what a write may touch and how it is admitted.
 type writeOpts struct {
-	whole bool // PUT /v1/fleet: may touch everything; becomes the Applied spec
+	whole bool // PUT /v1/fleet: may touch everything
+	file  bool // the Fleet comes from a Fleet file: it becomes the Applied spec
 	// only names the agent computers and Services a partial write touches.
 	only    []string
 	dryRun  bool
@@ -160,7 +161,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if changed {
 		c.state.Version++
 	}
-	if o.whole {
+	if o.file {
 		c.state.Applied = spec.Clone()
 	}
 	version = c.state.Version

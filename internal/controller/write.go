@@ -77,7 +77,7 @@ func (c *Controller) handleGetFleet(w http.ResponseWriter, r *http.Request) {
 	if spec == nil {
 		spec = &fleet.Spec{APIVersion: fleet.APIVersion, Kind: fleet.Kind, Metadata: fleet.Metadata{Name: c.cfg.Fleet}, AgentComputers: map[string]json.RawMessage{}}
 	}
-	res := api.FleetResponse{Version: version, Fleet: spec, Drift: []api.Change{}}
+	res := api.FleetResponse{Version: version, Fleet: *spec, Drift: []api.Change{}}
 	if applied != nil {
 		old, err1 := applied.Effective()
 		cur, err2 := spec.Effective()

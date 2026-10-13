@@ -44,9 +44,9 @@ func runPrompt(g *globals, args []string) error {
 		return err
 	}
 	var cs *api.ComputerStatus
-	for i := range st.Computers {
-		if st.Computers[i].Name == name {
-			cs = &st.Computers[i]
+	for i := range st.AgentComputers {
+		if st.AgentComputers[i].Name == name {
+			cs = &st.AgentComputers[i]
 		}
 	}
 	if cs == nil {
@@ -371,7 +371,7 @@ func runStop(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, cs := range st.Computers {
+	for _, cs := range st.AgentComputers {
 		if cs.Name != name {
 			continue
 		}

@@ -144,7 +144,7 @@ func TestPromptEndToEnd(t *testing.T) {
 		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/v1/status":
-			_ = json.NewEncoder(w).Encode(api.StatusResponse{Fleet: "lab", Computers: []api.ComputerStatus{{Name: "scout", Phase: api.PhaseBusy, ActiveTurn: "t_6"}}})
+			_ = json.NewEncoder(w).Encode(api.StatusResponse{Fleet: "lab", AgentComputers: []api.ComputerStatus{{Name: "scout", Phase: api.PhaseBusy, ActiveTurn: "t_6"}}})
 		case r.Method == "POST" && r.URL.Path == "/v1/agent-computers/scout/inbox":
 			mu.Lock()
 			_ = json.NewDecoder(r.Body).Decode(&enq)

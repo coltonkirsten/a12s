@@ -113,7 +113,7 @@ func TestFleetIfMatch(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), nil, false)
 	fr := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", ""))
-	body, _ := json.Marshal(api.PutFleetRequest{Fleet: fr.Fleet, Credentials: labCreds})
+	body, _ := json.Marshal(api.PutFleetRequest{Fleet: &fr.Fleet, Credentials: labCreds})
 	stale := `"` + string(rune('0'+fr.Version-1)) + `"`
 	if r := h.api("PUT", "/v1/fleet", string(body), "If-Match", stale); r.StatusCode != http.StatusPreconditionFailed || apiError(t, r).Code != api.ErrVersionMismatch {
 		t.Fatalf("stale If-Match = %d", r.StatusCode)

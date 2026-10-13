@@ -45,8 +45,8 @@ class AsyncClient:
     async def __aexit__(self, *exc: object) -> None:
         await self.aclose()
 
-    async def _request(self, method: str, path: str, body: Any = None) -> Any:
-        res = await self._http.request(method, self.url + path, **core.json_request(self._token, body))
+    async def _request(self, method: str, path: str, body: Any = None, headers: dict[str, str] | None = None) -> Any:
+        res = await self._http.request(method, self.url + path, **core.json_request(self._token, body, headers))
         return core.decode(res)
 
     async def status(self) -> Status:
@@ -54,7 +54,7 @@ class AsyncClient:
         return from_json(Status, await self._request("GET", "/v1/status"))
 
     async def computer(self, name: str) -> ComputerStatus:
-        for c in (await self.status()).computers:
+        for c in (await self.status()).agent_computers:
             if c.name == name:
                 return c
         raise A12sError(404, "not_found", f"no Computer {name}")
@@ -73,7 +73,7 @@ class AsyncClient:
     ) -> EnqueueResponse:
         """See Client.send."""
         m = core.enqueue_body(body, sender, metadata, fresh, idempotency_key, expires, replace_key)
-        return from_json(EnqueueResponse, await self._request("POST", f"/v1/computers/{core.enc(computer)}/inbox", m))
+        return from_json(EnqueueResponse, await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox", m))
 
     async def prompt(
         self,
@@ -129,7 +129,7 @@ class AsyncClient:
             return self._stream(core.events_path(name, turn), state, reconnect)
 
         async def all_names() -> list[str]:
-            return [c.name for c in (await self.status()).computers]
+            return [c.name for c in (await self.status()).agent_computers]
 
         return AsyncEventStream(source, names if names is not None else all_names)
 
@@ -149,27 +149,27 @@ class AsyncClient:
         return from_json(InboxList, await self._request("GET", core.inbox_path(computer, state, bodies, after)))
 
     async def message(self, computer: str, id: str) -> Message:
-        path = f"/v1/computers/{core.enc(computer)}/inbox/{core.enc(id)}"
+        path = f"/v1/agent-computers/{core.enc(computer)}/inbox/{core.enc(id)}"
         return from_json(Message, await self._request("GET", path))
 
     async def withdraw(self, computer: str, id: str) -> Message:
         """Withdraws a pending Message; a 409 A12sError names its state if it is too late."""
-        path = f"/v1/computers/{core.enc(computer)}/inbox/{core.enc(id)}"
+        path = f"/v1/agent-computers/{core.enc(computer)}/inbox/{core.enc(id)}"
         return from_json(Message, await self._request("DELETE", path))
 
     async def stop(self, computer: str, turn: str | None = None) -> None:
         """Interrupts a Turn (default: the active one). The Turn ends ``interrupted``; nothing is replayed."""
         id = turn if turn is not None else (await self.computer(computer)).active_turn
         if id:
-            await self._request("POST", f"/v1/computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
+            await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
 
     async def sleep(self, computer: str) -> None:
         """Stops the Computer's processes and keeps its disks, session and inbox."""
-        await self._request("POST", f"/v1/computers/{core.enc(computer)}/power", {"state": "asleep"})
+        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "asleep"})
 
     async def wake(self, computer: str) -> None:
         """Starts a sleeping Computer; its session resumes on the next Turn."""
-        await self._request("POST", f"/v1/computers/{core.enc(computer)}/power", {"state": "awake"})
+        await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "awake"})
 
     async def services(self) -> list[ServiceStatus]:
         res = await self._request("GET", "/v1/services")

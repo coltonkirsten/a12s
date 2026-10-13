@@ -532,29 +532,49 @@ export const fleetResponse: T.FleetResponse = {
           "a12s": 1,
           "name": "name",
           "version": "version",
-          "user": "0:0",
-          "health": {},
+          "user": "1:1",
+          "health": {
+            "http": {
+              "port": 0
+            },
+            "exec": [
+              ""
+            ],
+            "interval": "interval",
+            "startup": "startup"
+          },
           "ports": {
             "k": {
-              "port": 0
+              "port": 1,
+              "protocol": "protocol",
+              "mcp": {
+                "path": ""
+              }
             }
           },
           "credentials": [
             {
-              "name": ""
+              "name": "name",
+              "required": true
             }
           ],
           "login": {
-            "command": null,
-            "produces": ""
+            "command": [
+              ""
+            ],
+            "produces": "produces"
           },
           "state": {
-            "at": ""
+            "at": "at",
+            "size": "1"
           },
           "tmpfs": [
             "tmpfs"
           ],
-          "resources": {}
+          "resources": {
+            "cpu": "1m",
+            "memory": "1"
+          }
         },
         "config": {
           "k": null
@@ -613,7 +633,16 @@ export const fleetResponse: T.FleetResponse = {
 
 export const fleetResponseMinimal: T.FleetResponse = {
   "version": 1,
-  "fleet": null,
+  "fleet": {
+    "apiVersion": "apiVersion",
+    "kind": "kind",
+    "metadata": {
+      "name": "name"
+    },
+    "agent_computers": {
+      "k": {}
+    }
+  },
   "drift": [
     {
       "op": "op",

@@ -3,7 +3,7 @@ apiVersion: a12s.ai/v1alpha1
 kind: Fleet
 metadata: { name: quickstart }
 
-computers:
+agent_computers:
   hello:
     harness: { kind: claude-code, version: 2.1.280 }
     image: slim

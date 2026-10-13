@@ -85,8 +85,8 @@ class Client:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def _request(self, method: str, path: str, body: Any = None) -> Any:
-        res = self._http.request(method, self.url + path, **core.json_request(self._token, body))
+    def _request(self, method: str, path: str, body: Any = None, headers: dict[str, str] | None = None) -> Any:
+        res = self._http.request(method, self.url + path, **core.json_request(self._token, body, headers))
         return core.decode(res)
 
     def status(self) -> Status:
@@ -94,7 +94,7 @@ class Client:
         return from_json(Status, self._request("GET", "/v1/status"))
 
     def computer(self, name: str) -> ComputerStatus:
-        for c in self.status().computers:
+        for c in self.status().agent_computers:
             if c.name == name:
                 return c
         raise A12sError(404, "not_found", f"no Computer {name}")
@@ -118,7 +118,7 @@ class Client:
         Message; ``expires`` is in seconds, 0 meaning now or never.
         """
         m = core.enqueue_body(body, sender, metadata, fresh, idempotency_key, expires, replace_key)
-        return from_json(EnqueueResponse, self._request("POST", f"/v1/computers/{core.enc(computer)}/inbox", m))
+        return from_json(EnqueueResponse, self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/inbox", m))
 
     def prompt(
         self,
@@ -182,7 +182,7 @@ class Client:
             state = core.StreamState(name, after, on_gap, live)
             return self._stream(core.events_path(name, turn), state, reconnect, cancel)
 
-        return EventStream(source, names if names is not None else lambda: [c.name for c in self.status().computers])
+        return EventStream(source, names if names is not None else lambda: [c.name for c in self.status().agent_computers])
 
     def turns(
         self,
@@ -201,26 +201,26 @@ class Client:
         return from_json(InboxList, self._request("GET", core.inbox_path(computer, state, bodies, after)))
 
     def message(self, computer: str, id: str) -> Message:
-        return from_json(Message, self._request("GET", f"/v1/computers/{core.enc(computer)}/inbox/{core.enc(id)}"))
+        return from_json(Message, self._request("GET", f"/v1/agent-computers/{core.enc(computer)}/inbox/{core.enc(id)}"))
 
     def withdraw(self, computer: str, id: str) -> Message:
         """Withdraws a pending Message; a 409 A12sError names its state if it is too late."""
-        path = f"/v1/computers/{core.enc(computer)}/inbox/{core.enc(id)}"
+        path = f"/v1/agent-computers/{core.enc(computer)}/inbox/{core.enc(id)}"
         return from_json(Message, self._request("DELETE", path))
 
     def stop(self, computer: str, turn: str | None = None) -> None:
         """Interrupts a Turn (default: the active one). The Turn ends ``interrupted``; nothing is replayed."""
         id = turn if turn is not None else self.computer(computer).active_turn
         if id:
-            self._request("POST", f"/v1/computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
+            self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
 
     def sleep(self, computer: str) -> None:
         """Stops the Computer's processes and keeps its disks, session and inbox."""
-        self._request("POST", f"/v1/computers/{core.enc(computer)}/power", {"state": "asleep"})
+        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "asleep"})
 
     def wake(self, computer: str) -> None:
         """Starts a sleeping Computer; its session resumes on the next Turn."""
-        self._request("POST", f"/v1/computers/{core.enc(computer)}/power", {"state": "awake"})
+        self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", {"state": "awake"})
 
     def services(self) -> list[ServiceStatus]:
         res = self._request("GET", "/v1/services")

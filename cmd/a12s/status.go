@@ -29,7 +29,7 @@ func runStatus(g *globals, args []string) error {
 	}
 	if len(pos) == 1 {
 		var only []api.ComputerStatus
-		for _, cs := range st.Computers {
+		for _, cs := range st.AgentComputers {
 			if cs.Name == pos[0] {
 				only = append(only, cs)
 			}
@@ -43,8 +43,8 @@ func runStatus(g *globals, args []string) error {
 		if len(only) == 0 && len(svc) == 0 {
 			return fmt.Errorf("fleet %s has no Computer or Service %q", st.Fleet, pos[0])
 		}
-		st.Computers, st.Services = only, svc
-	} else if len(st.Computers) == 0 && !g.json {
+		st.AgentComputers, st.Services = only, svc
+	} else if len(st.AgentComputers) == 0 && !g.json {
 		fmt.Println("no Computers (run a12s up)")
 	}
 	if g.json {

@@ -43,19 +43,19 @@ def prompt_server() -> tuple[Handler, dict[str, int]]:
 
     def handler(req: Req, res: Res) -> None:
         assert req.headers["authorization"] == "Bearer tok"
-        if req.method == "POST" and req.url == "/v1/computers/lead/inbox":
+        if req.method == "POST" and req.url == "/v1/agent-computers/lead/inbox":
             m = json.loads(req.body)
             assert m["body"] == "split this"
             assert m["idempotencyKey"], "the client always sends an idempotency key"
             res.json(201, {"id": "m_1", "seq": 1, "state": "pending"})
             return
         res.write_head(200)
-        if req.url == "/v1/computers/lead/inbox/m_1/events":
+        if req.url == "/v1/agent-computers/lead/inbox/m_1/events":
             res.write(ev(1, "snapshot", "", {"message": {"id": "m_1", "state": "pending"}, "held": False}))
             res.write(": keepalive\n\n")
             res.end(ev(2, "delivered", "", {"turn": "t_9"}))
             return
-        assert req.url == "/v1/computers/lead/events?turn=t_9"
+        assert req.url == "/v1/agent-computers/lead/events?turn=t_9"
         calls["events"] += 1
         if calls["events"] == 1:
             res.write('event: head\ndata: {"seq":0}\n\n')
@@ -307,9 +307,9 @@ def test_fleet_name_reads_flow_and_block_metadata() -> None:
 
 def merged_server(req: Req, res: Res) -> None:
     if req.url == "/v1/status":
-        res.json(200, {"fleet": "f", "computers": [{"name": "lead"}, {"name": "w1"}, {"name": "w2"}]})
+        res.json(200, {"fleet": "f", "agentComputers": [{"name": "lead"}, {"name": "w1"}, {"name": "w2"}]})
         return
-    if req.url == "/v1/computers/w2/events":
+    if req.url == "/v1/agent-computers/w2/events":
         res.json(503, {"code": "asleep", "message": "asleep"})
         return
     name = req.url.split("/")[3]
@@ -416,7 +416,7 @@ def test_stop_defaults_to_the_active_turn() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         seen.append(f"{req.method} {req.url.path}")
         if req.url.path == "/v1/status":
-            return httpx.Response(200, json={"computers": [{"name": "lead", "activeTurn": "t_1"}, {"name": "idle"}]})
+            return httpx.Response(200, json={"agentComputers": [{"name": "lead", "activeTurn": "t_1"}, {"name": "idle"}]})
         assert req.content == b"{}"
         return httpx.Response(204)
 
@@ -425,5 +425,5 @@ def test_stop_defaults_to_the_active_turn() -> None:
     client.stop("idle")
     with pytest.raises(A12sError, match="not_found"):
         client.stop("nope")
-    assert seen == ["GET /v1/status", "POST /v1/computers/lead/turns/t_1/stop", "GET /v1/status", "GET /v1/status"]
+    assert seen == ["GET /v1/status", "POST /v1/agent-computers/lead/turns/t_1/stop", "GET /v1/status", "GET /v1/status"]
 
