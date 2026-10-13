@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -176,4 +177,38 @@ func mustPresetTar(t *testing.T) []byte {
 func quoted(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// Credentials are stored 0600 in the state volume and survive a restart; nobody reads a value back, and one still
+// in use can't be removed.
+func TestCredentialStore(t *testing.T) {
+	dir := t.TempDir()
+	persistCreds[dir] = true
+	h := startHarness(t, dir, nil)
+	h.up(labFleet(t, nil), nil, false)
+	if r := h.api("PUT", "/v1/credentials/hubspot", `{"value":"hs-secret"}`); r.StatusCode != 200 {
+		t.Fatalf("set = %d", r.StatusCode)
+	}
+	info, err := os.Stat(filepath.Join(dir, credsFile))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("credentials file: %v %v", info, err)
+	}
+	list := decodeBody[api.CredentialsResponse](t, h.api("GET", "/v1/credentials", ""))
+	b, _ := json.Marshal(list)
+	if strings.Contains(string(b), "hs-secret") || len(list.Credentials) != 4 {
+		t.Fatalf("list = %s", b)
+	}
+	if r := h.api("DELETE", "/v1/credentials/github", ""); r.StatusCode != 409 || apiError(t, r).Code != api.ErrInUse {
+		t.Fatalf("delete in use = %d", r.StatusCode)
+	}
+	if r := h.api("DELETE", "/v1/credentials/hubspot", ""); r.StatusCode != 204 {
+		t.Fatalf("delete = %d", r.StatusCode)
+	}
+
+	h.d.RemoveComputer(context.Background(), "scout")
+	h2 := h.restart()
+	h2.waitPhase("scout", api.PhaseReady) // restaged and started with the stored anthropic credential
+	if st := h2.c.Status(context.Background()); !st.CredentialsLoaded {
+		t.Fatal("credentials were not loaded after the restart")
+	}
 }

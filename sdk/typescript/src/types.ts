@@ -481,6 +481,17 @@ export interface TokenRequest {
   computers: string[];
 }
 
+/** A credential's name, whether it has a value, and who uses it. */
+export interface CredentialInfo {
+  name: string;
+  set: boolean;
+  usedBy?: string[];
+}
+
+export interface CredentialsResponse {
+  credentials: CredentialInfo[];
+}
+
 export interface Token {
   name: string;
   actions: string[];

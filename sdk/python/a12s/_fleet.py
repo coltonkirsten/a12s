@@ -19,6 +19,7 @@ from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
     Change,
     ComputerStatus,
+    CredentialInfo,
     EnqueueResponse,
     Event,
     InboxList,
@@ -274,6 +275,26 @@ class Tokens:
         self._fleet._client._request("DELETE", f"/v1/tokens/{core.enc(name)}")
 
 
+class Credentials:
+    """Credentials by name: set once, then name them in a spec's ``credentials``."""
+
+    def __init__(self, fleet: Fleet) -> None:
+        self._fleet = fleet
+
+    def set(self, name: str, value: str) -> CredentialInfo:
+        """Stores the value on the Controller; agent computers that use it get the new value at once."""
+        path = f"/v1/credentials/{core.enc(name)}"
+        return from_json(CredentialInfo, self._fleet._client._request("PUT", path, {"value": value}))
+
+    def list(self) -> builtins.list[CredentialInfo]:
+        res = self._fleet._client._request("GET", "/v1/credentials")
+        return [from_json(CredentialInfo, c) for c in (res or {}).get("credentials") or []]
+
+    def remove(self, name: str) -> None:
+        """Raises A12sError ``in_use`` while an agent computer or Service uses it."""
+        self._fleet._client._request("DELETE", f"/v1/credentials/{core.enc(name)}")
+
+
 class Fleet:
     """A running Fleet. It connects like ``connect()``: ``url`` and ``token``, else ``$A12S_URL`` and
     ``$A12S_TOKEN``, else the nearest fleet.yaml's Fleet (or ``fleet=``), else the only running Controller.
@@ -297,6 +318,7 @@ class Fleet:
         self.agent_computers = AgentComputers(self)
         self.services = Services(self)
         self.tokens = Tokens(self)
+        self.credentials = Credentials(self)
 
     def close(self) -> None:
         self._client.close()

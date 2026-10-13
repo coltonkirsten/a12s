@@ -521,12 +521,14 @@ var Fleet = class _Fleet {
   agentComputers;
   services;
   tokens;
+  credentials;
   /** No discovery: `url` and `token` as given, by default the page's own origin. */
   constructor(opts = {}) {
     this.client = new A12sClient(opts);
     this.agentComputers = new AgentComputers(this.client);
     this.services = new Services(this.client);
     this.tokens = new Tokens(this.client);
+    this.credentials = new Credentials(this.client);
   }
   /**
    * In a browser: the Fleet behind the page's own origin, which is `a12s gateway` serving the page (no token
@@ -746,6 +748,22 @@ var Tokens = class {
     await this.client.request("DELETE", `/v1/tokens/${enc2(name)}`);
   }
 };
+var Credentials = class {
+  constructor(client) {
+    this.client = client;
+  }
+  /** Stores the value on the Controller; agent computers that use it get the new value at once. */
+  set(name, value) {
+    return this.client.request("PUT", `/v1/credentials/${enc2(name)}`, { value });
+  }
+  async list() {
+    return (await this.client.request("GET", "/v1/credentials")).credentials ?? [];
+  }
+  /** Fails with A12sError code `in_use` while an agent computer or Service uses it. */
+  async remove(name) {
+    await this.client.request("DELETE", `/v1/credentials/${enc2(name)}`);
+  }
+};
 
 // src/index.ts
 async function connect(opts = {}) {
@@ -758,6 +776,7 @@ export {
   A12sStreamError,
   AgentComputer,
   AgentComputers,
+  Credentials,
   EventStream,
   Fleet,
   NotFound,

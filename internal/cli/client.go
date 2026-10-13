@@ -135,9 +135,17 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body any) 
 
 // Do returns a non-2xx response as *api.Error.
 func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {
+	return c.DoHeaders(ctx, method, path, nil, in, out)
+}
+
+// DoHeaders is Do with extra request headers (If-Match).
+func (c *Client) DoHeaders(ctx context.Context, method, path string, headers map[string]string, in, out any) error {
 	req, err := c.NewRequest(ctx, method, path, in)
 	if err != nil {
 		return err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

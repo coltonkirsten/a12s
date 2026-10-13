@@ -9,13 +9,22 @@
 from ._async import AsyncClient, AsyncEventStream, AsyncTurnStream
 from ._client import Client, EventStream, TurnStream
 from ._connect import connect, connect_async
-from ._afleet import AsyncAgentComputer, AsyncAgentComputers, AsyncFleet, AsyncService, AsyncServices, AsyncTokens
+from ._afleet import (
+    AsyncAgentComputer,
+    AsyncAgentComputers,
+    AsyncCredentials,
+    AsyncFleet,
+    AsyncService,
+    AsyncServices,
+    AsyncTokens,
+)
 from ._errors import A12sError, A12sGapError, A12sStreamError, NotFound
-from ._fleet import AgentComputer, AgentComputers, Fleet, FleetState, Service, Services, Tokens
+from ._fleet import AgentComputer, AgentComputers, Credentials, Fleet, FleetState, Service, Services, Tokens
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
     AgentComputerInfo,
     Change,
+    CredentialInfo,
     ComputerStatus,
     DriveRow,
     EnqueueResponse,
@@ -49,6 +58,7 @@ __all__ = [
     "AgentComputers",
     "AsyncAgentComputer",
     "AsyncAgentComputers",
+    "AsyncCredentials",
     "AsyncClient",
     "AsyncEventStream",
     "AsyncFleet",
@@ -57,6 +67,8 @@ __all__ = [
     "AsyncTokens",
     "AsyncTurnStream",
     "Change",
+    "CredentialInfo",
+    "Credentials",
     "Client",
     "ComputerStatus",
     "DriveRow",

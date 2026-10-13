@@ -18,9 +18,25 @@ type ControllerFile struct {
 	Token string `json:"token"` // Authorization: Bearer <token>
 }
 
-// Credentials is keyed by credential name ("anthropic", "github", ...). The
-// Controller keeps it in memory only.
+// Credentials is keyed by credential name ("anthropic", "github", ...). The Controller keeps the values in its
+// state volume (0600) unless it runs with memory-only credentials, and never returns them.
 type Credentials map[string][]byte
+
+// CredentialRequest is PUT /v1/credentials/{name}.
+type CredentialRequest struct {
+	Value string `json:"value"`
+}
+
+// CredentialInfo names a credential, never its value: whether it is set and who uses it.
+type CredentialInfo struct {
+	Name   string   `json:"name"`
+	Set    bool     `json:"set"`
+	UsedBy []string `json:"usedBy,omitempty"`
+}
+
+type CredentialsResponse struct {
+	Credentials []CredentialInfo `json:"credentials"`
+}
 
 // PutFleetRequest is PUT /v1/fleet: `a12s up` and fleet.replace. If-Match carries the version it read.
 type PutFleetRequest struct {

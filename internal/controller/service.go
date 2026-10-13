@@ -844,7 +844,7 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 		_, inFleet = c.state.Fleet.Services[name]
 	}
 	if inFleet && req.State == api.PowerAwake {
-		maps.Copy(c.creds, req.Credentials)
+		_ = c.setCredsLocked(req.Credentials)
 		c.state.Services[name].Restarts = 0
 		_ = c.saveLocked()
 	}
