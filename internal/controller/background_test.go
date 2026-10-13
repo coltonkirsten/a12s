@@ -45,6 +45,12 @@ func TestBackgroundTurnHoldsDelivery(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
 	scout := h.cds.get("scout")
+	// The fake streams only events emitted after the Controller subscribes.
+	waitFor(t, func() bool {
+		scout.mu.Lock()
+		defer scout.mu.Unlock()
+		return len(scout.subs) > 0
+	})
 	bg := scout.selfTurn()
 	h.waitPhase("scout", api.PhaseBusy)
 	m := h.send("scout", "hello")
