@@ -550,7 +550,7 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   PUT/PATCH/DELETE exist on /v1/services/{s}. These writes change only that one; last write wins.
 - The whole Fleet: GET /v1/fleet → {version, fleet, drift} with ETag "<version>". PUT /v1/fleet {"fleet": …} with
   If-Match: "<version>" replaces it, or answers 412 version_mismatch if it changed since you read it.
-- Every write takes ?dryRun=true (check and list the changes, change nothing) and answers {version, changes: [{op:
+- Every write takes ?dryRun=true (check it exactly as the write would, list the changes, change nothing) and answers {version, changes: [{op:
   create|update|remove, kind: agentComputer|service, name, when: now|idle, fields?, diff?: [{path, before?, after?}]}],
   warnings, errors, …}; diff lists each changed leaf of an update (path "grants.send"; lists and values are leaves). A
   missing harness or image (in the spec and in defaults) is 400 missing_field; a credential with no value is 400

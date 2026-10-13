@@ -117,18 +117,12 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		}
 	}
 	changes := c.diff(oldFleet, f, o)
-	if o.dryRun {
-		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
-			Warnings: slices.Concat(f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
-		if o.by.prefix() != "" {
-			res.Warnings = nil
-		}
-		return res, nil
-	}
 	lockIn := o.lock
 	if lockIn == nil {
 		lockIn = storedLock
 	}
+	// A dry run is admitted like the write, images and their manifests included, so it never says yes to a write
+	// that fails.
 	var admitWarnings []string
 	lock, hosts, manifests, err := c.resolve(ctx, f, lockIn, o.refresh, &admitWarnings)
 	if err != nil {
@@ -138,6 +132,14 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		return api.PutFleetResponse{}, err
 	}
 	admitSeccomp(f, &admitWarnings)
+	if o.dryRun {
+		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
+			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
+		if o.by.prefix() != "" {
+			res.Warnings = nil
+		}
+		return res, nil
+	}
 
 	// Durable sleep marks, read before taking the lock.
 	sleptMarks := map[string]bool{}

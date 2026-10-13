@@ -120,7 +120,8 @@ Controller's store: names it leaves out keep their values. The version goes up b
 something. Only the Fleet file can hold paths: a `home.preset` or a `security.seccomp` path in the body is refused
 (`a12s up` sends the preset as `files` and the profile as JSON).
 
-**Every write** takes `?dryRun=true`: it checks the write and lists what it would change, and changes nothing. Every
+**Every write** takes `?dryRun=true`: it checks the write as the write does (images, their Service manifests and
+custom-image labels included, so it fails with the same error) and lists what it would change, and changes nothing. Every
 write answers:
 
 ```json
