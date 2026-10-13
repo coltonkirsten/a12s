@@ -15,14 +15,14 @@ log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 run() { log "\$ ${*/#a /a12s }"; "$@" 2>&1 | tee -a "$LOG"; return "${PIPESTATUS[0]}"; }
 check() { local name=$1; shift; if (set +o pipefail; "$@") >>"$LOG" 2>&1; then PASS=$((PASS+1)); log "PASS $name"; else FAIL=$((FAIL+1)); log "FAIL $name"; fi; }
 a() { "$A12S" "$@"; }
-phase() { a status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((c['phase'] for c in d['computers']+d.get('services',[]) if c['name']=='$1'), ''))"; }
+phase() { a status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((c['phase'] for c in d['agentComputers']+d.get('services',[]) if c['name']=='$1'), ''))"; }
 wait_phase() { for _ in $(seq 1 ${3:-120}); do [ "$(phase "$1")" = "$2" ] && return 0; sleep 1; done; log "timeout: $1 is $(phase "$1"), want $2"; return 1; }
 events() { a logs "$1" --json 2>/dev/null; }
 inbox_json() { a inbox "$1" --all --json; }
 msg_state() { a inbox "$1" --all --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((m['state'] for m in d['messages'] if m['id']=='$2'), 'none'))"; }
 send_id() { a send --json "$@" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])"; }
 idle() { for _ in $(seq 1 ${2:-180}); do a status --json | python3 -c "
-import json,sys; d=json.load(sys.stdin); c=next(c for c in d['computers'] if c['name']=='$1'); sys.exit(0 if c['phase']=='Ready' and not c.get('activeTurn') else 1)" && return 0; sleep 1; done; return 1; }
+import json,sys; d=json.load(sys.stdin); c=next(c for c in d['agentComputers'] if c['name']=='$1'); sys.exit(0 if c['phase']=='Ready' and not c.get('activeTurn') else 1)" && return 0; sleep 1; done; return 1; }
 # A Turn that stays busy: the agent waits 40 s in its shell tool (Claude Code refuses a bare `sleep`).
 long_turn() { a send --wait "$1" "Use your Bash tool to run exactly this command: python3 -c 'import time; time.sleep(40)'. Then reply with the single word done." > /tmp/gate.long.$1 2>&1 & sleep 8; }
 
@@ -79,7 +79,7 @@ PY
   run a sleep reviewer; wait_phase reviewer Asleep
   id2=$(send_id reviewer "Reply with the single word kiwi.")
   sleep 5
-  check "2 stays Asleep with one pending" eval "[ \"\$($A12S status --json | python3 -c \"import json,sys; d=json.load(sys.stdin); c=next(c for c in d['computers'] if c['name']=='reviewer'); print(c['phase'], c['inbox']['pending'])\")\" = 'Asleep 1' ]"
+  check "2 stays Asleep with one pending" eval "[ \"\$($A12S status --json | python3 -c \"import json,sys; d=json.load(sys.stdin); c=next(c for c in d['agentComputers'] if c['name']=='reviewer'); print(c['phase'], c['inbox']['pending'])\")\" = 'Asleep 1' ]"
   run a wake reviewer; wait_phase reviewer Ready; sleep 3; idle reviewer 180
   check "2 delivered after wake" eval "[ \"\$(msg_state reviewer $id2 2>/dev/null || true)\" = delivered ] || $A12S inbox reviewer --all --json | grep -q '\"state\": \"delivered\"'"
 

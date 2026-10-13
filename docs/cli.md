@@ -82,7 +82,7 @@ the Fleet file's directory:
 | `a12s token create <name> --prefix biz-` | Create a prefix token, printed once: it may do everything the owner can for agent computers, Services and credentials whose names start with `biz-` except set a seccomp profile, and nothing outside. See [Security: Tokens](security.md#tokens). |
 | `a12s token create <name> --actions a,b --agent-computers c,d` | Create a narrow token for those agent computers (or `'*'`), printed once. Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`. |
 | `a12s token ls` / `a12s token rm <name>` | List or revoke tokens. |
-| `a12s drive ls` | Home drives (`home-<name>`) and Service state drives (`<svc>-state`): sizes, what's attached, orphans. |
+| `a12s drive ls` | Home drives (`home-<name>`) and Service state drives (`<svc>-state`): what's attached, orphans. |
 | `a12s drive rm <name> [--yes]` | Destroy one drive (asks first). With `down --purge`, the only commands that destroy data. |
 
 ## Other

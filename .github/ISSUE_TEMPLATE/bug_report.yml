@@ -19,7 +19,7 @@ body:
     attributes:
       label: a12s version
       description: Output of `a12s version`
-      placeholder: a12s v0.2.1
+      placeholder: a12s v0.7.1
     validations: { required: true }
   - type: input
     id: platform

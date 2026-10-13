@@ -38,9 +38,13 @@ func runInit(g *globals, args []string) error {
 	if err := os.WriteFile(fleetPath, []byte(text), 0o644); err != nil {
 		return err
 	}
+	cred := "anthropic"
+	if *harness == "codex" {
+		cred = "openai"
+	}
 	readme := filepath.Join(dir, "README.md")
 	if _, err := os.Stat(readme); errors.Is(err, fs2NotExist) {
-		if err := os.WriteFile(readme, []byte(starterReadme(filepath.Base(absDir(dir)))), 0o644); err != nil {
+		if err := os.WriteFile(readme, []byte(starterReadme(filepath.Base(absDir(dir)), cred)), 0o644); err != nil {
 			return err
 		}
 	}
@@ -48,10 +52,6 @@ func runInit(g *globals, args []string) error {
 		return printJSON(map[string]any{"dir": dir, "files": []string{fleetPath, readme}})
 	}
 	fmt.Printf("wrote fleet.yaml and README.md in %s\n", dir)
-	cred := "anthropic"
-	if *harness == "codex" {
-		cred = "openai"
-	}
 	fmt.Printf("next: a12s creds set %s, then a12s up\n", cred)
 	return nil
 }
@@ -108,9 +108,9 @@ func validFleetName(s string) bool {
 	return true
 }
 
-func starterReadme(name string) string {
+func starterReadme(name, cred string) string {
 	return "# " + name + "\n\n" +
 		"An a12s Fleet. a12s is installed like Docker: never vendor or edit its source here.\n" +
 		"Extend it through fleet.yaml, your own images and Services, and the client SDK.\n\n" +
-		"```sh\na12s creds set anthropic   # once per machine\na12s up\na12s send assistant \"hi\" --wait\na12s down\n```\n"
+		"```sh\na12s creds set " + cred + "   # per Fleet, and again after a12s down\na12s up\na12s send assistant \"hi\" --wait\na12s down\n```\n"
 }
