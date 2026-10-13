@@ -2,9 +2,11 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
-## Unreleased
+## v0.4.2 (2026-10-12)
 
-From running nine apps written by cold agents that had only llms.txt.
+What nine apps written by fresh agents with only llms.txt tripped over: inbox holds and wake-friendly sleep in the
+SDKs, connecting under a scoped token without a URL, Turn replays that end, warnings that reach SDK users, a check on
+the anthropic credential when it is set, and an llms.txt that states the facts they had to guess.
 
 ### Added
 - **`hold()` and `resume()` on an agent computer** in both SDKs (`POST …/inbox/hold|resume`): hold delivery while
