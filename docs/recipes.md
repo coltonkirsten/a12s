@@ -227,7 +227,7 @@ export default function App() {
 ```
 
 `a12s gateway -- <command>` starts the command, waits for the URL it prints (`Local: http://localhost:5173/`), and
-forwards everything except `/v1/` and `/a12s.js` to it, websockets (Vite's hot reload) included. Ctrl-C stops both.
+forwards everything except `/v1/` to it, websockets (Vite's hot reload) included. Ctrl-C stops both.
 If your dev server doesn't print its URL, add `--dev-port 3000`. If it is already running, use
 `a12s gateway --dev http://localhost:5173` instead. Next.js, webpack and other dev servers work the same way.
 
@@ -238,31 +238,38 @@ For production, `npm run build` and serve the output with `a12s gateway --web di
 No code: `a12s gateway` opens a built-in dashboard at http://127.0.0.1:7012 with every agent computer, their events as
 they stream, and a box to send a Message.
 
-Your own page: put it in a directory and serve that instead. The gateway also serves the SDK at `/a12s.js`, and
-the page needs no token or build step.
+Your own page: a Vite app that imports the npm package, run through the gateway. The page needs no token.
+
+```sh
+npm install @coltonkirsten/a12s vite
+```
 
 ```html
-<!-- web/index.html -->
+<!-- index.html -->
 <!doctype html>
 <meta charset="utf-8">
 <title>Team</title>
 <pre id="log"></pre>
-<script type="module">
-  import { Fleet } from "/a12s.js";
+<script type="module" src="/main.js"></script>
+```
 
-  const fleet = await Fleet.connect();
-  const log = (line) => (document.getElementById("log").textContent += line + "\n");
+```js
+// main.js
+import { Fleet } from "@coltonkirsten/a12s";
 
-  for await (const ev of fleet.events()) {         // every agent computer, merged
-    if (ev.type === "turn.started") log(`${ev.computer}: started (from ${ev.data.inbox?.messages.map((m) => m.via).join(", ")})`);
-    if (ev.type === "tool.started") log(`${ev.computer}: → ${ev.data.name}`);
-    if (ev.type === "turn.finished") log(`${ev.computer}: ${ev.data.status}`);
-  }
-</script>
+const fleet = await Fleet.connect();
+const log = (line) => (document.getElementById("log").textContent += line + "\n");
+
+for await (const ev of fleet.events()) {           // every agent computer, merged
+  if (ev.type === "turn.started") log(`${ev.computer}: started (from ${ev.data.inbox?.messages.map((m) => m.via).join(", ")})`);
+  if (ev.type === "tool.started") log(`${ev.computer}: → ${ev.data.name}`);
+  if (ev.type === "turn.finished") log(`${ev.computer}: ${ev.data.status}`);
+}
 ```
 
 ```sh
-a12s gateway --web web          # opens http://127.0.0.1:7012/?key=…
+a12s gateway -- npx vite        # opens http://127.0.0.1:7012/?key=…
+npx vite build && a12s gateway --web dist   # or serve the built app
 ```
 
 To show whole answers instead of events, use `fleet.turns()` the same way. The page can send work with

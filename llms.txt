@@ -211,7 +211,7 @@ agent computer's name. Every command takes `--json` (before or after it) for scr
 true/false, pending a number); `a12s --json send desk "hi" | jq -r .id` gives a Message id (m_ plus 26 capitals/digits);
 `a12s inbox desk --json` is the inbox object below; `a12s --json token create bizapp --prefix biz- | jq -r .secret`.
 
-## TypeScript SDK (npm install @coltonkirsten/a12s; Node 20+, ESM; browsers via the gateway)
+## TypeScript SDK (npm install @coltonkirsten/a12s; Node 20+, ESM; in a browser through a bundler and the gateway)
 
 ```ts
 const fleet = await Fleet.connect();
@@ -540,53 +540,54 @@ docker build -t my-clock:1 clock && a12s up && a12s service logs clock -f
 
 ## Browser (gateway)
 
-`a12s gateway` serves your page and, on the same origin, the SDK at /a12s.js and the API at /v1/ under a scoped
-token the page never sees. Run it in the Fleet's directory (or -F path/fleet.yaml).
+`a12s gateway` serves your app and, on the same origin, the API at /v1/ under a scoped token the page never sees.
+The page imports the npm package through a bundler (Vite here); that is the only way in. Run it in the Fleet's
+directory (or -F path/fleet.yaml).
 
 ```sh
 a12s gateway                          # built-in dashboard: every agent computer, live events, a send box
-a12s gateway --web ./web              # your static files (web/index.html at /)
-a12s gateway -- npm run dev           # your dev server (Vite, Next.js, …) behind it, hot reload included
+a12s gateway -- npx vite              # your dev server behind it (or -- npm run dev: Next.js, …), hot reload included
 a12s gateway --dev http://localhost:5173   # a dev server that is already running
+a12s gateway --web dist               # your built app (npx vite build writes dist/)
 ```
 
 It prints and opens http://127.0.0.1:7012/?key=… (new key each run; `--no-open` only prints). Open that link, not
-the dev server's own port: the key becomes a cookie that /v1/ and /a12s.js need. Scripts and tests use the key as a
+the dev server's own port: the key becomes a cookie that /v1/ needs. Scripts and tests use the key as a
 token: Fleet.connect({ url: "http://127.0.0.1:7012", token: key }). The page may use status, events, send and
 inbox on every agent computer, not create or change them; narrow with `--allow status,events` and `--computers worker`. Messages from the page arrive
 via token:gateway-7012. Loopback only; to serve other people, run your own server with login that calls a12s with a
 scoped token: narrow (`a12s token create web --actions send,status --agent-computers lead`) or, if it creates
 agent computers, a prefix token (`--prefix web-`).
 
+A page with live events of worker and a send box: `npm install @coltonkirsten/a12s vite`, these two files, then
+`a12s gateway -- npx vite`. No Vite or dev-server config is needed: the gateway runs the command, waits for the
+http://localhost:<port> URL it prints (or `--dev-port <port>`), and proxies it.
+
 ```html
-<!-- web/index.html: live events of worker and a send box, no build step -->
+<!-- index.html -->
 <!doctype html>
 <meta charset="utf-8">
 <form id="f"><input id="msg" size="60"><button>Send</button></form>
 <pre id="log"></pre>
-<script type="module">
-  import { Fleet } from "/a12s.js";
-  const fleet = await Fleet.connect();
-  const worker = await fleet.agentComputers.get("worker");
-  const log = (s) => (document.getElementById("log").textContent += s + "\n");
-  document.getElementById("f").onsubmit = async (e) => {
-    e.preventDefault();
-    const m = await worker.send(document.getElementById("msg").value);
-    log(`sent ${m.id}`);
-  };
-  for await (const ev of worker.events()) {
-    if (ev.type === "text.delta") log(ev.data.text);
-    if (ev.type === "tool.started") log(`→ ${ev.data.name}`);
-    if (ev.type === "turn.finished") log(`turn ${ev.data.status} ${ev.data.error ?? ""}`);
-  }
-</script>
+<script type="module" src="/main.js"></script>
 ```
 
-With a bundler (React, Vite): `npm install @coltonkirsten/a12s`, then in the app
-`import { Fleet } from "@coltonkirsten/a12s"; const fleet = await Fleet.connect();` and run `a12s gateway -- npm run dev`.
-Import the npm package there, never "/a12s.js" (only an unbundled page can import that; Vite fails to resolve it).
-No Vite or dev-server config is needed: the gateway runs the command, waits for the http://localhost:<port> URL it
-prints (or `--dev-port <port>`), and proxies it, hot reload included.
+```js
+// main.js
+import { Fleet } from "@coltonkirsten/a12s";
+const fleet = await Fleet.connect();
+const worker = await fleet.agentComputers.get("worker");
+const log = (s) => (document.getElementById("log").textContent += s + "\n");
+document.getElementById("f").onsubmit = async (e) => {
+  e.preventDefault();
+  await worker.send(document.getElementById("msg").value);
+};
+for await (const ev of worker.events()) {
+  if (ev.type === "text.delta") log(ev.data.text);
+  if (ev.type === "tool.started") log(`→ ${ev.data.name}`);
+  if (ev.type === "turn.finished") log(`turn ${ev.data.status} ${ev.data.error ?? ""}`);
+}
+```
 
 ## HTTP API (any language)
 

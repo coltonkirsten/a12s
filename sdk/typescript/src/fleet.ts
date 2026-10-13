@@ -1,4 +1,4 @@
-// Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run check:browser` enforces it).
+// Runs in Node, Deno, Bun and browsers: no node: imports here (`npm run dashboard` bundles it for the browser).
 import {
   A12sClient,
   A12sError,

@@ -1,5 +1,5 @@
-// Package gateway lets a browser page reach a Fleet: it serves the page (or proxies a dev server) and the browser
-// SDK, and proxies /v1/ to the Controller with a scoped token the browser never sees.
+// Package gateway lets a browser page reach a Fleet: it serves the page (or proxies a dev server) and proxies /v1/ to
+// the Controller with a scoped token the browser never sees.
 package gateway
 
 import (
@@ -25,21 +25,19 @@ type Config struct {
 	Token      string
 	// Key unlocks the gateway: in ?key= once (it becomes a cookie) or as a bearer token. Required.
 	Key string
-	// Web is the app to serve; nil serves the built-in dashboard. Ignored when Dev is set.
+	// Web is the built app to serve; nil serves the built-in dashboard. Ignored when Dev is set.
 	Web fs.FS
-	// Dev is a running dev server that gets every request except /v1/ and /a12s.js, websocket upgrades included.
+	// Dev is a running dev server that gets every request except /v1/, websocket upgrades included.
 	Dev *url.URL
 }
 
-// Handler serves the app, the browser SDK at /a12s.js, and the Controller's API under /v1/ with cfg.Token. It answers
-// only requests addressed to a loopback name, so a hostile page can't reach it by rebinding its own domain to
-// 127.0.0.1, and it refuses cross-origin writes. /v1/ and /a12s.js need cfg.Key, so another local user or
-// program can't use the Fleet through it either.
+// Handler serves the app and the Controller's API under /v1/ with cfg.Token. It answers only requests addressed to a
+// loopback name, so a hostile page can't reach it by rebinding its own domain to 127.0.0.1, and it refuses
+// cross-origin writes. /v1/ needs cfg.Key, so another local user or program can't use the Fleet through it either.
 func Handler(cfg Config) http.Handler {
 	if cfg.Key == "" {
 		panic("gateway: Config.Key is required")
 	}
-	builtin, _ := fs.Sub(embedded, "web")
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(cfg.Controller)
@@ -53,13 +51,13 @@ func Handler(cfg Config) http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", proxy)
-	mux.Handle("GET /a12s.js", http.FileServerFS(builtin))
 	switch {
 	case cfg.Dev != nil:
 		mux.Handle("/", devProxy(cfg.Dev))
 	case cfg.Web != nil:
 		mux.Handle("/", http.FileServerFS(cfg.Web))
 	default:
+		builtin, _ := fs.Sub(embedded, "web")
 		mux.Handle("/", http.FileServerFS(builtin))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +82,7 @@ func Handler(cfg Config) http.Handler {
 			return
 		}
 		if !hasKey(r, cfg.Key) {
-			if r.URL.Path == "/a12s.js" || strings.HasPrefix(r.URL.Path, "/v1/") {
+			if strings.HasPrefix(r.URL.Path, "/v1/") {
 				refuse(w, http.StatusUnauthorized, "this gateway needs its key", "open the link a12s gateway printed (http://127.0.0.1:<port>/?key=…), or send Authorization: Bearer <key>")
 				return
 			}

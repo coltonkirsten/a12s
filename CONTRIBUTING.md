@@ -54,8 +54,9 @@ npm run lint      # type-check
 npm test          # build, then node --test
 ```
 
-The client SDK in `sdk/typescript` builds and tests the same way; `npm test` also bundles its root entry with esbuild
-`--platform=browser`, so a `node:` import there fails. Its types in `src/types.ts` are hand-written; to keep them in
+The client SDK in `sdk/typescript` builds and tests the same way; `npm test` also bundles the gateway's built-in
+dashboard (`internal/gateway/dashboard/main.js`) with the SDK's root entry, esbuild `--platform=browser`, so a `node:`
+import there fails. Its types in `src/types.ts` are hand-written; to keep them in
 step with `internal/api`, `go test ./internal/api` renders every API type into `sdk/typescript/test/api-fixtures.gen.ts`
 and fails if the file is stale. After changing an API type, run `go test ./internal/api -run TestSDKFixtures -update`
 and fix `src/types.ts` until the SDK's `npm run lint` passes.
@@ -85,8 +86,8 @@ scripts/check.sh go sdk    # any subset of: go computerd sdk python slim control
 ```
 
 `make check` runs `go build`, `gofmt`, `go vet` and `go test` (which includes the Go to TypeScript/Python API fixture
-drift check), the TypeScript SDK's lint and tests (including the browser bundle) and the check that
-`internal/gateway/web/a12s.js` matches its build, and the Python SDK's tests and `mypy --strict` on Python 3.10 and
+drift check), the TypeScript SDK's lint and tests (including the dashboard bundle) and the check that
+`internal/gateway/web/dashboard.js` matches its build (`make dashboard` rebuilds it), and the Python SDK's tests and `mypy --strict` on Python 3.10 and
 3.14 (`CHECK_PYTHONS` overrides).
 
 `make check-full` adds computerd's lint, build and tests, the slim image (it carries computerd and its label), the
