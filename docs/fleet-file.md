@@ -157,13 +157,13 @@ running, sets it there too.
 ## fleet.lock
 
 ```yaml
-a12s:     v0.4.1
+a12s:     v0.4.2
 images:   { slim: "sha256:…", "ghcr.io/you/browser-agent:1": "sha256:…" }
 bundles:  { "claude-code@2.1.280": "sha256:…", "codex@0.154.0": "sha256:…" }
 services: { "db@ghcr.io/you/mcp-postgres:1": "sha256:…" }
 ```
 
-`a12s: v0.4.1` pins the a12s release. A release binary of another version refuses to apply the Fleet and says how to
+`a12s: v0.4.2` pins the a12s release. A release binary of another version refuses to apply the Fleet and says how to
 upgrade: install that version, or change the line to the new version and run `a12s up`. `a12s init` and the first
 `a12s up` of a release binary write it; a source build only warns. Existing pins are never moved, so when you
 upgrade, also delete the `slim` entry under `images:` (it pins the old release's image) and rebuild any
