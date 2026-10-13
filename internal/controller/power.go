@@ -145,7 +145,7 @@ func (c *Controller) setIdle(name string, idle bool) time.Time {
 func (c *Controller) cheapIdle(ctx context.Context, name string) bool {
 	c.mu.Lock()
 	r := c.rtLocked(name)
-	busy := r.activeTurn != "" || r.closed || r.transition
+	busy := r.activeTurn != "" || r.background > 0 || r.closed || r.transition
 	if rec := c.state.Computers[name]; rec != nil && rec.pending() {
 		busy = true
 	}
@@ -183,7 +183,7 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	st, err := c.client(name).Status(sctx)
 	cancel()
-	if err != nil || st.ActiveTurn != "" || st.Phase != "ready" || st.Continuation != "" {
+	if err != nil || st.ActiveTurn != "" || st.Phase != "ready" || st.Continuation != "" || st.Background != nil && st.Background.Tasks > 0 {
 		c.setIdle(name, false)
 		return
 	}

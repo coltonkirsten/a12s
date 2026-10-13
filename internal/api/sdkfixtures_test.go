@@ -51,6 +51,8 @@ func TestSDKFixtures(t *testing.T) {
 		{"textDeltaData", "TextDeltaEvent[\"data\"]", TextDeltaData{}},
 		{"diagnosticData", "DiagnosticData", DiagnosticData{}},
 		{"resumeFailedData", "ResumeFailedData", ResumeFailedData{}},
+		{"taskData", "TaskData", TaskData{}},
+		{"stopResponse", "StopResponse", StopResponse{}},
 		{"error", "ApiErrorBody", Error{}},
 	}
 	var b bytes.Buffer

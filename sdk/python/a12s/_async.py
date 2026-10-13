@@ -163,9 +163,10 @@ class AsyncClient:
 
     async def stop(self, computer: str, turn: str | None = None) -> None:
         """Interrupts a Turn (default: the active one). The Turn ends ``interrupted``; nothing is replayed."""
-        id = turn if turn is not None else (await self.computer(computer)).active_turn
-        if id:
-            await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
+        if turn is not None:
+            await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(turn)}/stop", {})
+        else:
+            await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/stop", {})
 
     async def sleep(self, computer: str, *, hold: bool = False) -> None:
         """See Client.sleep."""

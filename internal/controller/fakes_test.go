@@ -410,6 +410,8 @@ type fakeComputerd struct {
 	conflictNext, autoFinish bool
 	// sealed are the inbox.discarded records journaled, by Message id.
 	sealed map[string]map[string]any
+	// background is the session's live background task count.
+	background int
 }
 
 func (f *fakeComputerd) JournalInbox(_ context.Context, records any) ([]string, error) {
@@ -501,7 +503,48 @@ func (f *fakeComputerd) Status(context.Context) (api.ComputerdStatus, error) {
 	if f.active != "" {
 		phase = "busy"
 	}
-	return api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation}, nil
+	st := api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation}
+	st.Background = &api.Background{Tasks: f.background}
+	return st, nil
+}
+
+// task starts or ends one background task, as the harness reports it between Turns.
+func (f *fakeComputerd) task(started bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	typ, d := api.EventTaskStarted, api.TaskData{ID: "task", Kind: "local_agent", Description: "sleep"}
+	if started {
+		f.background++
+	} else {
+		f.background--
+		typ, d.Status = api.EventTaskFinished, api.TaskCompleted
+	}
+	f.emitLocked(typ, "", d)
+}
+
+// selfTurn starts a Turn the harness started by itself, with no request behind it.
+func (f *fakeComputerd) selfTurn() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.turns++
+	f.active = fmt.Sprintf("t_bg%d", f.turns)
+	f.emitLocked(api.EventTurnStarted, f.active, api.TurnStartedData{Reason: api.TurnReasonBackground})
+	return f.active
+}
+
+func (f *fakeComputerd) StopAll(context.Context) (api.StopResponse, error) {
+	f.mu.Lock()
+	res := api.StopResponse{Turns: []string{}, Background: f.background}
+	if f.active != "" {
+		res.Turns = append(res.Turns, f.active)
+	}
+	f.stops = append(f.stops, "*")
+	for ; f.background > 0; f.background-- {
+		f.emitLocked(api.EventTaskFinished, "", api.TaskData{ID: "task", Status: api.TaskKilled})
+	}
+	f.mu.Unlock()
+	f.finish(api.TurnInterrupted)
+	return res, nil
 }
 
 func (f *fakeComputerd) TurnSummary(_ context.Context, turn string) (api.TurnSummary, error) {

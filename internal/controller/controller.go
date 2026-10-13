@@ -113,6 +113,7 @@ type computerdClient interface {
 	TurnSummary(ctx context.Context, turnID string) (api.TurnSummary, error)
 	JournalInbox(ctx context.Context, records any) ([]string, error)
 	Stop(ctx context.Context, turnID string) error
+	StopAll(ctx context.Context) (api.StopResponse, error)
 	Events(ctx context.Context, lastEventID, turn string) (*computerd.Stream, error)
 	Diagnostic(ctx context.Context, message string, data any) error
 	EgressDenied(ctx context.Context, d api.EgressDeniedData) error

@@ -281,7 +281,7 @@ export class AgentComputer {
     return this.client.resume(this.name);
   }
 
-  /** Interrupts a Turn (default: the active one). */
+  /** Interrupts a Turn (default: whatever runs) and ends the session's background work. */
   stop(turn?: string): Promise<void> {
     return this.client.stop(this.name, turn);
   }

@@ -108,6 +108,13 @@ func (c *Client) Stop(ctx context.Context, turnID string) error {
 	return c.do(ctx, http.MethodPost, "/v1/turns/"+url.PathEscape(turnID)+"/stop", struct{}{}, nil)
 }
 
+// StopAll is POST /v1/stop: it stops the running Turns and the session's background work.
+func (c *Client) StopAll(ctx context.Context) (api.StopResponse, error) {
+	var res api.StopResponse
+	err := c.do(ctx, http.MethodPost, "/v1/stop", struct{}{}, &res)
+	return res, err
+}
+
 // CancelContinuation cancels computerd's owed restart_harness continuation
 // (`inbox resume --new`); it returns the cancelled id, or "".
 func (c *Client) CancelContinuation(ctx context.Context, reason string) (string, error) {

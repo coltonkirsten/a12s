@@ -40,6 +40,8 @@ const (
 	EventTurnRefused           EventType = "turn.refused"
 	EventInboxDiscarded        EventType = "inbox.discarded"
 	EventEgressDenied          EventType = "egress.denied"
+	EventTaskStarted           EventType = "task.started"
+	EventTaskFinished          EventType = "task.finished"
 
 	// Made by the Controller, on GET /v1/events only.
 	EventFleetChanged EventType = "fleet.changed"
@@ -106,7 +108,29 @@ type TurnStartedData struct {
 	RequestID    string     `json:"requestId,omitempty"`
 	Inbox        *TurnInbox `json:"inbox,omitempty"`
 	Continuation string     `json:"continuation,omitempty"`
+	// Reason is TurnReasonBackground for a Turn the harness started by itself; such a Turn carries no Messages.
+	Reason string `json:"reason,omitempty"`
 }
+
+// TurnReasonBackground: background work (a sub-agent, a shell) ended and the harness started a Turn by itself.
+const TurnReasonBackground = "background"
+
+// TaskData: background work the harness keeps running after the Turn that started it.
+type TaskData struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"` // the harness's own: local_agent, local_bash, shell, …
+	Description string `json:"description"`
+	// Status is on task.finished: TaskCompleted, TaskFailed, TaskStopped or TaskKilled.
+	Status string `json:"status,omitempty"`
+}
+
+const (
+	TaskCompleted = "completed"
+	TaskFailed    = "failed"
+	TaskStopped   = "stopped"
+	// TaskKilled: the session ended (stop, sleep, restart, a new session) while the task ran.
+	TaskKilled = "killed"
+)
 
 // TurnInbox is copied by computerd into turn.started so a client can find
 // the turn that carries its Message.
@@ -170,6 +194,7 @@ type Turn struct {
 	ID            string         `json:"id"`
 	Session       string         `json:"session"`
 	Status        string         `json:"status"`
+	Reason        string         `json:"reason,omitempty"` // TurnReasonBackground for a Turn the harness started by itself
 	Text          string         `json:"text"`
 	Error         string         `json:"error,omitempty"`
 	Messages      []TurnInboxMsg `json:"messages"`
@@ -222,5 +247,17 @@ type ComputerdStatus struct {
 	ResumePending        bool    `json:"resumePending,omitempty"`
 	// Continuation is owed by computerd; the Controller runs it at the next
 	// idle boundary.
-	Continuation string `json:"continuation,omitempty"`
+	Continuation string      `json:"continuation,omitempty"`
+	Background   *Background `json:"background,omitempty"`
+}
+
+// StopResponse is POST /v1/agent-computers/{c}/stop: the Turns it stopped and how many background tasks it ended.
+type StopResponse struct {
+	Turns      []string `json:"turns"`
+	Background int      `json:"background"`
+}
+
+// Background is the work the harness session keeps running between Turns.
+type Background struct {
+	Tasks int `json:"tasks"`
 }

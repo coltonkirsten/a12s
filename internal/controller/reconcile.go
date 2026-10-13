@@ -456,7 +456,7 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 		c.closeAdmission(name)
 		if c.busy(ctx, name) {
 			c.openAdmission(name)
-			return staged, c.stageLater(name, hash, obs.Generation, "applies when the current turn ends")
+			return staged, c.stageLater(name, hash, obs.Generation, "applies when the current turn and background work end")
 		}
 	}
 	return restaged, c.restage(ctx, name)
@@ -535,7 +535,7 @@ func (c *Controller) busy(ctx context.Context, name string) bool {
 	if err != nil {
 		return true
 	}
-	return st.ActiveTurn != "" || st.Phase == "busy"
+	return st.ActiveTurn != "" || st.Phase == "busy" || st.Background != nil && st.Background.Tasks > 0
 }
 
 func (c *Controller) idle(ctx context.Context, name string) bool {

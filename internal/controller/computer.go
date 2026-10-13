@@ -23,6 +23,8 @@ type runtime struct {
 	waiting       *api.Waiting
 	activeTurn    string
 	resumePending bool
+	// background is computerd's live background task count: work the harness runs between Turns.
+	background int
 	// transition is set while the Controller itself stops, stages or
 	// removes the Computer: deaths seen then are expected.
 	transition   bool
@@ -260,6 +262,10 @@ func (c *Controller) recordStatus(name string, st api.ComputerdStatus) {
 func (c *Controller) recordStatusLocked(name string, st api.ComputerdStatus) {
 	r := c.rtLocked(name)
 	r.resumePending = st.ResumePending
+	r.background = 0
+	if st.Background != nil {
+		r.background = st.Background.Tasks
+	}
 	rec := c.state.Computers[name]
 	if rec == nil {
 		return
@@ -402,11 +408,16 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			}
 			c.mu.Unlock()
 		case api.EventTurnFinished:
-			c.mu.Lock()
-			if r := c.rtLocked(name); !r.transition && r.phase == api.PhaseBusy {
-				c.setPhaseLocked(name, api.PhaseReady, nil)
+			// computerd may already run another Turn (one its harness started by itself, or one queued behind it).
+			if st, err := c.statusNow(name); err == nil {
+				c.observeStatus(name, st)
+			} else {
+				c.mu.Lock()
+				if r := c.rtLocked(name); !r.transition && r.phase == api.PhaseBusy {
+					c.setPhaseLocked(name, api.PhaseReady, nil)
+				}
+				c.mu.Unlock()
 			}
-			c.mu.Unlock()
 			c.maybeApplyStaged(name)
 			c.kick(name)
 			if ev.Turn != "" {
@@ -414,6 +425,11 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			}
 		case api.EventTurnDispatched, api.EventHarnessRestarted:
 			c.kick(name)
+		case api.EventTaskStarted, api.EventTaskFinished:
+			if st, err := c.statusNow(name); err == nil {
+				c.observeStatus(name, st)
+			}
+			c.maybeApplyStaged(name)
 		case api.EventContinuationAbandoned:
 			var ab struct {
 				Cancelled bool `json:"cancelled"`
@@ -445,20 +461,24 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			}
 			c.mu.Unlock()
 		case api.EventLifecycle:
-			sctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-			if st, err := c.client(name).Status(sctx); err == nil {
+			if st, err := c.statusNow(name); err == nil {
 				c.recordStatus(name, st)
 			}
-			cancel()
 		}
 	}
+}
+
+func (c *Controller) statusNow(name string) (api.ComputerdStatus, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+	defer cancel()
+	return c.client(name).Status(ctx)
 }
 
 func (c *Controller) maybeApplyStaged(name string) {
 	c.mu.Lock()
 	rec := c.state.Computers[name]
 	r := c.rtLocked(name)
-	due := rec != nil && rec.pending() && r.phase == api.PhaseReady && !r.transition
+	due := rec != nil && rec.pending() && r.phase == api.PhaseReady && !r.transition && r.background == 0
 	c.mu.Unlock()
 	if due {
 		c.spawn(func() { c.applyStaged(name) })

@@ -340,31 +340,26 @@ func runStop(g *globals, args []string) error {
 	}
 	ctx, cancel := interruptible()
 	defer cancel()
-	st, err := status(ctx, c)
-	if err != nil {
+	var res api.StopResponse
+	if err := c.Do(ctx, "POST", computerPath(name, "/stop"), struct{}{}, &res); err != nil {
 		return err
 	}
-	for _, cs := range st.AgentComputers {
-		if cs.Name != name {
-			continue
-		}
-		if cs.ActiveTurn == "" {
-			if g.json {
-				return printJSON(map[string]any{"computer": name, "turn": nil})
-			}
-			fmt.Printf("%s has no active turn\n", name)
-			return nil
-		}
-		if err := c.Do(ctx, "POST", computerPath(name, "/turns/"+url.PathEscape(cs.ActiveTurn)+"/stop"), struct{}{}, nil); err != nil {
-			return err
-		}
-		if g.json {
-			return printJSON(map[string]any{"computer": name, "turn": cs.ActiveTurn, "status": "stopping"})
-		}
-		fmt.Printf("stopping turn %s on %s\n", cs.ActiveTurn, name)
+	if g.json {
+		return printJSON(map[string]any{"computer": name, "turns": res.Turns, "background": res.Background})
+	}
+	var parts []string
+	for _, t := range res.Turns {
+		parts = append(parts, "turn "+t)
+	}
+	if res.Background > 0 {
+		parts = append(parts, fmt.Sprintf("%d background task(s)", res.Background))
+	}
+	if len(parts) == 0 {
+		fmt.Printf("%s has no active turn or background work\n", name)
 		return nil
 	}
-	return fmt.Errorf("fleet %s has no agent computer %q", st.Fleet, name)
+	fmt.Printf("stopping %s on %s\n", strings.Join(parts, " and "), name)
+	return nil
 }
 
 func runLogs(g *globals, args []string) error {

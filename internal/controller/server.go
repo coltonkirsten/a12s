@@ -103,6 +103,7 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/agent-computers/{c}/events", allow(api.ActionEvents, "c", c.handleEvents))
 	mux.HandleFunc("GET /v1/agent-computers/{c}/turns", allow(api.ActionEvents, "c", c.handleTurns))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/turns/{id}/stop", allow(api.ActionStop, "c", c.handleStop))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/stop", allow(api.ActionStop, "c", c.handleStopAll))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/shell", allowOwnerOrPrefix("c", c.handleShell))
 	mux.HandleFunc("GET /v1/drives", allow("", "", c.handleDrives))
@@ -216,6 +217,20 @@ func (c *Controller) handleStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"turnId": r.PathValue("id"), "status": "stopping"})
+}
+
+// handleStopAll stops the running Turn, if any, and the session's background work.
+func (c *Controller) handleStopAll(w http.ResponseWriter, r *http.Request) {
+	cl, err := c.awake(r.PathValue("c"))
+	var res api.StopResponse
+	if err == nil {
+		res, err = cl.StopAll(r.Context())
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // handleEvents proxies computerd's SSE stream, flushing every message. The
@@ -414,6 +429,9 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 			}
 			cs.CredentialGeneration = st.CredentialGeneration
 			cs.Harness = st.Harness
+			if st.Background != nil && st.Background.Tasks > 0 {
+				cs.Background = st.Background
+			}
 			if st.ResumePending {
 				cs.Warnings = append(cs.Warnings, "resume pending: the next prompt reopens the session")
 			}

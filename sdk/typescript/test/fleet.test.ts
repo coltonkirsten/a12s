@@ -239,6 +239,24 @@ test("agent computers' and the Fleet's streams share one /v1/events connection, 
   }
 });
 
+test("turns() folds a Turn the harness started by itself, with its reason and no Messages", async () => {
+  const { fleet, close } = await fake((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('event: head\ndata: {"id":"b-0"}\n\n');
+    res.write(fev("b-1", "a", "task.finished", { id: "x", kind: "local_agent", description: "sleep", status: "completed" }));
+    res.write(fev("b-2", "a", "turn.started", { harness: { kind: "claude-code", version: "1" }, resumed: true, prompt: "", cwd: "/", reason: "background" }, "t_bg"));
+    res.write(fev("b-3", "a", "turn.finished", { status: "completed", usage: null }, "t_bg"));
+  });
+  try {
+    const turns = fleet.turns(["a"]);
+    const [turn] = await take(turns, 1);
+    turns.close();
+    assert.deepEqual([turn!.id, turn!.reason, turn!.messages], ["t_bg", "background", []]);
+  } finally {
+    close();
+  }
+});
+
 test("the shared stream reconnects with Last-Event-ID", async () => {
   const { fleet, seen, close } = await fake((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });
