@@ -177,5 +177,5 @@ a12s token rm ci
 
 Actions: `send`, `inbox`, `status`, `events`, `power`, `stop`; agent computers: a list or `*`. A token's principal is
 `token:<name>`. A token with `send` can read and withdraw only its own Messages. Changing the Fleet (creating, changing
-and removing agent computers and Services included), `apply`, `shell`, drives and tokens stay owner-only. To let a
+and removing agent computers and Services included), `shell`, drives and tokens stay owner-only. To let a
 program create and run its own agent computers, give it a [prefix token](security.md#tokens) instead.

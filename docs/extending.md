@@ -13,7 +13,7 @@ customizes goes through four surfaces:
 a12s holds no app policy. Who talks to whom, what a task means, and how results combine belong in your app and
 your Fleet's grants, not in a12s.
 
-The examples assume a release binary (`a12s version` prints `v0.6.0`), whose images live at
+The examples assume a release binary (`a12s version` prints `v0.7.0`), whose images live at
 `ghcr.io/coltonkirsten/a12s`. In a source build, use the local refs instead (`a12s/slim:dev`).
 
 ## A custom agent image
@@ -23,7 +23,7 @@ fonts, a browser).
 
 ```dockerfile
 # images/agent-jq/Dockerfile
-FROM ghcr.io/coltonkirsten/a12s/slim:0.6.0
+FROM ghcr.io/coltonkirsten/a12s/slim:0.7.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
@@ -54,7 +54,7 @@ agent_computers:
 Otherwise nothing changes and `up` says why:
 
 ```text
-agent_computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM ghcr.io/coltonkirsten/a12s/slim:0.6.0
+agent_computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM ghcr.io/coltonkirsten/a12s/slim:0.7.0
 ```
 
 What a custom image can't change: a12s always starts computerd as root (your `ENTRYPOINT`, `CMD`, `USER` and
@@ -107,38 +107,13 @@ every new Claude Code and Codex release there, so moving to a new harness is one
 rebuilt. `model` is passed to the harness as is. For a version that isn't published, build the bundle from the a12s
 source (`make bundle-claude-code VERSION=x.y.z`) and tag it with the registry ref above.
 
-## Extra credentials
+## Extra credentials and egress
 
-Name any credential in the Fleet and set it with `a12s creds set <name>`. Names the harness knows (`anthropic`,
-`openai`, `github`) become its environment; any other name is a file at `/run/a12s/secrets/<name>`.
-
-```yaml
-agent_computers:
-  analyst:
-    credentials: [anthropic, github, stripe-test]
-```
-
-```sh
-a12s creds set stripe-test < ~/.secrets/stripe-test
-```
-
-Prefer a Service when an agent should use a capability without holding the secret: the Service holds the
-credential and the agent `uses:` it. See [Credentials](credentials.md).
-
-## Egress
-
-Every agent computer is deny-by-default. List the hosts it needs; the harness's sign-in hosts are added for you.
-
-```yaml
-defaults:
-  egress: { allow: [] }
-agent_computers:
-  analyst:
-    egress: { allow: [github.com, api.github.com, registry.npmjs.org] }
-```
-
-Lists replace rather than merge, so an agent computer's list replaces the default. `["*"]` allows any public host and shows
-a warning on every status line. See [Security](security.md).
+Name any credential in the Fleet and set it with `a12s creds set <name>`: names the harness knows (`anthropic`,
+`openai`, `github`) become its environment, any other name is a file at `/run/a12s/secrets/<name>`. Prefer a Service
+when an agent should use a capability without holding the secret: the Service holds the credential and the agent
+`uses:` it ([Credentials](credentials.md)). Every agent computer is deny-by-default on the network: list the hosts
+it needs in `egress.allow` ([Fleet file](fleet-file.md), [Security](security.md)).
 
 ## Apps: the SDK
 

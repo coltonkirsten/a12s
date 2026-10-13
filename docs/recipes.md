@@ -144,9 +144,9 @@ await turns.ready();                                   // watch first, so nothin
 await lead.send(process.argv[2] ?? "Two facts about octopuses: one about hearts, one about arms.", { fresh: true });
 
 for await (const t of turns) {
-  console.log(`[${t.computer}] ${t.text.trim()}`);
+  console.log(`[${t.agentComputer}] ${t.text.trim()}`);
   const at = t.text.indexOf("FINAL ANSWER:");
-  if (t.computer === "lead" && at >= 0) {
+  if (t.agentComputer === "lead" && at >= 0) {
     console.log("\n" + t.text.slice(at + "FINAL ANSWER:".length).trim());
     break;
   }
@@ -165,8 +165,8 @@ task = sys.argv[1] if len(sys.argv) > 1 else "Two facts about octopuses: one abo
 with fleet.turns(["lead", "worker1", "worker2"]) as turns:    # entering waits until it's watching
     lead.send(task, fresh=True)
     for t in turns:
-        print(f"[{t.computer}] {t.text.strip()}")
-        if t.computer == "lead" and "FINAL ANSWER:" in t.text:
+        print(f"[{t.agent_computer}] {t.text.strip()}")
+        if t.agent_computer == "lead" and "FINAL ANSWER:" in t.text:
             print("\n" + t.text.split("FINAL ANSWER:", 1)[1].strip())
             break
 ```
@@ -381,7 +381,7 @@ sales.send("Draft a reply to the Acme lead.")
 ```
 
 It sees only `biz-*` agent computers, Services and credentials. Naming anything else, or inheriting a `defaults`
-grant, use or drive outside `biz-`, fails with `out_of_prefix`; set the agent computer's own `grants` to override
+grant or use outside `biz-`, fails with `out_of_prefix`; set the agent computer's own `grants` to override
 the default. Its agent computers may use any credential the Fleet stores (here `anthropic`, from `defaults`), and
 their egress and image are its call, so trust the app like the owner for them. See
 [Security: Tokens](security.md#tokens).
@@ -406,7 +406,7 @@ Routes, JSON and the event-stream format: [HTTP API](api.md).
 ```sh
 a12s status                     # every agent computer: phase, inbox, power, warnings
 a12s logs lead --follow         # one agent computer's events as text
-a12s gateway                    # all of them, live, in the browser
+a12s ui                         # all of them, live, in the web console
 a12s doctor                     # what's broken, one line each, with the fix
 a12s inbox lead --bodies        # what's waiting
 ```

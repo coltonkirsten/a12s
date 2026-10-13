@@ -124,9 +124,9 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
 
-The fleet-wide stream (`GET /v1/events`) adds two events the Controller makes: `fleet.changed`
-`{version, by, names}` when a write changes the Fleet, and `agent_computer.phase` `{phase, error?, waiting?}` when an agent
-computer's phase changes.
+The fleet-wide stream (`GET /v1/events`) adds the events the Controller makes: `fleet.changed`
+`{version, by, names}` when a write changes the Fleet, `agent_computer.phase` `{phase, error?, waiting?}` when an agent
+computer's phase changes, `inbox.changed` and `service.phase` ([API: Event streams](api.md#event-streams-sse)).
 
 The SDKs type these ([SDK](sdk.md)); `turns()` folds them into one record per Turn. The Controller keeps the last 200
 finished Turns of each agent computer in the same shape (`GET /v1/agent-computers/{c}/turns`), so a Turn that ended

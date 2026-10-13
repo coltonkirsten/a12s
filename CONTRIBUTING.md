@@ -115,7 +115,7 @@ The end-to-end scripts (`hack/`) are not in CI: they make real model calls with 
 Push a tag; `.github/workflows/release.yml` does the rest on GitHub's runners:
 
 ```sh
-git tag -a v0.5.0 -m v0.5.0 origin/main && git push origin v0.5.0
+git tag -a v0.7.0 -m v0.7.0 origin/main && git push origin v0.7.0
 ```
 
 It pushes the images (linux/amd64 and linux/arm64), publishes the default harness bundles if missing, runs
@@ -145,7 +145,7 @@ For emergencies only (Actions unavailable); the release workflow above is the wa
 machine with Docker, on an up-to-date main whose CI passed:
 
 ```sh
-make release VERSION=0.5.0
+make release VERSION=0.7.0
 ```
 
 `scripts/release.sh` builds from a clean checkout of `origin/main`. It pushes the slim and controller images to
