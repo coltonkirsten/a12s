@@ -6,7 +6,6 @@ import json
 import warnings
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator, Sequence
-import dataclasses
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -166,7 +165,7 @@ class StreamState:
                 raise A12sGapError(data)
             ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
             return Event(
-                v=1, agent_computer=self.computer, computer=self.computer, session="", turn="", seq=0, ts=ts, type="gap", data=data
+                v=1, agent_computer=self.computer, session="", turn="", seq=0, ts=ts, type="gap", data=data
             )
         if f.event or not f.data:
             return None
@@ -225,7 +224,7 @@ class TurnBuilder:
     def add(self, ev: Event) -> Turn | None:
         if not ev.turn:
             return None
-        key = (ev.agent_computer or ev.computer, ev.turn)
+        key = (ev.agent_computer or "", ev.turn)
         t = self._open.setdefault(key, _OpenTurn())
         data = ev.data if isinstance(ev.data, dict) else {}
         if ev.type == "turn.started":
@@ -259,8 +258,7 @@ class TurnBuilder:
             del self._open[key]
             tokens = data.get("tokens")
             return Turn(
-                agent_computer=ev.agent_computer or ev.computer,
-                computer=ev.agent_computer or ev.computer,
+                agent_computer=ev.agent_computer or "",
                 id=ev.turn,
                 session=ev.session,
                 status=str(data.get("status", "")),
@@ -289,9 +287,7 @@ def _parse_json(text: str) -> Any:
 
 def turn_of(data: Any) -> Turn:
     """A Turn from the history (GET .../turns): the same shape turns() yields."""
-    t = from_json(Turn, data)
-    name = data.get("agentComputer", "") if isinstance(data, dict) else ""
-    return dataclasses.replace(t, agent_computer=name, computer=name)
+    return from_json(Turn, data)
 
 
 def until_turn_finished(events: Iterator[Event]) -> Iterator[Event]:

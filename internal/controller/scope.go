@@ -113,7 +113,7 @@ func filterStatus(k caller, st api.StatusResponse) api.StatusResponse {
 			svcs = append(svcs, scopeService(k, s))
 		}
 	}
-	st.AgentComputers, st.Computers, st.Services = keep, keep, svcs
+	st.AgentComputers, st.Services = keep, svcs
 	st.OrphanedDrives, st.OrphanedInboxes, st.Warnings = nil, nil, nil
 	return st
 }

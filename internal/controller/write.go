@@ -18,21 +18,6 @@ import (
 // maxSpecBody bounds one agent computer's or Service's spec: up to 1 MiB of files, JSON-escaped.
 const maxSpecBody = 8 << 20
 
-// legacyPaths serves the /v1/computers/... paths of earlier releases as /v1/agent-computers/....
-func legacyPaths(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rest, ok := strings.CutPrefix(r.URL.Path, "/v1/computers"); ok && (rest == "" || rest[0] == '/') {
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/v1/agent-computers" + rest
-			if r.URL.RawPath != "" {
-				r2.URL.RawPath = "/v1/agent-computers" + strings.TrimPrefix(r.URL.RawPath, "/v1/computers")
-			}
-			r = r2
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func dryRun(r *http.Request) bool { return r.URL.Query().Get("dryRun") == "true" }
 
 // ifMatch reads the version an If-Match header names; "*" or none is unconditional.

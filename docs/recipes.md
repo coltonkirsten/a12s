@@ -261,9 +261,9 @@ const fleet = await Fleet.connect();
 const log = (line) => (document.getElementById("log").textContent += line + "\n");
 
 for await (const ev of fleet.events()) {           // every agent computer, merged
-  if (ev.type === "turn.started") log(`${ev.computer}: started (from ${ev.data.inbox?.messages.map((m) => m.via).join(", ")})`);
-  if (ev.type === "tool.started") log(`${ev.computer}: → ${ev.data.name}`);
-  if (ev.type === "turn.finished") log(`${ev.computer}: ${ev.data.status}`);
+  if (ev.type === "turn.started") log(`${ev.agentComputer}: started (from ${ev.data.inbox?.messages.map((m) => m.via).join(", ")})`);
+  if (ev.type === "tool.started") log(`${ev.agentComputer}: → ${ev.data.name}`);
+  if (ev.type === "turn.finished") log(`${ev.agentComputer}: ${ev.data.status}`);
 }
 ```
 
@@ -274,7 +274,7 @@ npx vite build && a12s gateway --web dist   # or serve the built app
 
 To show whole answers instead of events, use `fleet.turns()` the same way. The page can send work with
 `(await fleet.agentComputers.get("lead")).send(...)`; those Messages arrive `via="token:gateway-7012"` (the
-gateway's port). Limit what the page may do with `--allow status,events` (read-only) and `--computers lead`.
+gateway's port). Limit what the page may do with `--allow status,events` (read-only) and `--agent-computers lead`.
 
 ## Change an agent's instructions
 

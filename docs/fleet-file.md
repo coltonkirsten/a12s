@@ -81,7 +81,7 @@ agent_computers:
 | `egress.allowPrivate` | CIDRs of private ranges that Services' `egress.tcp` may reach. Printed on every status line. |
 | `defaults` | Any agent computer field, applied to every agent computer. |
 | `drives` | Work drives, by name. |
-| `agent_computers` | Agent computers, by name (DNS labels). The old key `computers` is still read for one release; `a12s up` prints a hint to rename it. |
+| `agent_computers` | Agent computers, by name (DNS labels). |
 | `services` | Services, by name. See [Services](services.md). |
 
 ## Drives

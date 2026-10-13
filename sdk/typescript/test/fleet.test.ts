@@ -117,7 +117,7 @@ test("replace retries a stale If-Match, then writes", async () => {
 
 test("north star: create, send(...).wait(), remove", async () => {
   const ev = (seq: number, type: string, data: unknown) =>
-    `id: ${seq}\ndata: ${JSON.stringify({ v: 1, computer: "hello", session: "s", turn: "t_1", seq, ts: "", type, data })}\n\n`;
+    `id: ${seq}\ndata: ${JSON.stringify({ v: 1, agentComputer: "hello", session: "s", turn: "t_1", seq, ts: "", type, data })}\n\n`;
   const { fleet, seen, close } = await fake((req, res) => {
     if (req.method === "PUT") return json(res, 200, written("hello"));
     if (req.method === "POST") return json(res, 201, { id: "m_1", seq: 1, state: "pending" });
@@ -147,7 +147,7 @@ test("north star: create, send(...).wait(), remove", async () => {
 
 test("wait() after the Turn already ended replays it from the Message's own snapshot", async () => {
   const ev = (seq: number, type: string, data: unknown) =>
-    `id: ${seq}\ndata: ${JSON.stringify({ v: 1, computer: "hello", session: "s", turn: "t_1", seq, ts: "", type, data })}\n\n`;
+    `id: ${seq}\ndata: ${JSON.stringify({ v: 1, agentComputer: "hello", session: "s", turn: "t_1", seq, ts: "", type, data })}\n\n`;
   let finished = false;
   const { fleet, seen, close } = await fake((req, res) => {
     if (req.method === "GET" && req.url === "/v1/agent-computers/hello") return json(res, 200, view("hello"));
@@ -198,7 +198,7 @@ test("wait() on a held inbox throws A12sError held", async () => {
 });
 
 const fev = (id: string, agentComputer: string, type: string, data: unknown, turn = "") =>
-  `id: ${id}\ndata: ${JSON.stringify({ v: 1, agentComputer, computer: agentComputer, session: "s", turn, seq: 1, ts: "", type, data })}\n\n`;
+  `id: ${id}\ndata: ${JSON.stringify({ v: 1, agentComputer, session: "s", turn, seq: 1, ts: "", type, data })}\n\n`;
 
 async function take<T>(it: AsyncIterator<T>, n: number): Promise<T[]> {
   const out: T[] = [];
@@ -231,7 +231,7 @@ test("agent computers' and the Fleet's streams share one /v1/events connection, 
     assert.deepEqual((await take(eb, 2)).map((e) => e.type), ["egress.denied", "turn.finished"]);
     assert.deepEqual((await take(all, 4)).map((e) => e.type), ["text.delta", "egress.denied", "fleet.changed", "turn.finished"]);
     const [turn] = await take(turns, 1);
-    assert.deepEqual([turn!.agentComputer, turn!.computer, turn!.id, turn!.tokens?.output], ["b", "b", "t_b", 2]);
+    assert.deepEqual([turn!.agentComputer, turn!.id, turn!.tokens?.output], ["b", "t_b", 2]);
     for (const s of [ea, eb, all, turns]) s.close();
     assert.equal(seen.filter((s) => s.url === "/v1/events").length, 1);
   } finally {
@@ -268,7 +268,7 @@ test("turns({ limit }) reads past Turns", async () => {
     const a = await fleet.agentComputers.get("a");
     const [turn] = await a.turns({ limit: 5 });
     assert.equal(seen[1]!.url, "/v1/agent-computers/a/turns?limit=5");
-    assert.deepEqual([turn!.agentComputer, turn!.computer, turn!.tools[0]!.isError], ["agentComputer", "agentComputer", false]);
+    assert.deepEqual([turn!.agentComputer, turn!.tools[0]!.isError], ["agentComputer", false]);
   } finally {
     close();
   }

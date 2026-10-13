@@ -27,7 +27,7 @@ func TestInboxAPI(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), true) // asleep: Messages wait
 
-	res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"add a health check","idempotencyKey":"k1"}`)
+	res := h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"add a health check","idempotencyKey":"k1"}`)
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("enqueue = %d %+v", res.StatusCode, apiError(t, res))
 	}
@@ -36,44 +36,44 @@ func TestInboxAPI(t *testing.T) {
 		t.Fatalf("enqueue response %+v", m)
 	}
 	// Idempotent repeat: 200 and the same id.
-	res = h.api("POST", "/v1/computers/builder/inbox", `{"body":"add a health check","idempotencyKey":"k1"}`)
+	res = h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"add a health check","idempotencyKey":"k1"}`)
 	if res.StatusCode != http.StatusOK || decodeBody[api.EnqueueResponse](t, res).ID != m.ID {
 		t.Fatal("idempotent repeat")
 	}
-	if res := h.api("POST", "/v1/computers/nobody/inbox", `{"body":"x"}`); res.StatusCode != http.StatusNotFound {
+	if res := h.api("POST", "/v1/agent-computers/nobody/inbox", `{"body":"x"}`); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown computer = %d", res.StatusCode)
 	}
-	res = h.api("POST", "/v1/computers/builder/inbox", `{"body":"x","expires":0}`)
+	res = h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"x","expires":0}`)
 	if e := apiError(t, res); res.StatusCode != http.StatusConflict || e.Code != api.ErrNotIdle || e.Details["reason"] == "" || e.Fix == "" {
 		t.Fatalf("now or never = %d %+v", res.StatusCode, e)
 	}
 
-	list := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/computers/builder/inbox?bodies=true", ""))
+	list := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/agent-computers/builder/inbox?bodies=true", ""))
 	if len(list.Messages) != 1 || *list.Messages[0].Body != "add a health check" || list.Messages[0].Via != "local" || list.Limits.MaxMessages.Value != 200 || list.Limits.MaxMessages.Source != "builtin" {
 		t.Fatalf("list %+v", list)
 	}
 	st := decodeBody[api.StatusResponse](t, h.api("GET", "/v1/status", ""))
-	for _, cs := range st.Computers {
+	for _, cs := range st.AgentComputers {
 		if cs.Name == "builder" && (cs.Inbox == nil || cs.Inbox.Pending != 1) {
 			t.Fatalf("status inbox %+v", cs.Inbox)
 		}
 	}
 
-	if res := h.api("POST", "/v1/computers/builder/inbox/hold", `{}`); res.StatusCode != 200 || !decodeBody[api.InboxSummary](t, res).Held {
+	if res := h.api("POST", "/v1/agent-computers/builder/inbox/hold", `{}`); res.StatusCode != 200 || !decodeBody[api.InboxSummary](t, res).Held {
 		t.Fatal("hold")
 	}
-	if res := h.api("POST", "/v1/computers/builder/inbox/resume", `{"session":"new"}`); res.StatusCode != 200 || decodeBody[api.InboxSummary](t, res).SessionOverride != "new" {
+	if res := h.api("POST", "/v1/agent-computers/builder/inbox/resume", `{"session":"new"}`); res.StatusCode != 200 || decodeBody[api.InboxSummary](t, res).SessionOverride != "new" {
 		t.Fatal("resume --new")
 	}
-	if res := h.api("DELETE", "/v1/computers/builder/inbox/"+m.ID, ""); res.StatusCode != 200 {
+	if res := h.api("DELETE", "/v1/agent-computers/builder/inbox/"+m.ID, ""); res.StatusCode != 200 {
 		t.Fatalf("withdraw = %d", res.StatusCode)
 	}
-	if res := h.api("DELETE", "/v1/computers/builder/inbox/"+m.ID, ""); apiError(t, res).Code != api.ErrWithdrawn {
+	if res := h.api("DELETE", "/v1/agent-computers/builder/inbox/"+m.ID, ""); apiError(t, res).Code != api.ErrWithdrawn {
 		t.Fatal("second withdraw")
 	}
-	h.api("POST", "/v1/computers/builder/inbox", `{"body":"a"}`)
-	h.api("POST", "/v1/computers/builder/inbox", `{"body":"b"}`)
-	if c := decodeBody[api.ClearResponse](t, h.api("POST", "/v1/computers/builder/inbox/clear", `{}`)); c.Discarded != 2 {
+	h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"a"}`)
+	h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"b"}`)
+	if c := decodeBody[api.ClearResponse](t, h.api("POST", "/v1/agent-computers/builder/inbox/clear", `{}`)); c.Discarded != 2 {
 		t.Fatalf("clear %+v", c)
 	}
 }
@@ -92,31 +92,31 @@ func TestScopedTokens(t *testing.T) {
 		t.Fatal("bad token name accepted")
 	}
 
-	res = h.api("POST", "/v1/computers/builder/inbox", `{"body":"from the ui"}`, auth...)
+	res = h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"from the ui"}`, auth...)
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("send with token = %d", res.StatusCode)
 	}
 	mine := decodeBody[api.EnqueueResponse](t, res)
 	// The owner's Message is invisible to the token; its own is not.
-	owners := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/builder/inbox", `{"body":"owner"}`))
-	if res := h.api("GET", "/v1/computers/builder/inbox/"+owners.ID, "", auth...); res.StatusCode != 404 {
+	owners := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"owner"}`))
+	if res := h.api("GET", "/v1/agent-computers/builder/inbox/"+owners.ID, "", auth...); res.StatusCode != 404 {
 		t.Fatalf("token read the owner's message: %d", res.StatusCode)
 	}
-	got := decodeBody[api.Message](t, h.api("GET", "/v1/computers/builder/inbox/"+mine.ID, "", auth...))
+	got := decodeBody[api.Message](t, h.api("GET", "/v1/agent-computers/builder/inbox/"+mine.ID, "", auth...))
 	if got.Via != "token:ui" || got.Sender != "token:ui" {
 		t.Fatalf("via %+v", got)
 	}
-	if res := h.api("DELETE", "/v1/computers/builder/inbox/"+owners.ID, "", auth...); res.StatusCode != 404 {
+	if res := h.api("DELETE", "/v1/agent-computers/builder/inbox/"+owners.ID, "", auth...); res.StatusCode != 404 {
 		t.Fatal("token withdrew the owner's message")
 	}
 	for _, c := range []struct{ method, path, body string }{
-		{"POST", "/v1/computers/scout/inbox", `{"body":"x"}`},
-		{"GET", "/v1/computers/builder/inbox", ""},
-		{"POST", "/v1/computers/builder/inbox/clear", `{}`},
+		{"POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`},
+		{"GET", "/v1/agent-computers/builder/inbox", ""},
+		{"POST", "/v1/agent-computers/builder/inbox/clear", `{}`},
 		{"PUT", "/v1/fleet", `{}`},
 		{"GET", "/v1/drives", ""},
 		{"POST", "/v1/tokens", `{"name":"x","actions":["inbox"],"computers":["*"]}`},
-		{"POST", "/v1/computers/builder/power", `{"state":"asleep"}`},
+		{"POST", "/v1/agent-computers/builder/power", `{"state":"asleep"}`},
 		{"GET", "/v1/status", ""},
 	} {
 		res := h.api(c.method, c.path, c.body, auth...)
@@ -127,7 +127,7 @@ func TestScopedTokens(t *testing.T) {
 	if res := h.api("DELETE", "/v1/tokens/ui", ""); res.StatusCode != http.StatusNoContent {
 		t.Fatal("revoke")
 	}
-	if res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"x"}`, auth...); res.StatusCode != http.StatusUnauthorized {
+	if res := h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"x"}`, auth...); res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("revoked token = %d", res.StatusCode)
 	}
 }
@@ -149,7 +149,7 @@ func TestInboxFleetLimits(t *testing.T) {
 	})
 	h.up(f, true)
 	for i := range 4 {
-		res := h.api("POST", "/v1/computers/builder/inbox", `{"body":"x`+string(rune('a'+i))+`"}`)
+		res := h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"x`+string(rune('a'+i))+`"}`)
 		if i < 3 && res.StatusCode != 201 || i == 3 && res.StatusCode != 429 {
 			t.Fatalf("builder send %d = %d", i, res.StatusCode)
 		}
@@ -158,15 +158,15 @@ func TestInboxFleetLimits(t *testing.T) {
 		}
 	}
 	for i := range 5 {
-		if res := h.api("POST", "/v1/computers/scout/inbox", `{"body":"x"}`); res.StatusCode != 201 {
+		if res := h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); res.StatusCode != 201 {
 			t.Fatalf("scout send %d = %d", i, res.StatusCode)
 		}
 	}
-	l := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/computers/builder/inbox", ""))
+	l := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/agent-computers/builder/inbox", ""))
 	if l.Limits.MaxMessages.Value != 3 || l.Limits.MaxMessages.Source != "computer" {
 		t.Fatalf("limits %+v", l.Limits)
 	}
-	ls := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/computers/scout/inbox", ""))
+	ls := decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/agent-computers/scout/inbox", ""))
 	if ls.Limits.MaxMessages.Source != "defaults" {
 		t.Fatalf("scout limits %+v", ls.Limits)
 	}
@@ -181,16 +181,16 @@ func TestInboxFleetLimits(t *testing.T) {
 	if len(res.Staged)+len(res.Updated) != 0 {
 		t.Fatalf("a limit change restaged: %+v", res)
 	}
-	l = decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/computers/builder/inbox", ""))
+	l = decodeBody[api.InboxListResponse](t, h.api("GET", "/v1/agent-computers/builder/inbox", ""))
 	if l.Pending != 3 || !l.OverLimit {
 		t.Fatalf("after lowering %+v", l.InboxSummary)
 	}
-	if e := apiError(t, h.api("POST", "/v1/computers/builder/inbox", `{"body":"y"}`)); !strings.Contains(e.Fix, "over its limit") {
+	if e := apiError(t, h.api("POST", "/v1/agent-computers/builder/inbox", `{"body":"y"}`)); !strings.Contains(e.Fix, "over its limit") {
 		t.Fatalf("over-limit fix %+v", e)
 	}
 	// Survives a Controller restart.
 	h2 := h.restart()
-	l = decodeBody[api.InboxListResponse](t, h2.api("GET", "/v1/computers/builder/inbox", ""))
+	l = decodeBody[api.InboxListResponse](t, h2.api("GET", "/v1/agent-computers/builder/inbox", ""))
 	if l.Pending != 3 {
 		t.Fatalf("after restart %+v", l.InboxSummary)
 	}
@@ -200,10 +200,10 @@ func TestInboxFleetLimits(t *testing.T) {
 func TestInboxExpiryTimer(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), true)
-	m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/scout/inbox", `{"body":"soon","expires":1}`))
+	m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"soon","expires":1}`))
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		got := decodeBody[api.Message](t, h.api("GET", "/v1/computers/scout/inbox/"+m.ID, ""))
+		got := decodeBody[api.Message](t, h.api("GET", "/v1/agent-computers/scout/inbox/"+m.ID, ""))
 		if got.State == api.MsgExpired {
 			if got.EndedAt.Sub(*got.ExpiresAt) > time.Second {
 				t.Fatalf("expired late: %v after the deadline", got.EndedAt.Sub(*got.ExpiresAt))

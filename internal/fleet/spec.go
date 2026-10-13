@@ -28,30 +28,19 @@ type Spec struct {
 	Drives         map[string]Drive           `json:"drives,omitempty"`
 	AgentComputers map[string]json.RawMessage `json:"agent_computers"`
 	Services       map[string]Service         `json:"services,omitempty"`
-	// LegacyKey is set when the source used the old `computers` key.
-	LegacyKey bool `json:"-"`
 }
 
 type specAlias Spec
 
-// UnmarshalJSON is strict, and takes the old `computers` key for one release.
+// UnmarshalJSON is strict.
 func (s *Spec) UnmarshalJSON(b []byte) error {
-	var v struct {
-		specAlias
-		Computers map[string]json.RawMessage `json:"computers"`
-	}
+	var v specAlias
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
 		return err
 	}
-	*s = Spec(v.specAlias)
-	if v.Computers != nil {
-		if s.AgentComputers != nil {
-			return errors.New("fleet: both agent_computers and computers are set; computers is the old name of agent_computers")
-		}
-		s.AgentComputers, s.LegacyKey = v.Computers, true
-	}
+	*s = Spec(v)
 	if s.AgentComputers == nil {
 		s.AgentComputers = map[string]json.RawMessage{}
 	}

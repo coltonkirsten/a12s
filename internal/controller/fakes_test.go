@@ -484,7 +484,7 @@ func (f *fakeComputerd) halt() {
 func (f *fakeComputerd) emitLocked(typ api.EventType, turn string, data any) {
 	f.seq++
 	raw, _ := json.Marshal(data)
-	ev := api.Event{V: 1, Computer: f.name, Session: f.sessionLocked(), Turn: turn, Seq: f.seq, TS: time.Now(), Type: typ, Data: raw}
+	ev := api.Event{V: 1, AgentComputer: f.name, Session: f.sessionLocked(), Turn: turn, Seq: f.seq, TS: time.Now(), Type: typ, Data: raw}
 	b, _ := json.Marshal(ev)
 	msg := fmt.Sprintf("id: %d\ndata: %s\n\n", f.seq, b)
 	for _, sub := range f.subs {

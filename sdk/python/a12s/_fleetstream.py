@@ -28,7 +28,7 @@ _Item = Union[tuple[Literal["event"], Event], tuple[Literal["error"], BaseExcept
 
 def _gap_event() -> Event:
     ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    return Event(v=1, agent_computer="", computer="", session="", turn="", seq=0, ts=ts, type="gap", data={})
+    return Event(v=1, agent_computer="", session="", turn="", seq=0, ts=ts, type="gap", data={})
 
 
 def _wanted(names: frozenset[str] | None, ev: Event) -> bool:
@@ -39,7 +39,7 @@ def _wanted(names: frozenset[str] | None, ev: Event) -> bool:
         return isinstance(changed, list) and any(n in names for n in changed)
     if ev.type == "service.phase":
         return isinstance(ev.data, dict) and ev.data.get("service") in names
-    return (ev.agent_computer or ev.computer) in names
+    return ev.agent_computer in names
 
 
 class _Reader:

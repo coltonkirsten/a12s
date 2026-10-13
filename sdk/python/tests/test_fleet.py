@@ -44,7 +44,7 @@ class Fake:
             snap = {"message": {"id": "m_1", "state": "pending" if self.held else "delivered", "turn": "t_1"}, "held": self.held}
             return sse({"type": "snapshot", "data": snap})
         if req.method == "GET" and path == "/v1/agent-computers/hello/events?turn=t_1":
-            ev = {"v": 1, "computer": "hello", "session": "s", "turn": "t_1", "ts": "t"}
+            ev = {"v": 1, "agentComputer": "hello", "session": "s", "turn": "t_1", "ts": "t"}
             return sse(
                 {**ev, "seq": 1, "type": "text.delta", "data": {"text": "out of credit"}},
                 {**ev, "seq": 2, "type": "turn.finished", "data": {"status": "failed", "error": "billing", "usage": None}},
@@ -144,7 +144,7 @@ async def test_async_fleet_has_the_same_shape() -> None:
 
 
 def fleet_event(n: int, name: str, typ: str, turn: str = "t_1", data: dict[str, Any] | None = None) -> str:
-    ev = {"v": 1, "agentComputer": name, "computer": name, "session": "s", "turn": turn, "seq": n, "ts": "t", "type": typ}
+    ev = {"v": 1, "agentComputer": name, "session": "s", "turn": turn, "seq": n, "ts": "t", "type": typ}
     return f"id: b-{n}\ndata: {json.dumps({**ev, 'data': data or {}})}\n\n"
 
 

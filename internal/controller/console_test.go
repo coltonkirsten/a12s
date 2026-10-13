@@ -105,7 +105,7 @@ func TestServicePhaseEvent(t *testing.T) {
 	got := until(t, owner, `"service":"clock","phase":"Ready"`)
 	ev := eventOf(t, got[len(got)-1])
 	var d api.ServicePhaseData
-	if err := json.Unmarshal(ev.Data, &d); err != nil || ev.Type != api.EventServicePhase || ev.AgentComputer != "" || ev.Computer != "" ||
+	if err := json.Unmarshal(ev.Data, &d); err != nil || ev.Type != api.EventServicePhase || ev.AgentComputer != "" ||
 		d.Service != "clock" || d.Health != "ok" || d.Restarts != 0 {
 		t.Fatalf("service.phase = %s (%v)", got[len(got)-1], err)
 	}

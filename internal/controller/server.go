@@ -140,7 +140,7 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tokens", allow("", "", c.handleTokenCreate))
 	mux.HandleFunc("GET /v1/tokens", allow("", "", c.handleTokens))
 	mux.HandleFunc("DELETE /v1/tokens/{name}", allow("", "", c.handleTokenDelete))
-	return legacyPaths(c.authenticate(mux))
+	return c.authenticate(mux)
 }
 
 // detached runs fn on the Controller's context so the work finishes even if the caller
@@ -362,8 +362,7 @@ func (c *Controller) handleShell(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) Status(ctx context.Context) (res api.StatusResponse) {
 	c.mu.Lock()
 	f := c.state.Fleet
-	res = api.StatusResponse{Fleet: c.cfg.Fleet, EgressEnforcement: fleet.EnforcementEnforced, AgentComputers: []api.ComputerStatus{}, Computers: []api.ComputerStatus{}}
-	defer func() { res.Computers = res.AgentComputers }()
+	res = api.StatusResponse{Fleet: c.cfg.Fleet, EgressEnforcement: fleet.EnforcementEnforced, AgentComputers: []api.ComputerStatus{}}
 	needCreds := false
 	if f != nil {
 		for _, comp := range f.Computers {

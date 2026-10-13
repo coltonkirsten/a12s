@@ -48,25 +48,25 @@ func TestAPI(t *testing.T) {
 	res := h.api("GET", "/v1/status", "")
 	var st api.StatusResponse
 	json.NewDecoder(res.Body).Decode(&st)
-	if res.StatusCode != 200 || len(st.Computers) != 4 || st.Computers[2].Name != "scout" || st.Computers[2].Session != "s_scout" || st.EgressEnforcement != "enforced" {
+	if res.StatusCode != 200 || len(st.AgentComputers) != 4 || st.AgentComputers[2].Name != "scout" || st.AgentComputers[2].Session != "s_scout" || st.EgressEnforcement != "enforced" {
 		t.Fatalf("status = %d %+v", res.StatusCode, st)
 	}
 
 	// A message is delivered as a turn; a second one waits in line.
-	res = h.api("POST", "/v1/computers/scout/inbox", `{"body":"hi"}`)
+	res = h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"hi"}`)
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("enqueue = %d", res.StatusCode)
 	}
 	h.waitPhase("scout", api.PhaseBusy)
-	if m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/scout/inbox", `{"body":"again"}`)); m.State != api.MsgPending {
+	if m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"again"}`)); m.State != api.MsgPending {
 		t.Fatalf("second = %+v", m)
 	}
-	if e := apiError(t, h.api("POST", "/v1/computers/nobody/inbox", `{"body":"x"}`)); e.Code != api.ErrNotFound {
+	if e := apiError(t, h.api("POST", "/v1/agent-computers/nobody/inbox", `{"body":"x"}`)); e.Code != api.ErrNotFound {
 		t.Fatalf("unknown = %+v", e)
 	}
 
 	// Events are proxied as SSE, id per event.
-	res = h.api("GET", "/v1/computers/scout/events", "")
+	res = h.api("GET", "/v1/agent-computers/scout/events", "")
 	if res.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("events content type %q", res.Header.Get("Content-Type"))
 	}
@@ -80,7 +80,7 @@ func TestAPI(t *testing.T) {
 	}
 
 	// The shell request is journaled in the Computer.
-	res = h.api("POST", "/v1/computers/builder/shell", `{"root":true}`)
+	res = h.api("POST", "/v1/agent-computers/builder/shell", `{"root":true}`)
 	var sh api.ShellResponse
 	json.NewDecoder(res.Body).Decode(&sh)
 	if sh.Container != "a12s-lab-builder" || sh.User != "0:0" || len(h.cds.get("builder").diagnostics) != 1 {
@@ -88,10 +88,10 @@ func TestAPI(t *testing.T) {
 	}
 
 	// Sleep through the API; messages then wait.
-	if res := h.api("POST", "/v1/computers/tester/power", `{"state":"asleep"}`); res.StatusCode != 200 {
+	if res := h.api("POST", "/v1/agent-computers/tester/power", `{"state":"asleep"}`); res.StatusCode != 200 {
 		t.Fatalf("sleep = %d", res.StatusCode)
 	}
-	if m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/tester/inbox", `{"body":"x"}`)); m.State != api.MsgPending || m.Phase != api.PhaseAsleep {
+	if m := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/agent-computers/tester/inbox", `{"body":"x"}`)); m.State != api.MsgPending || m.Phase != api.PhaseAsleep {
 		t.Fatalf("asleep enqueue = %+v", m)
 	}
 

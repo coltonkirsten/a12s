@@ -78,7 +78,7 @@ test('Last-Event-ID replays from the journal, then goes live without loss or dup
   await until(() => s.frames.length === 3);
   assert.deepEqual(s.frames.map((f) => f.id), ['2', undefined, '3']);
   const live = JSON.parse(s.frames[2]!.data);
-  assert.deepEqual([live.v, live.computer, live.seq, live.type, live.data], [1, 'test', 3, 'diagnostic', { message: 'live' }]);
+  assert.deepEqual([live.v, live.agentComputer, live.seq, live.type, live.data], [1, 'test', 3, 'diagnostic', { message: 'live' }]);
   s.close();
 });
 

@@ -95,7 +95,7 @@ func TestMTLSGrantsAndRegistry(t *testing.T) {
 
 	// A certificate that is not the live one is refused, even well-formed.
 	stray, _ := h.c.ca.ServiceCert("clock", 1)
-	if code, e := mtlsDo(t, srv, h.c.ca, stray, "POST", "/v1/computers/scout/inbox", `{"body":"x"}`); code != http.StatusForbidden || !strings.Contains(e.Message, "not active") {
+	if code, e := mtlsDo(t, srv, h.c.ca, stray, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != http.StatusForbidden || !strings.Contains(e.Message, "not active") {
 		t.Fatalf("stray cert: %d %+v", code, e)
 	}
 	// Register a known leaf as clock's live certificate (as a start does).
@@ -103,14 +103,14 @@ func TestMTLSGrantsAndRegistry(t *testing.T) {
 	if err := h.c.registerCert(ctx, Principal{Kind: KindService, Name: "clock", Generation: 1}, leaf.Serial, []string{"scout"}); err != nil {
 		t.Fatal(err)
 	}
-	if code, e := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/scout/inbox", `{"body":"hello from the clock"}`); code != http.StatusCreated {
+	if code, e := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"hello from the clock"}`); code != http.StatusCreated {
 		t.Fatalf("granted send: %d %+v", code, e)
 	}
 	msgs, _ := h.c.inbox.List(ctx, "scout", inbox.ListOptions{State: "all"})
 	if len(msgs.Messages) != 1 || msgs.Messages[0].Via != "service:clock" {
 		t.Fatalf("messages %+v", msgs.Messages)
 	}
-	code, ae := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/reviewer/inbox", `{"body":"x"}`)
+	code, ae := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/reviewer/inbox", `{"body":"x"}`)
 	if code != http.StatusForbidden || ae.Code != api.ErrNoGrant || ae.Message != "clock may not send to reviewer" || ae.Fix != "add reviewer to services.clock.grants.send" {
 		t.Fatalf("ungranted send: %d %+v", code, ae)
 	}
@@ -131,7 +131,7 @@ func TestMTLSGrantsAndRegistry(t *testing.T) {
 	if _, ok, _ := h.c.inbox.LiveCert(ctx, "service:clock"); ok {
 		t.Fatal("entry survived sleep")
 	}
-	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/computers/scout/inbox", `{"body":"x"}`); code != http.StatusForbidden {
+	if code, _ := mtlsDo(t, srv, h.c.ca, leaf, "POST", "/v1/agent-computers/scout/inbox", `{"body":"x"}`); code != http.StatusForbidden {
 		t.Fatalf("after sleep: %d", code)
 	}
 }
@@ -158,7 +158,7 @@ func TestProxyInternalNames(t *testing.T) {
 	if _, _, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, true); reason != "" {
 		t.Fatalf("plain http to an http port: %s", reason)
 	}
-	if _, status, reason := h.c.internalTarget(ctx, "reviewer", "db.a12s", 8080, false); status != http.StatusForbidden || reason != "reviewer cannot reach db: computers.reviewer.uses does not list db" {
+	if _, status, reason := h.c.internalTarget(ctx, "reviewer", "db.a12s", 8080, false); status != http.StatusForbidden || reason != "reviewer cannot reach db: agent_computers.reviewer.uses does not list db" {
 		t.Fatalf("reviewer -> db: %d %s", status, reason)
 	}
 	if _, status, _ := h.c.internalTarget(ctx, "scout", "db.a12s", 9999, false); status != http.StatusForbidden {

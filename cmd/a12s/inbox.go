@@ -341,7 +341,6 @@ func runToken(g *globals, args []string) error {
 	fs := g.flags("token " + sub)
 	actions := fs.String("actions", "", "with create: comma-separated actions ("+strings.Join(api.TokenActions, ",")+")")
 	computers := fs.String("agent-computers", "", "with create: comma-separated agent computers, or *")
-	fs.StringVar(computers, "computers", "", "the old name of --agent-computers")
 	prefix := fs.String("prefix", "", "with create: a token with every power over names that start with this, and none outside")
 	asJSON := &g.json
 	pos, err := parse(fs, args)

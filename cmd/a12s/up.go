@@ -45,9 +45,6 @@ func (g *globals) loadSpec() (*fleet.Spec, *fleet.Fleet, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", g.fleetPath, err)
 	}
-	if spec.LegacyKey {
-		fmt.Fprintf(os.Stderr, "hint: %s uses computers:, the old name of agent_computers: (it still works in this release)\n", g.fleetPath)
-	}
 	return spec, f, nil
 }
 

@@ -997,15 +997,15 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 			seen["image "+comp.Image] = true
 			id, err := ensurePinned(ctx, imageRef(comp.Image), pins.Images[imageRef(comp.Image)], c.drv.EnsureImage)
 			if err != nil {
-				return nil, nil, caps, fmt.Errorf("computers.%s.image: %w", name, err)
+				return nil, nil, caps, fmt.Errorf("agent_computers.%s.image: %w", name, err)
 			}
 			if comp.Tier() == fleet.TierCustom {
 				warn, err := c.admitComputerImage(ctx, comp.Image, id)
 				if err != nil {
-					return nil, nil, caps, invalid("computers.%s.image: %v", name, err)
+					return nil, nil, caps, invalid("agent_computers.%s.image: %v", name, err)
 				}
 				if warn != "" {
-					*warnings = append(*warnings, fmt.Sprintf("computers.%s.image: %s: %s", name, comp.Image, warn))
+					*warnings = append(*warnings, fmt.Sprintf("agent_computers.%s.image: %s: %s", name, comp.Image, warn))
 				}
 			}
 			pins.Images[imageRef(comp.Image)] = id
@@ -1018,14 +1018,14 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 				return b.ImageID, err
 			})
 			if err != nil {
-				return nil, nil, caps, fmt.Errorf("computers.%s.harness: %w", name, err)
+				return nil, nil, caps, fmt.Errorf("agent_computers.%s.harness: %w", name, err)
 			}
 			m := b.Manifest
 			if m.Kind != comp.Harness.Kind || m.Version != comp.Harness.Version {
-				return nil, nil, caps, invalid("computers.%s.harness: bundle %s is %s@%s", name, id, m.Kind, m.Version)
+				return nil, nil, caps, invalid("agent_computers.%s.harness: bundle %s is %s@%s", name, id, m.Kind, m.Version)
 			}
 			if m.Arch != "" && !slices.Contains(caps.Architectures, m.Arch) {
-				return nil, nil, caps, invalid("computers.%s.harness: bundle is for %s, the substrate runs %s", name, m.Arch, strings.Join(caps.Architectures, ", "))
+				return nil, nil, caps, invalid("agent_computers.%s.harness: bundle is for %s, the substrate runs %s", name, m.Arch, strings.Join(caps.Architectures, ", "))
 			}
 			pins.Bundles[key] = id
 			hosts[key] = append([]string{}, m.SignInHosts...)

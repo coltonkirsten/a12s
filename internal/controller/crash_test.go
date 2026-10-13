@@ -17,7 +17,7 @@ func TestWakeClearInbox(t *testing.T) {
 	h.up(labFleet(t, nil), true)
 	a := h.send("scout", "first")
 	b := h.send("scout", "second")
-	res := h.api("POST", "/v1/computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`)
+	res := h.api("POST", "/v1/agent-computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`)
 	cs := decodeBody[api.ComputerStatus](t, res)
 	if res.StatusCode != http.StatusOK || cs.InboxCleared == nil || *cs.InboxCleared != 2 {
 		t.Fatalf("wake = %d %+v", res.StatusCode, cs)
@@ -34,7 +34,7 @@ func TestWakeClearInbox(t *testing.T) {
 	// A message after the clear survives a retry of the same wake.
 	h.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAsleep})
 	c := h.send("scout", "after")
-	h.api("POST", "/v1/computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/scout/power", `{"state":"awake","clearInbox":true,"requestId":"req-1","credentials":{"anthropic":"e30="}}`).Body.Close()
 	h.waitMessage("scout", c.ID, api.MsgDelivered)
 }
 
@@ -54,7 +54,7 @@ func TestDeferredJournaling(t *testing.T) {
 	}
 	waitFor(t, func() bool { return scout.sealedSnapshot()[m.ID]["reason"] == "expired" })
 
-	h.api("POST", "/v1/computers/scout/inbox/hold", `{}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/scout/inbox/hold", `{}`).Body.Close()
 	n := h.send("scout", "soon too", `"expires":1`)
 	waitFor(t, func() bool { return scout.sealedSnapshot()[n.ID]["body"] == "soon too" })
 }
@@ -67,7 +67,7 @@ func TestStopHold(t *testing.T) {
 	h.send("builder", "long")
 	h.waitPhase("builder", api.PhaseBusy)
 	next := h.send("builder", "next")
-	res := h.api("POST", "/v1/computers/builder/turns/t_1/stop?hold=true", `{}`)
+	res := h.api("POST", "/v1/agent-computers/builder/turns/t_1/stop?hold=true", `{}`)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("stop --hold = %d", res.StatusCode)
 	}
@@ -88,11 +88,11 @@ func TestInboxStateSurvivesRestart(t *testing.T) {
 		t.Fatal("no claim")
 	}
 	h.send("scout", "held one")
-	h.api("POST", "/v1/computers/scout/inbox/hold", `{}`).Body.Close()
-	h.api("POST", "/v1/computers/reviewer/inbox/resume", `{"session":"new"}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/scout/inbox/hold", `{}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/reviewer/inbox/resume", `{"session":"new"}`).Body.Close()
 	h2 := h.restart()
 	sum := func(name string) api.InboxSummary {
-		return decodeBody[api.InboxSummary](t, h2.api("GET", "/v1/computers/"+name+"/inbox", ""))
+		return decodeBody[api.InboxSummary](t, h2.api("GET", "/v1/agent-computers/"+name+"/inbox", ""))
 	}
 	if s := sum("builder"); s.Claimed != 1 {
 		t.Fatalf("builder %+v", s)

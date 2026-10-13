@@ -120,7 +120,7 @@ func (c *Controller) internalTarget(ctx context.Context, caller, host string, po
 			}
 		}
 	}
-	kind := "computers"
+	kind := "agent_computers"
 	if rc.service {
 		kind = "services"
 	}

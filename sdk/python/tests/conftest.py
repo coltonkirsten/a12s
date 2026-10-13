@@ -9,7 +9,8 @@ from typing import Any
 
 import pytest
 
-import a12s
+from a12s._async import AsyncClient
+from a12s._client import Client
 
 
 @pytest.fixture
@@ -68,7 +69,7 @@ class FakeServer:
         self.errors: list[BaseException] = []
         self._stop = threading.Event()
         self._conns: list[socket.socket] = []
-        self._clients: list[a12s.Client] = []
+        self._clients: list[Client] = []
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -110,13 +111,13 @@ class FakeServer:
         self.url = f"http://127.0.0.1:{self._srv.server_address[1]}/"
         threading.Thread(target=self._srv.serve_forever, args=(0.05,), daemon=True).start()
 
-    def client(self) -> a12s.Client:
-        c = a12s.Client(self.url, "tok")
+    def client(self) -> Client:
+        c = Client(self.url, "tok")
         self._clients.append(c)
         return c
 
-    def aclient(self) -> a12s.AsyncClient:
-        return a12s.AsyncClient(self.url, "tok")
+    def aclient(self) -> AsyncClient:
+        return AsyncClient(self.url, "tok")
 
     def close(self) -> None:
         for client in self._clients:
@@ -149,5 +150,5 @@ def fake() -> Iterator[Callable[[Handler], FakeServer]]:
 
 
 def ev(seq: int, type: str, turn: str, data: Any, computer: str = "lead") -> str:
-    e = {"v": 1, "computer": computer, "session": "s", "turn": turn, "seq": seq, "ts": "", "type": type, "data": data}
+    e = {"v": 1, "agentComputer": computer, "session": "s", "turn": turn, "seq": seq, "ts": "", "type": type, "data": data}
     return f"id: {seq}\ndata: {json.dumps(e)}\n\n"

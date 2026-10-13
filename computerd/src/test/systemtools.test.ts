@@ -46,7 +46,7 @@ test('the send tool exists only with a grant and returns the Controller reply ve
   const server = createServer(
     localHandler(computer, null, async (req) => {
       sent.push(req);
-      if (req.computer !== 'reviewer') return { status: 403, body: { code: 'no_grant', message: `builder may not send to ${req.computer}`, fix: `add ${req.computer} to computers.builder.grants.send` } };
+      if (req.computer !== 'reviewer') return { status: 403, body: { code: 'no_grant', message: `builder may not send to ${req.computer}`, fix: `add ${req.computer} to agent_computers.builder.grants.send` } };
       return { status: 201, body: { id: 'm_1', state: 'pending' } };
     }),
   );
@@ -66,7 +66,7 @@ test('the send tool exists only with a grant and returns the Controller reply ve
     assert.equal(ok.isError, false);
     const denied = await client.callTool({ name: 'send', arguments: { computer: 'scout', body: 'hi' } });
     assert.equal(denied.isError, true);
-    assert.match(JSON.stringify(denied.content), /add scout to computers.builder.grants.send/);
+    assert.match(JSON.stringify(denied.content), /add scout to agent_computers.builder.grants.send/);
     assert.deepEqual(sent[0], { computer: 'reviewer', body: 'please review', replaceKey: 'r1' });
   } finally {
     await client.close();

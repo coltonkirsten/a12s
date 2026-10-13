@@ -52,7 +52,7 @@ func TestAutoSleepAndWakeOnMessage(t *testing.T) {
 	if h.events("scout", "power.auto_sleep") != 1 || h.powerOf("scout").SleptBy != api.SleptAuto {
 		t.Fatalf("auto sleep not recorded: %+v", h.powerOf("scout"))
 	}
-	other := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/computers/scout/inbox", `{"body":"from a token"}`, "Authorization", "Bearer "+h.token("ui")))
+	other := decodeBody[api.EnqueueResponse](t, h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"from a token"}`, "Authorization", "Bearer "+h.token("ui")))
 	time.Sleep(50 * time.Millisecond)
 	if h.phase("scout") != api.PhaseAsleep {
 		t.Fatal("an unlisted principal woke scout")
@@ -90,7 +90,7 @@ func TestIdleDefinition(t *testing.T) {
 	h.d.mu.Lock()
 	h.d.sessions = nil
 	h.d.mu.Unlock()
-	h.api("POST", "/v1/computers/scout/inbox/hold", `{}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/scout/inbox/hold", `{}`).Body.Close()
 	h.send("scout", "held, so idle")
 	h.waitPhase("scout", api.PhaseAsleep)
 	time.Sleep(50 * time.Millisecond)
@@ -98,7 +98,7 @@ func TestIdleDefinition(t *testing.T) {
 		t.Fatal("a held inbox woke scout")
 	}
 	// inbox resume with a listed Message pending is an eligibility moment.
-	h.api("POST", "/v1/computers/scout/inbox/resume", `{}`).Body.Close()
+	h.api("POST", "/v1/agent-computers/scout/inbox/resume", `{}`).Body.Close()
 	h.waitPhase("scout", api.PhaseBusy)
 }
 
@@ -144,7 +144,7 @@ func TestHeldSleepSuppresses(t *testing.T) {
 	c.Power.SleepAfterIdle = &idle
 	f.Computers["scout"] = c
 	h.up(f, false)
-	if res := h.api("POST", "/v1/computers/scout/power", `{"state":"asleep","hold":true}`); res.StatusCode != http.StatusOK {
+	if res := h.api("POST", "/v1/agent-computers/scout/power", `{"state":"asleep","hold":true}`); res.StatusCode != http.StatusOK {
 		t.Fatal(res.StatusCode)
 	}
 	m := h.send("scout", "while held asleep")
@@ -167,7 +167,7 @@ func TestHeldSleepSuppresses(t *testing.T) {
 	h2.waitMessage("scout", m.ID, api.MsgDelivered)
 	h2.cds.get("scout").finish(api.TurnCompleted)
 	h2.waitPhase("scout", api.PhaseReady)
-	h2.api("POST", "/v1/computers/scout/power", `{"state":"asleep"}`).Body.Close()
+	h2.api("POST", "/v1/agent-computers/scout/power", `{"state":"asleep"}`).Body.Close()
 	if ps := h2.powerOf("scout"); ps.SleptBy != api.SleptManual {
 		t.Fatalf("plain sleep: %+v", ps)
 	}
@@ -189,7 +189,7 @@ func TestCredentialsPaused(t *testing.T) {
 		ps := h2.powerOf("scout")
 		return ps != nil && ps.AutoWake == api.AutoWakePaused && ps.Reason == "credentials_not_loaded" && ps.Fix == "a12s creds set <name>"
 	})
-	if e := apiError(t, h2.api("POST", "/v1/computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
+	if e := apiError(t, h2.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"now","expires":0}`)); e.Details["reason"] != "asleep" {
 		t.Fatalf("now-or-never asleep: %+v", e)
 	}
 	if h2.phase("scout") != api.PhaseAsleep {

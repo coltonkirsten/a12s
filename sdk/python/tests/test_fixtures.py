@@ -24,6 +24,8 @@ from a12s import (
     Token,
     TurnInboxMessage,
 )
+from a12s._async import AsyncClient
+from a12s._client import Client
 from a12s._core import TurnBuilder
 from a12s._parse import _fields, from_json
 from a12s._types import AgentComputersResponse, CredentialsResponse, FleetResponse, TurnsResponse
@@ -124,7 +126,7 @@ def test_turn_builder_folds_the_turn_event_data() -> None:
         )
 
         def e(type: str, data: Any, ts: str) -> Event:
-            return Event(v=1, computer="c", session="s", turn="t", seq=1, ts=ts, type=type, data=data)
+            return Event(v=1, agent_computer="c", session="s", turn="t", seq=1, ts=ts, type=type, data=data)
 
         b = TurnBuilder()
         assert b.add(e("turn.started", started, "t0")) is None
@@ -165,7 +167,7 @@ ROUTES = {
 
 def test_client_parses_every_fixture_off_the_wire() -> None:
     transport, sent = recorder(ROUTES)
-    client = a12s.Client("http://x", "t", http=httpx.Client(transport=transport))
+    client = Client("http://x", "t", http=httpx.Client(transport=transport))
     assert client.status() == from_json(Status, FIXTURES["statusResponse"], strict=True)
     assert client.inbox("lead") == from_json(InboxList, FIXTURES["inboxListResponse"], strict=True)
     assert client.message("lead", "m_1") == from_json(Message, FIXTURES["message"], strict=True)
@@ -195,7 +197,7 @@ def test_client_parses_every_fixture_off_the_wire() -> None:
 
 def test_send_and_create_token_send_exactly_the_request_keys() -> None:
     transport, sent = recorder(ROUTES)
-    client = a12s.Client("http://x", "t", http=httpx.Client(transport=transport))
+    client = Client("http://x", "t", http=httpx.Client(transport=transport))
 
     req = FIXTURES["enqueueRequest"]
     kwargs = {snake(k): v for k, v in req.items() if k != "body"}
@@ -213,7 +215,7 @@ def test_send_and_create_token_send_exactly_the_request_keys() -> None:
 @pytest.mark.anyio
 async def test_async_client_parses_the_fixtures() -> None:
     transport, sent = recorder(ROUTES)
-    client = a12s.AsyncClient("http://x", "t", http=httpx.AsyncClient(transport=transport))
+    client = AsyncClient("http://x", "t", http=httpx.AsyncClient(transport=transport))
     assert await client.status() == from_json(Status, FIXTURES["statusResponse"], strict=True)
     assert await client.inbox("lead") == from_json(InboxList, FIXTURES["inboxListResponse"], strict=True)
     assert await client.services() == [from_json(ServiceStatus, FIXTURES["servicesResponse"]["services"][0])]

@@ -204,7 +204,7 @@ PY
   log "## 16 agent-to-agent"
   a send --wait builder "Use your a12s send tool to send the message 'please review PR 42' to reviewer. Then try sending 'hi' to scout and tell me exactly what error came back." > /tmp/gate16 2>&1; cat /tmp/gate16 >> "$LOG"
   check "16 reviewer got a message via computer:builder" eval "$A12S inbox reviewer --all --json | grep -q '\"via\": \"computer:builder\"'"
-  check "16 send to scout refused with the fix, journaled" eval "grep -q 'add scout to computers.builder.grants.send' /tmp/gate16 && $A12S logs builder | grep -q 'builder may not send to scout'"
+  check "16 send to scout refused with the fix, journaled" eval "grep -q 'add scout to agent_computers.builder.grants.send' /tmp/gate16 && $A12S logs builder | grep -q 'builder may not send to scout'"
 
   log "## 17 webhook"
   body='{"action":"opened","repository":{"full_name":"c/a12s"},"pull_request":{"title":"Gate","html_url":"https://x/1"}}'
@@ -223,11 +223,11 @@ PY
     docker exec -u 0 a12s-gate-clock cat /run/a12s/tls/$f | a shell builder --root -- sh -c "mkdir -p /tmp/cert && cat > /tmp/cert/$f"
   done
   mt() { a shell builder --root -- sh -c "curl -s -o /dev/null -w '%{http_code}' --cacert /tmp/cert/ca.crt --cert /tmp/cert/cert.pem --key /tmp/cert/key.pem -X $1 https://a12s-gate-controller:7443$2 -H 'content-type: application/json' -d '$3'"; }
-  r1=$(mt PUT /v1/fleet '{}'); r2=$(mt POST /v1/leases '{}'); r3=$(mt POST /v1/computers/scout/inbox '{"body":"from a copied clock key"}')
+  r1=$(mt PUT /v1/fleet '{}'); r2=$(mt POST /v1/leases '{}'); r3=$(mt POST /v1/agent-computers/scout/inbox '{"body":"from a copied clock key"}')
   log "with the clock's copied key: PUT /v1/fleet $r1, POST /v1/leases $r2, send to scout (granted) $r3"
   check "18 PUT /v1/fleet and POST /v1/leases are 403 over mTLS; the granted send works" eval "[ '$r1' = 403 ] && [ '$r2' = 403 ] && [ '$r3' = 201 ]"
   run a sleep clock; wait_phase clock Asleep
-  r4=$(mt POST /v1/computers/scout/inbox '{"body":"after sleep"}')
+  r4=$(mt POST /v1/agent-computers/scout/inbox '{"body":"after sleep"}')
   log "after a12s sleep clock: $r4"
   check "18 after sleep the copied cert is refused" eval "[ '$r4' = 403 ]"
   a shell builder --root -- rm -rf /tmp/cert

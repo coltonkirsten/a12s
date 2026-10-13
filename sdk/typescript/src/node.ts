@@ -1,24 +1,30 @@
-// The Node entry ("node" export condition): connect() finds a running Fleet from the files `a12s up` writes.
+// The Node entry ("node" export condition): Fleet.connect() finds a running Fleet from the files `a12s up` writes.
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { A12sClient, type A12sClientOptions } from "./client.js";
+import type { ConnectOptions as PageConnectOptions } from "./client.js";
 import { Fleet as PageFleet } from "./fleet.js";
 
-export * from "./client.js";
-export * from "./fleet.js";
-export * from "./types.js";
+export * from "./index.js";
 
 export class Fleet extends PageFleet {
-  /** A running Fleet, as its owner, found like {@link connect} finds it. */
+  /**
+   * A running Fleet, as its owner. It uses the first of:
+   * 1. `url` (and `token`), or `$A12S_URL` (and `$A12S_TOKEN`);
+   * 2. the Fleet named by `fleet`;
+   * 3. the Fleet file in `$A12S_FLEET`, else the nearest `fleet.yaml` in the current directory or a parent;
+   * 4. the only Fleet with a running Controller on this machine.
+   * For 2–4 it reads `~/.a12s/<fleet>/controller.json`, which `a12s up` writes: its URL always, and its owner token
+   * unless `token` is given (a prefix or narrow token on this machine).
+   */
   static override async connect(opts: ConnectOptions = {}): Promise<Fleet> {
     return new Fleet(await discover(opts));
   }
 }
 
-export interface ConnectOptions extends A12sClientOptions {
-  /** The Fleet's name (`metadata.name`). Default: found as described on {@link connect}. */
+export interface ConnectOptions extends PageConnectOptions {
+  /** The Fleet's name (`metadata.name`). Default: found as described on {@link Fleet.connect}. */
   fleet?: string;
   /** Where `.a12s/` lives. Default: the home directory. */
   home?: string;
@@ -26,22 +32,7 @@ export interface ConnectOptions extends A12sClientOptions {
   cwd?: string;
 }
 
-/**
- * @deprecated Use `Fleet.connect()`, which finds the Fleet the same way. Kept for one release.
- *
- * A client for a running Fleet, as its owner. It uses the first of:
- * 1. `url` (and `token`), or `$A12S_URL` (and `$A12S_TOKEN`);
- * 2. the Fleet named by `fleet`;
- * 3. the Fleet file in `$A12S_FLEET`, else the nearest `fleet.yaml` in the current directory or a parent;
- * 4. the only Fleet with a running Controller on this machine.
- * For 2–4 it reads `~/.a12s/<fleet>/controller.json`, which `a12s up` writes: its URL always, and its owner token
- * unless `token` is given (a prefix or narrow token on this machine).
- */
-export async function connect(opts: ConnectOptions = {}): Promise<A12sClient> {
-  return new A12sClient(await discover(opts));
-}
-
-async function discover(opts: ConnectOptions): Promise<A12sClientOptions> {
+async function discover(opts: ConnectOptions): Promise<PageConnectOptions> {
   const url = opts.url ?? process.env.A12S_URL;
   if (url) return { url, token: opts.token ?? process.env.A12S_TOKEN, fetch: opts.fetch };
   const home = join(opts.home ?? homedir(), ".a12s");
@@ -102,7 +93,7 @@ async function onlyRunningFleet(home: string): Promise<string> {
   if (running.length === 1) return running[0]!;
   throw new Error(
     running.length === 0
-      ? "no running Fleet found: run a12s up in your Fleet's directory, or pass connect({ url, token })"
-      : `several Fleets are running (${running.join(", ")}): pass connect({ fleet: "<name>" }) or run from the Fleet's directory`,
+      ? "no running Fleet found: run a12s up in your Fleet's directory, or pass Fleet.connect({ url, token })"
+      : `several Fleets are running (${running.join(", ")}): pass Fleet.connect({ fleet: "<name>" }) or run from the Fleet's directory`,
   );
 }

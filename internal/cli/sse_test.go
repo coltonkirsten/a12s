@@ -17,7 +17,7 @@ import (
 
 func writeEvent(t *testing.T, w http.ResponseWriter, seq int64, typ api.EventType, data string) {
 	t.Helper()
-	ev := api.Event{V: 1, Computer: "scout", Turn: "t_1", Seq: seq, Type: typ, Data: json.RawMessage(data)}
+	ev := api.Event{V: 1, AgentComputer: "scout", Turn: "t_1", Seq: seq, Type: typ, Data: json.RawMessage(data)}
 	b, err := json.Marshal(ev)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestStreamReconnectExactlyOnce(t *testing.T) {
 			http.Error(w, "no", http.StatusUnauthorized)
 			return
 		}
-		if r.URL.Path != "/v1/computers/scout/events" || r.URL.Query().Get("turn") != "t_1" {
+		if r.URL.Path != "/v1/agent-computers/scout/events" || r.URL.Query().Get("turn") != "t_1" {
 			http.Error(w, "bad path "+r.URL.String(), http.StatusBadRequest)
 			return
 		}
@@ -82,7 +82,7 @@ func TestStreamReconnectExactlyOnce(t *testing.T) {
 	reconnects := 0
 	s := &Stream{
 		Client:      testClient(srv.URL),
-		Path:        "/v1/computers/scout/events?turn=t_1",
+		Path:        "/v1/agent-computers/scout/events?turn=t_1",
 		OnReconnect: func(int64, error) { reconnects++ },
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -123,7 +123,7 @@ func TestStreamCursorAndGap(t *testing.T) {
 		fmt.Fprint(w, ": keep-alive\n\nevent: gap\ndata: {\"oldest\":100}\n\n")
 	}))
 	defer srv.Close()
-	s := &Stream{Client: testClient(srv.URL), Path: "/v1/computers/scout/events", After: 41, SendCursor: true}
+	s := &Stream{Client: testClient(srv.URL), Path: "/v1/agent-computers/scout/events", After: 41, SendCursor: true}
 	err := s.Run(context.Background(), func(api.Event) (bool, error) {
 		t.Error("no event expected")
 		return false, nil

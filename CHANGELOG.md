@@ -2,6 +2,21 @@
 
 Breaking changes are allowed before 1.0 when they make a12s simpler; each one is listed here with what to do.
 
+## Unreleased
+
+### Breaking
+- **The v0.4 names are gone.** A Fleet file's `computers:` key is refused: rename it to `agent_computers:`. The
+  `/v1/computers/...` paths are gone: use `/v1/agent-computers/...` (rebuild a Service built with svckit v0.2.1 or
+  earlier against the current svckit). `GET /v1/status` no longer carries `computers` (use `agentComputers`), events
+  and SDK Turns no longer carry `computer` (use `agentComputer` / `agent_computer`), and `GET /v1/events` no longer
+  reads `?computers=` (use `?agentComputers=`). `a12s token create --computers` is gone (use `--agent-computers`), and
+  `a12s gateway --computers` is now `--agent-computers`.
+- **The name-first clients are private.** TypeScript `connect()` and `A12sClient`, and Python `connect()`,
+  `connect_async()`, `Client` and `AsyncClient` are no longer exported: use `Fleet.connect()` / `a12s.Fleet()` /
+  `a12s.AsyncFleet()`, whose agent computer handles have the same methods (`fleet.agentComputers.get(name).send(...)`).
+  TypeScript `fleet.client` keeps `url` and `request(method, path, body?)` only; for `inbox`, `message`, `withdraw`
+  and the rest, use the agent computer handle. `A12sClientOptions` is now `ConnectOptions`.
+
 ## v0.6.0 (2026-10-13)
 
 The live Fleet is the source of truth. fleet.lock, the bindings file and drift detection are gone: `a12s up` is a

@@ -23,8 +23,8 @@ its own fleet.yaml, presets, images, Services and app code.
   moment), so count results across Turns, never expect them in one.
 - Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted.
 - Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one.
-- Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data} (`computer` is agentComputer under its
-  old name). Types and data: turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, turn.dispatched,
+- Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. Types and data:
+  turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, turn.dispatched,
   text.delta {text}, tool.started {id, name, input}, tool.finished {id, name, isError, output},
   turn.finished {status, usage, tokens?: {input, output, cacheRead, cacheWrite}, error?}, egress.denied {host, port,
   reason}, diagnostic {message}, permission, session.changed {from, to}, resume.failed, lifecycle {phase},
@@ -111,8 +111,6 @@ agent_computers:
     grants: { send: [lead] }
 ```
 
-`agent_computers:` was `computers:` before; `a12s up` still reads the old key for one release and prints a hint.
-
 Agent computer fields (all optional except a harness, image and credential, which usually come from defaults):
 
 - harness: {kind: claude-code, version: 2.1.280, model} or {kind: codex, version: 0.154.0} with credentials
@@ -184,7 +182,7 @@ a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # e
 a12s send <c> "…" --wait              # and stream the Turn that delivers it; exit 0 if it completed, 1 if not
 a12s logs <c> [--follow]              # its journal, one "<seq> <type> <data JSON>" line per event, then exits;
                                       #   --follow keeps following (Ctrl-C). Types as in Words: turn.finished, …
-a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--computers c1,c2] [--no-open]
+a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow status,events,send,inbox] [--agent-computers c1,c2] [--no-open]
 a12s ui [--port 7013] [--no-open]     # the web console (npx a12s-console; Node.js 20+); args go to the console
 a12s inbox <c> [--bodies]             # pending Messages (human table; --json for machines)
 a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Messages still queue), release, withdraw
@@ -283,8 +281,7 @@ share one connection (GET /v1/events), however many agent computers they watch. 
 session, status, text (everything the agent said in the Turn, concatenated), error?, messages: [{id, sender, via}],
 tools: [{id, name, input, output, isError}], usage, tokens?, startedAt?, finishedAt}. tool input/output and usage are `unknown`: cast,
 e.g. `(t.tools[0].input as { body: string }).body`. Streams end with `break` or `.close()`; both also take
-`{ signal }`. The spec types are `AgentComputerSpec` and `FleetSpec`. `connect()` and `A12sClient` (name-first calls
-such as `a12s.send("hello", "…")`) still work for one release, deprecated.
+`{ signal }`. The spec types are `AgentComputerSpec` and `FleetSpec`.
 
 ## Python SDK (pip install a12s; Python 3.10+)
 
@@ -344,8 +341,7 @@ fleet.close()                         # or: with a12s.Fleet() as fleet:
 ```
 
 Iteration blocks until the next Turn or event; it has no timeout. To bound it, run it in a thread or use
-AsyncFleet with asyncio.wait_for. `a12s.connect()` and `Client` (name-first calls such as
-`client.send("hello", "…")`) still work for one release, deprecated.
+AsyncFleet with asyncio.wait_for.
 
 ## Recipe: hand work from one agent to another
 
@@ -550,7 +546,7 @@ a12s gateway --web dist               # your built app (npx vite build writes di
 It prints and opens http://127.0.0.1:7012/?key=… (new key each run; `--no-open` only prints). Open that link, not
 the dev server's own port: the key becomes a cookie that /v1/ needs. Scripts and tests use the key as a
 token: Fleet.connect({ url: "http://127.0.0.1:7012", token: key }). The page may use status, events, send and
-inbox on every agent computer, not create or change them; narrow with `--allow status,events` and `--computers worker`. Messages from the page arrive
+inbox on every agent computer, not create or change them; narrow with `--allow status,events` and `--agent-computers worker`. Messages from the page arrive
 via token:gateway-7012. Loopback only; to serve other people, run your own server with login that calls a12s with a
 scoped token: narrow (`a12s token create web --actions send,status --agent-computers lead`) or, if it creates
 agent computers, a prefix token (`--prefix web-`).
@@ -623,7 +619,6 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   it with the agent computer's own grants); its specs may name any credential. Reads list only names inside it.
   Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), /v1/apply, drives and tokens are 403 forbidden.
   Egress, image, seccomp and resources are its call: trust it like the owner for its agent computers.
-- The old /v1/computers/... paths still work for one release.
 - Error codes (`code`, stable): invalid, missing_field, bad_metadata, bad_expires (400);
   unauthorized (401); forbidden, no_grant, out_of_prefix (403); not_found, unknown_request (404); busy, conflict,
   exists, in_use, idempotency_conflict, not_idle, attached (409); gone (410); version_mismatch (412);
@@ -687,8 +682,6 @@ SDK objects (Python names; TypeScript is camelCase):
 - Service: TypeScript reload, update, remove, sleep, wake; Python reload, update, sleep, wake, remove
 - Tokens: TypeScript create, list, remove; Python create, list, remove
 - Credentials: TypeScript set, list, remove; Python set, list, remove
-
-Deprecated one release (name-first): TypeScript A12sClient status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, hold, resume, services, service, createToken, putFleet; Python Client close, status, computer, send, prompt, events, turns, inbox, message, withdraw, stop, sleep, wake, hold, resume, services, service, create_token, put_fleet
 <!-- /api-surface -->
 
 ## Patterns and gotchas

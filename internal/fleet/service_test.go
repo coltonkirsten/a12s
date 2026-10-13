@@ -11,7 +11,7 @@ import (
 const svcFleet = `apiVersion: a12s.ai/v1alpha1
 kind: Fleet
 metadata: { name: lab }
-computers:
+agent_computers:
   scout:
     harness: { kind: claude-code, version: 2.1.280 }
     image: slim

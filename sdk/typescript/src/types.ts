@@ -232,8 +232,6 @@ export interface StatusResponse {
   fleet: string;
   egressEnforcement: string;
   agentComputers: ComputerStatus[];
-  /** @deprecated `agentComputers` under its old name. */
-  computers: ComputerStatus[];
   orphanedDrives?: DriveRow[];
   credentialsLoaded: boolean;
   warnings?: string[];
@@ -313,10 +311,8 @@ export interface InboxListOptions {
 /** The fields every event has. `seq` is the agent computer's journal position (0 for the Controller's own events). */
 export interface EventEnvelope {
   v: number;
-  /** The agent computer it is about; absent on `fleet.changed` and in journals older than the field. */
+  /** The agent computer it is about; absent on `fleet.changed` and `service.phase`. */
   agentComputer?: string;
-  /** `agentComputer` under its old name, for one release. */
-  computer: string;
   session: string;
   /** The Turn it belongs to; "" for events outside a Turn. */
   turn: string;
@@ -511,8 +507,6 @@ export interface ToolCall {
 /** A finished Turn: what `turns()` yields and `wait()` returns. */
 export interface Turn {
   agentComputer: string;
-  /** `agentComputer` under its old name, for one release. */
-  computer: string;
   /** The Turn id. */
   id: string;
   session: string;

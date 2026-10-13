@@ -49,9 +49,6 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/fleet` | → `{version, fleet}` with `ETag: "<version>"` (owner only) |
 | `PUT /v1/fleet` | `{fleet, credentials?, asleep?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
-The paths of earlier releases, `/v1/computers/...`, are still served as `/v1/agent-computers/...` for one release.
-`GET /v1/status` also still carries `computers`, the same list as `agentComputers`, for one release.
-
 The field-by-field shapes are in `internal/api` and the SDKs' types. A ComputerStatus carries `seccomp` (the
 profile's `sha256:` digest) when the agent computer runs with its own seccomp profile.
 

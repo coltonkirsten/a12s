@@ -8,7 +8,7 @@ import (
 )
 
 func TestEventEnvelope(t *testing.T) {
-	raw := `{"v":1,"computer":"scout","session":"s_9c","turn":"t_41","seq":7,"ts":"2026-10-05T12:00:00Z","type":"text.delta","data":{"text":"hi"}}`
+	raw := `{"v":1,"agentComputer":"scout","session":"s_9c","turn":"t_41","seq":7,"ts":"2026-10-05T12:00:00Z","type":"text.delta","data":{"text":"hi"}}`
 	var ev Event
 	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
 		t.Fatal(err)

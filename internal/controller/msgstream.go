@@ -71,7 +71,7 @@ func (c *Controller) handleMessageEvents(w http.ResponseWriter, r *http.Request)
 	rc := http.NewResponseController(w)
 	write := func(seq int64, typ string, at time.Time, data any) error {
 		raw, _ := json.Marshal(data)
-		ev := api.Event{V: api.EventVersion, Computer: name, Seq: seq, TS: at, Type: api.EventType(typ), Data: raw}
+		ev := api.Event{V: api.EventVersion, AgentComputer: name, Seq: seq, TS: at, Type: api.EventType(typ), Data: raw}
 		b, _ := json.Marshal(ev)
 		if _, err := io.WriteString(w, "id: "+strconv.FormatInt(seq, 10)+"\ndata: "+string(b)+"\n\n"); err != nil {
 			return err

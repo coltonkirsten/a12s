@@ -6,9 +6,8 @@
     hello.remove()
 """
 
-from ._async import AsyncClient, AsyncEventStream, AsyncTurnStream
-from ._client import Client, EventStream, TurnStream
-from ._connect import connect, connect_async
+from ._async import AsyncEventStream, AsyncTurnStream
+from ._client import EventStream, TurnStream
 from ._afleet import (
     AsyncAgentComputer,
     AsyncAgentComputers,
@@ -75,7 +74,6 @@ __all__ = [
     "AsyncAgentComputer",
     "AsyncAgentComputers",
     "AsyncCredentials",
-    "AsyncClient",
     "AsyncEventStream",
     "AsyncFleet",
     "AsyncSending",
@@ -87,7 +85,6 @@ __all__ = [
     "Change",
     "CredentialInfo",
     "Credentials",
-    "Client",
     "ComputerStatus",
     "DriveRow",
     "EnqueueResponse",
@@ -122,6 +119,4 @@ __all__ = [
     "TurnInboxMessage",
     "TurnStream",
     "Waiting",
-    "connect",
-    "connect_async",
 ]

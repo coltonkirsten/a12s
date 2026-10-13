@@ -1,4 +1,4 @@
-"""connect() finds a running Fleet from the files `a12s up` writes."""
+"""Fleet discovery: a running Fleet, found from the files `a12s up` writes."""
 
 from __future__ import annotations
 
@@ -7,45 +7,8 @@ import os
 import re
 from pathlib import Path
 
-from ._async import AsyncClient
-from ._client import Client
-
 _FLOW = re.compile(r"""^metadata:\s*\{[^}]*\bname:\s*["']?([A-Za-z0-9-]+)""", re.M)
 _BLOCK = re.compile(r"""^metadata:\s*(?:#.*)?\n(?:[ \t]+.*\n)*?[ \t]+name:\s*["']?([A-Za-z0-9-]+)""", re.M)
-
-
-def connect(
-    *,
-    fleet: str | None = None,
-    url: str | None = None,
-    token: str | None = None,
-    home: str | os.PathLike[str] | None = None,
-    cwd: str | os.PathLike[str] | None = None,
-) -> Client:
-    """A client for a running Fleet, as its owner. It uses the first of:
-
-    1. ``url`` (and ``token``), or ``$A12S_URL`` (and ``$A12S_TOKEN``);
-    2. the Fleet named by ``fleet``;
-    3. the Fleet file in ``$A12S_FLEET``, else the nearest ``fleet.yaml`` in ``cwd`` (default: the current directory)
-       or a parent;
-    4. the only Fleet with a running Controller on this machine.
-
-    For 2-4 it reads ``<home>/.a12s/<fleet>/controller.json`` (default home: the home directory), which ``a12s up``
-    writes: its URL always, and its owner token unless ``token`` is given (a prefix or narrow token on this machine).
-    """
-    return Client(*_discover(fleet, url, token, home, cwd))
-
-
-async def connect_async(
-    *,
-    fleet: str | None = None,
-    url: str | None = None,
-    token: str | None = None,
-    home: str | os.PathLike[str] | None = None,
-    cwd: str | os.PathLike[str] | None = None,
-) -> AsyncClient:
-    """connect() for asyncio."""
-    return AsyncClient(*_discover(fleet, url, token, home, cwd))
 
 
 def _discover(
@@ -102,9 +65,9 @@ def _only_running_fleet(root: Path) -> str:
         return running[0]
     if not running:
         raise RuntimeError(
-            "no running Fleet found: run a12s up in your Fleet's directory, or pass connect(url=..., token=...)"
+            "no running Fleet found: run a12s up in your Fleet's directory, or pass Fleet(url=..., token=...)"
         )
     raise RuntimeError(
-        f"several Fleets are running ({', '.join(running)}): pass connect(fleet=\"<name>\") or run from the Fleet's "
+        f"several Fleets are running ({', '.join(running)}): pass Fleet(fleet=\"<name>\") or run from the Fleet's "
         "directory"
     )
