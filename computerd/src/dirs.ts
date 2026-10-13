@@ -1,4 +1,4 @@
-import { chmodSync, chownSync, closeSync, constants, fchownSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, fchownSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { AGENT_GID, AGENT_UID, type Config } from './config.js';
 import { agentFs } from './credentials.js';
 
@@ -51,6 +51,8 @@ export function prepareKeep(cfg: Config): void {
   for (const p of homeMounts(cfg, cfg.keep, readFileSync('/proc/self/mountinfo', 'utf8'))) {
     const fd = openSync(p, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     try {
+      // O_NOFOLLOW covers only the last component: what the fd really is must still be p, whatever changed since.
+      if (readlinkSync(`/proc/self/fd/${fd}`) !== p) throw new Error(`${p} moved while it was being prepared`);
       const st = fstatSync(fd);
       if (st.uid !== AGENT_UID || st.gid !== AGENT_GID) fchownSync(fd, AGENT_UID, AGENT_GID);
     } finally {
