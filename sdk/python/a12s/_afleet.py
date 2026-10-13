@@ -5,7 +5,7 @@ from __future__ import annotations
 import builtins
 import os
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import httpx
 
@@ -13,6 +13,7 @@ from . import _core as core
 from ._async import AsyncClient, AsyncEventStream, AsyncTurnStream
 from ._connect import _discover
 from ._errors import A12sError
+from ._fleetstream import AsyncFleetEventStream, AsyncFleetTurnStream, AsyncSharedStream, names_of
 from ._parse import from_json
 from ._spec import AgentComputerSpec, FleetSpec
 from ._types import (
@@ -26,6 +27,7 @@ from ._types import (
     ServiceStatus,
     Status,
     Token,
+    Turn,
 )
 
 from ._fleet import _REPLACE_TRIES, FleetState, ac_path, fleet_state, service_path, write_headers
@@ -103,15 +105,29 @@ class AsyncAgentComputer:
             replace_key=replace_key,
         )
 
-    def events(
-        self, *, turn: str | None = None, after: int | None = None, reconnect: float = 1.0, on_gap: core.OnGap = "yield"
-    ) -> AsyncEventStream:
-        """Its events, live; ``turn`` replays one Turn from its start."""
-        return self._fleet._client.events(self.name, turn=turn, after=after, reconnect=reconnect, on_gap=on_gap)
+    def events(self, *, turn: str | None = None, on_gap: core.OnGap = "yield") -> AsyncFleetEventStream | AsyncEventStream:
+        """Its events, live, from the Fleet's shared connection; ``turn`` replays one Turn from its start instead."""
+        if turn is not None:
+            return self._fleet._client.events(self.name, turn=turn, on_gap=on_gap)
+        return AsyncFleetEventStream(self._fleet._shared, frozenset([self.name]), on_gap)
 
-    def turns(self, *, reconnect: float = 1.0, on_gap: core.OnGap = "yield") -> AsyncTurnStream:
-        """Its Turns, live, as they end."""
-        return self._fleet._client.turns(self.name, reconnect=reconnect, on_gap=on_gap)
+    @overload
+    def turns(self, *, limit: None = None, on_gap: core.OnGap = "yield") -> AsyncFleetTurnStream: ...
+
+    @overload
+    def turns(self, *, limit: int, on_gap: core.OnGap = "yield") -> Awaitable[builtins.list[Turn]]: ...
+
+    def turns(
+        self, *, limit: int | None = None, on_gap: core.OnGap = "yield"
+    ) -> AsyncFleetTurnStream | Awaitable[builtins.list[Turn]]:
+        """Its Turns as they end, live; with ``limit``, its last finished Turns instead, newest first."""
+        if limit is not None:
+            return self._past_turns(limit)
+        return AsyncFleetTurnStream(AsyncFleetEventStream(self._fleet._shared, frozenset([self.name]), on_gap))
+
+    async def _past_turns(self, limit: int) -> builtins.list[Turn]:
+        res = await self._fleet._client._request("GET", ac_path(self.name, f"/turns?limit={limit}"))
+        return [core.turn_of(t) for t in (res or {}).get("turns") or []]
 
     async def update(self, **changes: Unpack[AgentComputerSpec]) -> AsyncAgentComputer:
         """Changes the given fields (maps merge, lists replace). It applies at the next idle moment; the session
@@ -293,6 +309,7 @@ class AsyncFleet:
         http: httpx.AsyncClient | None = None,
     ) -> None:
         self._client = AsyncClient(*_discover(fleet, url, token, home, cwd), http=http)
+        self._shared = AsyncSharedStream(self._client)
         self.url = self._client.url
         self.agent_computers = AsyncAgentComputers(self)
         self.services = AsyncServices(self)
@@ -311,25 +328,14 @@ class AsyncFleet:
     async def status(self) -> Status:
         return await self._client.status()
 
-    def events(
-        self,
-        agent_computers: str | Sequence[str] | None = None,
-        *,
-        reconnect: float = 1.0,
-        on_gap: core.OnGap = "yield",
-    ) -> AsyncEventStream:
-        """Live events of every agent computer (or those named), merged."""
-        return self._client.events(agent_computers, reconnect=reconnect, on_gap=on_gap)
+    def events(self, agent_computers: str | Sequence[str] | None = None, *, on_gap: core.OnGap = "yield") -> AsyncFleetEventStream:
+        """Live events of every agent computer (or those named), and the Fleet's own (fleet.changed,
+        agent_computer.phase), on the Fleet's one shared connection."""
+        return AsyncFleetEventStream(self._shared, names_of(agent_computers), on_gap)
 
-    def turns(
-        self,
-        agent_computers: str | Sequence[str] | None = None,
-        *,
-        reconnect: float = 1.0,
-        on_gap: core.OnGap = "yield",
-    ) -> AsyncTurnStream:
+    def turns(self, agent_computers: str | Sequence[str] | None = None, *, on_gap: core.OnGap = "yield") -> AsyncFleetTurnStream:
         """Turns of every agent computer (or those named), as they end."""
-        return self._client.turns(agent_computers, reconnect=reconnect, on_gap=on_gap)
+        return AsyncFleetTurnStream(self.events(agent_computers, on_gap=on_gap))
 
     async def get(self) -> FleetState:
         """The whole AsyncFleet as written, and its version."""

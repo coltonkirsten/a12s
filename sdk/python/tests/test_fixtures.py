@@ -26,7 +26,7 @@ from a12s import (
 )
 from a12s._core import TurnBuilder
 from a12s._parse import _fields, from_json
-from a12s._types import AgentComputersResponse, CredentialsResponse, FleetResponse
+from a12s._types import AgentComputersResponse, CredentialsResponse, FleetResponse, TurnsResponse
 
 FIXTURES: dict[str, Any] = json.loads((Path(__file__).parents[2] / "fixtures" / "api.json").read_text())
 
@@ -43,12 +43,21 @@ PARSED: dict[str, tuple[type, Callable[[Any], Any]]] = {
     "fleetResponse": (FleetResponse, lambda f: f),
     "agentComputersResponse": (AgentComputersResponse, lambda f: f),
     "credentialsResponse": (CredentialsResponse, lambda f: f),
+    "turnsResponse": (TurnsResponse, lambda f: f),
 }
 # Requests the client builds from keyword arguments, and responses it passes through as dicts.
 REQUESTS = {"enqueueRequest", "tokenRequest"}
 RAW = {"putFleetResponse", "error"}
 # Event data stays the raw JSON dict; the ones TurnBuilder reads are folded below.
-EVENT_DATA = {"diagnosticData", "resumeFailedData", "textDeltaData", "turnFinishedData"}
+EVENT_DATA = {
+    "diagnosticData",
+    "resumeFailedData",
+    "textDeltaData",
+    "turnFinishedData",
+    "egressDeniedData",
+    "fleetChangedData",
+    "phaseData",
+}
 
 
 def snake(key: str) -> str:
