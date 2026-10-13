@@ -178,31 +178,40 @@ role: put instructions in its `instructions`.
 
 ```ts
 for await (const t of fleet.turns(["lead", "worker1"])) {
-  console.log(t.computer, t.status, t.messages.map((m) => m.via), t.text);
+  console.log(t.agentComputer, t.status, t.messages.map((m) => m.via), t.text);
 }
 ```
 
 ```python
 for t in fleet.turns(["lead", "worker1"]):
-    print(t.computer, t.status, [m.via for m in t.messages], t.text)
+    print(t.agent_computer, t.status, [m.via for m in t.messages], t.text)
 ```
 
-A Turn has `computer`, `id`, `status` (`completed`, `failed` or `interrupted`), `text` (everything the agent
-said), `error`, `messages` (the Messages it delivered, each with `id`, `sender` and `via`), `tools` (each tool call
-with `name`, `input`, `output`, `isError` / `is_error`), `usage`, `startedAt` / `started_at` and `finishedAt` /
-`finished_at`. `error` is a string; `input`, `output` and `usage` are the harness's JSON as is (a dict in Python).
+A Turn has `agentComputer` / `agent_computer` (`computer` is the same, for one release), `id`, `status`
+(`completed`, `failed` or `interrupted`), `text` (everything the agent said), `error`, `messages` (the Messages it
+delivered, each with `id`, `sender` and `via`), `tools` (each tool call with `name`, `input`, `output`, `isError` /
+`is_error`), `usage`, `tokens`, `startedAt` / `started_at` and `finishedAt` / `finished_at`. `error` is a string;
+`input`, `output` and `usage` are the harness's JSON as is (a dict in Python). `tokens` (`TokenUsage`) is the same
+for every harness: `input` (not counting cached input), `output`, `cacheRead` / `cache_read`, `cacheWrite` /
+`cache_write`.
+
+Turns that already ended: `agent.turns({ limit: 20 })` (`agent.turns(limit=20)`) returns its last finished Turns,
+newest first, up to 200. The Controller keeps them, so this works while nothing was watching and while the agent
+computer sleeps.
 What an agent sends to another agent computer is in `tools`: a call named `mcp__a12s__send` whose `input` has
 `computer` and `body`.
 
 ### Events
 
-`events()` is the same stream before it's folded into Turns: every event as it happens. `fleet.events()` merges
-every agent computer (or those named); `agent.events()` follows one.
+`events()` is the same stream before it's folded into Turns: every event as it happens. `fleet.events()` has every
+agent computer (or those named) and the Fleet's own events (`fleet.changed`, `agent_computer.phase`);
+`agent.events()` follows one. Every `events()` and `turns()` of one Fleet object shares one connection, however many
+agent computers they watch.
 
 ```ts
 for await (const ev of fleet.events()) {
   if (ev.type === "text.delta") process.stdout.write(ev.data.text);
-  if (ev.type === "tool.started") console.log(`\n[${ev.computer}] ${ev.data.name}`);
+  if (ev.type === "tool.started") console.log(`\n[${ev.agentComputer}] ${ev.data.name}`);
 }
 ```
 
@@ -211,7 +220,7 @@ for ev in fleet.events():
     if ev.type == "text.delta":
         print(ev.data["text"], end="", flush=True)
     if ev.type == "tool.started":
-        print(f"\n[{ev.computer}] {ev.data['name']}")
+        print(f"\n[{ev.agent_computer}] {ev.data['name']}")
 ```
 
 In TypeScript, events are a typed union: narrow on `ev.type` and `ev.data` has the right shape. In Python,
@@ -239,13 +248,12 @@ with fleet.turns(["lead", "worker1", "worker2"]) as turns:   # entering waits un
 An agent computer that is asleep counts as connected; its events start when it wakes. To end a stream, `break`, or
 call `close()` (Python: leaving the `with` block). TypeScript also takes `{ signal }`.
 
-Streams reconnect by themselves after a network drop and resume exactly where they were. If the Controller can't
-resume (the agent computer's journal was reset), the stream yields one `gap` event and carries on live; pass
+Streams reconnect by themselves after a network drop and resume where they were. If the Controller can't resume
+(it restarted, or the stream fell too far behind), the stream yields one `gap` event and carries on live; pass
 `onGap: "throw"` (`on_gap="throw"`) to raise `A12sGapError` instead. Events were lost either way: resync with
-`fleet.status()`.
+`fleet.status()` and `agent.turns({ limit })`.
 
-To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`). To resume a stream you saved:
-`{ after: lastSeq }` (`after=last_seq`).
+To replay one Turn from its start: `analyst.events({ turn: r.id })` (`turn=r.id`).
 
 ## The whole Fleet
 

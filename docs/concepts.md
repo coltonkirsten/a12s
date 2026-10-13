@@ -107,7 +107,8 @@ Every event goes to an append-only SQLite journal on the agent computer's home d
 cannot open, so an agent can't read, edit or erase its own record. `a12s logs <name>` replays it; reconnecting with
 `Last-Event-ID` resumes without losing or duplicating events.
 
-Every event has the envelope `{v:1, computer, session, turn, seq, ts, type, data}`. Types:
+Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type, data}` (`computer` is
+`agentComputer` under its old name, for one release). Types:
 
 | Type | `data` |
 |---|---|
@@ -116,13 +117,20 @@ Every event has the envelope `{v:1, computer, session, turn, seq, ts, type, data
 | `text.delta` | `{text}`: streamed text from the agent |
 | `tool.started` | `{id, name, input}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send` |
 | `tool.finished` | `{id, name, isError, output}` |
-| `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, error?}` |
-| `diagnostic` | `{message, …}`: something an operator should see. Every Claude Code Turn has one or two `egress denied` diagnostics for telemetry hosts the proxy blocks; they are harmless |
+| `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, tokens?, error?}`: `usage` is the harness's own; `tokens` is `{input, output, cacheRead, cacheWrite}` for every harness (`input` excludes cached input) |
+| `egress.denied` | `{host, port, reason}`: the egress proxy refused a connection. Every Claude Code Turn has one or two, for telemetry hosts; they are harmless |
+| `diagnostic` | `{message, …}`: something an operator should see |
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
 
-The SDKs type these ([SDK](sdk.md)); `turns()` folds them into one record per Turn.
+The fleet-wide stream (`GET /v1/events`) adds two events the Controller makes: `fleet.changed`
+`{version, by, names}` when a write changes the Fleet, and `agent_computer.phase` `{phase, error?}` when an agent
+computer's phase changes.
+
+The SDKs type these ([SDK](sdk.md)); `turns()` folds them into one record per Turn. The Controller keeps the last 200
+finished Turns of each agent computer in the same shape (`GET /v1/agent-computers/{c}/turns`), so a Turn that ended
+while nobody watched can still be read.
 
 ## System tools
 

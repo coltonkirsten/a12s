@@ -20,11 +20,14 @@ its own fleet.yaml, presets, images, Services and app code.
   idle moment, batched with anything else pending. Works while it is busy or asleep.
 - Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted.
 - Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one.
-- Event: journal entry, {v, computer, session, turn, seq, ts, type, data}. Types and data:
-  turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, turn.dispatched, text.delta {text},
-  tool.started {id, name, input}, tool.finished {id, name, isError, output}, turn.finished {status, usage, error?},
-  diagnostic {message}, permission, session.changed {from, to}, resume.failed, lifecycle {phase}, harness.restarted,
-  inbox.discarded. SDK-made: gap (events lost; resync).
+- Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data} (`computer` is agentComputer under its
+  old name). Types and data: turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, turn.dispatched,
+  text.delta {text}, tool.started {id, name, input}, tool.finished {id, name, isError, output},
+  turn.finished {status, usage, tokens?: {input, output, cacheRead, cacheWrite}, error?}, egress.denied {host, port,
+  reason}, diagnostic {message}, permission, session.changed {from, to}, resume.failed, lifecycle {phase},
+  harness.restarted, inbox.discarded. On the fleet-wide stream only: fleet.changed {version, by, names} and
+  agent_computer.phase {phase, error?}. SDK-made: gap (events lost; resync). `tokens` is the same for every harness
+  (input excludes cached input); `usage` is the harness's own.
 - via: who really sent a Message: local (owner CLI/SDK), token:<name>, service:<name>, computer:<name>. sender is
   only the sender's own label. Trust via, not sender.
 - grants.send: agent computers this agent computer (or Service) may send to. On an agent computer it adds the MCP
@@ -209,14 +212,15 @@ r.status; r.text; r.id; r.error; r.messages; r.tools; r.message.id   // a Turn p
 const m = await lead.send("…");                     // or send("…", { sender, metadata, fresh, expires (seconds),
 m.id; m.state;                                      //   replaceKey, idempotencyKey }); returns at once
 
-const turns = fleet.turns(["lead", "worker1"]);     // finished Turns; no argument = every agent computer
+const turns = fleet.turns(["lead", "worker1"]);     // Turns as they end; no argument = every agent computer
 await turns.ready();                                // connected: nothing after this is missed
-for await (const t of turns) { t.computer; t.text; t.status; t.messages[0]?.via; t.tools[0]?.name; break; }
+for await (const t of turns) { t.agentComputer; t.text; t.status; t.tokens?.output; t.messages[0]?.via; break; }
 
-const evs = lead.events();                          // live from now; fleet.events(names?) merges several
+const evs = lead.events();                          // live from now; fleet.events(names?) for several or all
 await evs.ready();
 for await (const ev of evs) { if (ev.type === "text.delta") ev.data.text; }   // typed by ev.type
 lead.events({ turn: r.id });                        // replay one Turn from its start
+const past = await lead.turns({ limit: 20 });       // its last finished Turns, newest first
 
 await lead.update({ instructions: "…", power: null }); // JSON merge patch: null goes back to the default;
                                                        // a busy one picks it up at its next idle moment
@@ -239,9 +243,10 @@ await fleet.replace((f) => { f.defaults!.power = { sleepAfterIdle: "15m" }; }); 
 // A12sStreamError, A12sGapError (onGap: "throw"). A failed Turn is not an error: prompt() returns it, status "failed".
 ```
 
-events() and turns() start live (nothing from before they connect). Types: Turn {computer, id, session, status,
-text (everything the agent said in the Turn, concatenated), error?, messages: [{id, sender, via}], tools: [{id, name, input,
-output, isError}], usage, startedAt?, finishedAt}. tool input/output and usage are `unknown`: cast,
+events() and turns() start live (nothing from before they connect), and every events() and turns() of one Fleet
+share one connection (GET /v1/events), however many agent computers they watch. Types: Turn {agentComputer, id,
+session, status, text (everything the agent said in the Turn, concatenated), error?, messages: [{id, sender, via}],
+tools: [{id, name, input, output, isError}], usage, tokens?, startedAt?, finishedAt}. tool input/output and usage are `unknown`: cast,
 e.g. `(t.tools[0].input as { body: string }).body`. Streams end with `break` or `.close()`; both also take
 `{ signal }`. The spec types are `AgentComputerSpec` and `FleetSpec`. `connect()` and `A12sClient` (name-first calls
 such as `a12s.prompt("hello", "…")`) still work for one release, deprecated.
@@ -269,12 +274,13 @@ m = lead.send("…", sender="app", metadata={"k": "v"}, fresh=False, expires=Non
 m.id, m.state                         # body is a str; options are keyword-only
 with fleet.turns(["lead", "worker1"]) as turns:   # entering waits until connected
     lead.send("task")
-    for t in turns:                   # t.computer, t.text, t.status, t.error, t.messages[0].via
+    for t in turns:                   # t.agent_computer, t.text, t.status, t.error, t.tokens, t.messages[0].via
         for tool in t.tools:          # tool.name, tool.input (dict), tool.output, tool.is_error
             pass
         break
-for ev in lead.events():              # ev.type, ev.computer, ev.turn, ev.data (dict, camelCase keys)
-    pass                              # lead.events(turn=r.id) replays one Turn; fleet.events() merges all
+for ev in lead.events():              # ev.type, ev.agent_computer, ev.turn, ev.data (dict, camelCase keys)
+    pass                              # lead.events(turn=r.id) replays one Turn; fleet.events() has them all
+lead.turns(limit=20)                  # its last finished Turns, newest first (without limit: live, as they end)
 lead.update(instructions="…")         # changes only these fields; applies at its next idle moment
 lead.inbox(bodies=True); lead.message(m.id); lead.withdraw(m.id); lead.stop(); lead.sleep(); lead.wake()
 coder.remove()                        # stops and removes it; its drives are kept
@@ -529,8 +535,11 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
 ({"port", "token"}). Errors are {code, message, fix}.
 
 - Messages: POST /v1/agent-computers/{c}/inbox {"body", "idempotencyKey", "sender"?, "metadata"?, "fresh"?,
-  "expires"? (seconds), "replaceKey"?} → {id, state, …}; GET /v1/status; GET /v1/agent-computers/{c}/events (SSE;
-  id = seq; Last-Event-ID resumes; `event: head` {seq} marks live; `event: gap` = events lost).
+  "expires"? (seconds), "replaceKey"?} → {id, state, …}; GET /v1/status.
+- Events: GET /v1/events is one SSE stream for the whole Fleet (?agentComputers=a,b filters): id is an opaque
+  string, Last-Event-ID resumes, `event: head` marks live, `event: gap` = events lost (resync). It also carries
+  fleet.changed and agent_computer.phase. GET /v1/agent-computers/{c}/events is one agent computer's journal (id =
+  seq; ?turn=<id> replays one Turn). GET /v1/agent-computers/{c}/turns?limit=20 → {turns: [Turn]}, newest first.
 - One agent computer (owner or prefix token): PUT /v1/agent-computers/{c} with its spec as JSON (fleet.yaml's
   fields; seccomp is the profile object) creates or replaces it; add `If-None-Match: *` to only create (409 exists
   if taken). PATCH is a JSON merge patch (null removes a key, so it falls back to the default); DELETE removes it, drives kept.
@@ -608,7 +617,7 @@ SDK objects (Python names; TypeScript is camelCase):
 
 - Fleet: TypeScript get, replace, events, turns, status; Python close, status, events, turns, get, replace; Python AsyncFleet aclose, status, events, turns, get, replace
 - AgentComputers: TypeScript create, get, list; Python create, get, list
-- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, update, sleep, wake, stop, inbox, message, withdraw, remove
+- AgentComputer: TypeScript reload, update, remove, prompt, send, events, turns, sleep, wake, stop, inbox, message, withdraw; Python reload, prompt, send, events, turns, turns, turns, update, sleep, wake, stop, inbox, message, withdraw, remove
 - Services: TypeScript create, get, list; Python create, get, list
 - Service: TypeScript reload, update, remove, sleep, wake; Python reload, update, sleep, wake, remove
 - Tokens: TypeScript create, list, remove; Python create, list, remove
@@ -628,7 +637,7 @@ Deprecated one release (name-first): TypeScript A12sClient status, computer, sen
   which retries on 412 version_mismatch.
 - Send each new task with fresh=true so the agent starts a new conversation.
 - An agent can only `send` to agent computers in its grants.send; anything else gets 403 no_grant.
-- Every Claude Code Turn logs one or two `diagnostic` "egress denied" events for telemetry hosts: harmless.
+- Every Claude Code Turn logs one or two `egress.denied` events for telemetry hosts: harmless.
 - Nothing is delivered? `a12s inbox <c>` (held? says why; `a12s inbox resume <c>`), `a12s status` (asleep?
   `a12s wake <c>`), `a12s doctor`. A Turn failing with "Failed to authenticate": fix the credential, `a12s up`.
 - After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored. With
