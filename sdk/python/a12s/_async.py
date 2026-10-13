@@ -165,11 +165,11 @@ class AsyncClient:
         if id:
             await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
 
-    async def sleep(self, computer: str, *, allow_wake: bool = False) -> None:
+    async def sleep(self, computer: str, *, hold: bool = False) -> None:
         """See Client.sleep."""
         body: dict[str, Any] = {"state": "asleep"}
-        if allow_wake:
-            body["allowWake"] = True
+        if hold:
+            body["hold"] = True
         await self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
 
     async def wake(self, computer: str, *, clear_inbox: bool = False) -> None:

@@ -170,9 +170,9 @@ class AgentComputer:
             self._set(res["agentComputer"])
         return self
 
-    def sleep(self, *, allow_wake: bool = False) -> None:
-        """Puts it to sleep until wake(). With ``allow_wake``, its power policy (wakeOnMessage) may wake it."""
-        self._fleet._client.sleep(self.name, allow_wake=allow_wake)
+    def sleep(self, *, hold: bool = False) -> None:
+        """Puts it to sleep; a sender in its wakeOnMessage wakes it. With ``hold``, it stays asleep until wake()."""
+        self._fleet._client.sleep(self.name, hold=hold)
 
     def wake(self, *, clear_inbox: bool = False) -> None:
         """Wakes it; ``clear_inbox`` discards the pending Messages first."""

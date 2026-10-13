@@ -256,13 +256,13 @@ export class A12sClient {
   }
 
   /**
-   * Stops the agent computer's processes and keeps its disks, session and inbox. It stays asleep until wake(); with
-   * `allowWake` its power policy (wakeOnMessage) may wake it instead.
+   * Stops the agent computer's processes and keeps its disks, session and inbox. A Message from a sender its power
+   * policy lists (wakeOnMessage) wakes it; with `hold` it stays asleep until wake().
    */
-  async sleep(computer: string, opts: { allowWake?: boolean } = {}): Promise<void> {
+  async sleep(computer: string, opts: { hold?: boolean } = {}): Promise<void> {
     await this.request("POST", `/v1/agent-computers/${enc(computer)}/power`, {
       state: "asleep",
-      ...(opts.allowWake ? { allowWake: true } : {}),
+      ...(opts.hold ? { hold: true } : {}),
     });
   }
 

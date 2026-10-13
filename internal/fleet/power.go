@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	MinSleepAfterIdle      = time.Minute
+	MinSleepAfterIdle      = time.Second
 	MaxSleepAfterIdle      = 7 * 24 * time.Hour
 	DefaultMaxWakesPerHour = 6
 	MaxMaxWakesPerHour     = 60
@@ -71,9 +71,9 @@ func validatePower(field string, p Power, computer func(string) bool, service fu
 		d, err := ParseIdle(*p.SleepAfterIdle)
 		switch {
 		case err != nil:
-			bad("sleepAfterIdle", "use off, or 1m to 7d (e.g. 15m, 2h, 1d)", "%v", err)
+			bad("sleepAfterIdle", "use off, or 1s to 7d (e.g. 5s, 15m, 2h, 1d)", "%v", err)
 		case d != 0 && (d < MinSleepAfterIdle || d > MaxSleepAfterIdle):
-			bad("sleepAfterIdle", "use off, or 1m to 7d", "%s is out of range", *p.SleepAfterIdle)
+			bad("sleepAfterIdle", "use off, or 1s to 7d (e.g. 5s, 15m, 2h, 1d)", "%s is out of range", *p.SleepAfterIdle)
 		}
 	}
 	if w := p.WakeOnMessage; w != nil {

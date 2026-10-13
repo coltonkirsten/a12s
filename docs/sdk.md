@@ -399,7 +399,7 @@ way: in a browser, `Fleet.connect()` talks to the page's own origin.
 | AgentComputer | `inbox({ state, bodies })` | `inbox(state=…, bodies=True)` | Pending Messages (`state: "all"` includes ended ones). |
 | AgentComputer | `message(id)`, `withdraw(id)` | the same | One Message; take back a pending one. |
 | AgentComputer | `stop(turn?)` | `stop(turn=None)` | Interrupt a Turn (default: the active one). |
-| AgentComputer | `sleep({ allowWake? })`, `wake({ clearInbox? })` | `sleep(allow_wake=)`, `wake(clear_inbox=)` | Stop it and keep its disks, session and inbox; start it again. A plain sleep holds it asleep until `wake()`; `allowWake` lets its wakeOnMessage policy wake it. |
+| AgentComputer | `sleep({ hold? })`, `wake({ clearInbox? })` | `sleep(hold=)`, `wake(clear_inbox=)` | Stop it and keep its disks, session and inbox; start it again. A sender listed in its wakeOnMessage wakes a plain sleep; `hold` keeps it asleep until `wake()`. |
 | AgentComputer | `hold({ reason? })`, `resume()` | `hold(reason=)`, `resume()` | Hold delivery (Messages still queue); release it. |
 
 `connect()` and the client it returns (`A12sClient` in TypeScript, `Client` and `AsyncClient` in Python), whose

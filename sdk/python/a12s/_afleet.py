@@ -138,9 +138,9 @@ class AsyncAgentComputer:
             self._set(res["agentComputer"])
         return self
 
-    async def sleep(self, *, allow_wake: bool = False) -> None:
-        """Puts it to sleep until wake(). With ``allow_wake``, its power policy (wakeOnMessage) may wake it."""
-        await self._fleet._client.sleep(self.name, allow_wake=allow_wake)
+    async def sleep(self, *, hold: bool = False) -> None:
+        """Puts it to sleep; a sender in its wakeOnMessage wakes it. With ``hold``, it stays asleep until wake()."""
+        await self._fleet._client.sleep(self.name, hold=hold)
 
     async def wake(self, *, clear_inbox: bool = False) -> None:
         """Wakes it; ``clear_inbox`` discards the pending Messages first."""

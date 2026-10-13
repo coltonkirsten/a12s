@@ -847,33 +847,33 @@ func (c *Controller) SetPower(ctx context.Context, name string, req api.PowerReq
 	defer c.lockComputer(name)()
 	if req.State == api.PowerAsleep && c.inbox != nil {
 		// The intent is durable before the sleep starts: a crash in the
-		// middle can't leave a manual sleep unmarked.
-		by := api.SleptManual
-		if req.AllowWake {
-			by = api.SleptAllowWake
-		}
-		if err := c.inbox.SetSlept(ctx, name, by); err != nil {
+		// middle can't leave a held sleep unmarked.
+		if err := c.inbox.SetSlept(ctx, name, sleptBy(req)); err != nil {
 			return err
 		}
 	}
 	if err := c.setPowerLocked(ctx, name, req); err != nil {
 		return err
 	}
-	// A manual sleep suppresses auto-wake until a manual wake, which clears the mark and a
+	// A held sleep suppresses auto-wake until a manual wake, which clears the mark and a
 	// paused auto-wake.
 	if c.inbox != nil {
 		by := ""
 		if req.State == api.PowerAsleep {
-			by = api.SleptManual
-			if req.AllowWake {
-				by = api.SleptAllowWake
-			}
+			by = sleptBy(req)
 		}
 		if err := c.inbox.SetSlept(ctx, name, by); err != nil {
 			c.logf("%s: power mark: %v", name, err)
 		}
 	}
 	return nil
+}
+
+func sleptBy(req api.PowerRequest) string {
+	if req.Hold {
+		return api.SleptHeld
+	}
+	return api.SleptManual
 }
 
 func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.PowerRequest) error {

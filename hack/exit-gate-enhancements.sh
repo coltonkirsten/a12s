@@ -276,12 +276,12 @@ print(len(pend), pend[0]['superseded'] if pend else -1, len(repl), pend[0]['seq'
   log "## 23 power policy (scout: sleepAfterIdle 15m, at test speed 60x = 15 s)"
   run a wake scout; wait_phase scout Ready; idle scout
   check "23 scout auto-sleeps after its idle time" wait_phase scout Asleep 90
-  a sleep scout >/dev/null; wait_phase scout Asleep
+  a sleep scout --hold >/dev/null; wait_phase scout Asleep
   a prompt scout "hi" > /tmp/gate23a 2>&1
-  check "23 prompt to a manually slept scout fails with the reason" eval "grep -q 'asleep' /tmp/gate23a"
-  a sleep scout --allow-wake >/dev/null
+  check "23 prompt to a scout slept with --hold fails with the reason" eval "grep -q 'asleep' /tmp/gate23a"
+  a sleep scout >/dev/null
   a prompt scout "Reply with the single word wren." > /tmp/gate23b 2>&1; cat /tmp/gate23b >> "$LOG"
-  check "23 with --allow-wake, local wakes it: prompt prints waking and streams" eval "grep -q 'waking scout' /tmp/gate23b && grep -qi wren /tmp/gate23b"
+  check "23 after a plain sleep, local wakes it: prompt prints waking and streams" eval "grep -q 'waking scout' /tmp/gate23b && grep -qi wren /tmp/gate23b"
 fi
 
 if [[ " $SECTIONS " == *" cli "* ]]; then

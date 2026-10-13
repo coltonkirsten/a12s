@@ -246,8 +246,8 @@ func (c *Controller) judgeWake(ctx context.Context, name string, p fleet.PowerSe
 	}
 	v.wakes, _ = c.inbox.Wakes(ctx, name, c.now().Add(-c.scaled(time.Hour)))
 	switch {
-	case row.SleptBy == api.SleptManual:
-		v.state, v.reason, v.fix = api.AutoWakeSuppressed, "manual_sleep", "a12s wake "+name
+	case row.SleptBy == api.SleptHeld:
+		v.state, v.reason, v.fix = api.AutoWakeSuppressed, "held", "a12s wake "+name
 	case !c.credsLoaded(name):
 		v.state, v.reason, v.fix = api.AutoWakePaused, "credentials_not_loaded", "a12s up"
 	case row.Paused != "":

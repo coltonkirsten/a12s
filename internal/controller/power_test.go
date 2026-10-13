@@ -135,8 +135,8 @@ func TestWakeRateLimit(t *testing.T) {
 	}
 }
 
-// Manual sleep suppresses until a manual wake; --allow-wake leaves the policy in charge.
-func TestManualSleepSuppresses(t *testing.T) {
+// A held sleep suppresses until a manual wake; a plain sleep leaves the policy in charge.
+func TestHeldSleepSuppresses(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	f := powerFleet(t, 6)
 	idle := "off"
@@ -144,13 +144,13 @@ func TestManualSleepSuppresses(t *testing.T) {
 	c.Power.SleepAfterIdle = &idle
 	f.Computers["scout"] = c
 	h.up(f, nil, false)
-	if res := h.api("POST", "/v1/computers/scout/power", `{"state":"asleep"}`); res.StatusCode != http.StatusOK {
+	if res := h.api("POST", "/v1/computers/scout/power", `{"state":"asleep","hold":true}`); res.StatusCode != http.StatusOK {
 		t.Fatal(res.StatusCode)
 	}
-	m := h.send("scout", "while manually asleep")
+	m := h.send("scout", "while held asleep")
 	time.Sleep(50 * time.Millisecond)
 	if ps := h.powerOf("scout"); h.phase("scout") != api.PhaseAsleep || ps.AutoWake != api.AutoWakeSuppressed {
-		t.Fatalf("manual sleep: %s %+v", h.phase("scout"), ps)
+		t.Fatalf("held sleep: %s %+v", h.phase("scout"), ps)
 	}
 	// Survives a Controller restart.
 	h2 := startHarnessScaled(t, h.dir, h.d, powerScale)
@@ -159,7 +159,7 @@ func TestManualSleepSuppresses(t *testing.T) {
 	h2.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
 	time.Sleep(50 * time.Millisecond)
 	if h2.phase("scout") != api.PhaseAsleep || h2.message("scout", m.ID).State != api.MsgPending {
-		t.Fatal("a restart lost the manual mark")
+		t.Fatal("a restart lost the held mark")
 	}
 	if err := h2.c.SetPower(context.Background(), "scout", api.PowerRequest{State: api.PowerAwake, Credentials: labCreds}); err != nil {
 		t.Fatal(err)
@@ -167,8 +167,11 @@ func TestManualSleepSuppresses(t *testing.T) {
 	h2.waitMessage("scout", m.ID, api.MsgDelivered)
 	h2.cds.get("scout").finish(api.TurnCompleted)
 	h2.waitPhase("scout", api.PhaseReady)
-	h2.api("POST", "/v1/computers/scout/power", `{"state":"asleep","allowWake":true}`).Body.Close()
-	n := h2.send("scout", "allow-wake")
+	h2.api("POST", "/v1/computers/scout/power", `{"state":"asleep"}`).Body.Close()
+	if ps := h2.powerOf("scout"); ps.SleptBy != api.SleptManual {
+		t.Fatalf("plain sleep: %+v", ps)
+	}
+	n := h2.send("scout", "plain sleep")
 	h2.waitMessage("scout", n.ID, api.MsgDelivered)
 }
 

@@ -138,10 +138,10 @@ Agent computer fields (all optional except a harness, image and credential, whic
   access: exclusive | shared | shared-write}}`).
 - inbox: {maxMessages, maxBytes (≤1Mi), intro}. Bodies are at most 64 KiB.
 - power: {sleepAfterIdle: 15m, wakeOnMessage: {from: [local, service:clock, computer:lead, token:web],
-  maxWakesPerHour: 6}}. sleepAfterIdle is off or 1m to 7d (1m is the shortest; 30s is refused); maxWakesPerHour 1-60. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
-  A manual sleep (`a12s sleep`, SDK `sleep()`) holds it asleep until `wake`, ignoring wakeOnMessage (status says
-  "auto-wake suppressed"); `a12s sleep <c> --allow-wake`, `sleep(allow_wake=True)` or `sleep({ allowWake: true })`
-  sleeps it like sleepAfterIdle does, so a listed sender's Message wakes it.
+  maxWakesPerHour: 6}}. sleepAfterIdle is off or 1s to 7d (e.g. 5s, 15m, 2h, 1d); maxWakesPerHour 1-60. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
+  A manual sleep (`a12s sleep`, SDK `sleep()`) is like sleepAfterIdle's: a listed sender's Message wakes it (with
+  no wakeOnMessage it stays asleep until `wake`). `a12s sleep <c> --hold`, `sleep(hold=True)` or
+  `sleep({ hold: true })` keeps it asleep until `wake`, ignoring wakeOnMessage (status says "auto-wake suppressed").
 - security: {seccomp: ./profiles/x.json}: a Docker-format seccomp profile, relative to fleet.yaml, replacing
   Docker's default for that agent computer only; `a12s up` reads the file and sends the profile itself. From the SDK
   or the HTTP API, `seccomp` is the profile's JSON object. Set it only when the image's software needs blocked
@@ -192,8 +192,8 @@ a12s gateway [--web dir | --dev url | -- npm run dev] [--port 7012] [--allow sta
 a12s ui [--port 7013] [--no-open]     # the web console (npx a12s-console; Node.js 20+); args go to the console
 a12s inbox <c> [--bodies]             # pending Messages (human table; --json for machines)
 a12s inbox hold <c> | inbox resume <c> | inbox rm <c> <id>   # hold delivery (Messages still queue), release, withdraw
-a12s stop <c> | sleep <c> [--allow-wake] | wake <c> [--clear-inbox]   # plain sleep: no Message wakes it until wake;
-                                      #   --allow-wake: a sender listed in wakeOnMessage wakes it
+a12s stop <c> | sleep <c> [--hold] | wake <c> [--clear-inbox]   # plain sleep: a sender listed in wakeOnMessage
+                                      #   wakes it; --hold: no Message wakes it until wake
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
 a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names,
@@ -262,8 +262,8 @@ const box = await lead.inbox({ bodies: true });     // {computer, held, holdReas
 await lead.message(m.id); await lead.withdraw(m.id); // withdraw: a pending Message is removed, never delivered
 await lead.hold({ reason: "triage" }); await lead.resume();   // hold delivery (sends still queue); release it
 await lead.stop(); await lead.wake();               // wake({ clearInbox: true }) discards pending Messages first
-await lead.sleep();                                 // asleep until wake(): NO Message wakes it, wakeOnMessage or not
-await lead.sleep({ allowWake: true });              // asleep, and a sender listed in wakeOnMessage wakes it
+await lead.sleep();                                 // asleep, and a sender listed in wakeOnMessage wakes it
+await lead.sleep({ hold: true });                   // asleep until wake(): NO Message wakes it, wakeOnMessage or not
 await coder.remove();                               // stops and removes it; its drives are kept
 await fleet.status();                               // every agent computer and Service: phase, inbox, power
 
@@ -327,8 +327,8 @@ box = lead.inbox(bodies=True)         # box.held, box.pending, box.messages[i].i
 lead.message(m.id); lead.withdraw(m.id)   # withdraw: a pending Message is removed, never delivered
 lead.hold(reason="triage"); lead.resume() # hold delivery (sends still queue); release it
 lead.stop(); lead.wake()                  # wake(clear_inbox=True) discards pending Messages first
-lead.sleep()                              # asleep until wake(): NO Message wakes it, wakeOnMessage or not
-lead.sleep(allow_wake=True)               # asleep, and a sender listed in wakeOnMessage wakes it
+lead.sleep()                              # asleep, and a sender listed in wakeOnMessage wakes it
+lead.sleep(hold=True)                     # asleep until wake(): NO Message wakes it, wakeOnMessage or not
 coder.remove()                        # stops and removes it; its drives are kept
 fleet.status().agent_computers        # every agent computer: phase, inbox, power
 fleet.services.get("clock").sleep()   # Service: reload, update, sleep, wake, remove
@@ -697,9 +697,9 @@ Deprecated one release (name-first): TypeScript A12sClient status, computer, sen
 
 - Watch first, then send (`await turns.ready()` / `with fleet.turns(...)`), or you can miss fast Turns. Or use
   prompt(), which follows the Turn of its own Message.
-- A plain `sleep()` / `a12s sleep <c>` keeps it asleep until `wake()`: a Message queues and wakeOnMessage does NOT
-  wake it. To sleep it and let a listed sender's Message wake it (e.g. to test wakeOnMessage), use
-  `sleep(allow_wake=True)` (Python), `sleep({ allowWake: true })` (TypeScript) or `a12s sleep <c> --allow-wake`.
+- A plain `sleep()` / `a12s sleep <c>` leaves wakeOnMessage in charge: a Message from a listed sender wakes it (so
+  you can test wakeOnMessage by sleeping it and sending). To keep it asleep until `wake()` whatever is sent, use
+  `sleep(hold=True)` (Python), `sleep({ hold: true })` (TypeScript) or `a12s sleep <c> --hold`.
   After a send, reload() and check `status.phase` until it is Busy or Ready; an old Ready event proves nothing.
 - A seccomp profile's archMap/architectures take libseccomp names only (SCMP_ARCH_X86_64, SCMP_ARCH_X86,
   SCMP_ARCH_X32, SCMP_ARCH_AARCH64, SCMP_ARCH_ARM, …); the simplest valid profile that runs everything is

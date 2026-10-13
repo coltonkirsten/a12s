@@ -212,6 +212,8 @@ func phase(c api.ComputerStatus) string {
 			p += " (auto" + at + ")"
 		case api.SleptManual:
 			p += " (manual)"
+		case api.SleptHeld:
+			p += " (held)"
 		}
 	}
 	if c.ResumePending {
@@ -521,12 +523,19 @@ func PowerCell(ps *api.PowerStatus, phase api.Phase) string {
 	}
 	if ps.SleepAfterIdle != "off" && ps.SleepAfterIdle != "" && phase != api.PhaseAsleep {
 		if ps.IdleSince != nil {
-			parts = append(parts, fmt.Sprintf("idle %s of %s", time.Since(*ps.IdleSince).Round(time.Minute), ps.SleepAfterIdle))
+			parts = append(parts, fmt.Sprintf("idle %s of %s", idleFor(time.Since(*ps.IdleSince)), ps.SleepAfterIdle))
 		} else {
 			parts = append(parts, "sleeps after "+ps.SleepAfterIdle+" idle")
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+func idleFor(d time.Duration) time.Duration {
+	if d < time.Minute {
+		return d.Round(time.Second)
+	}
+	return d.Round(time.Minute)
 }
 
 func WriteServiceDetail(w io.Writer, s api.ServiceStatus) {

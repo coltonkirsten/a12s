@@ -40,7 +40,7 @@ func commands() []command {
 		{"token", "create <name> --prefix p | --actions a,b --agent-computers c | ls | rm <name>", "API tokens for other programs", runToken},
 		{"stop", "<name> [--hold]", "interrupt the active turn (--hold: hold the inbox first)", runStop},
 		{"logs", "<name> [--follow] [--since <seq>]", "replay and follow the journal", runLogs},
-		{"sleep", "<name>... | --all [--allow-wake]", "sleep agent computers (storage kept, no CPU or RAM)", runSleep},
+		{"sleep", "<name>... | --all [--hold]", "sleep agent computers (storage kept, no CPU or RAM)", runSleep},
 		{"wake", "<name>... | --all [--clear-inbox]", "wake agent computers; resume happens on the next prompt", runWake},
 		{"gateway", "[--web dir | --dev url | -- npm run dev] [--port 7012] [--allow actions]", "serve a web app (or the built-in dashboard) that can reach the Fleet", runGateway},
 		{"ui", "[console args, e.g. --port 7013 --no-open]", "open the web console (a12s-console, via npx; Node.js 20+)", runUI},

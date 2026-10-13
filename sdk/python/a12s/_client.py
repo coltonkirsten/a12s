@@ -216,12 +216,12 @@ class Client:
         if id:
             self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/turns/{core.enc(id)}/stop", {})
 
-    def sleep(self, computer: str, *, allow_wake: bool = False) -> None:
-        """Stops the agent computer's processes and keeps its disks, session and inbox. It stays asleep until wake();
-        with ``allow_wake`` its power policy (wakeOnMessage) may wake it instead."""
+    def sleep(self, computer: str, *, hold: bool = False) -> None:
+        """Stops the agent computer's processes and keeps its disks, session and inbox. A Message from a sender its
+        power policy lists (wakeOnMessage) wakes it; with ``hold`` it stays asleep until wake()."""
         body: dict[str, Any] = {"state": "asleep"}
-        if allow_wake:
-            body["allowWake"] = True
+        if hold:
+            body["hold"] = True
         self._request("POST", f"/v1/agent-computers/{core.enc(computer)}/power", body)
 
     def wake(self, computer: str, *, clear_inbox: bool = False) -> None:

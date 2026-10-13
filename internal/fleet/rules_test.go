@@ -71,7 +71,7 @@ func TestPowerValidation(t *testing.T) {
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"local"}, MaxWakesPerHour: p(61)}}, "wakeOnMessage.maxWakesPerHour", "61"},
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"computer:nobody"}}}, "wakeOnMessage.from", "no agent computer nobody"},
 		{Power{WakeOnMessage: &WakeOnMessage{From: []string{"service:clock"}}}, "wakeOnMessage.from", "no Service clock"},
-		{Power{SleepAfterIdle: p("30s")}, "sleepAfterIdle", "30s"},
+		{Power{SleepAfterIdle: p("500ms")}, "sleepAfterIdle", "500ms"},
 		{Power{SleepAfterIdle: p("8d")}, "sleepAfterIdle", "8d"},
 		{Power{SleepAfterIdle: p("soon")}, "sleepAfterIdle", "soon"},
 	} {
