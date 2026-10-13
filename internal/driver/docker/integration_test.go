@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -119,41 +118,38 @@ func TestDockerIntegration(t *testing.T) {
 		t.Fatalf("same-version bundles share an identity: %s %s", b.ImageID, other.ImageID)
 	}
 
-	presetDir := t.TempDir()
-	must(t, os.MkdirAll(filepath.Join(presetDir, ".claude"), 0o755))
-	must(t, os.WriteFile(filepath.Join(presetDir, ".claude", "settings.json"), []byte(`{"preset":true}`), 0o644))
-	var preset bytes.Buffer
-	must(t, fleet.WritePresetTar(presetDir, &preset))
+	files, _, err := fleet.FilesTar(map[string]string{".claude/settings.json": `{"files":true}`})
+	must(t, err)
 	spec := driver.ComputerSpec{
 		Name: "c", Generation: 1, Image: standin, Tier: fleet.TierCustom,
-		Bundle:   driver.BundleRef{Kind: "codex", Version: "0.0.0-test", Image: b.ImageID},
-		Autonomy: fleet.AutonomyFull, CPUMillis: 500, Memory: 256 << 20,
+		Bundle:    driver.BundleRef{Kind: "codex", Version: "0.0.0-test", Image: b.ImageID},
+		CPUMillis: 500, Memory: 256 << 20,
 		HomeDrive:   home.ID,
 		Drives:      []driver.Mount{{DriveID: data.ID, At: "/work/data"}, {DriveID: ref.ID, At: "/work/ref", ReadOnly: true}},
 		Credentials: []string{"openai"},
 	}
 
-	// A preset copy that fails leaves no staged container behind, so the
+	// A files copy that fails leaves no staged container behind, so the
 	// retry below stages and copies again instead of reporting success.
 	bad := spec
-	bad.Preset = badPreset(t)
+	bad.Files = badFilesTar(t)
 	if err := d.StageComputer(ctx, bad); err == nil {
-		t.Fatal("stage with a broken preset succeeded")
+		t.Fatal("stage with a broken files tar succeeded")
 	}
 	if obs, err := d.Observe(ctx); err != nil || len(obs.Computers) != 0 {
-		t.Fatalf("after a failed preset: %+v, %v", obs.Computers, err)
+		t.Fatalf("after a failed files copy: %+v, %v", obs.Computers, err)
 	}
 
 	// A network with the Computer's name that is not isolated is never reused.
 	_, err = cli.NetworkCreate(ctx, d.NetworkName("rogue"), client.NetworkCreateOptions{Driver: "bridge", Labels: map[string]string{LabelFleet: fleetName}})
 	must(t, err)
 	rogue := spec
-	rogue.Name, rogue.HomeDrive, rogue.Drives, rogue.Preset = "rogue", home.ID, nil, nil
+	rogue.Name, rogue.HomeDrive, rogue.Drives, rogue.Files = "rogue", home.ID, nil, nil
 	if err := d.StageComputer(ctx, rogue); err == nil || !strings.Contains(err.Error(), "not internal") {
 		t.Errorf("stage on a non-isolated network = %v", err)
 	}
 
-	spec.Preset, spec.PresetDigest = preset.Bytes(), "sha256:p1"
+	spec.Files, spec.FilesDigest = files, "sha256:p1"
 	must(t, d.StageComputer(ctx, spec))
 	staged, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
 	must(t, err)
@@ -161,8 +157,8 @@ func TestDockerIntegration(t *testing.T) {
 	if again, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{}); err != nil || again.Container.ID != staged.Container.ID {
 		t.Fatalf("same-generation restage replaced a finished container: %v", err)
 	}
-	// A same-generation container whose preset copy never finished is
-	// replaced and the preset copied again.
+	// A same-generation container whose files copy never finished is
+	// replaced and the files copied again.
 	must(t, d.writeMarker(ctx, staged.Container.ID, "pending"))
 	must(t, d.StageComputer(ctx, spec))
 	again, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
@@ -170,7 +166,7 @@ func TestDockerIntegration(t *testing.T) {
 	if again.Container.ID == staged.Container.ID {
 		t.Error("pending-marker container was reported as staged")
 	}
-	if state, err := d.readFile(ctx, again.Container.ID, presetMarker); err != nil || state != "applied sha256:p1" {
+	if state, err := d.readFile(ctx, again.Container.ID, filesMarker); err != nil || state != "applied sha256:p1" {
 		t.Errorf("marker after restage = %q, %v", state, err)
 	}
 
@@ -234,7 +230,7 @@ func TestDockerIntegration(t *testing.T) {
 		t.Errorf("asleep state = %+v", st)
 	}
 
-	// Stage generation 2 over the stopped Computer; home survives, the unchanged preset is not reapplied.
+	// Stage generation 2 over the stopped Computer; home survives, the unchanged files are not reapplied.
 	gen1ID := obs.Computers["c"].InstanceID
 	spec.Generation = 2
 	must(t, d.StageComputer(ctx, spec))
@@ -248,16 +244,15 @@ func TestDockerIntegration(t *testing.T) {
 		t.Errorf("home after restage = %q", out)
 	}
 
-	// A changed preset is copied over the home at the next stage: its files are replaced, the agent's stay.
+	// Changed files are copied over the home at the next stage: they are replaced, the agent's stay.
 	must(t, d.SetPower(ctx, "c", driver.PowerAsleep, 2))
-	must(t, os.WriteFile(filepath.Join(presetDir, ".claude", "settings.json"), []byte(`{"preset":2}`), 0o644))
-	preset.Reset()
-	must(t, fleet.WritePresetTar(presetDir, &preset))
-	spec.Generation, spec.Preset, spec.PresetDigest = 3, preset.Bytes(), "sha256:p2"
+	files, _, err = fleet.FilesTar(map[string]string{".claude/settings.json": `{"files":2}`})
+	must(t, err)
+	spec.Generation, spec.Files, spec.FilesDigest = 3, files, "sha256:p2"
 	must(t, d.StageComputer(ctx, spec))
 	must(t, d.SetPower(ctx, "c", driver.PowerAwake, 3))
-	if _, out, _ := d.Exec(ctx, "c", []string{"cat", "/home/agent/.claude/settings.json", "/home/agent/keep"}, nil, false); out != `{"preset":2}kept`+"\n" {
-		t.Errorf("home after a preset change = %q", out)
+	if _, out, _ := d.Exec(ctx, "c", []string{"cat", "/home/agent/.claude/settings.json", "/home/agent/keep"}, nil, false); out != `{"files":2}kept`+"\n" {
+		t.Errorf("home after a files change = %q", out)
 	}
 
 	// Remove: container and network go, drives stay.
@@ -356,9 +351,9 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePa
 	}
 	expect(false, "1000:1000", "sh", "-c", "echo $(id -u):$(id -g)")
 	expect(true, "0", "id", "-u")
-	// The preset landed in /home/agent, owned by the agent.
+	// The files landed in /home/agent, owned by the agent.
 	expect(true, "1000:1000\n1000:1000", "stat", "-c", "%u:%g", "/home/agent", "/home/agent/.claude/settings.json")
-	expect(false, `{"preset":true}`, "cat", "/home/agent/.claude/settings.json")
+	expect(false, `{"files":true}`, "cat", "/home/agent/.claude/settings.json")
 	// Agent writes for the restage check later.
 	expect(false, "", "sh", "-c", `printf '{"changed":true}' > /home/agent/.claude/settings.json && echo kept > /home/agent/keep`)
 	// Capabilities: exactly CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID; no new privileges.
@@ -386,7 +381,7 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePa
 	if code, _ := run(true, "", "touch", "/work/ref/x"); code == 0 {
 		t.Error("readOnly drive is writable")
 	}
-	expect(true, "applied sha256:p1", "cat", presetMarker)
+	expect(true, "applied sha256:p1", "cat", filesMarker)
 	expect(true, "docker-init", "sh", "-c", "cat /proc/1/comm")
 	expect(true, "tmpfs 700", "sh", "-c", "echo $(stat -f -c %T /run/a12s) $(stat -c %a /run/a12s)")
 	// The secret-inject path: bytes on stdin into tmpfs.
@@ -439,8 +434,8 @@ func execIn(ctx context.Context, cli *client.Client, name string, cmd ...string)
 	return res.ExitCode, out, nil
 }
 
-// badPreset is a preset tar the driver refuses (a hard link), so the copy fails.
-func badPreset(t *testing.T) []byte {
+// badFilesTar is a files tar the driver refuses (a hard link), so the copy fails.
+func badFilesTar(t *testing.T) []byte {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	must(t, tw.WriteHeader(&tar.Header{Typeflag: tar.TypeLink, Name: "l", Linkname: "x"}))

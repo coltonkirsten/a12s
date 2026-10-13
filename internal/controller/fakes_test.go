@@ -800,24 +800,14 @@ func labFleet(t *testing.T, edit func(f *fleet.Fleet)) *fleet.Fleet {
 	return f
 }
 
-// specFor is what a12s up sends for f: each agent computer as written is its merged form, with the lab's preset
-// inlined as files.
+// specFor is what a12s up sends for f: each agent computer as written is its merged form.
 func specFor(f *fleet.Fleet) *fleet.Spec {
 	s := &fleet.Spec{APIVersion: f.APIVersion, Kind: f.Kind, Metadata: f.Metadata, Egress: f.Egress, Drives: f.Drives,
 		Services: f.Services, AgentComputers: map[string]json.RawMessage{}}
-	if d := f.Defaults; d.Home.Preset == "" {
-		if raw := fleet.SpecOf(d); string(raw) != "{}" {
-			s.Defaults = raw
-		}
+	if raw := fleet.SpecOf(f.Defaults); string(raw) != "{}" {
+		s.Defaults = raw
 	}
 	for name, c := range f.Computers {
-		if p := c.Home.Preset; p != "" {
-			files, err := fleet.InlineFiles(filepath.Join("../../examples/lab", p))
-			if err != nil {
-				panic(err)
-			}
-			c.Files, c.Home.Preset = files, ""
-		}
 		s.AgentComputers[name] = fleet.SpecOf(c)
 	}
 	return s

@@ -20,12 +20,9 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// inlineInstructionsMax is the longest instructions export leaves in fleet.yaml; longer ones become a preset file.
-const inlineInstructionsMax = 2000
-
-// runExport writes the live Fleet back to the Fleet file: short instructions stay inline, longer ones and files go
-// to presets/<name>/, seccomp profiles to profiles/<name>.json. Credential values are never written. It overwrites
-// what differs: the live Fleet is the source of truth, and git diff shows what changed.
+// runExport writes the live Fleet back to the Fleet file, instructions and files included, and seccomp profiles to
+// profiles/<name>.json. Credential values are never written. It overwrites what differs: the live Fleet is the source
+// of truth, and git diff shows what changed.
 func runExport(g *globals, args []string) error {
 	flags := g.flags("export")
 	pos, err := parse(flags, args)
@@ -49,11 +46,10 @@ func runExport(g *globals, args []string) error {
 	if err := c.Do(ctx, "GET", "/v1/fleet", nil, &live); err != nil {
 		return err
 	}
-	all, err := exportFiles(&live.Fleet)
+	files, err := exportFiles(&live.Fleet)
 	if err != nil {
 		return err
 	}
-	files := maps.Clone(all)
 	dir := g.dir()
 	var wrote []string
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
@@ -64,15 +60,6 @@ func runExport(g *globals, args []string) error {
 			return err
 		case bytes.Equal(old, files[rel]):
 			delete(files, rel)
-		}
-	}
-	stale, err := stalePresetFiles(dir, all, &live.Fleet)
-	if err != nil {
-		return err
-	}
-	for _, rel := range stale {
-		if err := os.Remove(filepath.Join(dir, rel)); err != nil {
-			return err
 		}
 	}
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
@@ -90,17 +77,14 @@ func runExport(g *globals, args []string) error {
 		wrote = append(wrote, rel)
 	}
 	if g.json {
-		return printJSON(map[string]any{"version": live.Version, "wrote": wrote, "removed": stale})
+		return printJSON(map[string]any{"version": live.Version, "wrote": wrote})
 	}
-	if len(wrote) == 0 && len(stale) == 0 {
+	if len(wrote) == 0 {
 		fmt.Printf("%s already matches the live Fleet (v%d)\n", g.fleetPath, live.Version)
 		return nil
 	}
 	for _, rel := range wrote {
 		fmt.Println("wrote " + rel)
-	}
-	for _, rel := range stale {
-		fmt.Println("removed " + rel)
 	}
 	return nil
 }
@@ -116,26 +100,12 @@ func (g *globals) fleetName() (string, error) {
 // exportFiles is every file export writes, by path relative to the Fleet file's directory.
 func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 	out := map[string][]byte{}
-	var defaultsKind string
-	one := func(dirName string, raw json.RawMessage, kind string) (*fleet.Computer, error) {
+	one := func(dirName string, raw json.RawMessage) (*fleet.Computer, error) {
 		var c fleet.Computer
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &c); err != nil {
 				return nil, err
 			}
-		}
-		if c.Harness.Kind != "" {
-			kind = c.Harness.Kind
-		}
-		if len(c.Files) > 0 || len(c.Instructions) > inlineInstructionsMax {
-			preset := path.Join("presets", dirName)
-			for p, body := range c.Files {
-				out[path.Join(preset, p)] = []byte(body)
-			}
-			if c.Instructions != "" {
-				out[path.Join(preset, fleet.InstructionsFile(kind))] = []byte(c.Instructions)
-			}
-			c.Files, c.Instructions, c.Home.Preset = nil, "", "./"+preset
 		}
 		if prof := c.Security.Seccomp.Profile; len(prof) > 0 {
 			var pretty bytes.Buffer
@@ -166,11 +136,10 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 		_ = add("egress", spec.Egress)
 	}
 	if len(spec.Defaults) > 0 {
-		d, err := one("defaults", spec.Defaults, "")
+		d, err := one("defaults", spec.Defaults)
 		if err != nil {
 			return nil, fmt.Errorf("defaults: %w", err)
 		}
-		defaultsKind = d.Harness.Kind
 		_ = add("defaults", d)
 	}
 	if len(spec.Drives) > 0 {
@@ -178,7 +147,7 @@ func exportFiles(spec *fleet.Spec) (map[string][]byte, error) {
 	}
 	acs := yamlMap()
 	for _, name := range spec.Names() {
-		c, err := one(name, spec.AgentComputers[name], defaultsKind)
+		c, err := one(name, spec.AgentComputers[name])
 		if err != nil {
 			return nil, fmt.Errorf("agent_computers.%s: %w", name, err)
 		}
@@ -275,32 +244,4 @@ func allScalars(ns []*yaml.Node) bool {
 		}
 	}
 	return true
-}
-
-// stalePresetFiles are files in a preset directory export owns that the live Fleet does not have: left there, the
-// next up would send them again.
-func stalePresetFiles(dir string, all map[string][]byte, spec *fleet.Spec) ([]string, error) {
-	var out []string
-	names := append(spec.Names(), "defaults")
-	for _, name := range names {
-		root := filepath.Join(dir, "presets", name)
-		if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			rel, _ := filepath.Rel(dir, p)
-			rel = filepath.ToSlash(rel)
-			if _, ok := all[rel]; !ok {
-				out = append(out, rel)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
 }

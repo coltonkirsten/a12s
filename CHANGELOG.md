@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+Upgrading: while still on 0.6.0, remove `home:`, `autonomy:` and `inbox.intro` from fleet.yaml (and from specs your
+code writes) and run `a12s up`, so the live Fleet holds none of them; a Controller whose stored Fleet still has one
+refuses to start. Then install the new release and `a12s up`.
+
 ### Breaking
 - **The v0.4 names are gone.** A Fleet file's `computers:` key is refused: rename it to `agent_computers:`. The
   `/v1/computers/...` paths are gone: use `/v1/agent-computers/...` (rebuild a Service built with svckit v0.2.1 or
@@ -32,6 +36,22 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   - `shell --root`: use `docker exec -u 0 <container>`. The shell routes take no `root`.
   - `send --key`, the SDKs' `idempotencyKey` / `idempotency_key` send option and svckit's `Enqueue.IdempotencyKey`:
     the CLI and SDKs set a fresh key on every send themselves; the HTTP API still accepts `idempotencyKey`.
+- **`credentials` add to the defaults' list** instead of replacing it: with `defaults.credentials: [anthropic]`, an
+  agent computer's `credentials: [github]` now gets both. Other lists still replace. The write no longer warns about
+  a credentials list missing the harness's credential. To keep an agent computer off a default credential, take it
+  out of `defaults` and list it on the agent computers that need it.
+- **`home` is gone** (`home.size` and `home.preset`). Docker never enforced `home.size`: delete it. Put a preset's
+  files in `files:` (`{path: text}`) and its `CLAUDE.md` (`AGENTS.md` for Codex) in `instructions:`. `a12s export`
+  now writes instructions and files into fleet.yaml instead of `presets/<name>/`; delete the `presets/` directory
+  once you've moved its files. Agent computer status has no `homeSize`, and home drive rows no `size`.
+- **`autonomy` is gone.** Every agent computer runs as `autonomy: full` did (Claude Code `bypassPermissions`, Codex
+  approval `never`); `restricted` is removed. Delete `autonomy:` from fleet.yaml. Agent computer status has no
+  `autonomy`.
+- **`inbox.intro` is gone.** Every Batch starts with the same fixed intro line before the safety block. Delete
+  `intro:` from `inbox:`.
+- **Only the owner sets `security.seccomp`.** A prefix token's write that adds, changes or drops an agent computer's
+  own seccomp profile is `403 forbidden`; set profiles with the owner token (`a12s up`, or the SDK as owner).
+- A Controller's state from before v0.4.0 is no longer migrated: run `a12s up` with your fleet.yaml again.
 
 ## v0.6.0 (2026-10-13)
 

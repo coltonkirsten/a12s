@@ -29,8 +29,8 @@ const (
 	agentGID  = 1000
 	agentUser = "1000:1000"
 
-	// presetMarker sits outside the agent's home and is root-owned so the agent can't forge it.
-	presetMarker = "/home/.a12s-preset"
+	// filesMarker sits outside the agent's home and is root-owned so the agent can't forge it.
+	filesMarker = "/home/.a12s-files"
 
 	gatewayModeOption = "com.docker.network.bridge.gateway_mode_ipv4"
 )
@@ -96,8 +96,8 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 	if err := d.checkBundle(ctx, created.ID, spec); err != nil {
 		return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
 	}
-	if len(spec.Preset) > 0 {
-		if err := d.applyPreset(ctx, created.ID, spec); err != nil {
+	if len(spec.Files) > 0 {
+		if err := d.applyFiles(ctx, created.ID, spec); err != nil {
 			// Without the container, a retry stages (and copies) again.
 			return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
 		}
@@ -117,14 +117,14 @@ func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driv
 	if err := d.checkBundle(ctx, containerID, spec); err != nil {
 		return false, nil
 	}
-	if len(spec.Preset) == 0 {
+	if len(spec.Files) == 0 {
 		return true, nil
 	}
-	state, err := d.readFile(ctx, containerID, presetMarker)
+	state, err := d.readFile(ctx, containerID, filesMarker)
 	if err != nil {
-		return false, fmt.Errorf("preset: %w", err)
+		return false, fmt.Errorf("files: %w", err)
 	}
-	return state == appliedMarker(spec.PresetDigest), nil
+	return state == appliedMarker(spec.FilesDigest), nil
 }
 
 // mountPointRE excludes ',' and ':', which A12S_DRIVES uses as separators.
@@ -245,41 +245,41 @@ func (d *Driver) checkBundle(ctx context.Context, containerID string, spec drive
 	return nil
 }
 
-// appliedMarker names the preset a home drive holds. The marker reads "pending" during a copy, so an interrupted copy
+// appliedMarker names the files a home drive holds. The marker reads "pending" during a copy, so an interrupted copy
 // is retried.
 func appliedMarker(digest string) string { return "applied " + digest }
 
-// applyPreset copies the preset onto the home drive unless this digest is already there. It overwrites the preset's
-// own files and leaves everything else the agent wrote.
-func (d *Driver) applyPreset(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
-	state, err := d.readFile(ctx, containerID, presetMarker)
+// applyFiles copies the files onto the home drive unless this digest is already there. It overwrites those files
+// and leaves everything else the agent wrote.
+func (d *Driver) applyFiles(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
+	state, err := d.readFile(ctx, containerID, filesMarker)
 	if err != nil {
-		return fmt.Errorf("preset: %w", err)
+		return fmt.Errorf("files: %w", err)
 	}
-	if state == appliedMarker(spec.PresetDigest) {
+	if state == appliedMarker(spec.FilesDigest) {
 		return nil
 	}
 	if err := d.writeMarker(ctx, containerID, "pending"); err != nil {
 		return err
 	}
 	var buf bytes.Buffer
-	if err := rebasePresetTar(bytes.NewReader(spec.Preset), &buf, path.Base(agentHome)); err != nil {
+	if err := rebaseFilesTar(bytes.NewReader(spec.Files), &buf, path.Base(agentHome)); err != nil {
 		return err
 	}
 	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: homeMount, Content: &buf}); err != nil {
-		return fmt.Errorf("preset: copy: %w", err)
+		return fmt.Errorf("files: copy: %w", err)
 	}
-	return d.writeMarker(ctx, containerID, appliedMarker(spec.PresetDigest))
+	return d.writeMarker(ctx, containerID, appliedMarker(spec.FilesDigest))
 }
 
 func (d *Driver) writeMarker(ctx context.Context, containerID, state string) error {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	_ = tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(presetMarker), Mode: 0o600, Size: int64(len(state))})
+	_ = tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(filesMarker), Mode: 0o600, Size: int64(len(state))})
 	_, _ = tw.Write([]byte(state))
 	_ = tw.Close()
-	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: path.Dir(presetMarker), Content: &buf}); err != nil {
-		return fmt.Errorf("preset: write marker: %w", err)
+	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: path.Dir(filesMarker), Content: &buf}); err != nil {
+		return fmt.Errorf("files: write marker: %w", err)
 	}
 	return nil
 }
@@ -304,11 +304,11 @@ func (d *Driver) readFile(ctx context.Context, containerID, p string) (string, e
 	return string(b), nil
 }
 
-// rebasePresetTar rejects entries that would escape dir.
-func rebasePresetTar(r io.Reader, w io.Writer, dir string) error {
+// rebaseFilesTar rejects entries that would escape dir.
+func rebaseFilesTar(r io.Reader, w io.Writer, dir string) error {
 	tr, tw := tar.NewReader(r), tar.NewWriter(w)
 	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeDir, Name: dir + "/", Mode: 0o755, Uid: agentUID, Gid: agentGID}); err != nil {
-		return fmt.Errorf("preset tar: %w", err)
+		return fmt.Errorf("files tar: %w", err)
 	}
 	for {
 		h, err := tr.Next()
@@ -316,14 +316,14 @@ func rebasePresetTar(r io.Reader, w io.Writer, dir string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("preset tar: %w", err)
+			return fmt.Errorf("files tar: %w", err)
 		}
 		clean := path.Clean("/" + h.Name)
 		if clean == "/" {
 			continue
 		}
 		if h.Typeflag == tar.TypeLink {
-			return fmt.Errorf("preset tar: hard link %q not supported", h.Name)
+			return fmt.Errorf("files tar: hard link %q not supported", h.Name)
 		}
 		h.Name = dir + clean
 		if h.Typeflag == tar.TypeDir {
@@ -331,14 +331,14 @@ func rebasePresetTar(r io.Reader, w io.Writer, dir string) error {
 		}
 		h.Uid, h.Gid, h.Uname, h.Gname = agentUID, agentGID, "", ""
 		if err := tw.WriteHeader(h); err != nil {
-			return fmt.Errorf("preset tar: %w", err)
+			return fmt.Errorf("files tar: %w", err)
 		}
 		if _, err := io.Copy(tw, tr); err != nil {
-			return fmt.Errorf("preset tar: %w", err)
+			return fmt.Errorf("files tar: %w", err)
 		}
 	}
 	if err := tw.Close(); err != nil {
-		return fmt.Errorf("preset tar: %w", err)
+		return fmt.Errorf("files tar: %w", err)
 	}
 	return nil
 }

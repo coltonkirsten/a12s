@@ -1,4 +1,4 @@
-import type { Autonomy, HarnessKind } from '../config.js';
+import type { HarnessKind } from '../config.js';
 
 export interface McpServer {
   command: string;
@@ -16,7 +16,6 @@ export interface TurnInput {
   sessionId: string | null;
   cwd: string;
   model: string | null;
-  autonomy: Autonomy;
   mcpServers: Record<string, McpServer>;
 }
 

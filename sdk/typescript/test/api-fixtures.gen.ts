@@ -29,11 +29,9 @@ export const statusResponse: T.StatusResponse = {
       },
       "image": "image",
       "seccomp": "seccomp",
-      "autonomy": "autonomy",
       "generation": 1,
       "stagedGeneration": 1,
       "credentialGeneration": 1,
-      "homeSize": "1",
       "drives": [
         "drives"
       ],
@@ -196,7 +194,6 @@ export const statusResponseMinimal: T.StatusResponse = {
         "version": "version"
       },
       "image": "image",
-      "autonomy": "autonomy",
       "generation": 1
     }
   ]
@@ -279,11 +276,9 @@ export const putFleetResponse: T.PutFleetResponse = {
       },
       "image": "image",
       "seccomp": "seccomp",
-      "autonomy": "autonomy",
       "generation": 1,
       "stagedGeneration": 1,
       "credentialGeneration": 1,
-      "homeSize": "1",
       "drives": [
         "drives"
       ],
@@ -579,11 +574,9 @@ export const agentComputersResponse: T.AgentComputersResponse = {
         },
         "image": "image",
         "seccomp": "seccomp",
-        "autonomy": "autonomy",
         "generation": 1,
         "stagedGeneration": 1,
         "credentialGeneration": 1,
-        "homeSize": "1",
         "drives": [
           "drives"
         ],
@@ -656,7 +649,6 @@ export const agentComputersResponseMinimal: T.AgentComputersResponse = {
           "version": "version"
         },
         "image": "image",
-        "autonomy": "autonomy",
         "generation": 1
       }
     }

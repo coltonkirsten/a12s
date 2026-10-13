@@ -20,7 +20,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
-// maxFleetBody bounds PUT /v1/fleet, which carries preset tars.
+// maxFleetBody bounds PUT /v1/fleet, which carries every agent computer's files.
 const maxFleetBody = 64 << 20
 
 type httpError struct {
@@ -410,11 +410,9 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 	c.mu.Lock()
 	comp := c.state.Fleet.Computers[name]
 	cs := api.ComputerStatus{
-		Name:     name,
-		Harness:  api.Harness{Kind: comp.Harness.Kind, Version: comp.Harness.Version, Model: comp.Harness.Model},
-		Image:    comp.Image,
-		Autonomy: comp.Autonomy,
-		HomeSize: comp.Home.Size,
+		Name:    name,
+		Harness: api.Harness{Kind: comp.Harness.Kind, Version: comp.Harness.Version, Model: comp.Harness.Model},
+		Image:   comp.Image,
 	}
 	for _, d := range comp.Drives {
 		cs.Drives = append(cs.Drives, d.Name)
@@ -496,8 +494,8 @@ func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 			_ = s
 		} else if owner, ok := strings.CutPrefix(id, "home-"); ok {
 			row.Kind, row.Computer = api.DriveHome, owner
-			comp, declared := f.Computers[owner]
-			row.Size, row.Orphaned = comp.Home.Size, !declared
+			_, declared := f.Computers[owner]
+			row.Orphaned = !declared
 		} else {
 			name := strings.TrimPrefix(id, "drive-")
 			row.Name, row.Kind = name, api.DriveWork

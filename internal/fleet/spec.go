@@ -9,12 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Spec is a Fleet as written: defaults and each agent computer before the defaults are merged in. The Controller
@@ -62,8 +60,8 @@ func (s *Spec) Clone() *Spec {
 	return &out
 }
 
-// Effective merges the defaults into every agent computer (maps merge, lists and scalars replace) without
-// validating.
+// Effective merges the defaults into every agent computer (maps merge, lists and scalars replace, credentials add to
+// the defaults') without validating.
 func (s *Spec) Effective() (*Fleet, error) {
 	f := &Fleet{
 		APIVersion: s.APIVersion,
@@ -89,12 +87,9 @@ func (s *Spec) Effective() (*Fleet, error) {
 			continue
 		}
 		var c Computer
-		if err := decodeComputerJSON(MergeJSON(defaults, own), &c); err != nil {
+		if err := decodeComputerJSON(mergeComputer(defaults, own), &c); err != nil {
 			errs = append(errs, fmt.Errorf("agent_computers.%s: %w", name, err))
 			continue
-		}
-		if c.Autonomy == "" {
-			c.Autonomy = AutonomyFull
 		}
 		f.Computers[name] = c
 	}
@@ -148,6 +143,25 @@ func objectOf(raw json.RawMessage) (map[string]any, error) {
 		return nil, fmt.Errorf("want a JSON object: %v", err)
 	}
 	return out, nil
+}
+
+// mergeComputer is MergeJSON, except that credentials are the defaults' followed by the agent computer's own, each
+// name once.
+func mergeComputer(defaults, own map[string]any) map[string]any {
+	out := MergeJSON(defaults, own)
+	base, _ := defaults["credentials"].([]any)
+	extra, ok := own["credentials"].([]any)
+	if !ok || len(base) == 0 {
+		return out
+	}
+	creds := slices.Clone(base)
+	for _, c := range extra {
+		if !slices.Contains(creds, c) {
+			creds = append(creds, c)
+		}
+	}
+	out["credentials"] = creds
+	return out
 }
 
 // MergeJSON lays over onto base: objects merge key by key, anything else (lists, scalars, null) replaces. Neither
@@ -260,7 +274,7 @@ func validateFiles(c Computer) []string {
 	if c.Instructions != "" {
 		name := InstructionsFile(c.Harness.Kind)
 		if _, ok := c.Files[name]; ok {
-			bad = append(bad, fmt.Sprintf("instructions: also set as files[%q] (a preset's %s?); keep one", name, name))
+			bad = append(bad, fmt.Sprintf("instructions: also set as files[%q]; keep one", name))
 		}
 	}
 	if total > MaxFilesBytes {
@@ -269,33 +283,10 @@ func validateFiles(c Computer) []string {
 	return bad
 }
 
-// InlineFiles reads a preset directory into text files, for a12s up. Directories become implicit, and a file that
-// is not UTF-8 text is an error: the API carries text.
-func InlineFiles(dir string) (map[string]string, error) {
-	entries, err := walkPreset(dir)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for _, e := range entries {
-		switch e.typ {
-		case tar.TypeSymlink:
-			return nil, fmt.Errorf("preset %s: %s is a symlink; a12s sends presets as text files", dir, e.rel)
-		case tar.TypeReg:
-			b, err := os.ReadFile(e.abs)
-			if err != nil {
-				return nil, err
-			}
-			if !isText(b) {
-				return nil, fmt.Errorf("preset %s: %s is not UTF-8 text; a12s sends presets as text files", dir, e.rel)
-			}
-			out[e.rel] = string(b)
-		}
-	}
-	return out, nil
-}
-
-func isText(b []byte) bool { return utf8.Valid(b) && !bytes.ContainsRune(b, 0) }
+const (
+	AgentUID = 1000
+	AgentGID = 1000
+)
 
 // FilesTar is the tar the driver copies onto the home drive, and its digest. Directories are implied; a file that
 // starts with "#!" is executable. The same files always give the same bytes.

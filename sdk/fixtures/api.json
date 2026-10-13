@@ -28,11 +28,9 @@
           },
           "image": "image",
           "seccomp": "seccomp",
-          "autonomy": "autonomy",
           "generation": 1,
           "stagedGeneration": 1,
           "credentialGeneration": 1,
-          "homeSize": "1",
           "drives": [
             "drives"
           ],
@@ -104,7 +102,6 @@
             "version": "version"
           },
           "image": "image",
-          "autonomy": "autonomy",
           "generation": 1
         }
       }
@@ -586,11 +583,9 @@
         },
         "image": "image",
         "seccomp": "seccomp",
-        "autonomy": "autonomy",
         "generation": 1,
         "stagedGeneration": 1,
         "credentialGeneration": 1,
-        "homeSize": "1",
         "drives": [
           "drives"
         ],
@@ -836,11 +831,9 @@
         },
         "image": "image",
         "seccomp": "seccomp",
-        "autonomy": "autonomy",
         "generation": 1,
         "stagedGeneration": 1,
         "credentialGeneration": 1,
-        "homeSize": "1",
         "drives": [
           "drives"
         ],
@@ -1002,7 +995,6 @@
           "version": "version"
         },
         "image": "image",
-        "autonomy": "autonomy",
         "generation": 1
       }
     ]

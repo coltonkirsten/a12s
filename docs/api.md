@@ -60,6 +60,7 @@ profile's `sha256:` digest) when the agent computer runs with its own seccomp pr
   start with the prefix it may call every route the owner can, except the whole-Fleet ones (`GET`/`PUT /v1/fleet`,
   `POST /v1/apply`), drives and tokens. What its agent computers and Services send to, use and attach (`grants.send`,
   `uses`, `drives`, those from `defaults` included) must be inside the prefix too; its specs may name any credential.
+  It can't add, change or drop an agent computer's own `security.seccomp` (`403 forbidden`): only the owner sets one.
   `GET /v1/status`, `/v1/agent-computers`, `/v1/services` and `/v1/credentials` list only names inside it, and its
   status and write responses carry no Fleet-wide warnings. Anything outside is `403 out_of_prefix`; the whole-Fleet
   routes, drives and tokens are `403 forbidden`. See [Security: Tokens](security.md#tokens).
@@ -112,8 +113,8 @@ Content-Type: application/json
 With `If-Match`, a Fleet that changed since you read it answers `412 version_mismatch`: read it again and retry.
 Without it, the write is unconditional. `credentials` (`{name: value}`, values base64 in JSON) are merged into the
 Controller's store: names it leaves out keep their values. The version goes up by one with every write that changes
-something. Only the Fleet file can hold paths: a `home.preset` or a `security.seccomp` path in the body is refused
-(`a12s up` sends the preset as `files` and the profile as JSON).
+something. Only the Fleet file can hold paths: a `security.seccomp` path in the body is refused (`a12s up` sends the
+profile as JSON).
 
 **Every write** takes `?dryRun=true`: it checks the write as the write does (images, their Service manifests and
 custom-image labels included, so it fails with the same error) and lists what it would change, and changes nothing. Every

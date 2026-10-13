@@ -8,8 +8,8 @@ import { collect, fixtures, testConfig } from './helpers.js';
 
 const fake = join(fixtures, 'fake-claude.js');
 
-function setup(mode: string, autonomy: 'full' | 'restricted' = 'full', timing = { termAfterMs: 10_000, killAfterMs: 5_000 }) {
-  const cfg = testConfig({ autonomy });
+function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 }) {
+  const cfg = testConfig();
   const argsFile = join(cfg.runDir, 'args.jsonl');
   const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile }), mcpServers: {} }, fake, timing);
   const input: TurnInput = {
@@ -17,7 +17,6 @@ function setup(mode: string, autonomy: 'full' | 'restricted' = 'full', timing = 
     sessionId: null,
     cwd: cfg.agentHome,
     model: null,
-    autonomy,
     mcpServers: { a12s: { command: '/bin/true', args: ['x'], alwaysLoad: true } },
   };
   const args = () => JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n').at(-1) ?? '[]') as string[];
@@ -48,14 +47,11 @@ test('claude: maps deltas, tools and the result; passes the pinned flags', async
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"alwaysLoad":true'), 'the system tools are never deferred');
 });
 
-test('claude: restricted maps to dontAsk + no prompts, and denials become permission events once each', async () => {
-  const { adapter, input, args } = setup('deny', 'restricted');
+test('claude: denials become permission events once each', async () => {
+  const { adapter, input } = setup('deny');
   const evs = await collect((await adapter.startTurn(input)).events);
   const perms = evs.filter((e) => e.type === 'permission').map((e) => (e.data as { detail: { toolUseId: string } }).detail.toolUseId);
   assert.deepEqual(perms, ['toolu_3', 'toolu_2']);
-  const a = args();
-  assert.equal(a[a.indexOf('--permission-mode') + 1], 'dontAsk');
-  assert.equal(a[a.indexOf('--permission-prompts') + 1], 'none');
 });
 
 test('claude: resume requires the transcript; with it the SDK gets --resume', async () => {
@@ -81,7 +77,7 @@ test('claude: stop interrupts and the turn ends interrupted', async () => {
 });
 
 test('claude: a harness that ignores interrupt and SIGTERM is killed, turn ends interrupted', async () => {
-  const { adapter, input } = setup('ignore-term', 'full', { termAfterMs: 200, killAfterMs: 200 });
+  const { adapter, input } = setup('ignore-term', { termAfterMs: 200, killAfterMs: 200 });
   const run = await adapter.startTurn(input);
   setTimeout(() => void adapter.stop(), 300);
   const evs = await collect(run.events);

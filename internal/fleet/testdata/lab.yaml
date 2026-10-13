@@ -4,8 +4,6 @@ metadata: { name: lab }
 
 defaults:
   resources: { cpu: 1, memory: 2Gi }
-  home: { size: 10Gi }
-  autonomy: full                     # maps to each harness's native permission flags
   egress: { allow: [] }              # deny by default
 
 drives:
@@ -18,7 +16,11 @@ agent_computers:
     harness: { kind: claude-code, version: 2.1.280, model: claude-fable-5-1 }
     image: slim
     credentials: [anthropic]
-    home: { preset: ./presets/scout }          # copied once, onto an empty home
+    instructions: |
+      You are scout.
+    files:
+      .claude/settings.json: |
+        { "cleanupPeriodDays": 365 }
     drives: [{ name: reference, at: /work/ref, readOnly: true }]
     egress: { allow: [api.anthropic.com] }
 

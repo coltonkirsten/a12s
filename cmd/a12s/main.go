@@ -30,7 +30,7 @@ func commands() []command {
 	return []command{
 		{"init", "[dir] [--harness claude-code|codex]", "scaffold fleet.yaml and .gitignore", runInit},
 		{"up", "", "apply the Fleet file to the live Fleet: create, update, stage or remove agent computers", runUp},
-		{"export", "", "write the live Fleet back to the Fleet file and presets", runExport},
+		{"export", "", "write the live Fleet back to the Fleet file", runExport},
 		{"apply", "--interrupt [--grace 30s]", "force a staged change onto a busy agent computer", runApply},
 		{"status", "[<name>]", "state, session, active turn, harness version, warnings", runStatus},
 		{"send", "<name> \"…\" [--wait] [--fresh] [--expires d] [--replace k] [--meta k=v]", "enqueue a message (works while asleep); --wait streams the turn that delivers it", runSend},
@@ -236,7 +236,8 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 
 func (g *globals) dir() string { return filepath.Dir(g.fleetPath) }
 
-func (g *globals) presetDir(p string) string {
+// fleetRel resolves a path written in the Fleet file, which is relative to the file's directory.
+func (g *globals) fleetRel(p string) string {
 	if filepath.IsAbs(p) {
 		return p
 	}

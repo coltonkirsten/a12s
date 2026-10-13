@@ -1,17 +1,11 @@
 package controller
 
 import (
-	"archive/tar"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -38,10 +32,6 @@ type State struct {
 	// admitted with.
 	Services  map[string]*ServiceRecord         `json:"services,omitempty"`
 	Manifests map[string]*fleet.ServiceManifest `json:"manifests,omitempty"`
-
-	// LegacyFleet and LegacySeccomp are read from a state file older than Spec, and migrated.
-	LegacyFleet   json.RawMessage   `json:"fleet,omitempty"`
-	LegacySeccomp map[string]string `json:"seccomp,omitempty"`
 }
 
 type Record struct {
@@ -95,12 +85,6 @@ func loadState(path string) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	if st.Spec == nil && len(st.LegacyFleet) > 0 {
-		if st.Spec, err = migrateLegacy(filepath.Dir(path), st); err != nil {
-			return nil, fmt.Errorf("load state %s: migrate: %w", path, err)
-		}
-	}
-	st.LegacyFleet, st.LegacySeccomp = nil, nil
 	if st.Spec != nil {
 		// A Spec the Controller once admitted that no longer resolves would stop the whole resume: start empty
 		// and let the next a12s up say why instead.
@@ -109,73 +93,6 @@ func loadState(path string) (*State, error) {
 		}
 	}
 	return st, nil
-}
-
-// migrateLegacy turns the effective Fleet an older Controller stored into a Spec: each agent computer as written is
-// its merged form, its preset becomes files and its seccomp path the profile.
-func migrateLegacy(stateDir string, st *State) (*fleet.Spec, error) {
-	var old struct {
-		APIVersion string                     `json:"apiVersion"`
-		Kind       string                     `json:"kind"`
-		Metadata   fleet.Metadata             `json:"metadata"`
-		Egress     fleet.FleetEgress          `json:"egress"`
-		Drives     map[string]fleet.Drive     `json:"drives"`
-		Computers  map[string]json.RawMessage `json:"computers"`
-		Services   map[string]fleet.Service   `json:"services"`
-	}
-	if err := json.Unmarshal(st.LegacyFleet, &old); err != nil {
-		return nil, err
-	}
-	spec := &fleet.Spec{APIVersion: old.APIVersion, Kind: old.Kind, Metadata: old.Metadata, Egress: old.Egress, Drives: old.Drives,
-		Services: old.Services, AgentComputers: map[string]json.RawMessage{}}
-	lock := st.Pins
-	if lock == nil {
-		lock = fleet.NewPins()
-	}
-	for name, raw := range old.Computers {
-		var c fleet.Computer
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil, fmt.Errorf("computers.%s: %w", name, err)
-		}
-		if p := c.Home.Preset; p != "" {
-			files, err := filesFromTar(loadPreset(stateDir, lock.Presets[p]))
-			if err != nil {
-				return nil, fmt.Errorf("computers.%s.home.preset: %w", name, err)
-			}
-			c.Files, c.Home.Preset = files, ""
-		}
-		if p := c.Security.Seccomp.Path; p != "" {
-			c.Security.Seccomp = fleet.Seccomp{Profile: json.RawMessage(st.LegacySeccomp[lock.Seccomp[p]])}
-		}
-		spec.AgentComputers[name] = fleet.SpecOf(c)
-	}
-	return spec, nil
-}
-
-// filesFromTar keeps a stored preset's text files; nil data is an empty preset.
-func filesFromTar(data []byte) (map[string]string, error) {
-	out := map[string]string{}
-	tr := tar.NewReader(bytes.NewReader(data))
-	for len(data) > 0 {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-		b, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, err
-		}
-		if utf8.Valid(b) {
-			out[hdr.Name] = string(b)
-		}
-	}
-	return out, nil
 }
 
 func readStateFile(path string) (*State, error) {
@@ -214,24 +131,4 @@ func (s *State) save(path string) error {
 		return fmt.Errorf("save state: %w", err)
 	}
 	return nil
-}
-
-// presetDir holds the preset tars of Controllers older than Spec, read once to migrate their state.
-const presetDir = "presets"
-
-func presetPath(stateDir, sum string) string {
-	return filepath.Join(stateDir, presetDir, strings.TrimPrefix(sum, "sha256:")+".tar")
-}
-
-// loadPreset returns the stored tar for sum, or nil when it is missing or
-// no longer matches its hash.
-func loadPreset(stateDir, sum string) []byte {
-	data, err := os.ReadFile(presetPath(stateDir, sum))
-	if err != nil {
-		return nil
-	}
-	if got, err := hashPresetTar(data); err != nil || got != sum {
-		return nil
-	}
-	return data
 }

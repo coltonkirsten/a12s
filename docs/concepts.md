@@ -37,7 +37,7 @@ puts this together.
 | **Grant** | A permission written on the side that acts: `grants.send` (may send to these agent computers), `uses` (may reach these Services). |
 | **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server, a webhook bridge. See [Services](services.md). |
 | **Drive** | A persistent volume: each agent computer's home drive, plus shared work drives. |
-| **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds skills, settings and anything else. A **preset** (`home.preset`) is a directory of such files that `a12s up` sends. |
+| **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds skills, settings and anything else. |
 | **Harness**, **HarnessBundle** | The agent program (Claude Code or Codex), shipped as a pinned read-only bundle per version. |
 | **Controller** | The process `a12s up` starts in a container: it holds the Fleet and its version, reconciles it, owns the inboxes and serves the API. |
 | **computerd** | The small daemon inside every agent computer that runs the harness and keeps the journal. |
@@ -149,11 +149,8 @@ itself is read-only.
 
 ## Permissions
 
-There's nobody to answer a permission prompt, so `autonomy` in the Fleet maps onto each harness's native settings:
-
-- `full` (default): the agent owns its computer. Claude Code runs with `bypassPermissions`; Codex with approval
-  policy `never` and `danger-full-access`.
-- `restricted`: every permission request is denied automatically (Claude Code `dontAsk`; Codex `on-request` with
-  `workspace-write` and auto-decline).
+There's nobody to answer a permission prompt, so the agent owns its computer: Claude Code runs with
+`bypassPermissions`, Codex with approval policy `never` and `danger-full-access`. The sandbox is the agent computer
+itself ([Security](security.md)).
 
 Every decision emits a `permission` event, so a Turn never hangs on a question.

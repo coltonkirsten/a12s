@@ -38,7 +38,7 @@ func Load(path string) (*Fleet, error) {
 	return f, nil
 }
 
-// LoadSpec reads a Fleet file as written. home.preset and security.seccomp paths stay paths.
+// LoadSpec reads a Fleet file as written. security.seccomp paths stay paths.
 func LoadSpec(path string) (*Spec, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

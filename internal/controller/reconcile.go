@@ -1,15 +1,12 @@
 package controller
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -64,6 +61,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 
 	c.mu.Lock()
 	cur, version, oldFleet := c.state.Spec, c.state.Version, c.state.Fleet
+	before := cur
 	storedPins := c.state.Pins
 	c.mu.Unlock()
 	if o.ifMatch != nil && *o.ifMatch != version {
@@ -88,7 +86,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if err != nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
 	}
-	if err := checkScope(o.by, f, o); err != nil {
+	if err := checkScope(o.by, f, before, spec, o); err != nil {
 		return api.PutFleetResponse{}, err
 	}
 	if err := admitFields(f, o); err != nil {
@@ -113,7 +111,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	waits := credentialWaits(f, manifests, creds, o)
 	if o.dryRun {
 		res := api.PutFleetResponse{Version: version, DryRun: true, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{},
-			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
+			Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()), Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 		if o.by.prefix() != "" {
 			res.Warnings = nil
 		}
@@ -199,7 +197,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		c.fleetChanged(version, o.by.principal, changes)
 	}
 
-	res := api.PutFleetResponse{Version: version, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings(), f.CredentialWarnings()),
+	res := api.PutFleetResponse{Version: version, Changes: changes, Created: []string{}, Updated: []string{}, Staged: []string{}, Removed: []string{}, Warnings: slices.Concat(admitWarnings, f.InboxWarnings(), f.GrantWarnings()),
 		Services: api.ServiceChanges{Created: []string{}, Updated: []string{}, Removed: []string{}}}
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -344,17 +342,14 @@ func admitFields(f *fleet.Fleet, o writeOpts) error {
 		if comp.Image == "" {
 			missing = append(missing, field+".image")
 		}
-		if comp.Home.Preset != "" {
-			fileOnly = append(fileOnly, field+".home.preset")
-		}
 		if comp.Security.Seccomp.Path != "" {
 			fileOnly = append(fileOnly, field+".security.seccomp")
 		}
 	}
 	if len(fileOnly) > 0 {
 		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid,
-			Message: strings.Join(fileOnly, ", ") + ": paths exist only in a Fleet file; send the preset as files and the seccomp profile as JSON",
-			Fix:     "a12s up does this; from the API set instructions, files and security.seccomp inline"}}
+			Message: strings.Join(fileOnly, ", ") + ": a path exists only in a Fleet file; send the seccomp profile as JSON",
+			Fix:     "a12s up does this; from the API set security.seccomp to the profile itself"}}
 	}
 	if len(missing) > 0 {
 		return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrMissingField,
@@ -429,9 +424,8 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 	}
 	c.mu.Lock()
 	rec := c.state.Computers[name]
-	homeSize := c.state.Fleet.Computers[name].Home.Size
 	c.mu.Unlock()
-	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name, Size: int64(homeSize)}); err != nil {
+	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name}); err != nil {
 		return unchanged, c.fail(name, err, true)
 	}
 
@@ -1018,9 +1012,9 @@ func ensurePinned(ctx context.Context, ref, pin string, ensure func(context.Cont
 }
 
 // buildSpec is the Driver spec of a Computer under the applied Fleet and
-// its pins (generation and preset bytes unset), and the hash of what makes a
+// its pins (generation and files bytes unset), and the hash of what makes a
 // generation: image, bundle, resources, drives, environment, egress, the
-// Fleet's egress enforcement and the preset's and seccomp profile's digests.
+// Fleet's egress enforcement and the files' and seccomp profile's digests.
 func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1042,7 +1036,6 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Tier:        comp.Tier(),
 		Bundle:      driver.BundleRef{Kind: comp.Harness.Kind, Version: comp.Harness.Version, Image: bundle},
 		Model:       comp.Harness.Model,
-		Autonomy:    comp.Autonomy,
 		CPUMillis:   comp.Resources.CPU.Millis(),
 		Memory:      int64(comp.Resources.Memory),
 		HomeDrive:   driver.HomeDriveID(name),
@@ -1052,7 +1045,7 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 	}
 	if files := comp.HomeFiles(); len(files) > 0 {
 		var err error
-		if spec.Preset, spec.PresetDigest, err = fleet.FilesTar(files); err != nil {
+		if spec.Files, spec.FilesDigest, err = fleet.FilesTar(files); err != nil {
 			return driver.ComputerSpec{}, "", err
 		}
 	}
@@ -1070,9 +1063,9 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Egress        []string
 		// Omitted when enforced, so enforced generations keep their hash.
 		Unenforced bool   `json:",omitempty"`
-		Preset     string `json:",omitempty"`
+		Files      string `json:",omitempty"`
 		Seccomp    string `json:",omitempty"`
-	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced(), spec.PresetDigest, seccompDigest})
+	}{spec.Image, bundle, spec.CPUMillis, spec.Memory, spec.Drives, spec.Env(c.cfg.Fleet), egress, f.Egress.Unenforced(), spec.FilesDigest, seccompDigest})
 	if err != nil {
 		return spec, "", err
 	}
@@ -1093,38 +1086,6 @@ func admitSeccomp(f *fleet.Fleet, warnings *[]string) {
 			*warnings = append(*warnings, fmt.Sprintf("agent_computers.%s.security.seccomp: the profile allows every syscall it does not list", name))
 		}
 	}
-}
-
-// hashPresetTar is fleet.HashPreset computed over the tar stream
-// fleet.WritePresetTar made of the same directory.
-func hashPresetTar(data []byte) (string, error) {
-	tr := tar.NewReader(bytes.NewReader(data))
-	h := sha256.New()
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("preset tar: %w", err)
-		}
-		rel := strings.TrimSuffix(hdr.Name, "/")
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			fmt.Fprintf(h, "d %q %o\n", rel, hdr.Mode)
-		case tar.TypeSymlink:
-			fmt.Fprintf(h, "l %q %q\n", rel, hdr.Linkname)
-		case tar.TypeReg:
-			fh := sha256.New()
-			if _, err := io.Copy(fh, tr); err != nil {
-				return "", fmt.Errorf("preset tar: %w", err)
-			}
-			fmt.Fprintf(h, "f %q %o %d %s\n", rel, hdr.Mode, hdr.Size, hex.EncodeToString(fh.Sum(nil)))
-		default:
-			return "", fmt.Errorf("preset tar: unsupported entry %q", hdr.Name)
-		}
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // admitComputerImage accepts a custom image only if it was built FROM a compatible a12s base image: computerd is

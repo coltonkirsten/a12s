@@ -28,22 +28,6 @@ func (c *clock) add(d time.Duration) {
 
 func newStore(t *testing.T, limits map[string]Limits) (*Store, *clock) {
 	t.Helper()
-	return newStoreCfg(t, cfgs(limits))
-}
-
-func cfgs(limits map[string]Limits) map[string]Config {
-	if limits == nil {
-		return nil
-	}
-	out := map[string]Config{}
-	for k, v := range limits {
-		out[k] = Config{Limits: v}
-	}
-	return out
-}
-
-func newStoreCfg(t *testing.T, limits map[string]Config) (*Store, *clock) {
-	t.Helper()
 	s, err := Open(filepath.Join(t.TempDir(), "fleet.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +36,7 @@ func newStoreCfg(t *testing.T, limits map[string]Config) (*Store, *clock) {
 	c := &clock{t: time.Date(2026, 10, 7, 18, 0, 0, 0, time.UTC)}
 	s.SetClock(c.now)
 	if limits == nil {
-		limits = map[string]Config{"builder": {Limits: BuiltinLimits()}, "scout": {Limits: BuiltinLimits()}}
+		limits = map[string]Limits{"builder": BuiltinLimits(), "scout": BuiltinLimits()}
 	}
 	if err := s.SyncFleet(context.Background(), limits, "local"); err != nil {
 		t.Fatal(err)
@@ -260,7 +244,7 @@ func TestReplaceAtFullInbox(t *testing.T) {
 	// Lower the limit below what is outstanding.
 	lim.MaxMessages.Value = 1
 	lim.MaxMessages.Source = "computer"
-	if err := s.SyncFleet(context.Background(), cfgs(map[string]Limits{"builder": lim}), "local"); err != nil {
+	if err := s.SyncFleet(context.Background(), map[string]Limits{"builder": lim}, "local"); err != nil {
 		t.Fatal(err)
 	}
 	sum, _ := s.Summary(context.Background(), "builder")
@@ -336,7 +320,7 @@ func TestClearHoldResumeOrphan(t *testing.T) {
 		t.Fatalf("summary %+v", sum)
 	}
 	// Remove builder from the Fleet: orphaned, enqueue refused.
-	if err := s.SyncFleet(context.Background(), cfgs(map[string]Limits{"scout": BuiltinLimits()}), "local"); err != nil {
+	if err := s.SyncFleet(context.Background(), map[string]Limits{"scout": BuiltinLimits()}, "local"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Enqueue(context.Background(), Enqueue{Computer: "builder", Principal: "local", Req: api.EnqueueRequest{Body: "x"}}, nil); !errors.Is(err, ErrUnknownInbox) {
@@ -347,7 +331,7 @@ func TestClearHoldResumeOrphan(t *testing.T) {
 		t.Fatalf("inboxes %+v", all)
 	}
 	// The name comes back: reattached with its Message.
-	if err := s.SyncFleet(context.Background(), cfgs(map[string]Limits{"builder": BuiltinLimits(), "scout": BuiltinLimits()}), "local"); err != nil {
+	if err := s.SyncFleet(context.Background(), map[string]Limits{"builder": BuiltinLimits(), "scout": BuiltinLimits()}, "local"); err != nil {
 		t.Fatal(err)
 	}
 	sum, _ = s.Summary(context.Background(), "builder")
@@ -379,7 +363,7 @@ func TestDurableAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = s.SyncFleet(context.Background(), cfgs(map[string]Limits{"builder": BuiltinLimits()}), "local")
+	_ = s.SyncFleet(context.Background(), map[string]Limits{"builder": BuiltinLimits()}, "local")
 	enq(t, s, "builder", "local", api.EnqueueRequest{Body: "survives"})
 	_ = s.Hold(context.Background(), "builder", api.HoldOperator, "", "local")
 	s.Close()

@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 
 export type HarnessKind = 'claude-code' | 'codex';
-export type Autonomy = 'full' | 'restricted';
 
 export const AGENT_UID = 1000;
 export const AGENT_GID = 1000;
@@ -11,7 +10,6 @@ export interface Config {
   fleet: string;
   generation: string;
   harness: { kind: HarnessKind; version: string; model: string | null };
-  autonomy: Autonomy;
   imageTier: string;
   bundle: string;
   credentials: string[];
@@ -57,7 +55,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     fleet: env.A12S_FLEET ?? '',
     generation: env.A12S_GENERATION ?? '0',
     harness: { kind, version: env.A12S_HARNESS_VERSION ?? 'unknown', model: env.A12S_MODEL || null },
-    autonomy: oneOf<Autonomy>('A12S_AUTONOMY', env.A12S_AUTONOMY, ['full', 'restricted'], 'full'),
     imageTier: env.A12S_IMAGE_TIER ?? 'slim',
     bundle: env.A12S_BUNDLE ?? `/opt/a12s/bundles/${kind}-${env.A12S_HARNESS_VERSION ?? ''}`,
     credentials: (env.A12S_CREDENTIALS ?? '').split(',').map((s) => s.trim()).filter(Boolean),

@@ -54,9 +54,8 @@ Run the nightly dependency audit.
 
 - `from` is the sender's own, unverified label. `via` is the authenticated principal (`local`, `token:<name>`,
   `service:<name>`, `computer:<name>`) and the only field an agent should trust.
-- The **intro** line is set by the owner with `inbox.intro` (at most 512 bytes and 8 lines; `""` renders none). It
-  is escaped so it can't forge a frame.
-- The **safety block** after it is fixed in the binary; nothing in the Fleet, API or CLI can remove or edit it.
+- The **intro** line and the **safety block** after it are fixed in the binary; nothing in the Fleet, API or CLI can
+  remove or edit them.
 
 ## Message options
 
@@ -90,24 +89,10 @@ delivery is never replaced. A replace that doesn't grow the inbox is accepted ev
 
 ## Queue size
 
-```yaml
-defaults:
-  inbox: { maxMessages: 200, maxBytes: 320Ki }   # the built-in values
-agent_computers:
-  builder:
-    inbox: { maxMessages: 50, intro: "Review requests from scout, oldest first." }
-```
-
-| Field | Default | Allowed |
-|---|---|---|
-| `maxMessages` | 200 | 1 to 2,000 outstanding (pending + claimed) Messages |
-| `maxBytes` | 320Ki | 8Ki to 1Mi of rendered bytes, including a fixed 4 KiB preamble reserve |
-
-The byte cap is the input budget: the whole pending snapshot becomes one prompt next to the session it continues.
-1Mi is a hard ceiling; values above the default warn on `a12s up`. A full inbox answers `429 inbox_full`; a
-Message that could never fit answers `413 exceeds_inbox`. Lowering a limit below what is outstanding drops nothing:
-new enqueues are refused until the backlog drains. Limit changes take effect when the Fleet is accepted, without
-restarting the agent computer.
+An inbox holds at most 200 outstanding (pending + claimed) Messages and 320 KiB of rendered bytes, including a fixed
+4 KiB preamble reserve. The byte cap is the input budget: the whole pending snapshot becomes one prompt next to the
+session it continues. A full inbox answers `429 inbox_full`; a Message that could never fit answers
+`413 exceeds_inbox`.
 
 ## Holds
 

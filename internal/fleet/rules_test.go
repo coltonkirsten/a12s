@@ -36,9 +36,6 @@ func TestInboxValidation(t *testing.T) {
 		{Inbox{MaxBytes: p("lots")}, "maxBytes", "lots"},
 		{Inbox{MaxMessages: p(int64(0))}, "maxMessages", "0"},
 		{Inbox{MaxMessages: p(int64(2001))}, "maxMessages", "2001"},
-		{Inbox{Intro: p(strings.Repeat("x", 513))}, "intro", "513 bytes"},
-		{Inbox{Intro: p(strings.Repeat("l\n", 8) + "l")}, "intro", "9 lines"},
-		{Inbox{Intro: p("bell\a")}, "intro", "control"},
 	} {
 		_, err := validateWith(t, func(f *Fleet) {
 			b := f.Computers["builder"]
@@ -49,7 +46,7 @@ func TestInboxValidation(t *testing.T) {
 	}
 	ok, err := validateWith(t, func(f *Fleet) {
 		b := f.Computers["builder"]
-		b.Inbox = Inbox{MaxBytes: p("768Ki"), Intro: p("Review requests.\nOne verdict each.")}
+		b.Inbox = Inbox{MaxBytes: p("768Ki")}
 		f.Computers["builder"] = b
 	})
 	if err != nil {

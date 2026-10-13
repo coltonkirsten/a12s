@@ -451,7 +451,8 @@ a12s token create dashboard --actions status,events --agent-computers '*'   # re
 - A **prefix token** may do everything the owner can with agent computers, Services and credentials whose names start
   with its prefix: `fleet.agentComputers.create("biz-a", …)`, send, events, sleep, remove. Lists show only those
   names; anything outside, or a spec whose `grants.send`, `uses` or drives (also from `defaults`) point outside,
-  raises `out_of_prefix`. It can't call `fleet.get()`, `fleet.replace()` or `fleet.tokens`. See
+  raises `out_of_prefix`. It can't call `fleet.get()`, `fleet.replace()` or `fleet.tokens`, or set
+  `security.seccomp` (`forbidden`). See
   [Security: Tokens](security.md#tokens).
 - A **narrow token** may make only its actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on its agent
   computers. A token with `send` sees only its own Messages. Creating, changing and removing agent computers, Services

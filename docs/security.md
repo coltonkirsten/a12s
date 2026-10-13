@@ -35,9 +35,10 @@ agent_computers:
 
 - **It replaces only the seccomp filter.** The agent computer keeps `no-new-privileges`, the same capabilities, the
   read-only root filesystem and everything else above. There is no privileged mode and no capability option.
-- **Only the Fleet's owner, or a prefix token for its own agent computers, sets it.** It comes from `fleet.yaml` or
-  from a write through the SDK or the HTTP API, never from an image label or file, so a pulled image can't loosen its
-  own sandbox.
+- **Only the Fleet's owner sets it.** It comes from `fleet.yaml` or from an owner-token write through the SDK or the
+  HTTP API, never from an image label or file, so a pulled image can't loosen its own sandbox. A prefix token's write
+  that adds, changes or drops an agent computer's own `security.seccomp` is `403 forbidden`; it may change the rest of
+  an agent computer the owner gave a profile, and remove it.
 - **It travels inline.** In the Fleet file it is a path relative to the file (or the profile itself, as a mapping);
   `a12s up` reads the file and sends the profile's JSON. Through the SDK and the HTTP API, `security.seccomp` is the
   profile's JSON object; a path there is refused.
@@ -107,12 +108,14 @@ Three kinds of bearer token call the owner API:
     top-level egress, and it can't remove drives or create, list or remove tokens.
   - Its specs may name any credential, so its agent computers can use the owner's keys without seeing them. It may
     set and remove only credentials whose names start with its prefix.
+  - It can't set a seccomp profile (`security.seccomp`): that loosens the sandbox, so only the owner sets one. A
+    write that adds, changes or drops one is `403 forbidden`.
 - **A narrow token** (`a12s token create dash --actions status,events --agent-computers a,b`) may make only those
   actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on those agent computers (or `*`). It can't change the
   Fleet. Use it for read-only dashboards and webhooks; `a12s gateway` uses one.
 
-There is no ceiling inside a prefix token's lane: egress (`allow: ["*"]` included), image, seccomp profile and
-resources are its call, and its agent computers can use any stored credential. One rule, the prefix, is easier to get
+Inside a prefix token's lane, egress (`allow: ["*"]` included), image and resources are its call, and its agent
+computers can use any stored credential; only the seccomp profile stays with the owner. One rule, the prefix, is easier to get
 right than a dozen limits, and it leaves an app free to shape its own agent computers. Treat a prefix token like the
 owner token for the agent computers it creates, and give it only to programs you trust that far. What it can't do is
 reach, read or change anything outside its prefix.
@@ -132,7 +135,7 @@ the agent so. See [Inbox](inbox.md#what-the-agent-sees).
 
 - Containers share the host kernel. Tenants that are hostile to each other need a sandboxed runtime (gVisor, Kata).
 - Any host on an allowlist is a possible exfiltration channel.
-- With `autonomy: full` (the default), the agent approves its own tool calls inside its agent computer.
+- The agent approves its own tool calls inside its agent computer.
 - MCP config the agent writes to its home drive (and a cloned repo's `.mcp.json`) is loaded after
   `restart_harness`.
 - A Service program can copy its own secret into its state drive; choose Service programs the way you choose MCP

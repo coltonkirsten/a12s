@@ -1,10 +1,6 @@
 package fleet
 
-import (
-	"fmt"
-	"strings"
-	"unicode/utf8"
-)
+import "fmt"
 
 const (
 	InboxDefaultMaxMessages = 200
@@ -13,11 +9,7 @@ const (
 	InboxDefaultMaxBytes    = 320 << 10
 	InboxMinMaxBytes        = 8 << 10
 	InboxCeilMaxBytes       = 1 << 20
-	IntroMaxBytes           = 512
-	IntroMaxLines           = 8
 )
-
-const DefaultIntro = "These messages arrived while you were busy or asleep, oldest first."
 
 const (
 	SourceComputer = "computer"
@@ -30,7 +22,6 @@ type InboxSettings struct {
 	MaxMessagesSource string
 	MaxBytes          int64
 	MaxBytesSource    string
-	Intro             string
 }
 
 // ResolveInbox reports a value equal to the default's as from defaults, since
@@ -38,7 +29,7 @@ type InboxSettings struct {
 func (f *Fleet) ResolveInbox(name string) InboxSettings {
 	c := f.Computers[name].Inbox
 	d := f.Defaults.Inbox
-	s := InboxSettings{MaxMessages: InboxDefaultMaxMessages, MaxMessagesSource: SourceBuiltin, MaxBytes: InboxDefaultMaxBytes, MaxBytesSource: SourceBuiltin, Intro: DefaultIntro}
+	s := InboxSettings{MaxMessages: InboxDefaultMaxMessages, MaxMessagesSource: SourceBuiltin, MaxBytes: InboxDefaultMaxBytes, MaxBytesSource: SourceBuiltin}
 	if c.MaxMessages != nil {
 		s.MaxMessages, s.MaxMessagesSource = *c.MaxMessages, SourceComputer
 		if d.MaxMessages != nil && *d.MaxMessages == *c.MaxMessages {
@@ -52,9 +43,6 @@ func (f *Fleet) ResolveInbox(name string) InboxSettings {
 				s.MaxBytesSource = SourceDefaults
 			}
 		}
-	}
-	if c.Intro != nil {
-		s.Intro = *c.Intro
 	}
 	return s
 }
@@ -76,19 +64,6 @@ func validateInbox(field string, in Inbox) []error {
 			bad("maxBytes", "set 1Mi or less", "%s is above the 1Mi ceiling, which protects the model's context budget", *in.MaxBytes)
 		case b < InboxMinMaxBytes:
 			bad("maxBytes", "set 8Ki or more", "%s is below the 8Ki floor", *in.MaxBytes)
-		}
-	}
-	if in.Intro != nil {
-		t := *in.Intro
-		switch {
-		case len(t) > IntroMaxBytes:
-			bad("intro", "shorten it", "%d bytes is over the 512-byte cap", len(t))
-		case strings.Count(t, "\n")+1 > IntroMaxLines && t != "":
-			bad("intro", "use at most 8 lines", "%d lines is over the 8-line cap", strings.Count(t, "\n")+1)
-		case !utf8.ValidString(t):
-			bad("intro", "use UTF-8 text", "is not valid UTF-8")
-		case strings.IndexFunc(t, func(r rune) bool { return r != '\n' && (r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0)) }) >= 0:
-			bad("intro", "remove control characters (newlines are allowed)", "contains a control character")
 		}
 	}
 	return errs

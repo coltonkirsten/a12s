@@ -20,7 +20,9 @@ func (d *Driver) EnsureDrive(ctx context.Context, spec driver.DriveSpec) (bool, 
 	labels := map[string]string{
 		LabelFleet: d.fleet,
 		LabelDrive: spec.ID,
-		LabelSize:  strconv.FormatInt(spec.Size, 10),
+	}
+	if spec.Size > 0 {
+		labels[LabelSize] = strconv.FormatInt(spec.Size, 10)
 	}
 	switch spec.Kind {
 	case driver.DriveHome:

@@ -35,7 +35,7 @@ has() { grep -qE -- "(^|[^A-Za-z0-9/_-])$1([^A-Za-z0-9/_-]|\$)" <<<"$2"; }
 case $kind in
 claude-code)
   help=$(run "$dir/$bin" --help 2>&1) || true
-  for f in --session-id --resume --output-format --input-format --permission-mode --permission-prompts \
+  for f in --session-id --resume --output-format --input-format --permission-mode \
            --setting-sources --mcp-config --include-partial-messages --replay-user-messages; do
     has "$f" "$help" && pass "claude --help lists $f" || bad "claude --help lacks $f"
   done ;;

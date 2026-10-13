@@ -35,15 +35,13 @@ export interface AgentComputerSpec {
   /** File contents by path, written into the agent computer's home. */
   files?: Record<string, string>;
   resources?: { cpu?: string | number; memory?: string | number };
-  home?: { size?: string | number; preset?: string };
-  autonomy?: "full" | "restricted";
-  /** Credential names; their values come from `a12s up` or the credentials API. */
+  /** Credential names, added to the defaults' list; their values come from `a12s creds set` or the credentials API. */
   credentials?: string[];
   drives?: Array<{ name: string; at: string; readOnly?: boolean }>;
   egress?: { allow?: string[] };
   /** `seccomp` is the profile JSON itself. */
   security?: { seccomp?: Record<string, unknown> };
-  inbox?: { maxMessages?: number; maxBytes?: string; intro?: string };
+  inbox?: { maxMessages?: number; maxBytes?: string };
   power?: { sleepAfterIdle?: string; wakeOnMessage?: { from: string[]; maxWakesPerHour?: number } };
   uses?: Array<string | { name: string; mcp?: boolean }>;
   grants?: { send?: string[] };
@@ -177,12 +175,9 @@ export interface ComputerStatus {
   image: string;
   /** The Fleet's security.seccomp path, when the Computer runs with a custom seccomp profile. */
   seccomp?: string;
-  autonomy: string;
   generation: number;
   stagedGeneration?: number;
   credentialGeneration?: number;
-  /** A quantity such as "10Gi". */
-  homeSize?: string;
   drives?: string[];
   egressMode?: string;
   warnings?: string[];
@@ -542,7 +537,7 @@ export interface TokenRequest {
   name: string;
   actions?: TokenAction[];
   computers?: string[];
-  /** Every power over agent computers, Services and credentials whose names start with it; none outside. */
+  /** Every power over agent computers, Services and credentials whose names start with it but seccomp; none outside. */
   prefix?: string;
 }
 

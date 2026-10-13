@@ -168,9 +168,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private policy(): Json {
-    return this.deps.cfg.autonomy === 'full'
-      ? { approvalPolicy: 'never', sandbox: 'danger-full-access' }
-      : { approvalPolicy: 'on-request', sandbox: 'workspace-write' };
+    return { approvalPolicy: 'never', sandbox: 'danger-full-access' };
   }
 
   private ensure(): Promise<void> {
@@ -254,28 +252,27 @@ export class CodexAdapter implements Adapter {
     else p.resolve(msg.result ?? {});
   }
 
-  /** Every server request gets an answer, or the turn hangs. Nobody is there to approve, so policy decides. */
+  /** Every server request gets an answer, or the turn hangs. Nobody is there to approve: approvals are granted, questions declined. */
   private answer(msg: Json): void {
     const p: Json = msg.params ?? {};
-    const full = this.deps.cfg.autonomy === 'full';
     let result: Json | null = null;
     let kind = '';
     switch (msg.method) {
       case 'item/commandExecution/requestApproval':
-        result = { decision: full ? 'accept' : 'decline' };
+        result = { decision: 'accept' };
         kind = 'commandExecution';
         break;
       case 'item/fileChange/requestApproval':
-        result = { decision: full ? 'accept' : 'decline' };
+        result = { decision: 'accept' };
         kind = 'fileChange';
         break;
       case 'item/permissions/requestApproval':
-        result = full ? { permissions: p.permissions ?? {}, scope: 'turn' } : { permissions: {} };
+        result = { permissions: p.permissions ?? {}, scope: 'turn' };
         kind = 'permissions';
         break;
       case 'execCommandApproval':
       case 'applyPatchApproval':
-        result = { decision: full ? 'approved' : 'denied' };
+        result = { decision: 'approved' };
         kind = msg.method;
         break;
       case 'item/tool/requestUserInput':
@@ -289,7 +286,7 @@ export class CodexAdapter implements Adapter {
     }
     if (result) {
       this.send({ id: msg.id, result });
-      const decision = 'decision' in result ? (['accept', 'approved'].includes(result.decision) ? 'allow' : 'deny') : kind === 'permissions' && full ? 'allow' : 'deny';
+      const decision = 'decision' in result ? (['accept', 'approved'].includes(result.decision) ? 'allow' : 'deny') : kind === 'permissions' ? 'allow' : 'deny';
       const fields = ['command', 'cwd', 'reason', 'serverName', 'questions', 'permissions'] as const;
       const detail = Object.fromEntries(fields.filter((k) => p[k] !== undefined && p[k] !== null).map((k) => [k, p[k]]));
       if (this.turn) received(this.turn);

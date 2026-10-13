@@ -121,11 +121,6 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 			h += " " + c.Harness.Model
 		}
 		cells = append(cells, h)
-		if c.HomeSize != 0 {
-			cells = append(cells, "home "+c.HomeSize.String())
-		} else {
-			cells = append(cells, "home -")
-		}
 		var extra []string
 		if len(c.Drives) == 1 {
 			extra = append(extra, "drive "+c.Drives[0])

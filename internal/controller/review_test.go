@@ -164,15 +164,15 @@ func TestRestartFinishesRemovals(t *testing.T) {
 	}
 }
 
-// Preset files survive a restart: they are part of the stored spec.
-func TestPresetsSurviveRestart(t *testing.T) {
+// Files survive a restart: they are part of the stored spec.
+func TestFilesSurviveRestart(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
 	h.d.RemoveComputer(context.Background(), "scout") // lost: must be staged again
 	h2 := h.restart()
 	h2.waitPhase("scout", api.PhaseReady)
-	if len(h.d.get("scout").spec.Preset) == 0 {
-		t.Fatal("scout was staged without its preset")
+	if len(h.d.get("scout").spec.Files) == 0 {
+		t.Fatal("scout was staged without its files")
 	}
 }
 

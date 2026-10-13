@@ -8,7 +8,7 @@
 This file is for coding agents building ON a12s, and it is meant to be enough on its own: every command, field,
 method and file layout below is exact, so copy them rather than guessing. Current release: v0.6.0 (CLI, images,
 svckit, npm and PyPI packages all share the version). You never edit or vendor a12s itself: a project changes only
-its own fleet.yaml, presets, images, Services and app code.
+its own fleet.yaml, images, Services and app code.
 
 ## Words
 
@@ -84,7 +84,7 @@ work: an agent computer whose credential has no value yet waits (up prints the w
 `a12s init` writes `harness: { kind: claude-code, version: 2.1.280 }` with no model key (the harness's default
 model): add `model: haiku` to that line yourself.
 
-`a12s init` is optional: a hand-written fleet.yaml works. Commit fleet.yaml and presets; credential values live
+`a12s init` is optional: a hand-written fleet.yaml works. Commit fleet.yaml; credential values live
 only in the Controller. A Message sent right after `a12s up` is delivered as soon as the agent computer is Ready. `a12s init` puts harness, image and credentials
 in `defaults:`, so an agent computer created from code needs only a name and instructions.
 
@@ -94,7 +94,7 @@ in `defaults:`, so an agent computer created from code needs only a name and ins
 apiVersion: a12s.ai/v1alpha1
 kind: Fleet
 metadata: { name: team }              # DNS label; also names ~/.a12s/team/
-defaults:                             # applies to every agent computer (not Services); maps merge, lists replace
+defaults:                             # applies to every agent computer (not Services); maps merge, lists replace (credentials add)
   harness: { kind: claude-code, version: 2.1.280, model: haiku }   # model: haiku | sonnet | opus | a full model id
   image: slim                         # slim | your image built FROM ghcr.io/coltonkirsten/a12s/slim:0.6.0
   credentials: [anthropic]            # names; values are set with a12s creds set (never in the file)
@@ -105,7 +105,7 @@ agent_computers:
       You are lead. …
     grants: { send: [worker1] }
   worker1:
-    home: { preset: ./presets/worker }  # a directory of files for its home: CLAUDE.md, .claude/skills, .mcp.json
+    files: { .claude/skills/review/SKILL.md: "…" }   # more files for its home: .claude/skills, .mcp.json
     grants: { send: [lead] }
 ```
 
@@ -117,24 +117,19 @@ Agent computer fields (all optional except a harness, image and credential, whic
 - instructions: text written to its home as CLAUDE.md (claude-code) or AGENTS.md (codex): its standing role.
 - files: {path: text}: more text files for its home, by path relative to /home/agent (`.claude/skills/x/SKILL.md`,
   `.mcp.json`, `bin/tool`). A file that starts with `#!` is executable. Instructions plus files: at most 1 MiB.
-- home: {preset: ./dir (relative to fleet.yaml), size: 10Gi}. `a12s up` reads the preset directory and sends it as
-  files (UTF-8 text only; symlinks and binary files are refused). `instructions:` together with a preset that has a
-  CLAUDE.md (AGENTS.md for codex) is an error: keep one. No instructions or files is fine: `hello: {}` with defaults
-  works.
+  No instructions or files is fine: `hello: {}` with defaults works.
 - credentials: [names]. anthropic → Claude Code, openai → Codex, github → GH_TOKEN/GITHUB_TOKEN, any other name →
   file /run/a12s/secrets/<name> (the agent can read that file, but not list the directory: put the exact path in its
-  instructions). A list on one agent computer REPLACES the defaults' list: with defaults [anthropic] write
-  `credentials: [anthropic, stripe]`, not `[stripe]` (without anthropic every Turn fails "Not logged in"; the write
-  warns). A credential with no value yet doesn't fail the write: it warns and the agent computer waits until it is set.
+  instructions). The list ADDS to the defaults' list (the one list that doesn't replace): with defaults [anthropic],
+  `credentials: [stripe]` gives it both. A credential with no value yet doesn't fail the write: it warns and the
+  agent computer waits until it is set.
 - egress: {allow: [hosts]}. HTTPS to those hosts only; plain http and private addresses are refused. The harness's
   own API and sign-in hosts are always added, so `allow: []` still lets Claude Code work. Allow everything public:
   `allow: ["*"]` (quote it: a bare * is YAML alias syntax and fails to parse).
-- autonomy: full (default; Claude Code runs with bypassPermissions, the agent may run any command on its own
-  computer) | restricted (every permission request is denied).
 - grants: {send: [agent computers]}. uses: [services] (reach a Service's ports; an MCP port becomes a tool).
 - resources: {cpu: 2, memory: 4Gi}. drives: [{name, at: /work/x, readOnly}] (top-level `drives: {x: {size: 20Gi,
   access: exclusive | shared | shared-write}}`).
-- inbox: {maxMessages, maxBytes (≤1Mi), intro}. Bodies are at most 64 KiB.
+- Inbox bodies are at most 64 KiB.
 - power: {sleepAfterIdle: 15m, wakeOnMessage: {from: [local, service:clock, computer:lead, token:web],
   maxWakesPerHour: 6}}. sleepAfterIdle is off or 1s to 7d (e.g. 5s, 15m, 2h, 1d); maxWakesPerHour 1-60. Default: never sleeps; once asleep, nothing wakes it unless its via is listed (no wildcard).
   A manual sleep (`a12s sleep`, SDK `sleep()`) is like sleepAfterIdle's: a listed sender's Message wakes it (with
@@ -143,9 +138,9 @@ Agent computer fields (all optional except a harness, image and credential, whic
 - security: {seccomp: ./profiles/x.json}: a Docker-format seccomp profile, relative to fleet.yaml, replacing
   Docker's default for that agent computer only; `a12s up` reads the file and sends the profile itself. From the SDK
   or the HTTP API, `seccomp` is the profile's JSON object. Set it only when the image's software needs blocked
-  syscalls (Chromium's sandbox: see Custom images).
+  syscalls (Chromium's sandbox: see Custom images). Only the owner sets it, not a prefix token.
 
-Top level also takes `services:` (see Services) and `drives:`. Change anything (instructions and preset files
+Top level also takes `services:` (see Services) and `drives:`. Change anything (instructions and files
 included) and run `a12s up`: it applies at each agent computer's next idle moment, never mid-Turn, and keeps the
 session. Changed files are written again; other files the agent made in its home stay.
 The Controller pins the image each tag names when it is first used and keeps running that image: to pick up a
@@ -153,8 +148,8 @@ rebuilt image, give it a new tag.
 
 The live Fleet is the source of truth; fleet.yaml is optional. `a12s up` is a plain apply: the live Fleet becomes the
 file, so it removes agent computers created from code and replaces changes made through the SDK or API.
-`a12s export` writes the live Fleet back to fleet.yaml (long instructions and files go to presets/<name>/, seccomp
-profiles to profiles/<name>.json; comments are lost): run it before `a12s up` to keep what code changed, and
+`a12s export` writes the live Fleet back to fleet.yaml (instructions and files inline, seccomp profiles to
+profiles/<name>.json; comments are lost): run it before `a12s up` to keep what code changed, and
 `git diff` shows what it was. Give each agent computer one owner: the file or your code.
 
 ## What the agent sees
@@ -173,7 +168,7 @@ profiles to profiles/<name>.json; comments are lost): run it before `a12s up` to
 
 ```sh
 a12s up                               # apply fleet.yaml to the live Fleet (start the Controller if needed)
-a12s export                           # write the live Fleet back to fleet.yaml, presets/ and profiles/
+a12s export                           # write the live Fleet back to fleet.yaml and profiles/
 a12s status                           # phase, inbox, power, warnings (--json for machines)
 a12s send <c> "…" [--fresh] [--expires 60s] [--replace key] [--meta k=v]   # enqueue and exit; busy or asleep
 a12s send <c> "…" --wait              # and stream the Turn that delivers it; exit 0 if it completed, 1 if not
@@ -187,8 +182,8 @@ a12s stop <c> | sleep <c> [--hold] | wake <c>   # plain sleep: a sender listed i
                                       #   wakes it; --hold: no Message wakes it until wake
 a12s shell <c|svc> [-- cmd…]          # audited terminal inside an agent computer or Service
 a12s service ls | status <svc> | logs <svc> [-f] | login <svc>
-a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names,
-                                      #   nothing outside. Prints the secret (a12st_…) once, alone on stdout:
+a12s token create <name> --prefix biz- # <name> is a DNS label (bizapp), not the prefix. Owner powers on biz-* names
+                                      #   (not seccomp), nothing outside. Prints the secret (a12st_…) once, alone on stdout:
                                       #   TOKEN=$(a12s token create bizapp --prefix biz-); with --json it is .secret
 a12s token create <name> --actions send,events,status,inbox,power,stop --agent-computers c1,c2|'*'   # narrow
 a12s creds set <name>                 # see Setup
@@ -614,7 +609,8 @@ Base http://127.0.0.1:<port>, header Authorization: Bearer <token>, both from ~/
   grants.send, uses and drives, defaults included, must be inside the prefix too (a default grant outside: override
   it with the agent computer's own grants); its specs may name any credential. Reads list only names inside it.
   Anything outside is 403 out_of_prefix; /v1/fleet (so defaults), /v1/apply, drives and tokens are 403 forbidden.
-  Egress, image, seccomp and resources are its call: trust it like the owner for its agent computers.
+  Egress, image and resources are its call: trust it like the owner for its agent computers. Seccomp is owner-only:
+  a write that adds, changes or drops an agent computer's own security.seccomp is 403 forbidden.
 - Error codes (`code`, stable): invalid, missing_field, bad_metadata, bad_expires (400);
   unauthorized (401); forbidden, no_grant, out_of_prefix (403); not_found, unknown_request (404); busy, conflict,
   exists, in_use, idempotency_conflict, not_idle, attached (409); gone (410); version_mismatch (412);

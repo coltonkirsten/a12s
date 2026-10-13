@@ -21,11 +21,6 @@ const (
 )
 
 const (
-	AutonomyFull       = "full"
-	AutonomyRestricted = "restricted"
-)
-
-const (
 	AccessExclusive   = "exclusive"
 	AccessShared      = "shared"
 	AccessSharedWrite = "shared-write"
@@ -71,7 +66,8 @@ type Drive struct {
 }
 
 // Computer is one agent computer's spec. In a Fleet it has the defaults merged in; in a Spec it is as written.
-// Lists are omitzero, not omitempty, so an explicit empty list still replaces the defaults' one.
+// Lists are omitzero, not omitempty, so an explicit empty list still replaces the defaults' one (credentials add to
+// the defaults' list instead).
 type Computer struct {
 	Harness Harness `yaml:"harness,omitempty" json:"harness,omitzero"`
 	Image   string  `yaml:"image,omitempty" json:"image,omitempty"`
@@ -80,8 +76,6 @@ type Computer struct {
 	// Files are more text files for the home drive, by path relative to it.
 	Files       map[string]string `yaml:"files,omitempty" json:"files,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty" json:"resources,omitzero"`
-	Home        Home              `yaml:"home,omitempty" json:"home,omitzero"`
-	Autonomy    string            `yaml:"autonomy,omitempty" json:"autonomy,omitempty"`
 	Credentials []string          `yaml:"credentials,omitempty" json:"credentials,omitzero"`
 	Drives      []DriveMount      `yaml:"drives,omitempty" json:"drives,omitzero"`
 	Egress      Egress            `yaml:"egress,omitempty" json:"egress,omitzero"`
@@ -112,8 +106,6 @@ type Inbox struct {
 	MaxMessages *int64 `yaml:"maxMessages,omitempty" json:"maxMessages,omitempty"`
 	// MaxBytes is a size as written ("320Ki"); validated at admission.
 	MaxBytes *string `yaml:"maxBytes,omitempty" json:"maxBytes,omitempty"`
-	// Intro is the Batch intro; "" renders none, nil the default.
-	Intro *string `yaml:"intro,omitempty" json:"intro,omitempty"`
 }
 
 func (c Computer) Tier() string {
@@ -142,13 +134,6 @@ func (h Harness) BundleKey() string { return BundleKey(h.Kind, h.Version) }
 type Resources struct {
 	CPU    CPU   `yaml:"cpu,omitempty" json:"cpu,omitzero"`
 	Memory Bytes `yaml:"memory,omitempty" json:"memory,omitzero"`
-}
-
-type Home struct {
-	Size Bytes `yaml:"size,omitempty" json:"size,omitzero"`
-	// Preset is a directory, relative to the Fleet file. It exists only in the file: a12s up sends its contents as
-	// files, and the Controller refuses it.
-	Preset string `yaml:"preset,omitempty" json:"preset,omitempty"`
 }
 
 type DriveMount struct {

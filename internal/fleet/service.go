@@ -137,8 +137,6 @@ func (f *Fleet) HasService(name string) bool { return f.hasService(name) }
 
 var serviceForbidden = []struct{ key, why, fix string }{
 	{"harness", "a Service runs no harness", "remove it; a Service that wants a harness is an agent computer"},
-	{"home", "a Service has no home drive", "remove it; use the manifest's state drive for data that must persist"},
-	{"autonomy", "a Service runs no agent, so it has no autonomy", "remove it"},
 	{"inbox", "a Service has no inbox", "remove it"},
 	{"power", "a Service has no power policy (no auto-sleep, no wake on message)", "remove it; a12s sleep and a12s wake still work on Services"},
 	{"drives", "a Service attaches no Fleet drives", "remove it; use the manifest's state drive"},
@@ -432,28 +430,6 @@ func (f *Fleet) GrantWarnings() []string {
 	}
 	if len(f.Egress.AllowPrivate) > 0 {
 		out = append(out, fmt.Sprintf("egress.allowPrivate %s: Services' named TCP egress may reach these private ranges", strings.Join(f.Egress.AllowPrivate, ", ")))
-	}
-	return out
-}
-
-var harnessCredential = map[string]string{HarnessClaudeCode: "anthropic", HarnessCodex: "openai"}
-
-// CredentialWarnings: an agent computer without its harness's credential fails every Turn at sign-in, and a
-// credentials list on one agent computer replaces the defaults' list instead of adding to it.
-func (f *Fleet) CredentialWarnings() []string {
-	var out []string
-	for _, name := range f.ComputerNames() {
-		c := f.Computers[name]
-		need := harnessCredential[c.Harness.Kind]
-		if need == "" || slices.Contains(c.Credentials, need) {
-			continue
-		}
-		has := "none"
-		if len(c.Credentials) > 0 {
-			has = "[" + strings.Join(c.Credentials, ", ") + "]"
-		}
-		out = append(out, fmt.Sprintf("agent_computers.%s.credentials: %s needs %s, and its list is %s, so every Turn fails to sign in (a list here replaces the defaults' list)  fix: credentials: [%s]",
-			name, c.Harness.Kind, need, has, strings.Join(append([]string{need}, c.Credentials...), ", ")))
 	}
 	return out
 }

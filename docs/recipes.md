@@ -82,8 +82,6 @@ inboxes; your app sends the task and watches.
 ```text
 team/
   fleet.yaml
-  presets/lead/CLAUDE.md
-  presets/worker/CLAUDE.md
   app.ts  or  app.py
 ```
 
@@ -100,38 +98,34 @@ defaults:                                 # every agent computer gets these
 
 agent_computers:
   lead:
-    home: { preset: ./presets/lead }      # its CLAUDE.md: the role
+    instructions: |                       # its CLAUDE.md: the role
+      # You are lead
+
+      You coordinate `worker1` and `worker2` with your `send` tool. You never do the work yourself.
+
+      When a task arrives (any message not from worker1 or worker2):
+      1. Split it into two independent parts.
+      2. `send` one part to worker1 and the other to worker2. Ask for a short answer, sent back to `lead`.
+      3. Reply `DISPATCHED` and end your turn. Don't wait: their results arrive as new messages.
+
+      When a worker's result arrives (`via="computer:worker1"` or `computer:worker2`):
+      - If you now have both results for the task, reply `FINAL ANSWER:` followed by the combined answer.
+      - Otherwise reply `WAITING`.
     grants: { send: [worker1, worker2] }  # gives lead a send tool for these two
   worker1:
-    home: { preset: ./presets/worker }
+    instructions: |
+      # You are a worker
+
+      `lead` sends you one part of a task (`via="computer:lead"`). Do it, keep the answer short, and `send` it to
+      `lead` starting with `RESULT from <your name>:`. Then reply `SENT`.
     grants: { send: [lead] }
   worker2:
-    home: { preset: ./presets/worker }
+    instructions: |
+      # You are a worker
+
+      `lead` sends you one part of a task (`via="computer:lead"`). Do it, keep the answer short, and `send` it to
+      `lead` starting with `RESULT from <your name>:`. Then reply `SENT`.
     grants: { send: [lead] }
-```
-
-```markdown
-<!-- presets/lead/CLAUDE.md -->
-# You are lead
-
-You coordinate `worker1` and `worker2` with your `send` tool. You never do the work yourself.
-
-When a task arrives (any message not from worker1 or worker2):
-1. Split it into two independent parts.
-2. `send` one part to worker1 and the other to worker2. Ask for a short answer, sent back to `lead`.
-3. Reply `DISPATCHED` and end your turn. Don't wait: their results arrive as new messages.
-
-When a worker's result arrives (`via="computer:worker1"` or `computer:worker2`):
-- If you now have both results for the task, reply `FINAL ANSWER:` followed by the combined answer.
-- Otherwise reply `WAITING`.
-```
-
-```markdown
-<!-- presets/worker/CLAUDE.md -->
-# You are a worker
-
-`lead` sends you one part of a task (`via="computer:lead"`). Do it, keep the answer short, and `send` it to `lead`
-starting with `RESULT from <your name>:`. Then reply `SENT`.
 ```
 
 Each result reaches lead in its own Turn. Lead's conversation continues between Turns, so it remembers the task and
@@ -278,10 +272,10 @@ gateway's port). Limit what the page may do with `--allow status,events` (read-o
 
 ## Change an agent's instructions
 
-Edit its `instructions` (or its preset's `CLAUDE.md`) and apply:
+Edit its `instructions` and apply:
 
 ```sh
-$EDITOR fleet.yaml              # or presets/lead/CLAUDE.md
+$EDITOR fleet.yaml
 a12s up                         # "updated lead": the new files are written at its next idle moment
 ```
 
@@ -298,7 +292,7 @@ fleet.agent_computers.get("helper").update(instructions="Answer in one sentence.
 The agent computer restarts between Turns, never in the middle of one, and keeps its conversation. To also start a
 fresh conversation, send the next Message with `fresh: true` (`a12s send lead --fresh "…"`).
 
-`files` (or a preset directory) can hold anything Claude Code reads from the home directory: `.claude/skills/`,
+`files` can hold anything Claude Code reads from the home directory: `.claude/skills/`,
 `.claude/settings.json`, `.mcp.json`. They overwrite the agent's copies; other files on the home drive stay.
 
 ## Give agents tools and network access

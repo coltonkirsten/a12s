@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/coltonkirsten/a12s/internal/api"
-	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
 func TestUpSummary(t *testing.T) {
@@ -31,13 +30,12 @@ func TestUpSummary(t *testing.T) {
 }
 
 func TestWriteStatus(t *testing.T) {
-	gi := fleet.Bytes(10 << 30)
 	st := &api.StatusResponse{
 		Fleet:             "lab",
 		EgressEnforcement: "enforced",
 		AgentComputers: []api.ComputerStatus{
-			{Name: "scout", Phase: api.PhaseAsleep, Session: "9c41aa07-1111", Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"}, HomeSize: gi},
-			{Name: "builder", Phase: api.PhaseBusy, Session: "2f00", ActiveTurn: "t_41", Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, HomeSize: gi, Drives: []string{"a12s-repo"},
+			{Name: "scout", Phase: api.PhaseAsleep, Session: "9c41aa07-1111", Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"}},
+			{Name: "builder", Phase: api.PhaseBusy, Session: "2f00", ActiveTurn: "t_41", Harness: api.Harness{Kind: "codex", Version: "0.154.0"}, Drives: []string{"a12s-repo"},
 				Warnings: []string{"resume failed"}},
 			{Name: "tester", Phase: api.PhaseError, ResumePending: true, Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"}, Error: &api.Failure{Reason: "image missing", Retryable: true}, EgressMode: api.EgressAllowAll},
 			{Name: "job-1", Phase: api.PhaseProvisioning, Harness: api.Harness{Kind: "claude-code", Version: "2.1.280"},

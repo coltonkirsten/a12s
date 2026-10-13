@@ -79,9 +79,8 @@ export class ClaudeAdapter implements Adapter {
       // The CLI echoes each user message it took in: the evidence of receipt behind turn.dispatched.
       extraArgs: { 'replay-user-messages': null },
       includePartialMessages: true,
-      ...(input.autonomy === 'full'
-        ? { permissionMode: 'bypassPermissions' as const, allowDangerouslySkipPermissions: true }
-        : { permissionMode: 'dontAsk' as const, permissionPrompts: 'none' as const }),
+      permissionMode: 'bypassPermissions' as const,
+      allowDangerouslySkipPermissions: true,
     };
     active.query = query({ prompt: prompt(), options });
     this.active = active;

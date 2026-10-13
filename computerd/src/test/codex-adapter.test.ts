@@ -8,12 +8,12 @@ import { collect, fixtures, testConfig } from './helpers.js';
 
 const fake = join(fixtures, 'fake-codex.js');
 
-function setup(mode: string, autonomy: 'full' | 'restricted' = 'full') {
-  const cfg = testConfig({ autonomy, harness: { kind: 'codex', version: '0.0.0', model: null } });
+function setup(mode: string) {
+  const cfg = testConfig({ harness: { kind: 'codex', version: '0.0.0', model: null } });
   const logFile = join(cfg.runDir, 'codex.jsonl');
   const mcp = { a12s: { command: '/usr/bin/node', args: ['/opt/x.js'], env: { A12S_SOCK: '/run/s.sock' } } };
   const adapter = new CodexAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_LOG: logFile }), mcpServers: mcp }, fake, { termAfterMs: 300, killAfterMs: 300 });
-  const input: TurnInput = { prompt: 'reply with pong', sessionId: null, cwd: cfg.agentHome, model: 'gpt-x', autonomy, mcpServers: mcp };
+  const input: TurnInput = { prompt: 'reply with pong', sessionId: null, cwd: cfg.agentHome, model: 'gpt-x', mcpServers: mcp };
   after(() => adapter.close());
   const log = () => readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, any>);
   return { adapter, input, log };
@@ -27,13 +27,13 @@ test('codex: mcp servers become -c overrides', () => {
   ]);
 });
 
-test('codex: handshake, thread/start, events, and a declined approval in restricted mode', async () => {
-  const { adapter, input, log } = setup('normal', 'restricted');
+test('codex: handshake, thread/start, events, and a granted approval', async () => {
+  const { adapter, input, log } = setup('normal');
   const run = await adapter.startTurn(input);
   assert.equal(run.sessionId, 'thr_1');
   const evs = await collect(run.events);
   assert.deepEqual(evs.map((e) => e.type), ['turn.dispatched', 'tool.started', 'permission', 'tool.finished', 'text.delta', 'text.delta', 'turn.finished']);
-  assert.deepEqual(evs[2]?.data, { decision: 'deny', kind: 'commandExecution', detail: { command: 'ls', cwd: '/' } });
+  assert.deepEqual(evs[2]?.data, { decision: 'allow', kind: 'commandExecution', detail: { command: 'ls', cwd: '/' } });
   assert.equal(finished(evs).status, 'completed');
   assert.deepEqual(finished(evs).usage, { thread: { totalTokens: 9 }, last: { totalTokens: 5 } });
   const msgs = log();
@@ -41,12 +41,12 @@ test('codex: handshake, thread/start, events, and a declined approval in restric
   assert.deepEqual(msgs.slice(1, 3).map((m) => m.method), ['initialize', 'initialized']);
   assert.equal(msgs[1]?.params.clientInfo.name, 'a12s');
   const start = msgs.find((m) => m.method === 'thread/start');
-  assert.deepEqual([start?.params.approvalPolicy, start?.params.sandbox, start?.params.model], ['on-request', 'workspace-write', 'gpt-x']);
-  assert.deepEqual(msgs.find((m) => m.id === 'srv_1')?.result, { decision: 'decline' });
+  assert.deepEqual([start?.params.approvalPolicy, start?.params.sandbox, start?.params.model], ['never', 'danger-full-access', 'gpt-x']);
+  assert.deepEqual(msgs.find((m) => m.id === 'srv_1')?.result, { decision: 'accept' });
   await adapter.close();
 });
 
-test('codex: full autonomy uses never + danger-full-access; resume of a loaded thread skips thread/resume', async () => {
+test('codex: never + danger-full-access; resume of a loaded thread skips thread/resume', async () => {
   const { adapter, input, log } = setup('normal');
   const first = await adapter.startTurn(input);
   await collect(first.events);
@@ -97,7 +97,7 @@ test('codex: the configured model goes on every turn/start, also after a prechec
 test('codex: a stalled request hits its deadline; stop during startup kills the app-server', async () => {
   const cfg = testConfig({ harness: { kind: 'codex', version: '0', model: null } });
   const deps = { cfg, credentialEnv: () => ({ FAKE_MODE: 'stall' }), mcpServers: {} };
-  const input: TurnInput = { prompt: 'p', sessionId: null, cwd: cfg.agentHome, model: null, autonomy: 'full', mcpServers: {} };
+  const input: TurnInput = { prompt: 'p', sessionId: null, cwd: cfg.agentHome, model: null, mcpServers: {} };
   const slow = new CodexAdapter(deps, fake, { termAfterMs: 300, killAfterMs: 300 }, 300);
   after(() => slow.close());
   await assert.rejects(slow.startTurn(input), /did not answer turn\/start within 300ms/);
