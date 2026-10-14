@@ -4,6 +4,14 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.8.1 (2026-10-13)
+
+Codex background work now reports back, like Claude Code's.
+
+Upgrading: install the new release, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.8.1` under new
+tags (the change is in computerd), and `a12s up`. If your `openai` credential is a bare API key, set it again in the
+`auth.json` form below.
+
 - Added: Codex background work reports back. A Codex sub-agent still running when the Turn that spawned it ends is
   tracked as background work (`task.started` / `task.finished` with `kind: "agent"`), like a background terminal.
   When either ends, computerd starts a background Turn in the same thread (`turn.started` `{reason: "background"}`)
