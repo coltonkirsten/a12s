@@ -13,7 +13,7 @@ customizes goes through four surfaces:
 a12s holds no app policy. Who talks to whom, what a task means, and how results combine belong in your app and
 your Fleet's grants, not in a12s.
 
-The examples assume a release binary (`a12s version` prints `v0.8.0`), whose images live at
+The examples assume a release binary (`a12s version` prints `v0.8.1`), whose images live at
 `ghcr.io/coltonkirsten/a12s`. In a source build, use the local refs instead (`a12s/slim:dev`).
 
 ## A custom agent image
@@ -23,7 +23,7 @@ fonts, a browser).
 
 ```dockerfile
 # images/agent-jq/Dockerfile
-FROM ghcr.io/coltonkirsten/a12s/slim:0.8.0
+FROM ghcr.io/coltonkirsten/a12s/slim:0.8.1
 RUN apt-get update \
  && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
@@ -54,7 +54,7 @@ agent_computers:
 Otherwise nothing changes and `up` says why:
 
 ```text
-agent_computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM ghcr.io/coltonkirsten/a12s/slim:0.8.0
+agent_computers.analyst.image: my-org/agent-jq:1 has no ai.a12s.computerd.version label, so it was not built FROM an a12s image  fix: start its Dockerfile with FROM ghcr.io/coltonkirsten/a12s/slim:0.8.1
 ```
 
 What a custom image can't change: a12s always starts computerd as root (your `ENTRYPOINT`, `CMD`, `USER` and
