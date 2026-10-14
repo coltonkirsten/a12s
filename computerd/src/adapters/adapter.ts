@@ -48,6 +48,8 @@ export type AdapterEvent =
 
 export interface RunningTurn {
   sessionId: string;
+  /** A background turn's prompt, when the adapter wrote one (Codex reports finished background work in it). */
+  prompt?: string;
   /** Ends after exactly one turn.finished. */
   events: AsyncIterable<AdapterEvent>;
 }

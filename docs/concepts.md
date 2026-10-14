@@ -85,16 +85,19 @@ automatically. The conversation survives, so "continue" works.
 
 The harness runs as one long-lived process per session, across Turns. Work the agent starts in the background keeps
 running after the Turn that started it ends: a Claude Code sub-agent or Bash command run with `run_in_background`, or
-a Codex command still running when its Turn ends (a background terminal). Each one is journaled as `task.started`
+a Codex sub-agent or command still running when its Turn ends (a background terminal). Each one is journaled as `task.started`
 and `task.finished`, and status shows the count as `background: {tasks: N}` while any run.
 
 - **The agent stays responsive.** While only background work runs, the agent computer is `Ready`: a Message is
   delivered at once, as a new Turn in the same session.
-- **Claude Code reports back by itself.** When background work ends, Claude Code starts a Turn on its own to look at
-  the result. It is journaled like any Turn, with `turn.started` `{reason: "background"}` and no Messages, so
-  `a12s logs`, the event streams and `turns()` show it. The agent computer is `Busy` while it runs; Messages that
-  arrive meanwhile wait for its end. Codex tracks its background terminals but never starts a Turn by itself: the
-  agent sees their output in its next Turn.
+- **The agent hears back.** When background work ends, the agent gets a Turn of its own to look at the result.
+  Claude Code starts it by itself. Codex never tells the thread that spawned a sub-agent what it produced, so
+  computerd starts the Turn in the same thread with a prompt that carries each result:
+  `<background-result kind="agent" agent="…" status="…">` with the sub-agent's final message, or `kind="shell"` with
+  the command, its exit code and the end of its output. Either way it is journaled like any Turn, with
+  `turn.started` `{reason: "background"}` and no Messages (Codex: `prompt` is that prompt), so `a12s logs`, the event
+  streams and `turns()` show it. The agent computer is `Busy` while it runs; Messages that arrive meanwhile wait for
+  its end. A sub-agent that finishes within the Turn that spawned it is not background work.
 - **Background work keeps the agent computer awake.** `sleepAfterIdle` counts only time with no Turn and no
   background work, and a config change that restarts the agent computer waits for the same idle.
 - **What ends the session, and its background work with it:** `a12s stop` (and the SDKs' `stop()`), sleep (manual
@@ -147,7 +150,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
-| `task.started`, `task.finished` | `{id, kind, description, status?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`, `shell`); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns |
+| `task.started`, `task.finished` | `{id, kind, description, status?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`; Codex `agent`, `shell`); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns |
 
 The fleet-wide stream (`GET /v1/events`) adds the events the Controller makes: `fleet.changed`
 `{version, by, names}` when a write changes the Fleet, `agent_computer.phase` `{phase, error?, waiting?}` when an agent

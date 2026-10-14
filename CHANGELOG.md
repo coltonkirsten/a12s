@@ -4,6 +4,14 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: Codex background work reports back. A Codex sub-agent still running when the Turn that spawned it ends is
+  tracked as background work (`task.started` / `task.finished` with `kind: "agent"`), like a background terminal.
+  When either ends, computerd starts a background Turn in the same thread (`turn.started` `{reason: "background"}`)
+  whose prompt carries the result: Codex itself never tells the spawning thread, so the agent used to learn nothing
+  until it asked. Spawns show as a `spawn_agent` tool call.
+- Fixed (docs): Codex ignores `OPENAI_API_KEY`, so an `openai` credential that is a bare API key fails with 401.
+  Set the `auth.json` form instead: `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-…"}`.
+
 ## v0.8.0 (2026-10-13)
 
 Agent computers can now work on a folder of this machine in place (`attach`), and Claude Code background work

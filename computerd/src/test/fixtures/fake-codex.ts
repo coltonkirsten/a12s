@@ -16,11 +16,30 @@ function runTurn(threadId: string, turnId: string, prompt: string): void {
   if (mode === 'hang' || mode === 'ignore-interrupt') return;
   if (prompt === 'bg') {
     // A command still running when the turn ends stays a background terminal; its completion names the old turn.
-    const item = { type: 'commandExecution', id: `item_bg_${turnId}`, command: 'sleep 1; make', cwd: '/', status: 'inProgress' };
+    const item = { type: 'commandExecution', id: `item_bg_${turnId}`, command: 'sleep 1; make', cwd: '/', status: 'inProgress', aggregatedOutput: '' };
     notify('item/started', { threadId, turnId, item });
     notify('turn/completed', { threadId, turn: { id: turnId, status: process.env.FAKE_BG_STATUS ?? 'completed', items: [] } });
     current = null;
-    setTimeout(() => notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', exitCode: 0 } }), Number(process.env.FAKE_BG_MS ?? 200));
+    setTimeout(() => notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', exitCode: 0, aggregatedOutput: 'built' } }), Number(process.env.FAKE_BG_MS ?? 200));
+    return;
+  }
+  if (prompt === 'spawn' || prompt === 'spawn-wait') {
+    // A sub-agent runs in a thread of its own; the spawning thread hears subAgentActivity started and completed.
+    const child = `thr_child_${turnId}`;
+    const childTurn = `turn_child_${turnId}`;
+    const activity = (kind: string) => ({ type: 'subAgentActivity', id: `act_${kind}_${turnId}`, kind, agentThreadId: child, agentPath: '/root/panel', model: 'gpt-mini' });
+    notify('item/started', { threadId, turnId, item: activity('started') });
+    notify('item/completed', { threadId, turnId, item: activity('started') });
+    notify('turn/started', { threadId: child, turn: { id: childTurn, status: 'inProgress', items: [] } });
+    const childDone = () => {
+      notify('item/completed', { threadId: child, turnId: childTurn, item: { type: 'agentMessage', id: 'cm', text: 'rendered panel-1', phase: 'final_answer' } });
+      notify('turn/completed', { threadId: child, turn: { id: childTurn, status: process.env.FAKE_CHILD_STATUS ?? 'completed', items: [] } });
+      notify('item/completed', { threadId, turnId, item: activity('completed') });
+    };
+    if (prompt === 'spawn-wait') childDone();
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+    current = null;
+    if (prompt === 'spawn') setTimeout(childDone, Number(process.env.FAKE_BG_MS ?? 200));
     return;
   }
   notify('item/started', { threadId, turnId, item: { type: 'commandExecution', id: 'item_1', command: 'ls', cwd: '/', status: 'inProgress' } });

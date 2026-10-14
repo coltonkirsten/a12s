@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ResumeError, type AdapterEvent, type TaskEvent, type TurnInput } from '../adapters/adapter.js';
-import { CodexAdapter, mcpConfigArgs } from '../adapters/codex.js';
+import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type TurnInput } from '../adapters/adapter.js';
+import { backgroundPrompt, CodexAdapter, mcpConfigArgs } from '../adapters/codex.js';
 import { collect, fixtures, testConfig, until } from './helpers.js';
 
 const fake = join(fixtures, 'fake-codex.js');
@@ -16,9 +16,10 @@ function setup(mode: string, env: Record<string, string> = {}) {
   const input: TurnInput = { prompt: 'reply with pong', sessionId: null, cwd: cfg.agentHome, model: 'gpt-x', mcpServers: mcp };
   after(() => adapter.close());
   const tasks: TaskEvent[] = [];
-  adapter.listen({ backgroundTurn: () => assert.fail('codex never starts a turn by itself'), taskEvent: (ev) => tasks.push(ev) });
+  const background: RunningTurn[] = [];
+  adapter.listen({ backgroundTurn: (run) => background.push(run), taskEvent: (ev) => tasks.push(ev) });
   const log = () => readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, any>);
-  return { adapter, input, log, tasks };
+  return { adapter, input, log, tasks, background };
 }
 
 const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
@@ -113,8 +114,8 @@ test('codex: a stalled request hits its deadline; stop during startup kills the 
   assert.ok(Date.now() - started < 5000);
 });
 
-test('codex: a command still running at the turn end is a background task until its late completion', async () => {
-  const { adapter, input, tasks } = setup('normal');
+test('codex: a command still running at the turn end is a background task; its completion starts a background turn', async () => {
+  const { adapter, input, tasks, background, log } = setup('normal');
   const run = await adapter.startTurn({ ...input, prompt: 'bg' });
   const evs = await collect(run.events);
   assert.deepEqual(evs.map((e) => e.type).slice(-2), ['task.started', 'turn.finished']);
@@ -122,6 +123,77 @@ test('codex: a command still running at the turn end is a background task until 
   await until(() => tasks.length === 1);
   assert.deepEqual(tasks[0]?.data, { id: (evs.at(-2) as TaskEvent).data.id, kind: 'shell', description: 'sleep 1; make', status: 'completed' });
   assert.equal(adapter.backgroundTasks(), 0);
+  await until(() => background.length === 1);
+  assert.equal(background[0]?.sessionId, run.sessionId);
+  assert.match(background[0]?.prompt ?? '', /<background-result kind="shell" command="sleep 1; make" status="completed">\nexit code 0\nbuilt\n<\/background-result>/);
+  assert.equal(finished(await collect(background[0]!.events)).status, 'completed');
+  const starts = log().filter((m) => m.method === 'turn/start');
+  assert.equal(starts.length, 2);
+  assert.deepEqual([starts[1]?.params.threadId, starts[1]?.params.model, starts[1]?.params.cwd], [run.sessionId, 'gpt-x', input.cwd]);
+});
+
+test('codex: a sub-agent that outlives its turn is a background task, and its result starts a background turn', async () => {
+  const { adapter, input, tasks, background } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'spawn' });
+  const evs = await collect(run.events);
+  const spawn = evs.find((e) => e.type === 'tool.started')?.data as { name: string; input: unknown };
+  assert.deepEqual([spawn.name, spawn.input], ['spawn_agent', { agent: '/root/panel', model: 'gpt-mini' }]);
+  assert.deepEqual(evs.map((e) => e.type).slice(-2), ['task.started', 'turn.finished']);
+  const started = (evs.at(-2) as TaskEvent).data;
+  assert.deepEqual([started.id.startsWith('thr_child_'), started.kind, started.description], [true, 'agent', 'panel']);
+  assert.equal(adapter.backgroundTasks(), 1);
+  await until(() => background.length === 1);
+  assert.deepEqual(tasks.map((t) => [t.type, t.data.kind, (t.data as { status?: string }).status]), [['task.finished', 'agent', 'completed']]);
+  assert.equal(adapter.backgroundTasks(), 0);
+  assert.equal(background[0]?.prompt, backgroundPrompt([{ threadId: run.sessionId, kind: 'agent', description: 'panel', status: 'completed', text: 'rendered panel-1' }]));
+  assert.match(background[0]?.prompt ?? '', /<background-result kind="agent" agent="panel" status="completed">\nrendered panel-1\n/);
+  const bevs = await collect(background[0]!.events);
+  assert.equal(bevs[0]?.type, 'turn.dispatched');
+  assert.equal(finished(bevs).status, 'completed');
+});
+
+test('codex: a sub-agent that finishes within its turn is not background work', async () => {
+  const { adapter, input, background } = setup('normal');
+  const evs = await collect((await adapter.startTurn({ ...input, prompt: 'spawn-wait' })).events);
+  assert.equal(evs.filter((e) => e.type === 'task.started').length, 0);
+  assert.equal(adapter.backgroundTasks(), 0);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(background.length, 0);
+});
+
+test('codex: a failed sub-agent reports failed; a request that races the background turn runs after it', async () => {
+  const { adapter, input, tasks, background } = setup('normal', { FAKE_CHILD_STATUS: 'failed' });
+  const run = await adapter.startTurn({ ...input, prompt: 'spawn' });
+  await collect(run.events);
+  await until(() => background.length === 1);
+  assert.equal((tasks[0]?.data as { status: string }).status, 'failed');
+  assert.match(background[0]?.prompt ?? '', /status="failed"/);
+  const order: string[] = [];
+  const bg = collect(background[0]!.events).then(() => order.push('background'));
+  const next = await adapter.startTurn({ ...input, sessionId: run.sessionId });
+  order.push('request');
+  await bg;
+  assert.deepEqual(order, ['background', 'request']);
+  assert.equal(finished(await collect(next.events)).status, 'completed');
+});
+
+test('codex: stop ends a background sub-agent with the app-server; no background turn follows', async () => {
+  const { adapter, input, tasks, background } = setup('normal', { FAKE_BG_MS: '60000' });
+  await collect((await adapter.startTurn({ ...input, prompt: 'spawn' })).events);
+  assert.equal(adapter.backgroundTasks(), 1);
+  await adapter.stop();
+  await until(() => tasks.length === 1);
+  assert.deepEqual([tasks[0]?.data.kind, (tasks[0]?.data as { status: string }).status], ['agent', 'killed']);
+  assert.equal(adapter.backgroundTasks(), 0);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(background.length, 0);
+});
+
+test('codex: backgroundPrompt escapes attributes', () => {
+  assert.equal(
+    backgroundPrompt([{ threadId: 't', kind: 'shell', description: 'echo "a<b>"\nx', status: 'failed', text: ' out \n' }]),
+    'Background work you started has finished.\n<background-result kind="shell" command="echo &quot;a&lt;b&gt;&quot; x" status="failed">\nout\n</background-result>',
+  );
 });
 
 test('codex: stop and a new thread end the background terminals with the app-server', async () => {

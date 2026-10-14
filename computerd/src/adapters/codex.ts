@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { EventQueue, ResumeError, Tail, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type SessionListener, type TaskEvent, type TurnInput, type TurnStatus } from './adapter.js';
+import { EventQueue, ResumeError, Tail, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type SessionListener, type TaskEvent, type TaskStatus, type TurnInput, type TurnStatus } from './adapter.js';
 import { harnessEnv, spawnAsAgent, terminate, type HarnessDeps } from './spawn.js';
 import type { StopTiming } from './claude.js';
 
@@ -17,6 +17,44 @@ interface ActiveTurn {
   timer: NodeJS.Timeout | null;
   /** turn.dispatched was emitted: the turn/start response or the first turn notification came in. */
   dispatched: boolean;
+  /** started by the adapter to report finished background work, not by a request */
+  background: boolean;
+  ended: Promise<void>;
+  end: () => void;
+}
+
+/** Background work that ended after the turn that started it; reported in the next background turn. */
+interface Result {
+  threadId: string;
+  kind: 'agent' | 'shell';
+  description: string;
+  status: TaskStatus;
+  text: string;
+}
+
+/** A sub-agent the agent's thread spawned; it runs in a thread of its own. */
+interface SubAgent {
+  threadId: string;
+  description: string;
+  status: TaskStatus;
+  text: string;
+}
+
+function activeTurn(threadId: string, background: boolean): ActiveTurn {
+  let end!: () => void;
+  const ended = new Promise<void>((r) => (end = r));
+  return { threadId, turnId: null, out: new EventQueue(), usage: null, stopping: false, timer: null, dispatched: false, background, ended, end };
+}
+
+const attr = (s: string) => s.replace(/[\r\n]+/g, ' ').replace(/[&"<>]/g, (c) => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' })[c]!);
+
+/** The prompt of a background turn: Codex never tells the thread that spawned it what a sub-agent or background terminal produced. */
+export function backgroundPrompt(results: Result[]): string {
+  const body = results.map((r) => {
+    const name = r.kind === 'agent' ? `agent="${attr(r.description)}"` : `command="${attr(r.description)}"`;
+    return `<background-result kind="${r.kind}" ${name} status="${r.status}">\n${r.text.trim()}\n</background-result>`;
+  });
+  return `Background work you started has finished.\n${body.join('\n')}`;
 }
 
 /** `codex app-server -c mcp_servers.<name>.…` overrides; values are TOML, and JSON strings/arrays are valid TOML. */
@@ -54,8 +92,16 @@ export class CodexAdapter implements Adapter {
   private listener: SessionListener | null = null;
   /** Commands of the running turn that have not completed, by item id. */
   private readonly commands = new Map<string, string>();
-  /** Commands still running when their turn ended: Codex keeps them as background terminals until they exit. */
-  private readonly tasks = new Map<string, { threadId: string; description: string }>();
+  /** Background work: commands still running when their turn ended (Codex keeps them as background terminals until
+   * they exit) and sub-agents that outlived the turn that spawned them. */
+  private readonly tasks = new Map<string, { threadId: string; kind: 'agent' | 'shell'; description: string }>();
+  /** Sub-agents of the running turn that have not finished; at the turn's end they become background tasks. */
+  private readonly agents = new Map<string, SubAgent>();
+  private readonly bgAgents = new Map<string, SubAgent>();
+  /** Finished background work waiting for a background turn. */
+  private results: Result[] = [];
+  /** cwd and model of the last requested turn, for the background turns that follow it. */
+  private last: { cwd: string; model: string | null } | null = null;
 
   constructor(
     private readonly deps: HarnessDeps,
@@ -75,10 +121,13 @@ export class CodexAdapter implements Adapter {
   }
 
   async startTurn(input: TurnInput): Promise<RunningTurn> {
-    if (this.turn || this.starting) throw new Error('a turn is already running');
+    if ((this.turn && !this.turn.background) || this.starting) throw new Error('a turn is already running');
     const start = { cancelled: false };
     this.starting = start;
     try {
+      // A request that raced a background turn runs after it, as Claude Code queues a prompt behind its own turn.
+      while (this.turn?.background) await this.turn.ended;
+      if (start.cancelled) throw new Error('stopped before the turn started');
       const run = await this.dispatch(input, start);
       if (start.cancelled) throw new Error('stopped before the turn started');
       return run;
@@ -86,6 +135,7 @@ export class CodexAdapter implements Adapter {
       throw start.cancelled ? new Error('stopped before the turn started') : err;
     } finally {
       this.starting = null;
+      this.reportBackground();
     }
   }
 
@@ -97,6 +147,7 @@ export class CodexAdapter implements Adapter {
       await this.restart();
     }
     await this.ensure();
+    this.last = { cwd: input.cwd, model: input.model };
     const policy = this.policy();
     let threadId: string;
     if (input.sessionId === null) {
@@ -110,7 +161,7 @@ export class CodexAdapter implements Adapter {
         if (reason) throw new ResumeError(reason);
       }
     }
-    const turn: ActiveTurn = { threadId, turnId: null, out: new EventQueue(), usage: null, stopping: false, timer: null, dispatched: false };
+    const turn = activeTurn(threadId, false);
     this.turn = turn;
     try {
       // The model goes on every turn: a thread loaded by the wake precheck was resumed without it.
@@ -125,6 +176,7 @@ export class CodexAdapter implements Adapter {
       received(turn);
     } catch (err) {
       this.turn = null;
+      turn.end();
       throw err;
     }
     if (start.cancelled) {
@@ -222,8 +274,11 @@ export class CodexAdapter implements Adapter {
     for (const p of this.pending.values()) p.reject(new Error(`codex app-server ${why}`));
     this.pending.clear();
     this.commands.clear();
-    for (const [id, task] of this.tasks) this.emit({ type: 'task.finished', data: { id, kind: 'shell', description: task.description, status: 'killed' } });
+    for (const [id, task] of this.tasks) this.emit({ type: 'task.finished', data: { id, kind: task.kind, description: task.description, status: 'killed' } });
     this.tasks.clear();
+    this.agents.clear();
+    this.bgAgents.clear();
+    this.results = [];
     const t = this.turn;
     if (t) {
       if (!t.stopping) t.out.push({ type: 'diagnostic', data: { message: `codex app-server ${why}`, stderr: this.stderr.toString() } });
@@ -237,16 +292,63 @@ export class CodexAdapter implements Adapter {
     // item/completed, and a task that never ends would keep the computer awake forever.
     if (status === 'completed') {
       for (const [id, description] of this.commands) {
-        this.tasks.set(id, { threadId: t.threadId, description });
+        this.tasks.set(id, { threadId: t.threadId, kind: 'shell', description });
         t.out.push({ type: 'task.started', data: { id, kind: 'shell', description } });
+      }
+      for (const [id, agent] of this.agents) {
+        this.tasks.set(id, { threadId: t.threadId, kind: 'agent', description: agent.description });
+        this.bgAgents.set(id, agent);
+        t.out.push({ type: 'task.started', data: { id, kind: 'agent', description: agent.description } });
       }
     }
     this.commands.clear();
+    this.agents.clear();
     t.out.push({ type: 'turn.finished', data: { status, usage: t.usage, ...(error ? { error } : {}) } });
     t.out.end();
     if (this.turn === t) this.turn = null;
+    t.end();
     // A stop ends the session's background work too.
     if (t.stopping && this.tasks.size && this.child) void terminate(this.child, this.timing.killAfterMs);
+    else this.reportBackground();
+  }
+
+  /** Background work ended: unlike Claude Code, Codex does not start a turn to report it, so the adapter does. */
+  private backgroundEnded(id: string, status: TaskStatus, text: string): void {
+    const task = this.tasks.get(id);
+    if (!task) return;
+    this.tasks.delete(id);
+    this.bgAgents.delete(id);
+    this.emit({ type: 'task.finished', data: { id, kind: task.kind, description: task.description, status } });
+    this.results.push({ threadId: task.threadId, kind: task.kind, description: task.description, status, text });
+    this.reportBackground();
+  }
+
+  private reportBackground(): void {
+    if (this.turn || this.starting || !this.child || !this.results.length) return;
+    const threadId = this.results[0]!.threadId;
+    const batch = this.results.filter((r) => r.threadId === threadId);
+    this.results = this.results.filter((r) => r.threadId !== threadId);
+    const turn = activeTurn(threadId, true);
+    this.turn = turn;
+    const prompt = backgroundPrompt(batch);
+    this.listener?.backgroundTurn({ sessionId: threadId, events: turn.out, prompt });
+    const model = this.last?.model ?? null;
+    this.request('turn/start', {
+      threadId,
+      input: [{ type: 'text', text: prompt, text_elements: [] }],
+      ...(this.last ? { cwd: this.last.cwd } : {}),
+      ...(model ? { model } : {}),
+    }).then(
+      (r) => {
+        if (this.turn !== turn) return;
+        turn.turnId = String(r.turn.id);
+        received(turn);
+        if (turn.stopping) void this.interrupt(turn);
+      },
+      (err: Error) => {
+        if (this.turn === turn) this.finish(turn, 'failed', err.message);
+      },
+    );
   }
 
   private emit(ev: TaskEvent): void {
@@ -335,15 +437,46 @@ export class CodexAdapter implements Adapter {
     }
   }
 
+  /**
+   * Sub-agents run in threads of their own. The spawning thread gets subAgentActivity items (started, completed,
+   * interrupted); the sub-agent's own thread carries its final message. Returns true for a sub-agent's own event.
+   */
+  private subAgentEvent(method: string, p: Json): boolean {
+    const own = this.agents.get(String(p.threadId)) ?? this.bgAgents.get(String(p.threadId));
+    if (own) {
+      if (method === 'item/completed' && p.item?.type === 'agentMessage' && typeof p.item.text === 'string') own.text = p.item.text;
+      if (method === 'turn/completed') own.status = p.turn?.status === 'completed' ? 'completed' : p.turn?.status === 'interrupted' ? 'stopped' : 'failed';
+      return true;
+    }
+    const item = p.item;
+    if (method !== 'item/completed' || item?.type !== 'subAgentActivity' || !item.agentThreadId) return false;
+    const id = String(item.agentThreadId);
+    if (item.kind === 'started') {
+      if (this.turn && p.threadId === this.turn.threadId && !this.tasks.has(id)) {
+        this.agents.set(id, { threadId: String(p.threadId), description: String(item.agentPath ?? id).replace(/^\/root\//, ''), status: 'completed', text: '' });
+      }
+      return false;
+    }
+    if (item.kind === 'completed' || item.kind === 'interrupted') {
+      // Finished within the turn that spawned it: that turn saw it (or waited for it); nothing to report.
+      const agent = this.agents.get(id);
+      if (agent) return (this.agents.delete(id), false);
+      const bg = this.bgAgents.get(id);
+      if (bg) this.backgroundEnded(id, item.kind === 'interrupted' ? 'stopped' : bg.status, bg.text);
+      return !!bg;
+    }
+    return false;
+  }
+
   private notify(method: string, p: Json): void {
     const task = method === 'item/completed' ? this.tasks.get(String(p.item?.id)) : undefined;
-    if (task) {
+    if (task?.kind === 'shell') {
       // A background terminal's completion carries the id of the turn that started it: it belongs to no other turn.
-      const id = String(p.item.id);
-      this.tasks.delete(id);
       const status = p.item.status === 'completed' && (p.item.exitCode ?? 0) === 0 ? 'completed' : 'failed';
-      return this.emit({ type: 'task.finished', data: { id, kind: 'shell', description: task.description, status } });
+      const exit = p.item.exitCode === undefined || p.item.exitCode === null ? '' : `exit code ${p.item.exitCode}\n`;
+      return this.backgroundEnded(String(p.item.id), status, exit + tail(p.item.aggregatedOutput));
     }
+    if (this.subAgentEvent(method, p)) return;
     const t = this.turn;
     if (!t || (p.threadId !== undefined && p.threadId !== t.threadId)) return;
     switch (method) {
@@ -382,6 +515,10 @@ export class CodexAdapter implements Adapter {
   }
 }
 
+function tail(s: unknown, max = 2000): string {
+  return typeof s === 'string' ? (s.length > max ? `…${s.slice(-max)}` : s) : '';
+}
+
 function toolOf(item: Json | undefined): { name: string; input: unknown; isError: boolean; output: unknown } | null {
   if (!item) return null;
   const failed = item.status === 'failed' || item.status === 'declined';
@@ -396,6 +533,8 @@ function toolOf(item: Json | undefined): { name: string; input: unknown; isError
       return { name: String(item.tool), input: item.arguments, isError: failed || item.success === false, output: { status: item.status } };
     case 'webSearch':
       return { name: 'web_search', input: { query: item.query }, isError: false, output: null };
+    case 'subAgentActivity':
+      return item.kind === 'started' ? { name: 'spawn_agent', input: { agent: item.agentPath, model: item.model }, isError: false, output: null } : null;
     default:
       return null;
   }

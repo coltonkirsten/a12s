@@ -279,7 +279,7 @@ export class Computer {
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version },
       model: this.cfg.harness.model,
       resumed: true,
-      prompt: '',
+      prompt: run.prompt ?? '',
       cwd: this.session?.cwd ?? this.cfg.agentHome,
       reason: 'background',
     };

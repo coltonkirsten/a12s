@@ -21,9 +21,11 @@ its own fleet.yaml, images, Services and app code.
   the Turn that delivered it. Two Messages sent back to back to an idle agent computer usually run as two Turns (the
   first starts at once), so count results across Turns, never expect them in one.
 - Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted. When
-  background work ends, Claude Code starts a Turn by itself: turn.started {reason: "background"}, no Messages.
+  background work ends, the agent gets a Turn by itself: turn.started {reason: "background"}, no Messages (Codex:
+  computerd starts it, its prompt carries each <background-result>).
 - Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one. The harness
-  process lives across Turns, so background work (a sub-agent or Bash run with run_in_background) outlives its Turn.
+  process lives across Turns, so background work (a sub-agent or Bash run with run_in_background; a Codex sub-agent
+  or command still running at the Turn's end) outlives its Turn.
   status shows it as background {tasks}; the agent computer stays Ready (Messages run at once) but never idle.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
   turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input},
@@ -52,7 +54,8 @@ claude setup-token                    # browser sign-in, prints a long-lived sk-
 ```
 
 Credential for `anthropic`: a `claude setup-token` token (recommended; Claude subscription) or an Anthropic API key
-(`sk-ant-api…`), not a copy of your interactive Claude login. Codex: `openai` = an OpenAI API key.
+(`sk-ant-api…`), not a copy of your interactive Claude login. Codex: `openai` = the auth.json
+form of an OpenAI API key, `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-…"}` (Codex ignores a bare key).
 - `a12s creds set <name>` reads ONE line when typed or pasted (not echoed), or all of stdin when piped. The setup
   token prints wrapped over several terminal lines: pasting it stores only the first piece and Turns fail to
   authenticate. Join it first: `pbpaste | tr -d ' \n' | a12s creds set anthropic`, or
