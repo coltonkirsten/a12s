@@ -92,11 +92,10 @@ func BlockedAddr(addr netip.Addr) string {
 	return ""
 }
 
-// Proxy is the egress proxy. The Computer behind a connection is the one
-// whose network the connection arrived on: Identify maps the proxy's local
-// address to it.
+// Proxy is the egress proxy. Identify names the Computer behind a connection from the connection's local and remote
+// addresses (the Driver's Caller).
 type Proxy struct {
-	Identify func(local netip.Addr) (computer string, ok bool)
+	Identify func(local, remote netip.Addr) (computer string, ok bool)
 	Policy   func(computer string) (Policy, bool)
 	Resolve  func(ctx context.Context, host string) ([]netip.Addr, error)
 	Dial     func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -113,7 +112,7 @@ func IsInternal(host string) bool {
 	return h == "a12s" || strings.HasSuffix(h, ".a12s")
 }
 
-func NewProxy(identify func(netip.Addr) (string, bool), policy func(string) (Policy, bool), denied func(string, string, int, string)) *Proxy {
+func NewProxy(identify func(local, remote netip.Addr) (string, bool), policy func(string) (Policy, bool), denied func(string, string, int, string)) *Proxy {
 	d := &net.Dialer{Timeout: 10 * time.Second}
 	return &Proxy{
 		Identify: identify,
@@ -278,11 +277,15 @@ func plainTarget(r *http.Request) (string, int, bool) {
 
 func (p *Proxy) identify(r *http.Request) (string, bool) {
 	la, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
-	tcp, ok := la.(*net.TCPAddr)
+	local, ok := la.(*net.TCPAddr)
 	if !ok || p.Identify == nil {
 		return "", false
 	}
-	return p.Identify(tcp.AddrPort().Addr().Unmap())
+	remote, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return "", false
+	}
+	return p.Identify(local.AddrPort().Addr().Unmap(), remote.Addr().Unmap())
 }
 
 func (p *Proxy) deny(w http.ResponseWriter, computer, host string, port int, reason string) {

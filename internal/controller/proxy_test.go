@@ -79,7 +79,7 @@ type proxyHarness struct {
 func newProxyHarness(t *testing.T, policy Policy, dns map[string][]string, target string) *proxyHarness {
 	h := &proxyHarness{}
 	p := &Proxy{
-		Identify: func(netip.Addr) (string, bool) { return "scout", true },
+		Identify: func(_, _ netip.Addr) (string, bool) { return "scout", true },
 		Policy:   func(string) (Policy, bool) { return policy, true },
 		Resolve: func(_ context.Context, host string) ([]netip.Addr, error) {
 			var out []netip.Addr

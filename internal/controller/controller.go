@@ -26,9 +26,6 @@ import (
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
-// APIPort listens on the Fleet bridge only.
-const APIPort = 7000
-
 type Config struct {
 	Fleet    string // A12S_FLEET
 	StateDir string // A12S_STATE_DIR, default /var/lib/a12s
@@ -135,9 +132,6 @@ type Controller struct {
 	ctx       context.Context // set by Start; outlives requests
 
 	newClient func(name string) computerdClient
-	// selfAddrs returns the Controller's IP on each network it is attached
-	// to; nil outside Docker.
-	selfAddrs func(ctx context.Context) (map[string]netip.Addr, error)
 
 	// bg counts the Controller's background goroutines (event streams,
 	// restarts, idle applies, the watch), so Stop can wait for them.
@@ -153,15 +147,6 @@ type Controller struct {
 	// never delays another.
 	applyMu sync.RWMutex
 
-	// netMu serializes the proxy map's refresh (engine read and publish)
-	// against removing a Computer and its network (invalidate, remove,
-	// read back): a refresh can never publish an address whose network is
-	// being, or has been, removed and possibly reused by another Computer.
-	netMu sync.Mutex
-	// netContended, if set (tests only), runs with the refresh's context
-	// when a refresh finds netMu held and is about to wait for it.
-	netContended func(ctx context.Context)
-
 	mu    sync.Mutex // guards everything below
 	state *State
 	creds api.Credentials // persisted by setCredsLocked
@@ -170,7 +155,6 @@ type Controller struct {
 	rt        map[string]*runtime
 	locks     map[string]*sync.Mutex // per Computer, see applyMu
 	clients   map[string]computerdClient
-	proxyIPs  map[netip.Addr]string // Controller IP on a Computer network -> Computer
 	drains    map[string]*drainState
 	srt       map[string]*serviceRuntime
 	// auditSubs are followers of a Service's audit lines (service logs -f).
@@ -185,7 +169,6 @@ type Controller struct {
 	inboxBcast chan struct{}
 	// inboxDirty are the agent computers whose inbox.changed is due.
 	inboxDirty map[string]bool
-	addrsAt    time.Time
 }
 
 func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
@@ -219,7 +202,6 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		rt:        map[string]*runtime{},
 		locks:     map[string]*sync.Mutex{},
 		clients:   map[string]computerdClient{},
-		proxyIPs:  map[netip.Addr]string{},
 		srt:       map[string]*serviceRuntime{},
 		auditSubs: map[string][]chan string{},
 		revoked:   map[string]bool{},
@@ -374,7 +356,6 @@ func (c *Controller) Start(ctx context.Context) {
 		}
 		c.convergeServices(ctx, f.ServiceNames(), obs)
 		c.convergeAll(ctx, f.ComputerNames(), obs)
-		c.refreshAddrs(ctx)
 		c.kickAll()
 	})
 	if !resumed { // ctx already ended: nothing will release it
@@ -386,11 +367,11 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return err
 	}
-	drv, err := docker.New(docker.Config{Fleet: cfg.Fleet, SubnetPool: cfg.SubnetPool})
+	drv, host, closeDriver, err := openDriver(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer drv.Close()
+	defer closeDriver()
 	ca, err := LoadCA(cfg.StateDir, cfg.Fleet)
 	if err != nil {
 		return err
@@ -399,25 +380,12 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	c.selfAddrs = drv.ControllerAddrs
-	if err := drv.ReattachController(ctx); err != nil {
-		return err
-	}
 
 	apiAddr := cfg.APIAddr
 	if apiAddr == "" {
-		addrs, err := drv.ControllerAddrs(ctx)
-		if err != nil {
-			return err
-		}
-		bridge := "a12s-" + cfg.Fleet
-		ip, ok := addrs[bridge]
-		if !ok {
-			return fmt.Errorf("the controller container is not attached to network %s", bridge)
-		}
-		apiAddr = net.JoinHostPort(ip.String(), strconv.Itoa(APIPort))
+		apiAddr = host.APIAddr
 	}
-	serverTLS, err := ca.ServerTLS(drv.ControllerName())
+	serverTLS, err := ca.ServerTLS(host.ControllerName)
 	if err != nil {
 		return err
 	}
@@ -474,106 +442,11 @@ func (c *Controller) newProxy() *Proxy {
 	return p
 }
 
-func (c *Controller) refreshAddrs(ctx context.Context) error {
-	if c.selfAddrs == nil {
-		return nil
-	}
-	if !c.netMu.TryLock() {
-		if c.netContended != nil {
-			c.netContended(ctx) // tests: this refresh waits for a removal
-		}
-		c.netMu.Lock()
-	}
-	defer c.netMu.Unlock()
-	addrs, err := c.selfAddrs(ctx)
-	if err != nil {
-		c.logf("egress proxy: %v", err)
-		return err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.addrsAt = time.Now()
-	c.proxyIPs = map[netip.Addr]string{}
-	if c.state.Fleet != nil {
-		for name := range c.state.Fleet.Computers {
-			if ip, ok := addrs[c.containerName(name)]; ok {
-				c.proxyIPs[ip] = name
-			}
-		}
-		for name := range c.state.Fleet.Services {
-			if ip, ok := addrs[c.containerName(name)]; ok {
-				c.proxyIPs[ip] = name
-			}
-		}
-	}
-	return nil
-}
-
-// removeNetworked holds netMu throughout, after dropping the Computer's proxy mapping.
-func (c *Controller) removeNetworked(ctx context.Context, name, what string) error {
-	c.netMu.Lock()
-	defer c.netMu.Unlock()
-	c.invalidateAddrs(name)
-	c.unregisterCert(KindComputer, name)
-	if err := c.drv.RemoveComputer(ctx, name); err != nil {
-		return err
-	}
-	return c.confirm(ctx, name, what, func(_ driver.ComputerState, exists bool) bool { return !exists })
-}
-
-// invalidateAddrs forgets a Computer's address before its network is
-// removed: a replacement network may reuse the subnet, and the address,
-// for another Computer, which must never inherit this one's policy. The
-// caller holds netMu.
-func (c *Controller) invalidateAddrs(name string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for ip, n := range c.proxyIPs {
-		if n == name {
-			delete(c.proxyIPs, ip)
-		}
-	}
-}
-
-// verifyAddr refreshes the mapping from the engine and requires the
-// Computer's network to be in it, before the Computer starts serving.
-func (c *Controller) verifyAddr(ctx context.Context, name string) error {
-	if c.selfAddrs == nil {
-		return nil
-	}
-	if err := c.refreshAddrs(ctx); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, n := range c.proxyIPs {
-		if n == name {
-			return nil
-		}
-	}
-	return fmt.Errorf("the Controller has no address on %s's network; egress would not be identifiable", name)
-}
-
-func (c *Controller) identify(local netip.Addr) (string, bool) {
-	c.mu.Lock()
-	name, ok := c.proxyIPs[local]
-	stale := time.Since(c.addrsAt) > time.Second
-	c.mu.Unlock()
-	if ok {
-		return name, true
-	}
-	if !stale {
-		c.logf("egress proxy: refused a connection on %s: no verified agent computer for that address", local)
-		return "", false
-	}
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-	defer cancel()
-	c.refreshAddrs(ctx)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	name, ok = c.proxyIPs[local]
+// identify logs every refusal: a refused connection is an agent computer whose egress the Driver cannot attribute.
+func (c *Controller) identify(local, remote netip.Addr) (string, bool) {
+	name, ok := c.drv.Caller(local, remote)
 	if !ok {
-		c.logf("egress proxy: refused a connection on %s: no verified agent computer for that address", local)
+		c.logf("egress proxy: refused a connection from %s on %s: no verified agent computer for those addresses", remote, local)
 	}
 	return name, ok
 }
@@ -609,4 +482,13 @@ func (c *Controller) denied(name, host string, port int, reason string) {
 	if err := c.client(name).EgressDenied(ctx, api.EgressDeniedData{Host: host, Port: port, Reason: reason}); err != nil {
 		c.logf("%s: journal egress denial: %v", name, err)
 	}
+}
+
+// openDriver returns the substrate the Controller runs on and how it is reached there.
+func openDriver(ctx context.Context, cfg Config) (driver.Driver, driver.Host, func(), error) {
+	drv, host, err := docker.Open(ctx, docker.Config{Fleet: cfg.Fleet, SubnetPool: cfg.SubnetPool})
+	if err != nil {
+		return nil, driver.Host{}, nil, err
+	}
+	return drv, host, func() { drv.Close() }, nil
 }

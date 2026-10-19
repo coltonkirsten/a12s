@@ -138,3 +138,20 @@ func TestRemoveStateDriveOfKeepNamedService(t *testing.T) {
 		t.Fatalf("drive rm keep-db-state = %d %+v", r.StatusCode, apiError(t, r))
 	}
 }
+
+// A substrate without host folders refuses attach at admission, before anything is staged.
+func TestAttachNeedsHostFolders(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	h.d.mu.Lock()
+	h.d.noHostFolders = true
+	h.d.mu.Unlock()
+	h.d.takeCalls()
+	r := h.api("PUT", "/v1/agent-computers/w", bizSpec+`,"attach":`+attachApp+`}`)
+	if e := apiError(t, r); r.StatusCode != http.StatusBadRequest || !strings.Contains(e.Message, "agent_computers.w.attach") || e.Fix == "" {
+		t.Errorf("create with attach = %d %+v, want 400 naming attach, with a fix", r.StatusCode, e)
+	}
+	if calls := h.d.takeCalls(); len(calls) > 0 {
+		t.Errorf("a refused Fleet reached the Driver: %v", calls)
+	}
+}

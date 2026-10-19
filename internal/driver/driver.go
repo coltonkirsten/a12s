@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 )
 
 type Driver interface {
@@ -53,6 +54,10 @@ type Driver interface {
 	// Sessions counts attached interactive/exec sessions; any keeps the Computer from auto-sleeping.
 	Sessions(ctx context.Context, computer string) (int, error)
 
+	// Caller names the Computer or Service an egress proxy connection comes from, judged by whichever of the
+	// connection's local or remote address the substrate makes unforgeable.
+	Caller(local, remote netip.Addr) (name string, ok bool)
+
 	ServiceDriver
 }
 
@@ -94,6 +99,16 @@ type Capabilities struct {
 	SandboxedRuntime  bool     `json:"sandboxedRuntime"`
 	// A multi-node Driver reports Services false until it encrypts both hops.
 	Services bool `json:"services"`
+	// HostFolders: the substrate can bind a folder of the owner's host into a Computer (attach).
+	HostFolders bool `json:"hostFolders"`
+}
+
+// Host is how the Controller is reached on its substrate.
+type Host struct {
+	// ControllerName is in the Controller's server certificate, and Computers dial the Controller by it.
+	ControllerName string
+	// APIAddr is where the owner API listens unless configured otherwise.
+	APIAddr string
 }
 
 type Observation struct {

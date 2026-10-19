@@ -46,11 +46,9 @@ type fakeDriver struct {
 	lostStages, ghostStarts bool
 	// ips is the Controller's address on each Computer network (by
 	// Computer), allocated when a network first appears, freed with it.
-	ips     map[string]netip.Addr
-	addrErr error
-	// beforeRemove runs at the start of RemoveComputer (the network still
-	// exists).
-	beforeRemove func(name string)
+	ips map[string]netip.Addr
+	// noHostFolders makes the substrate one without host folders (no attach).
+	noHostFolders bool
 	// observeGate, when set, holds the next Observe until it is closed.
 	observeGate chan struct{}
 	// sessions are attached shell sessions, by Computer.
@@ -102,7 +100,9 @@ func (d *fakeDriver) takeCalls() []string {
 }
 
 func (d *fakeDriver) Capabilities(context.Context) (driver.Capabilities, error) {
-	return driver.Capabilities{EgressEnforcement: true, Architectures: []string{"arm64"}, Services: true}, nil
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return driver.Capabilities{EgressEnforcement: true, Architectures: []string{"arm64"}, Services: true, HostFolders: !d.noHostFolders}, nil
 }
 
 func (d *fakeDriver) Observe(context.Context) (driver.Observation, error) {
@@ -323,9 +323,6 @@ func (d *fakeDriver) file(name, path, owner, mode string) []byte {
 }
 
 func (d *fakeDriver) RemoveComputer(_ context.Context, name string) error {
-	if d.beforeRemove != nil {
-		d.beforeRemove(name)
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if c := d.computers[name]; c != nil {
@@ -958,36 +955,22 @@ func (f *fakeComputerd) mute() {
 	f.up = false
 }
 
-// controllerAddrs is the Docker driver's ControllerAddrs over the fake.
-func (d *fakeDriver) controllerAddrs(context.Context) (map[string]netip.Addr, error) {
+// Caller answers like the Docker driver: by the Controller's address on the Computer's own network.
+func (d *fakeDriver) Caller(local, _ netip.Addr) (string, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.addrErr != nil {
-		return nil, d.addrErr
-	}
-	out := map[string]netip.Addr{"a12s-lab": netip.MustParseAddr("172.19.0.2")}
 	for name, ip := range d.ips {
-		out["a12s-lab-"+name] = ip
+		if ip == local {
+			return name, true
+		}
 	}
-	return out, nil
+	return "", false
 }
 
 func (d *fakeDriver) ip(name string) netip.Addr {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.ips[name]
-}
-
-func (d *fakeDriver) setIP(name string, ip netip.Addr) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.ips[name] = ip
-}
-
-func (d *fakeDriver) setAddrErr(err error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.addrErr = err
 }
 
 func (f *fakeComputerd) CancelContinuation(_ context.Context, reason string) (string, error) {
