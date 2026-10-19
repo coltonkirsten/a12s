@@ -161,6 +161,14 @@ type FirewallRule struct {
 	Ports      []string `json:"ports,omitempty"`
 }
 
+type Subnetwork struct {
+	Name        string `json:"name"`
+	Network     string `json:"network,omitempty"`
+	IPCidrRange string `json:"ipCidrRange,omitempty"`
+	Region      string `json:"region,omitempty"`
+	SelfLink    string `json:"selfLink,omitempty"`
+}
+
 type MachineType struct {
 	Name        string `json:"name"`
 	GuestCpus   int64  `json:"guestCpus"`
@@ -479,6 +487,11 @@ func (a *API) ListOperations(ctx context.Context, filter string) ([]Operation, e
 
 func (a *API) ListFirewalls(ctx context.Context, filter string) ([]Firewall, error) {
 	return listOf[Firewall](ctx, a, withFilter(a.global("firewalls"), filter))
+}
+
+func (a *API) GetSubnetwork(ctx context.Context, name string) (*Subnetwork, error) {
+	var out Subnetwork
+	return &out, a.do(ctx, http.MethodGet, a.regional("subnetworks", name), nil, &out)
 }
 
 func (a *API) ListMachineTypes(ctx context.Context, filter string) ([]MachineType, error) {

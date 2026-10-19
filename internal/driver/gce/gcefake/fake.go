@@ -31,6 +31,7 @@ type Fake struct {
 	disks      map[string]*gceapi.Disk
 	ops        []gceapi.Operation
 	firewalls  []gceapi.Firewall
+	subnets    []gceapi.Subnetwork
 	accounts   map[string]*gceapi.ServiceAccount
 	guest      map[string]map[string]string
 	denied     map[string]bool
@@ -38,6 +39,9 @@ type Fake struct {
 	opFaults   []opFault
 	calls      []string
 	types      []gceapi.MachineType
+
+	hookMu sync.Mutex
+	hooks  map[string]func()
 }
 
 type httpFault struct {
@@ -127,6 +131,12 @@ func (f *Fake) SetFirewalls(fw []gceapi.Firewall) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.firewalls = slices.Clone(fw)
+}
+
+func (f *Fake) AddSubnetwork(sn gceapi.Subnetwork) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subnets = append(f.subnets, sn)
 }
 
 func (f *Fake) SetGuestAttribute(instance, key, value string) {
@@ -244,10 +254,11 @@ func (f *Fake) recordOp(opType, target string, targetID uint64, user string, opE
 }
 
 var (
-	zonalRE  = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/zones/([^/]+)/([a-zA-Z]+)(?:/([^/]+))?(?:/([a-zA-Z]+))?$`)
-	globalRE = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/global/([a-zA-Z]+)$`)
-	saRE     = regexp.MustCompile(`^/iam/v1/projects/([^/]+)/serviceAccounts(?:/([^/]+))?$`)
-	crmRE    = regexp.MustCompile(`^/crm/v1/projects/([^/:]+):testIamPermissions$`)
+	zonalRE    = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/zones/([^/]+)/([a-zA-Z]+)(?:/([^/]+))?(?:/([a-zA-Z]+))?$`)
+	regionalRE = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/regions/([^/]+)/subnetworks/([^/]+)$`)
+	globalRE   = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/global/([a-zA-Z]+)$`)
+	saRE       = regexp.MustCompile(`^/iam/v1/projects/([^/]+)/serviceAccounts(?:/([^/]+))?$`)
+	crmRE      = regexp.MustCompile(`^/crm/v1/projects/([^/:]+):testIamPermissions$`)
 )
 
 type reply struct {
@@ -262,8 +273,56 @@ func errReply(status int, reason, format string, args ...any) reply {
 	}}}
 }
 
+// Before runs fn once, outside the fake's lock, just before the next request for call (as "instances.setLabels").
+func (f *Fake) Before(call string, fn func()) {
+	f.hookMu.Lock()
+	defer f.hookMu.Unlock()
+	if f.hooks == nil {
+		f.hooks = map[string]func(){}
+	}
+	f.hooks[call] = fn
+}
+
+// SetLabel changes one instance label, with a new fingerprint, as another writer would.
+func (f *Fake) SetLabel(instance, key, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if in := f.instances[instance]; in != nil {
+		if in.Labels == nil {
+			in.Labels = map[string]string{}
+		}
+		in.Labels[key] = value
+		in.LabelFingerprint = f.fingerprint()
+	}
+}
+
+func (f *Fake) callName(r *http.Request) string {
+	m := zonalRE.FindStringSubmatch(r.URL.Path)
+	if m == nil {
+		return ""
+	}
+	switch {
+	case m[5] != "":
+		return m[3] + "." + m[5]
+	case r.Method == http.MethodPost && m[4] == "":
+		return m[3] + ".insert"
+	case r.Method == http.MethodGet && m[4] == "":
+		return m[3] + ".list"
+	case r.Method == http.MethodGet:
+		return m[3] + ".get"
+	}
+	return m[3] + "." + strings.ToLower(r.Method)
+}
+
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	f.hookMu.Lock()
+	hook := f.hooks[f.callName(r)]
+	delete(f.hooks, f.callName(r))
+	f.hookMu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	rep := f.route(r, body)
 	f.mu.Unlock()
@@ -281,6 +340,14 @@ func (f *Fake) route(r *http.Request, body []byte) reply {
 			return errReply(404, "notFound", "unknown project or zone %s/%s", m[1], m[2])
 		}
 		return f.zonal(r, m[3], m[4], m[5], body)
+	}
+	if m := regionalRE.FindStringSubmatch(p); m != nil && r.Method == http.MethodGet {
+		for _, sn := range f.subnets {
+			if sn.Name == m[3] {
+				return reply{200, sn}
+			}
+		}
+		return errReply(404, "notFound", "subnetwork %s", m[3])
 	}
 	if m := globalRE.FindStringSubmatch(p); m != nil && m[2] == "firewalls" && r.Method == http.MethodGet {
 		return f.listReply(f.firewalls, r)
