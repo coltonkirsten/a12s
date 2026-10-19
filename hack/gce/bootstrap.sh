@@ -70,6 +70,11 @@ PERMS+=,compute.disks.use,compute.disks.setLabels,compute.resourcePolicies.use
 PERMS+=,compute.subnetworks.get,compute.subnetworks.use,compute.zoneOperations.get,compute.zoneOperations.list
 PERMS+=,compute.firewalls.list,compute.machineTypes.list
 PERMS+=,iam.serviceAccounts.create,iam.serviceAccounts.delete,iam.serviceAccounts.get,iam.serviceAccounts.actAs
+# A deleted custom role stays (deleted) for 7 days and its ID can't be reused, so a fleet made again within a week
+# (after hack/gce/teardown.sh) undeletes it.
+if [ "$(g iam roles describe "$ROLE" --format 'value(deleted)' 2> /dev/null)" = True ]; then
+  g iam roles undelete "$ROLE" > /dev/null
+fi
 if exists iam roles describe "$ROLE"; then
   g iam roles update "$ROLE" --permissions "$PERMS" > /dev/null
 else
