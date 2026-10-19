@@ -36,6 +36,19 @@ COPY bundle /bundle
 
 const bundleJSON = `{"kind":"codex","version":"0.0.0-test","arch":"arm64","bin":"bin/codex","signInHosts":["auth.openai.com"]}`
 
+// startStandinController runs a container in the controller's place, so staging attaches it to each network and
+// egress is attributable.
+func startStandinController(ctx context.Context, t *testing.T, cli *client.Client, d *Driver, fleetName string) {
+	t.Helper()
+	ctrl, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name:   d.ControllerName(),
+		Config: &container.Config{Image: "alpine", Cmd: []string{"sleep", "600"}, Labels: map[string]string{LabelFleet: fleetName, LabelRole: RoleController}},
+	})
+	must(t, err)
+	_, err = cli.ContainerStart(ctx, ctrl.ID, client.ContainerStartOptions{})
+	must(t, err)
+}
+
 func TestDockerIntegration(t *testing.T) {
 	if os.Getenv("A12S_DOCKER_TEST") != "1" {
 		t.Skip("set A12S_DOCKER_TEST=1 to run against Docker")
@@ -66,14 +79,7 @@ func TestDockerIntegration(t *testing.T) {
 		"bundle/bin/codex":   "#!/bin/sh\necho fake codex\n",
 	})
 
-	// A stand-in controller container, so staging attaches it to the network.
-	ctrl, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name:   d.ControllerName(),
-		Config: &container.Config{Image: "alpine", Cmd: []string{"sleep", "600"}, Labels: map[string]string{LabelFleet: fleetName, LabelRole: RoleController}},
-	})
-	must(t, err)
-	_, err = cli.ContainerStart(ctx, ctrl.ID, client.ContainerStartOptions{})
-	must(t, err)
+	startStandinController(ctx, t, cli, d, fleetName)
 
 	caps, err := d.Capabilities(ctx)
 	must(t, err)
@@ -196,6 +202,16 @@ func TestDockerIntegration(t *testing.T) {
 	}
 	if err := d.StageComputer(ctx, driver.ComputerSpec{Name: "c", Generation: 2, Image: standin, HomeDrive: home.ID, Bundle: spec.Bundle}); !errors.Is(err, driver.ErrRunning) {
 		t.Errorf("stage over running = %v, want ErrRunning", err)
+	}
+
+	// Egress is attributed by the Controller's address on the Computer's own network, never by the remote address.
+	ctrlAddrs, err := d.controllerAddrs(ctx)
+	must(t, err)
+	if got, ok := d.Caller(ctrlAddrs[d.NetworkName("c")], netip.MustParseAddr("192.0.2.1")); !ok || got != "c" {
+		t.Errorf("Caller(controller's address on c's network) = %q, %v", got, ok)
+	}
+	if got, ok := d.Caller(netip.MustParseAddr("192.0.2.1"), addr); ok {
+		t.Errorf("Caller(unknown local, c's address) = %q, want refused", got)
 	}
 
 	t.Run("container spec", func(t *testing.T) { checkContainer(ctx, t, d, cli) })

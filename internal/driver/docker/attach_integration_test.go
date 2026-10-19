@@ -40,6 +40,7 @@ func TestDockerAttachIntegration(t *testing.T) {
 		"bundle/bundle.json": bundleJSON,
 		"bundle/bin/codex":   "#!/bin/sh\necho fake codex\n",
 	})
+	startStandinController(ctx, t, cli, d, fleetName)
 	b, err := d.EnsureBundle(ctx, bundleRef)
 	must(t, err)
 

@@ -500,9 +500,6 @@ func (c *Controller) startService(ctx context.Context, name string) error {
 		return &credentialsMissing{w}
 	}
 	c.setServicePhase(name, api.PhaseStarting, nil)
-	if err := c.verifyAddr(ctx, name); err != nil {
-		return c.failService(name, err)
-	}
 	if err := c.drv.SetServicePower(ctx, name, driver.PowerAwake, gen); err != nil {
 		return c.failService(name, err)
 	}
@@ -844,14 +841,11 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 func (c *Controller) removeService(ctx context.Context, name string) error {
 	c.setServiceTransition(name, true)
 	c.stopHealth(name)
-	c.netMu.Lock()
-	c.invalidateAddrs(name)
 	c.unregisterCert(KindService, name)
 	err := c.drv.RemoveService(ctx, name)
 	if err == nil {
 		err = c.confirmService(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
 	}
-	c.netMu.Unlock()
 	if err != nil {
 		c.setServiceTransition(name, false)
 		return err

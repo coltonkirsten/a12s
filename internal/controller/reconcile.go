@@ -294,7 +294,6 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 			}
 		}
 	}
-	c.refreshAddrs(ctx)
 	if o.by.prefix() != "" {
 		// Fleet-wide, so they may name what the token must not see.
 		res.Warnings = nil
@@ -707,7 +706,7 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	c.stopEvents(name)
-	if err := c.removeNetworked(ctx, name, "removal"); err != nil {
+	if err := c.removeFromDriver(ctx, name); err != nil {
 		c.setTransition(name, false)
 		return err
 	}
@@ -751,6 +750,15 @@ func (c *Controller) resolveComputers(ctx context.Context, f *fleet.Fleet, in *f
 	}
 	if !caps.EgressEnforcement {
 		return nil, nil, caps, invalid("this substrate cannot enforce egress  fix: upgrade Docker Engine to 28 or later")
+	}
+	if !caps.HostFolders {
+		for _, name := range f.ComputerNames() {
+			if len(f.Computers[name].Attach) > 0 {
+				return nil, nil, caps, &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid,
+					Message: fmt.Sprintf("agent_computers.%s.attach: this substrate has no host folders to attach", name),
+					Fix:     "put the files in files:, or serve them from a Service"}}
+			}
+		}
 	}
 
 	pins := fleet.NewPins()

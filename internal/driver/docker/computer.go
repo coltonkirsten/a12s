@@ -469,9 +469,9 @@ next:
 	return netip.Prefix{}, fmt.Errorf("subnet pool %s is exhausted", pool)
 }
 
-// ReattachController connects the controller container to every agent computer's and Service's network: a
+// reattachController connects the controller container to every agent computer's and Service's network: a
 // Controller container that was replaced (an upgrade) starts attached to the Fleet bridge only.
-func (d *Driver) ReattachController(ctx context.Context) error {
+func (d *Driver) reattachController(ctx context.Context) error {
 	f := make(client.Filters).Add("label", LabelFleet+"="+d.fleet)
 	list, err := d.cli.NetworkList(ctx, client.NetworkListOptions{Filters: f})
 	if err != nil {
@@ -530,6 +530,9 @@ func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Pow
 		if running {
 			return nil
 		}
+		if err := d.callers.Require(ctx, computer); err != nil {
+			return fmt.Errorf("power %s awake: %w", computer, err)
+		}
 		if _, err := d.cli.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 			return fmt.Errorf("power %s awake: %w", computer, explainMountError(err, boundFolders(c)))
 		}
@@ -548,6 +551,7 @@ func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Pow
 }
 
 func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
+	defer d.callers.Remove(computer)()
 	name := d.ContainerName(computer)
 	res, err := d.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	switch {
@@ -582,9 +586,8 @@ func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 	return nil
 }
 
-// ControllerAddrs: the address on each Computer network identifies the Computer
-// behind an egress proxy connection.
-func (d *Driver) ControllerAddrs(ctx context.Context) (map[string]netip.Addr, error) {
+// controllerAddrs is the controller container's address on each network, by network name.
+func (d *Driver) controllerAddrs(ctx context.Context) (map[string]netip.Addr, error) {
 	res, err := d.cli.ContainerInspect(ctx, d.ControllerName(), client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("inspect controller: %w", err)
@@ -599,3 +602,30 @@ func (d *Driver) ControllerAddrs(ctx context.Context) (map[string]netip.Addr, er
 	}
 	return out, nil
 }
+
+// callerSnapshot maps the Controller's address on each Computer's and Service's own network to its owner: only the
+// Controller and that one Computer are on the network, so a connection arriving on that address is from it.
+func (d *Driver) callerSnapshot(ctx context.Context) (map[netip.Addr]string, error) {
+	addrs, err := d.controllerAddrs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	list, err := d.cli.NetworkList(ctx, client.NetworkListOptions{Filters: d.fleetFilter()})
+	if err != nil {
+		return nil, fmt.Errorf("list networks: %w", err)
+	}
+	out := map[netip.Addr]string{}
+	for _, n := range list.Items {
+		role := n.Labels[LabelRole]
+		if role != RoleComputer && role != RoleService {
+			continue
+		}
+		owner := n.Labels[ownerLabel(role)]
+		if ip, ok := addrs[n.Name]; ok && owner != "" && n.Name == d.NetworkName(owner) {
+			out[ip] = owner
+		}
+	}
+	return out, nil
+}
+
+func (d *Driver) Caller(local, _ netip.Addr) (string, bool) { return d.callers.Lookup(local) }

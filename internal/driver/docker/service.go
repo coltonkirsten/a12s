@@ -341,6 +341,9 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 	switch power {
 	case driver.PowerAwake:
 		if !running {
+			if err := d.callers.Require(ctx, name); err != nil {
+				return fmt.Errorf("power service %s awake: %w", name, err)
+			}
 			if _, err := d.cli.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 				return fmt.Errorf("power service %s awake: %w", name, err)
 			}
@@ -359,6 +362,7 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 }
 
 func (d *Driver) RemoveService(ctx context.Context, name string) error {
+	defer d.callers.Remove(name)()
 	c, err := d.serviceContainer(ctx, name)
 	switch {
 	case isNotFound(err) || errors.Is(err, driver.ErrNotFound):

@@ -168,6 +168,15 @@ func (c *Controller) credsHashLocked(names []string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// removeFromDriver withdraws the certificate before the Computer goes, and reads the removal back.
+func (c *Controller) removeFromDriver(ctx context.Context, name string) error {
+	c.unregisterCert(KindComputer, name)
+	if err := c.drv.RemoveComputer(ctx, name); err != nil {
+		return err
+	}
+	return c.confirm(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
+}
+
 func (c *Controller) observeOne(ctx context.Context, name string) (driver.ComputerState, bool, error) {
 	obs, err := c.drv.Observe(ctx)
 	if err != nil {
@@ -187,9 +196,6 @@ func (c *Controller) start(ctx context.Context, name string) error {
 		return c.waitForCredentials(name, missing)
 	}
 	c.setPhase(name, api.PhaseStarting, nil)
-	if err := c.verifyAddr(ctx, name); err != nil {
-		return c.fail(name, err, true)
-	}
 	if err := c.drv.SetPower(ctx, name, driver.PowerAwake, gen); err != nil {
 		return c.fail(name, err, true)
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -58,6 +59,8 @@ type Driver struct {
 	pool  netip.Prefix
 	mu    sync.Mutex // serializes subnet allocation and staging
 
+	callers driver.CallerMap
+
 	initPath string
 	initOnce sync.Once
 	initData []byte
@@ -85,8 +88,41 @@ func New(cfg Config) (*Driver, error) {
 			return nil, fmt.Errorf("docker driver: %w", err)
 		}
 	}
-	return &Driver{cli: cli, fleet: cfg.Fleet, pool: pool.Masked(), initPath: cfg.InitBinary}, nil
+	d := &Driver{cli: cli, fleet: cfg.Fleet, pool: pool.Masked(), initPath: cfg.InitBinary}
+	d.callers.Snapshot = d.callerSnapshot
+	return d, nil
 }
+
+// Open is New for the Controller running in its container: it reattaches the container to every network of the
+// Fleet and reports where the owner API listens, on the Fleet bridge.
+func Open(ctx context.Context, cfg Config) (*Driver, driver.Host, error) {
+	d, err := New(cfg)
+	if err != nil {
+		return nil, driver.Host{}, err
+	}
+	if err := d.reattachController(ctx); err != nil {
+		d.Close()
+		return nil, driver.Host{}, err
+	}
+	addrs, err := d.controllerAddrs(ctx)
+	if err != nil {
+		d.Close()
+		return nil, driver.Host{}, err
+	}
+	bridge := "a12s-" + cfg.Fleet
+	ip, ok := addrs[bridge]
+	if !ok {
+		d.Close()
+		return nil, driver.Host{}, fmt.Errorf("the controller container is not attached to network %s", bridge)
+	}
+	return d, driver.Host{
+		ControllerName: d.ControllerName(),
+		APIAddr:        net.JoinHostPort(ip.String(), strconv.Itoa(APIPort)),
+	}, nil
+}
+
+// APIPort is the owner API's port on the Fleet bridge.
+const APIPort = 7000
 
 func (d *Driver) Close() error { return d.cli.Close() }
 
@@ -126,6 +162,7 @@ func (d *Driver) Capabilities(ctx context.Context) (driver.Capabilities, error) 
 		Architectures:     []string{goArch(info.Info.Architecture)},
 		SandboxedRuntime:  sandboxed,
 		Services:          true,
+		HostFolders:       true,
 	}, nil
 }
 
