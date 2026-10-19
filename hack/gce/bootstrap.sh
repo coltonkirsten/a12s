@@ -77,8 +77,13 @@ else
 fi
 # actAs is project-wide: the Controller could run a VM as any account in the project. That is why a fleet gets a
 # project of its own, holding only the Controller's and the agents' accounts.
-g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "projects/$PROJECT/roles/$ROLE" \
-  --condition None > /dev/null
+# A new service account takes a while to reach IAM policy checks ("does not exist"), so the binding retries.
+for i in $(seq 1 30); do
+  g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "projects/$PROJECT/roles/$ROLE" \
+    --condition None > /dev/null 2> /tmp/a12s-bootstrap-iam && break
+  grep -q 'does not exist' /tmp/a12s-bootstrap-iam && [ "$i" -lt 30 ] || { cat /tmp/a12s-bootstrap-iam >&2; exit 1; }
+  sleep 5
+done
 
 log "Controller VM $VM ($MACHINE, Debian with Docker)"
 if ! exists compute instances describe "$VM" --zone "$ZONE"; then
