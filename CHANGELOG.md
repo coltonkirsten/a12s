@@ -4,6 +4,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- `a12s init`'s README shows how to create agent computers from code: the README's hello example in Python and
+  TypeScript, after `a12s up`.
+
 ## v0.8.1 (2026-10-13)
 
 Codex background work now reports back, like Claude Code's.
