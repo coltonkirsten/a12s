@@ -176,6 +176,8 @@ internal/fleet/            Fleet file: parse, defaults merge, validation, image 
 internal/driver/           Driver interface and types
 internal/driver/engine/    one Docker engine's agent computer: container settings, files, exec, state, events, images, bundles
 internal/driver/docker/    Docker driver: internal networks, volumes, the controller's attachment, on engine
+internal/driver/gce/       GCE driver (experimental): VMs, disks, identity, firewall checks; the in-VM half (boot.sh,
+                           the VM's engine over mTLS) behind the Guest interface; gceapi (REST) and gcefake (tests)
 internal/controller/       reconciler, power, CA and mTLS, credential injection, egress proxy, owner API
 internal/inbox/            inbox store (fleet.db), delivery, Batch rendering, tokens, certificate registry
 internal/api/              CLI ↔ Controller API types (JSON)
@@ -190,7 +192,7 @@ images/slim, images/controller   container images
 images/bundles/            HarnessBundle images and conformance.sh
 services/svckit/           svckit, the Go library for writing Services
 examples/                  runnable Fleets: quickstart, lab
-hack/                      end-to-end scripts
+hack/                      end-to-end scripts; hack/gce: a fleet project's bootstrap and the GCE exit gate
 ```
 
 ## computerd on a host

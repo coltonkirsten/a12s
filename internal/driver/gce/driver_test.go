@@ -199,7 +199,7 @@ func TestFirewallCheck(t *testing.T) {
 			return fw
 		},
 		"engine open to the subnet": func(fw []gceapi.Firewall) []gceapi.Firewall {
-			fw[2].SourceServiceAccounts, fw[2].SourceRanges = nil, []string{"10.128.0.0/20"}
+			fw[2].SourceRanges = []string{"10.128.0.0/20"}
 			return fw
 		},
 		"an allow-all ahead of the deny": func(fw []gceapi.Firewall) []gceapi.Firewall {

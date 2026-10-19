@@ -42,6 +42,7 @@ type Drive struct {
 	ID     string // the a12s.drive label: "home-<computer>" or "state-<service>"
 	Name   string // "home-<computer>" or "<service>-state"
 	Volume string // the Docker volume
+	Disk   string // the GCE disk, for a fleet on GCE
 }
 
 type DownPlan struct {

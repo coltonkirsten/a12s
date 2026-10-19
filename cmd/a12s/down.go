@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/cli"
+	"github.com/coltonkirsten/a12s/internal/driver/gce"
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
@@ -52,26 +54,82 @@ func runDown(g *globals, args []string) error {
 	if err != nil {
 		return err
 	}
+	drv, err := cli.ReadDriverConfig(name)
+	if err != nil {
+		return err
+	}
+	var td *gce.Teardown
+	var vms gce.TeardownPlan
+	if drv.Driver == gce.Name {
+		if td, err = gce.OpenTeardown(ctx, name, drv.GCE); err != nil {
+			return err
+		}
+		if vms, err = td.Plan(ctx); err != nil {
+			return err
+		}
+	}
 	var purgeable []cli.Drive // a drive with a malformed (empty) label is always kept
 	for _, d := range plan.Drives {
 		if d.ID != "" {
 			purgeable = append(purgeable, d)
 		}
 	}
+	for _, d := range vms.Disks {
+		purgeable = append(purgeable, cli.Drive{ID: d.ID, Name: d.ID, Disk: d.Name})
+	}
 	if *purge && (len(purgeable) > 0 || len(plan.Data) > 0) && !*yes {
 		if !confirmPurge(os.Stdin, os.Stderr, name, purgeable, plan.Data, inboxCounts(name)) {
 			return exitCode(1)
 		}
 	}
+	var vmErr error
+	var gceRes gceDown
+	if td != nil {
+		// The VMs go first: they work without the Controller, and must not outlive it unnoticed.
+		gceRes.VMs, gceRes.DisksDestroyed, vmErr = td.Down(ctx, vms, *purge)
+		if !*purge {
+			for _, d := range vms.Disks {
+				gceRes.DisksKept = append(gceRes.DisksKept, d.Name)
+			}
+		}
+	}
 	res, derr := cli.Down(ctx, dc, plan, *purge)
+	derr = errors.Join(vmErr, derr)
 	if g.json {
-		if err := printJSON(res); err != nil {
+		out := any(res)
+		if td != nil {
+			out = struct {
+				*cli.DownResult
+				GCE gceDown `json:"gce"`
+			}{res, gceRes}
+		}
+		if err := printJSON(out); err != nil {
 			return err
 		}
 		return derr
 	}
+	writeGCEDown(os.Stdout, gceRes)
 	writeDown(os.Stdout, name, plan, res)
 	return derr
+}
+
+// gceDown is what down did on GCE.
+type gceDown struct {
+	VMs            []string `json:"vms"`            // agent computers whose VMs were deleted
+	DisksKept      []string `json:"disksKept"`      // home disks left in place
+	DisksDestroyed []string `json:"disksDestroyed"` // home disks deleted (purge)
+}
+
+func writeGCEDown(w io.Writer, r gceDown) {
+	for _, c := range r.VMs {
+		fmt.Fprintln(w, "removed the VM of "+c)
+	}
+	for _, d := range r.DisksDestroyed {
+		fmt.Fprintln(w, "destroyed disk "+d)
+	}
+	if len(r.DisksKept) > 0 {
+		fmt.Fprintf(w, "kept %d disk(s); a12s up reattaches them: %s\n", len(r.DisksKept), strings.Join(r.DisksKept, ", "))
+	}
 }
 
 func inboxCounts(fleetName string) string {
@@ -110,7 +168,11 @@ func inboxCounts(fleetName string) string {
 func confirmPurge(in io.Reader, out io.Writer, fleetName string, drives []cli.Drive, data []string, counts string) bool {
 	fmt.Fprintf(out, "a12s down --purge destroys the %d drive(s) of fleet %s and everything on them:\n", len(drives), fleetName)
 	for _, d := range drives {
-		fmt.Fprintf(out, "  %s (volume %s)\n", d.Name, d.Volume)
+		if d.Disk != "" {
+			fmt.Fprintf(out, "  %s (disk %s)\n", d.Name, d.Disk)
+		} else {
+			fmt.Fprintf(out, "  %s (volume %s)\n", d.Name, d.Volume)
+		}
 	}
 	for _, v := range data {
 		if counts == "" {

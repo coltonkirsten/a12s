@@ -109,6 +109,9 @@ type Host struct {
 	ControllerName string
 	// APIAddr is where the owner API listens unless configured otherwise.
 	APIAddr string
+	// RemoteEngines: Computers' containers run in engines other than the one on the Controller's host, so the CLI
+	// can't docker exec into them (a12s shell).
+	RemoteEngines bool
 }
 
 type Observation struct {

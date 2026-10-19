@@ -78,11 +78,12 @@ func (d *Driver) checkFirewall(ctx context.Context) error {
 		if r.Direction != "INGRESS" && r.Direction != "" || len(r.Allowed) == 0 || !slices.Contains(r.TargetTags, NetworkTag) {
 			continue
 		}
-		fromController := slices.Contains(r.SourceServiceAccounts, d.cfg.ControllerAccount) || onlyHost(r.SourceRanges, ctl) && len(r.SourceTags) == 0
+		// GCE rules can't mix service accounts and tags, so the Controller is named by its address.
+		fromController := onlyHost(r.SourceRanges, ctl) && len(r.SourceTags) == 0 && len(r.SourceServiceAccounts) == 0
 		for _, p := range []int{EnginePort, MTLSPort} {
 			if allows(r.Allowed, p) {
 				if !fromController {
-					return fmt.Errorf("firewall rule %s opens tcp:%d on instances tagged %s to more than the Controller; fix: restrict its source to the Controller's service account", r.Name, p, NetworkTag)
+					return fmt.Errorf("firewall rule %s opens tcp:%d on instances tagged %s to more than the Controller; fix: restrict its source to the Controller's address", r.Name, p, NetworkTag)
 				}
 				inbound[p] = true
 			}
