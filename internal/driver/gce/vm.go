@@ -493,12 +493,3 @@ func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.Comput
 	}
 	return cs
 }
-
-func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
-	out := make(chan driver.Event)
-	go func() {
-		<-ctx.Done()
-		close(out)
-	}()
-	return out, nil
-}

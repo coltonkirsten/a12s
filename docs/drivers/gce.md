@@ -66,3 +66,16 @@ e2-micro 0.25, e2-small 0.5, e2-medium 1). One that sets none gets `defaultShape
 container itself has none. When the zone has no capacity for the shape, wake tries the same size in each next family
 (`families`, default `e2, n2d, t2d`); the next wake starts from the first family again. If none has capacity, the
 wake fails and `a12s status` says so.
+
+## When things fail
+
+| Event | What happens | What `a12s status` shows |
+|---|---|---|
+| The agent computer's container dies (crash or out of memory) | The driver records why and stops the VM, so a dead agent computer doesn't bill. The Controller restarts it like on Docker. | `exited with code N` or `out of memory` |
+| Host maintenance | E2 and N-series VMs live-migrate. | Nothing |
+| Host error | GCE stops the VM (`automaticRestart` is off: a12s makes power decisions). The power policy wakes it when a message waits. | `host error` |
+| The VM shuts itself down | Recorded like a host error. | `the VM shut itself down` |
+| No capacity in the zone | Wake tries the next family; see above. | `zone Z has no capacity for SHAPE` |
+| Someone else stops or deletes the VM | Reported to the Controller like a dead or removed container. | As on Docker |
+| The Controller restarts | Nothing is lost: everything it needs is on the instances' labels and the disks, and the staged specs on its state disk. | |
+| The zone fails | Nothing automatic: home disks are zonal. Restore a snapshot into another zone, change `zone`, and `a12s up`. | |
