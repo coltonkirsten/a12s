@@ -4,6 +4,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added (experimental): a GCE driver that runs each agent computer as its own Compute Engine VM. Select it with
+  `~/.a12s/<fleet>/driver.yaml` on the Controller VM ([GCE driver](docs/drivers/gce.md)). It has not passed the exit
+  gate on a real project yet.
 - `a12s init`'s README shows how to create agent computers from code: the README's hello example in Python and
   TypeScript, after `a12s up`.
 

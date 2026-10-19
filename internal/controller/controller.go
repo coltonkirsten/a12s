@@ -4,6 +4,7 @@ package controller
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/computerd"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
+	"github.com/coltonkirsten/a12s/internal/driver/gce"
 	"github.com/coltonkirsten/a12s/internal/fleet"
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
@@ -40,6 +42,9 @@ type Config struct {
 	APIAddr string // A12S_API_ADDR
 	// TimeScale divides power-policy durations; 1 in production, larger in tests.
 	TimeScale float64 // A12S_TEST_TIME_SCALE
+	// Driver is the substrate: "docker" (default) or "gce", with GCE's settings.
+	Driver string       // A12S_DRIVER
+	GCE    gce.Settings // A12S_GCE, JSON
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -54,6 +59,17 @@ func ConfigFromEnv() (Config, error) {
 		cfg.StateDir = "/var/lib/a12s"
 	}
 	cfg.SubnetPool = docker.DefaultSubnetPool
+	cfg.Driver = os.Getenv("A12S_DRIVER")
+	switch cfg.Driver {
+	case "", docker.Name:
+		cfg.Driver = docker.Name
+	case gce.Name:
+		if err := json.Unmarshal([]byte(os.Getenv("A12S_GCE")), &cfg.GCE); err != nil {
+			return cfg, fmt.Errorf("A12S_GCE: %w", err)
+		}
+	default:
+		return cfg, fmt.Errorf("A12S_DRIVER: want %s or %s, got %q", docker.Name, gce.Name, cfg.Driver)
+	}
 	if s := os.Getenv("A12S_TEST_TIME_SCALE"); s != "" {
 		v, err := strconv.ParseFloat(s, 64)
 		if err != nil || v < 1 {
@@ -367,15 +383,15 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return err
 	}
-	drv, host, closeDriver, err := openDriver(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	defer closeDriver()
 	ca, err := LoadCA(cfg.StateDir, cfg.Fleet)
 	if err != nil {
 		return err
 	}
+	drv, host, closeDriver, err := openDriver(ctx, cfg, ca)
+	if err != nil {
+		return err
+	}
+	defer closeDriver()
 	c, err := New(cfg, drv, ca)
 	if err != nil {
 		return err
@@ -485,7 +501,22 @@ func (c *Controller) denied(name, host string, port int, reason string) {
 }
 
 // openDriver returns the substrate the Controller runs on and how it is reached there.
-func openDriver(ctx context.Context, cfg Config) (driver.Driver, driver.Host, func(), error) {
+func openDriver(ctx context.Context, cfg Config, ca *CA) (driver.Driver, driver.Host, func(), error) {
+	if cfg.Driver == gce.Name {
+		leaf, err := ca.ControllerClientCert()
+		if err != nil {
+			return nil, driver.Host{}, nil, err
+		}
+		cert, err := leaf.TLS()
+		if err != nil {
+			return nil, driver.Host{}, nil, err
+		}
+		drv, err := gce.Open(ctx, cfg.Fleet, cfg.GCE, cfg.StateDir, cert, ca.CertPEM())
+		if err != nil {
+			return nil, driver.Host{}, nil, err
+		}
+		return drv, drv.Host(), func() { drv.Close() }, nil
+	}
 	drv, host, err := docker.Open(ctx, docker.Config{Fleet: cfg.Fleet, SubnetPool: cfg.SubnetPool})
 	if err != nil {
 		return nil, driver.Host{}, nil, err

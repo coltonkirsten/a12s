@@ -27,6 +27,9 @@ const (
 	LabelData = "a12s.data"
 )
 
+// Name selects this driver (A12S_DRIVER, driver.yaml); it is the default.
+const Name = "docker"
+
 var DefaultSubnetPool = netip.MustParsePrefix("10.213.0.0/16")
 
 const SubnetBits = 29

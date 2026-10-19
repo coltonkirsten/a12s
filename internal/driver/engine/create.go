@@ -29,6 +29,8 @@ type Placement struct {
 	// Limits applies the spec's CPU and memory to the container; a substrate that sizes the machine to the spec
 	// leaves it off.
 	Limits bool
+	// Env is what the substrate adds to the spec's environment.
+	Env []string
 }
 
 // VolumeMount holds only what was written to the volume, never image content.
@@ -72,7 +74,7 @@ func (e *Engine) CreateOptions(spec driver.ComputerSpec, p Placement) client.Con
 		Config: &container.Config{
 			Image:       spec.Image,
 			Hostname:    spec.Name,
-			Env:         spec.Env(e.fleet),
+			Env:         append(spec.Env(e.fleet), p.Env...),
 			StopTimeout: &stop,
 			Healthcheck: NoHealthcheck,
 			// A custom image's ENTRYPOINT or USER must not replace computerd, which starts as root and drops the

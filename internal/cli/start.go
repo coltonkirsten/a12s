@@ -22,6 +22,7 @@ import (
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
 	"github.com/coltonkirsten/a12s/internal/driver/engine"
+	"github.com/coltonkirsten/a12s/internal/driver/gce"
 	"github.com/coltonkirsten/a12s/internal/version"
 )
 
@@ -73,10 +74,16 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 	}
 	defer dc.Close()
 	n := NamesFor(o.Fleet)
-	labels := map[string]string{engine.LabelFleet: o.Fleet, engine.LabelRole: engine.RoleController}
-
-	if err := ensureBridge(ctx, dc, n.Network, o.Fleet, labels); err != nil {
+	drv, err := ReadDriverConfig(o.Fleet)
+	if err != nil {
 		return nil, err
+	}
+	labels := map[string]string{engine.LabelFleet: o.Fleet, engine.LabelRole: engine.RoleController, LabelDriver: drv.digest()}
+
+	if drv.Driver == docker.Name {
+		if err := ensureBridge(ctx, dc, n.Network, o.Fleet, labels); err != nil {
+			return nil, err
+		}
 	}
 	if err := ensureStateVolume(ctx, dc, n.Volume, o.Fleet, labels); err != nil {
 		return nil, err
@@ -96,7 +103,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 	switch {
 	case cerrdefs.IsNotFound(err):
 		token = NewToken()
-		if err := createController(ctx, dc, n, o, labels, token, prevPort); err != nil {
+		if err := createController(ctx, dc, n, o, drv, labels, token, prevPort); err != nil {
 			return nil, err
 		}
 		logf("started controller %s (%s)", n.Container, o.Image)
@@ -113,13 +120,13 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 		if token == "" {
 			return nil, fmt.Errorf("container %s has no API token; remove it (docker rm -f %s) and run a12s up again", n.Container, n.Container)
 		}
-		if res.Container.Config.Image != o.Image {
-			// Another release's Controller: replace it. Its volumes, so the Fleet's state, stay, and the agent
-			// computers keep running while it restarts.
+		if res.Container.Config.Image != o.Image || res.Container.Config.Labels[LabelDriver] != labels[LabelDriver] {
+			// Another release's Controller, or another driver config: replace it. Its volumes, so the Fleet's state,
+			// stay, and the agent computers keep running while it restarts.
 			if _, err := dc.ContainerRemove(ctx, n.Container, client.ContainerRemoveOptions{Force: true}); err != nil {
 				return nil, fmt.Errorf("replace %s: %w", n.Container, err)
 			}
-			if err := createController(ctx, dc, n, o, labels, token, prevPort); err != nil {
+			if err := createController(ctx, dc, n, o, drv, labels, token, prevPort); err != nil {
 				return nil, err
 			}
 			logf("replaced controller %s (%s -> %s)", n.Container, res.Container.Config.Image, o.Image)
@@ -133,7 +140,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 		}
 	}
 
-	port, err := publishedPort(ctx, dc, n.Container)
+	port, err := apiPort(ctx, dc, n.Container)
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +209,29 @@ func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName st
 }
 
 // ControllerCreateOptions publishes the API port on loopback only, on a fixed host port so that a restart of the
-// container keeps the port in controller.json.
-func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, hostPort int, labels map[string]string) client.ContainerCreateOptions {
+// container keeps the port in controller.json. On GCE the Controller shares the VM's network instead: Computer VMs
+// reach its proxy and mTLS listener at the VM's address, and the API listens on the VM's loopback.
+func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, hostPort int, labels map[string]string, drv DriverConfig) client.ContainerCreateOptions {
+	if drv.Driver == gce.Name {
+		return client.ContainerCreateOptions{
+			Name: n.Container,
+			Config: &container.Config{
+				Image: image,
+				Env: append([]string{"A12S_FLEET=" + fleetName, "A12S_API_TOKEN=" + token, "A12S_DATA_DIR=" + controllerDataDir,
+					"A12S_API_ADDR=" + net.JoinHostPort("127.0.0.1", strconv.Itoa(hostPort))}, drv.env()...),
+				Labels: labels,
+			},
+			HostConfig: &container.HostConfig{
+				NetworkMode:   network.NetworkHost,
+				RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
+				Binds:         []string{dockerSocket + ":" + dockerSocket},
+				Mounts: []mount.Mount{
+					{Type: mount.TypeVolume, Source: n.Volume, Target: controllerStateDir},
+					{Type: mount.TypeVolume, Source: n.Data, Target: controllerDataDir},
+				},
+			},
+		}
+	}
 	port := network.MustParsePort(ControllerPort)
 	return client.ContainerCreateOptions{
 		Name: n.Container,
@@ -232,12 +260,12 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 	}
 }
 
-func createController(ctx context.Context, dc *client.Client, n ControllerNames, o StartOptions, labels map[string]string, token string, prevPort int) error {
+func createController(ctx context.Context, dc *client.Client, n ControllerNames, o StartOptions, drv DriverConfig, labels map[string]string, token string, prevPort int) error {
 	port, err := freeLoopbackPort(prevPort)
 	if err != nil {
 		return fmt.Errorf("pick a port for %s: %w", n.Container, err)
 	}
-	opts := ControllerCreateOptions(n, o.Fleet, o.Image, token, port, labels)
+	opts := ControllerCreateOptions(n, o.Fleet, o.Image, token, port, labels, drv)
 	// Lets tests run power-policy timers faster than real time.
 	if v := os.Getenv("A12S_TEST_TIME_SCALE"); v != "" {
 		opts.Config.Env = append(opts.Config.Env, "A12S_TEST_TIME_SCALE="+v)
@@ -271,6 +299,22 @@ func freeLoopbackPort(prev int) (int, error) {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// apiPort is the published API port, or on the host network the port in the Controller's A12S_API_ADDR.
+func apiPort(ctx context.Context, dc *client.Client, name string) (int, error) {
+	res, err := dc.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("inspect %s: %w", name, err)
+	}
+	if res.Container.HostConfig != nil && res.Container.HostConfig.NetworkMode.IsHost() {
+		_, p, err := net.SplitHostPort(envValue(res.Container.Config.Env, "A12S_API_ADDR"))
+		if err != nil {
+			return 0, fmt.Errorf("controller %s: A12S_API_ADDR: %w", name, err)
+		}
+		return strconv.Atoi(p)
+	}
+	return publishedPort(ctx, dc, name)
 }
 
 func publishedPort(ctx context.Context, dc *client.Client, name string) (int, error) {
