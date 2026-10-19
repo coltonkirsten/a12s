@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
 )
@@ -161,5 +163,24 @@ func TestExplainMountError(t *testing.T) {
 		if want == "" && got != msg || want != "" && (!strings.Contains(got, "Docker can't see "+want) || !strings.Contains(got, "File sharing")) {
 			t.Errorf("%s\n -> %s, want %q", msg, got, want)
 		}
+	}
+}
+
+// Regression (first real GCE run): a published port must also be exposed, or the engine never binds it.
+func TestCreateOptionsExposesPublishedPorts(t *testing.T) {
+	port := network.MustParsePort("7443/tcp")
+	p := Placement{
+		Name: "c", Network: "bridge",
+		Drive: func(_, target string) mount.Mount {
+			return mount.Mount{Type: mount.TypeBind, Source: "/h", Target: target}
+		},
+		Ports: network.PortMap{port: {{HostPort: "7443"}}},
+	}
+	opts := (&Engine{}).CreateOptions(driver.ComputerSpec{Name: "c"}, p)
+	if _, ok := opts.Config.ExposedPorts[port]; !ok {
+		t.Fatalf("ExposedPorts = %v, want %v", opts.Config.ExposedPorts, port)
+	}
+	if got := (&Engine{}).CreateOptions(driver.ComputerSpec{Name: "c"}, Placement{Drive: p.Drive}).Config.ExposedPorts; got != nil {
+		t.Fatalf("no ports: ExposedPorts = %v, want nil", got)
 	}
 }
