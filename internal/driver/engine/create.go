@@ -65,6 +65,15 @@ func (e *Engine) CreateOptions(spec driver.ComputerSpec, p Placement) client.Con
 	}
 	stop := StopTimeout
 	useInit := true
+	// The engine publishes only exposed ports: a binding for a port the config doesn't expose is kept in HostConfig
+	// and never applied.
+	var exposed network.PortSet
+	for port := range p.Ports {
+		if exposed == nil {
+			exposed = network.PortSet{}
+		}
+		exposed[port] = struct{}{}
+	}
 	var res container.Resources
 	if p.Limits {
 		res = container.Resources{Memory: spec.Memory, NanoCPUs: spec.CPUMillis * 1_000_000}
@@ -72,11 +81,12 @@ func (e *Engine) CreateOptions(spec driver.ComputerSpec, p Placement) client.Con
 	return client.ContainerCreateOptions{
 		Name: p.Name,
 		Config: &container.Config{
-			Image:       spec.Image,
-			Hostname:    spec.Name,
-			Env:         append(spec.Env(e.fleet), p.Env...),
-			StopTimeout: &stop,
-			Healthcheck: NoHealthcheck,
+			Image:        spec.Image,
+			Hostname:     spec.Name,
+			Env:          append(spec.Env(e.fleet), p.Env...),
+			StopTimeout:  &stop,
+			ExposedPorts: exposed,
+			Healthcheck:  NoHealthcheck,
 			// A custom image's ENTRYPOINT or USER must not replace computerd, which starts as root and drops the
 			// harness to uid 1000 itself.
 			Entrypoint: []string{"node", driver.ComputerdMain},
