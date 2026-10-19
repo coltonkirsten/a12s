@@ -104,6 +104,8 @@ class ComputerStatus:
     harness: Harness
     image: str
     seccomp: str | None = None
+    identity: str | None = None
+    """The cloud principal it acts as (a GCE service account with per-computer identity), for your app to grant access to."""
     generation: int
     staged_generation: int | None = None
     credential_generation: int | None = None

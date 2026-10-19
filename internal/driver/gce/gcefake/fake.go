@@ -45,10 +45,11 @@ type Fake struct {
 }
 
 type httpFault struct {
-	call   string // "instances.insert"
-	target string // resource name, "" for any
-	status int
-	reason string
+	call    string // "instances.insert"
+	target  string // resource name, "" for any
+	status  int
+	reason  string
+	message string
 }
 
 type opFault struct {
@@ -106,11 +107,16 @@ func (f *Fake) API() *gceapi.API {
 	}
 }
 
-// FailHTTP makes the next matching call fail with status and reason; target "" matches any resource.
-func (f *Fake) FailHTTP(call, target string, status int, reason string) {
+// FailHTTP makes the next matching call fail with status, reason and, if given, message; target "" matches any
+// resource.
+func (f *Fake) FailHTTP(call, target string, status int, reason string, message ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.httpFaults = append(f.httpFaults, httpFault{call, target, status, reason})
+	msg := "injected " + call + " failure"
+	if len(message) > 0 {
+		msg = message[0]
+	}
+	f.httpFaults = append(f.httpFaults, httpFault{call, target, status, reason, msg})
 }
 
 // FailOp makes the next matching operation finish with error code, changing nothing.
@@ -375,7 +381,7 @@ func (f *Fake) fault(call, target string) (reply, bool) {
 	for i, h := range f.httpFaults {
 		if h.call == call && (h.target == "" || h.target == target) {
 			f.httpFaults = slices.Delete(f.httpFaults, i, i+1)
-			return errReply(h.status, h.reason, "injected %s failure", call), true
+			return errReply(h.status, h.reason, "%s", h.message), true
 		}
 	}
 	return reply{}, false

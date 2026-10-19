@@ -30,6 +30,8 @@ type Settings struct {
 	BootImage      string   `json:"bootImage,omitempty" yaml:"bootImage,omitempty"`
 	BootDiskGB     int64    `json:"bootDiskGb,omitempty" yaml:"bootDiskGb,omitempty"`
 	SnapshotPolicy string   `json:"snapshotPolicy,omitempty" yaml:"snapshotPolicy,omitempty"`
+	// Identity "per-computer" gives each agent computer its own service account; default "none".
+	Identity string `json:"identity,omitempty" yaml:"identity,omitempty"`
 }
 
 // Open runs on the Controller VM: the project, zone, address and service account come from its metadata server,
@@ -80,11 +82,18 @@ func Open(ctx context.Context, fleet string, s Settings, stateDir string, client
 	}
 	local := engine.New(cli, fleet)
 	engines := &Engines{API: api, Fleet: fleet, Controller: controller, ClientCert: clientCert, Local: local}
+	if s.Identity == IdentityPerComputer {
+		engines.Env = IdentityEnv()
+	}
+	identity := s.Identity
+	if identity == "" {
+		identity = IdentityNone
+	}
 	d, err := New(ctx, Config{
 		Fleet: fleet, API: api, Subnetwork: s.Subnetwork, Controller: controller, ControllerAccount: account,
 		Families: s.Families, DefaultShape: s.DefaultShape, BootImage: s.BootImage, BootDiskGB: s.BootDiskGB,
 		SnapshotPolicy: s.SnapshotPolicy, StateDir: stateDir, Local: local, Guest: engines.Open,
-		BootMetadata: BootMetadata(controller, caPEM, "none"), Arch: runtime.GOARCH,
+		Identity: s.Identity, BootMetadata: BootMetadata(controller, caPEM, identity), Arch: runtime.GOARCH,
 	})
 	if err != nil {
 		cli.Close()

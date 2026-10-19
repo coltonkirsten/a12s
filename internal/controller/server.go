@@ -412,7 +412,7 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 		}
 	}
 	r := c.rtLocked(name)
-	cs.Phase, cs.Error, cs.Waiting, cs.ActiveTurn = r.phase, r.failure, r.waiting, r.activeTurn
+	cs.Phase, cs.Error, cs.Waiting, cs.ActiveTurn, cs.Identity = r.phase, r.failure, r.waiting, r.activeTurn, r.identity
 	c.mu.Unlock()
 	defer func() { out.Power = c.powerStatus(ctx, name, out.Phase) }()
 

@@ -425,6 +425,9 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 	}
 	c.mu.Lock()
 	rec := c.state.Computers[name]
+	if exists {
+		c.rtLocked(name).identity = obs.Identity
+	}
 	c.mu.Unlock()
 	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name}); err != nil {
 		return unchanged, c.fail(name, err, true)
@@ -586,7 +589,9 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	if err := c.drv.StageComputer(ctx, spec); err != nil {
 		return c.fail(name, err, true)
 	}
+	var identity string
 	err = c.confirm(ctx, name, fmt.Sprintf("generation %d staged", spec.Generation), func(st driver.ComputerState, exists bool) bool {
+		identity = st.Identity
 		return exists && st.Generation == spec.Generation && !st.Running
 	})
 	if err != nil {
@@ -595,6 +600,7 @@ func (c *Controller) restage(ctx context.Context, name string) error {
 	c.mu.Lock()
 	rec.Generation, rec.SpecHash = spec.Generation, hash
 	rec.StagedGeneration, rec.StagedHash = 0, ""
+	c.rtLocked(name).identity = identity
 	// The new generation's egress policy takes effect now.
 	rec.Active = c.activeLocked(name)
 	desired := rec.DesiredPower

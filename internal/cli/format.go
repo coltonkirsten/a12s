@@ -157,6 +157,9 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 		if c.Seccomp != "" {
 			extra = append(extra, "seccomp "+c.Seccomp)
 		}
+		if c.Identity != "" {
+			extra = append(extra, "identity "+c.Identity)
+		}
 		if in := InboxCell(c.Inbox); in != "" {
 			extra = append(extra, in)
 		}

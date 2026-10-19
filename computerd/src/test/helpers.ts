@@ -23,6 +23,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     bundle: join(root, 'bundle'),
     credentials: [],
     proxy: null,
+    harnessEnv: {},
     send: [],
     uses: '',
     attach: [],
