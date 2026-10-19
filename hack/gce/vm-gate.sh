@@ -62,7 +62,7 @@ latency)
     t0=$(date +%s.%N)
     "$A12S" wake scout -F examples/lab/fleet.yaml >> "$LOG" 2>&1
     if wait_phase scout Ready 600; then
-      echo "$(date +%s.%N) - $t0" | bc >> /tmp/gce-wakes
+      awk -v t0="$t0" -v t1="$(date +%s.%N)" 'BEGIN { print t1 - t0 }' >> /tmp/gce-wakes
       log "wake $i: $(tail -1 /tmp/gce-wakes) s"
     else
       log "wake $i: scout not Ready after 600 s"
