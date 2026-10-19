@@ -585,7 +585,7 @@ func MetadataToken(hc *http.Client, base string) TokenSource {
 			AccessToken string `json:"access_token"`
 			ExpiresIn   int    `json:"expires_in"`
 		}
-		if err := metadataGet(ctx, hc, base, "instance/service-accounts/default/token", &out); err != nil {
+		if err := MetadataGet(ctx, hc, base, "instance/service-accounts/default/token", &out); err != nil {
 			return "", err
 		}
 		tok, exp = out.AccessToken, time.Now().Add(time.Duration(out.ExpiresIn)*time.Second-time.Minute)
@@ -595,8 +595,8 @@ func MetadataToken(hc *http.Client, base string) TokenSource {
 
 const DefaultMetadataEndpoint = "http://169.254.169.254/computeMetadata/v1/"
 
-// metadataGet decodes JSON into out when out is not a *string.
-func metadataGet(ctx context.Context, hc *http.Client, base, path string, out any) error {
+// MetadataGet decodes JSON into out when out is not a *string.
+func MetadataGet(ctx context.Context, hc *http.Client, base, path string, out any) error {
 	if hc == nil {
 		hc = http.DefaultClient
 	}

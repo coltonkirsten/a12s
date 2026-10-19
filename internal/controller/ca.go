@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -185,7 +186,12 @@ func (ca *CA) ControllerClientCert() (Leaf, error) {
 	return ca.issue(ControllerCN, nil, x509.ExtKeyUsageClientAuth)
 }
 
+// ControllerServerCert names host as an IP address when it is one: on GCE, Computers reach the Controller by
+// address, since they resolve no names.
 func (ca *CA) ControllerServerCert(host string) (Leaf, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return ca.issueSAN(host, nil, []net.IP{ip}, nil, x509.ExtKeyUsageServerAuth)
+	}
 	return ca.issue(host, []string{host}, x509.ExtKeyUsageServerAuth)
 }
 
@@ -194,6 +200,10 @@ func (ca *CA) issue(cn string, dns []string, usage ...x509.ExtKeyUsage) (Leaf, e
 }
 
 func (ca *CA) issueURI(cn string, dns []string, uris []*url.URL, usage ...x509.ExtKeyUsage) (Leaf, error) {
+	return ca.issueSAN(cn, dns, nil, uris, usage...)
+}
+
+func (ca *CA) issueSAN(cn string, dns []string, ips []net.IP, uris []*url.URL, usage ...x509.ExtKeyUsage) (Leaf, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return Leaf{}, err
@@ -203,6 +213,7 @@ func (ca *CA) issueURI(cn string, dns []string, uris []*url.URL, usage ...x509.E
 		SerialNumber: serial(),
 		Subject:      pkix.Name{CommonName: cn},
 		DNSNames:     dns,
+		IPAddresses:  ips,
 		URIs:         uris,
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.Add(leafLife),

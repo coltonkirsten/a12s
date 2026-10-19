@@ -77,6 +77,12 @@ func (e *Engine) InspectComputerImage(ctx context.Context, imageID string) (driv
 // extractor containers, so the image needs no shell. bundle.json is written last: its presence marks a complete
 // extraction.
 func (e *Engine) EnsureBundle(ctx context.Context, imageRef, cacheVolume string) (driver.Bundle, error) {
+	return e.EnsureBundleAs(ctx, imageRef, cacheVolume, "")
+}
+
+// EnsureBundleAs extracts under the BundleDir of dirImageID instead of the image's own ID: the ID the image has in
+// another engine, the one Computers' specs name, when it was copied into this one under a different ID.
+func (e *Engine) EnsureBundleAs(ctx context.Context, imageRef, cacheVolume, dirImageID string) (driver.Bundle, error) {
 	imageID, err := e.EnsureImage(ctx, imageRef)
 	if err != nil {
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: %w", imageRef, err)
@@ -103,7 +109,10 @@ func (e *Engine) EnsureBundle(ctx context.Context, imageRef, cacheVolume string)
 		return driver.Bundle{}, fmt.Errorf("ensure bundle %s: %w", imageRef, err)
 	}
 	out := driver.Bundle{ImageID: imageID, Manifest: m}
-	dir := driver.BundleDir(m.Kind, m.Version, imageID)
+	if dirImageID == "" {
+		dirImageID = imageID
+	}
+	dir := driver.BundleDir(m.Kind, m.Version, dirImageID)
 
 	_, err = e.cli.ContainerStatPath(ctx, created, client.ContainerStatPathOptions{Path: path.Join(extractMount, dir, bundleManifest)})
 	if err == nil {

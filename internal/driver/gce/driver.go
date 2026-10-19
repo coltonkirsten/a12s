@@ -79,6 +79,8 @@ type Driver struct {
 	locks  map[string]*sync.Mutex // per Computer: stage, power and removal never interleave
 	guests map[string]openGuest
 	types  []gceapi.MachineType
+
+	closeLocal func() error
 }
 
 type openGuest struct {
@@ -144,16 +146,15 @@ func New(ctx context.Context, cfg Config) (*Driver, error) {
 	return d, nil
 }
 
-func (d *Driver) Host() driver.Host {
-	return driver.Host{ControllerName: d.cfg.Controller.String()}
-}
-
 func (d *Driver) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for name, og := range d.guests {
 		og.g.Close()
 		delete(d.guests, name)
+	}
+	if d.closeLocal != nil {
+		return d.closeLocal()
 	}
 	return nil
 }
