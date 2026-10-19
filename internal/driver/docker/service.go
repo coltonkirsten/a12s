@@ -26,6 +26,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
+	"github.com/coltonkirsten/a12s/internal/driver/engine"
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
@@ -35,12 +36,10 @@ var serviceCapAdd = []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGI
 
 const initCacheMount = "/a12s-init-cache"
 
-var noHealthcheck = &container.HealthConfig{Test: []string{"NONE"}}
-
 func (d *Driver) InitVolume() string { return "a12s-" + d.fleet + "-init" }
 
 func (d *Driver) serviceFilter() client.Filters {
-	return d.fleetFilter().Add("label", LabelRole+"="+RoleService)
+	return d.fleetFilter().Add("label", engine.LabelRole+"="+engine.RoleService)
 }
 
 func (d *Driver) initBinary() ([]byte, string, error) {
@@ -78,7 +77,7 @@ func (d *Driver) ensureInit(ctx context.Context, imageID string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := d.ensureVolume(ctx, d.InitVolume(), map[string]string{LabelFleet: d.fleet, LabelRole: RoleInit}, LabelRole, RoleInit); err != nil {
+	if _, err := d.eng.EnsureVolume(ctx, d.InitVolume(), map[string]string{engine.LabelFleet: d.fleet, engine.LabelRole: engine.RoleInit}, engine.LabelRole, engine.RoleInit); err != nil {
 		return err
 	}
 	suffix := make([]byte, 4)
@@ -87,7 +86,7 @@ func (d *Driver) ensureInit(ctx context.Context, imageID string) error {
 		Name: "a12s-" + d.fleet + "-init-extract-" + hex.EncodeToString(suffix),
 		Config: &container.Config{
 			Image: imageID, Entrypoint: []string{"/a12s-never-started"},
-			Labels: map[string]string{LabelFleet: d.fleet},
+			Labels: map[string]string{engine.LabelFleet: d.fleet},
 		},
 		HostConfig: &container.HostConfig{NetworkMode: "none", Mounts: []mount.Mount{{
 			Type: mount.TypeVolume, Source: d.InitVolume(), Target: initCacheMount,
@@ -97,11 +96,11 @@ func (d *Driver) ensureInit(ctx context.Context, imageID string) error {
 	if err != nil {
 		return fmt.Errorf("a12s-init: create extractor: %w", err)
 	}
-	defer d.removeExtractor(ctx, created.ID)
+	defer d.eng.RemoveExtractor(ctx, created.ID)
 	target := path.Join(initCacheMount, sum, "a12s")
 	if st, err := d.cli.ContainerStatPath(ctx, created.ID, client.ContainerStatPathOptions{Path: target}); err == nil && st.Stat.Size == int64(len(data)) {
 		return nil
-	} else if err != nil && !isNotFound(err) {
+	} else if err != nil && !engine.IsNotFound(err) {
 		return fmt.Errorf("a12s-init: stat: %w", err)
 	}
 	var buf bytes.Buffer
@@ -129,13 +128,13 @@ func (d *Driver) ServiceImage(ctx context.Context, imageID string) (driver.Servi
 		out.HasCommand = len(cfg.Entrypoint) > 0 || len(cfg.Cmd) > 0
 	}
 	sort.Strings(out.Volumes)
-	id, err := d.createExtractor(ctx, res.ID, false)
+	id, err := d.eng.CreateExtractor(ctx, res.ID, "")
 	if err != nil {
 		return out, fmt.Errorf("read %s from %s: %w", fleet.ManifestPath, imageID, err)
 	}
-	defer d.removeExtractor(ctx, id)
+	defer d.eng.RemoveExtractor(ctx, id)
 	rc, err := d.cli.CopyFromContainer(ctx, id, client.CopyFromContainerOptions{SourcePath: fleet.ManifestPath})
-	if isNotFound(err) {
+	if engine.IsNotFound(err) {
 		return out, nil
 	}
 	if err != nil {
@@ -165,18 +164,18 @@ func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) erro
 	name := d.ContainerName(spec.Name)
 	existing, err := d.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	switch {
-	case isNotFound(err):
+	case engine.IsNotFound(err):
 	case err != nil:
 		return fmt.Errorf("stage service %s: %w", spec.Name, err)
 	default:
 		c := existing.Container
-		if c.Config.Labels[LabelFleet] != d.fleet || c.Config.Labels[LabelRole] != RoleService {
+		if c.Config.Labels[engine.LabelFleet] != d.fleet || c.Config.Labels[engine.LabelRole] != engine.RoleService {
 			return fmt.Errorf("stage service %s: container %s exists but is not a Service of fleet %s", spec.Name, name, d.fleet)
 		}
 		if c.State != nil && (c.State.Running || c.State.Restarting || c.State.Paused) {
 			return fmt.Errorf("stage service %s generation %d: %w", spec.Name, spec.Generation, driver.ErrRunning)
 		}
-		staged := parseGeneration(c.Config.Labels)
+		staged := engine.ParseGeneration(c.Config.Labels)
 		if staged > spec.Generation {
 			return fmt.Errorf("stage service %s generation %d: generation %d is staged: %w", spec.Name, spec.Generation, staged, driver.ErrStaleGeneration)
 		}
@@ -205,7 +204,7 @@ func (d *Driver) StageService(ctx context.Context, spec driver.ServiceSpec) erro
 	if err != nil {
 		return fmt.Errorf("stage service %s: %w", spec.Name, err)
 	}
-	netName, err := d.ensureNetworkFor(ctx, spec.Name, RoleService)
+	netName, err := d.ensureNetworkFor(ctx, spec.Name, engine.RoleService)
 	if err != nil {
 		return fmt.Errorf("stage service %s: %w", spec.Name, err)
 	}
@@ -248,7 +247,7 @@ func checkServiceSpec(s driver.ServiceSpec) error {
 		if p == "" {
 			continue
 		}
-		if !mountPointRE.MatchString(p) || path.Clean(p) != p || !path.IsAbs(p) || p == "/" {
+		if !engine.MountPointRE.MatchString(p) || path.Clean(p) != p || !path.IsAbs(p) || p == "/" {
 			return fmt.Errorf("invalid mount point %q", p)
 		}
 		for _, r := range []string{"/run/a12s", "/tmp", "/a12s", "/proc", "/sys", "/dev"} {
@@ -284,7 +283,7 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 		"A12S_STATE_AT=" + spec.StateAt,
 		"A12S_TMPFS=" + strings.Join(spec.Tmpfs, ","),
 	}, spec.Env...)
-	stop := StopTimeout
+	stop := engine.StopTimeout
 	useInit := true
 	return client.ContainerCreateOptions{
 		Name: d.ContainerName(spec.Name),
@@ -295,14 +294,14 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 			Entrypoint: []string{initExec, "service-init", "--"},
 			Cmd:        program,
 			// An image HEALTHCHECK would run image code as root; a12s runs the manifest's check.
-			Healthcheck: noHealthcheck,
+			Healthcheck: engine.NoHealthcheck,
 			Env:         env,
 			StopTimeout: &stop,
 			Labels: map[string]string{
-				LabelFleet:      d.fleet,
-				LabelService:    spec.Name,
-				LabelGeneration: strconv.FormatInt(spec.Generation, 10),
-				LabelRole:       RoleService,
+				engine.LabelFleet:      d.fleet,
+				engine.LabelService:    spec.Name,
+				engine.LabelGeneration: strconv.FormatInt(spec.Generation, 10),
+				engine.LabelRole:       engine.RoleService,
 			},
 		},
 		HostConfig: &container.HostConfig{
@@ -325,13 +324,13 @@ func (d *Driver) serviceCreateOptions(spec driver.ServiceSpec, initExec string, 
 
 func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.Power, generation int64) error {
 	c, err := d.serviceContainer(ctx, name)
-	if isNotFound(err) || errors.Is(err, driver.ErrNotFound) {
+	if engine.IsNotFound(err) || errors.Is(err, driver.ErrNotFound) {
 		return fmt.Errorf("power service %s %s: %w", name, power, driver.ErrNotStaged)
 	}
 	if err != nil {
 		return fmt.Errorf("power service %s %s: %w", name, power, err)
 	}
-	switch staged := parseGeneration(c.Config.Labels); {
+	switch staged := engine.ParseGeneration(c.Config.Labels); {
 	case generation < staged:
 		return fmt.Errorf("power service %s generation %d: generation %d is staged: %w", name, generation, staged, driver.ErrStaleGeneration)
 	case generation > staged:
@@ -349,7 +348,7 @@ func (d *Driver) SetServicePower(ctx context.Context, name string, power driver.
 			}
 		}
 	case driver.PowerAsleep:
-		timeout := StopTimeout
+		timeout := engine.StopTimeout
 		if running {
 			if _, err := d.cli.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 				return fmt.Errorf("power service %s asleep: %w", name, err)
@@ -365,29 +364,29 @@ func (d *Driver) RemoveService(ctx context.Context, name string) error {
 	defer d.callers.Remove(name)()
 	c, err := d.serviceContainer(ctx, name)
 	switch {
-	case isNotFound(err) || errors.Is(err, driver.ErrNotFound):
+	case engine.IsNotFound(err) || errors.Is(err, driver.ErrNotFound):
 	case err != nil:
 		return fmt.Errorf("remove service %s: %w", name, err)
 	default:
-		if _, err := d.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
+		if _, err := d.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !engine.IsNotFound(err) {
 			return fmt.Errorf("remove service %s: %w", name, err)
 		}
 	}
 	netName := d.NetworkName(name)
 	nres, err := d.cli.NetworkInspect(ctx, netName, client.NetworkInspectOptions{})
-	if isNotFound(err) {
+	if engine.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("remove service %s: %w", name, err)
 	}
-	if nres.Network.Labels[LabelFleet] != d.fleet {
+	if nres.Network.Labels[engine.LabelFleet] != d.fleet {
 		return fmt.Errorf("remove service %s: network %s is not owned by fleet %s", name, netName, d.fleet)
 	}
 	for id := range nres.Network.Containers {
 		_, _ = d.cli.NetworkDisconnect(ctx, netName, client.NetworkDisconnectOptions{Container: id, Force: true})
 	}
-	if _, err := d.cli.NetworkRemove(ctx, netName, client.NetworkRemoveOptions{}); err != nil && !isNotFound(err) {
+	if _, err := d.cli.NetworkRemove(ctx, netName, client.NetworkRemoveOptions{}); err != nil && !engine.IsNotFound(err) {
 		return fmt.Errorf("remove service %s: network: %w", name, err)
 	}
 	return nil
@@ -395,13 +394,13 @@ func (d *Driver) RemoveService(ctx context.Context, name string) error {
 
 func (d *Driver) serviceContainer(ctx context.Context, name string) (container.InspectResponse, error) {
 	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(name), client.ContainerInspectOptions{})
-	if isNotFound(err) {
+	if engine.IsNotFound(err) {
 		return container.InspectResponse{}, driver.ErrNotFound
 	}
 	if err != nil {
 		return container.InspectResponse{}, err
 	}
-	if res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RoleService {
+	if res.Container.Config.Labels[engine.LabelFleet] != d.fleet || res.Container.Config.Labels[engine.LabelRole] != engine.RoleService {
 		return container.InspectResponse{}, fmt.Errorf("container %s is not a Service of fleet %s", d.ContainerName(name), d.fleet)
 	}
 	return res.Container, nil
@@ -412,7 +411,7 @@ func (d *Driver) runningService(ctx context.Context, name string) (driver.Comput
 	if err != nil {
 		return driver.ComputerState{}, err
 	}
-	st := d.computerState(name, c)
+	st := engine.ComputerState(name, d.NetworkName(name), c)
 	if !st.Running {
 		return st, fmt.Errorf("service is %s, not running", st.Power)
 	}
@@ -423,7 +422,7 @@ func (d *Driver) ServiceExec(ctx context.Context, name, user string, cmd []strin
 	if _, err := d.runningService(ctx, name); err != nil {
 		return -1, "", fmt.Errorf("exec %s: %w", name, err)
 	}
-	return d.exec(ctx, d.ContainerName(name), user, cmd, stdin)
+	return d.eng.Exec(ctx, d.ContainerName(name), name, user, cmd, stdin)
 }
 
 func (d *Driver) DialService(ctx context.Context, name string, port int) (net.Conn, error) {

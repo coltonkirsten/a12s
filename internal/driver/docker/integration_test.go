@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
+	"github.com/coltonkirsten/a12s/internal/driver/engine"
 	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
@@ -42,7 +44,7 @@ func startStandinController(ctx context.Context, t *testing.T, cli *client.Clien
 	t.Helper()
 	ctrl, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:   d.ControllerName(),
-		Config: &container.Config{Image: "alpine", Cmd: []string{"sleep", "600"}, Labels: map[string]string{LabelFleet: fleetName, LabelRole: RoleController}},
+		Config: &container.Config{Image: "alpine", Cmd: []string{"sleep", "600"}, Labels: map[string]string{engine.LabelFleet: fleetName, engine.LabelRole: engine.RoleController}},
 	})
 	must(t, err)
 	_, err = cli.ContainerStart(ctx, ctrl.ID, client.ContainerStartOptions{})
@@ -141,7 +143,7 @@ func TestDockerIntegration(t *testing.T) {
 	}
 
 	// A network with the Computer's name that is not isolated is never reused.
-	_, err = cli.NetworkCreate(ctx, d.NetworkName("rogue"), client.NetworkCreateOptions{Driver: "bridge", Labels: map[string]string{LabelFleet: fleetName}})
+	_, err = cli.NetworkCreate(ctx, d.NetworkName("rogue"), client.NetworkCreateOptions{Driver: "bridge", Labels: map[string]string{engine.LabelFleet: fleetName}})
 	must(t, err)
 	rogue := spec
 	rogue.Name, rogue.HomeDrive, rogue.Files = "rogue", home.ID, nil
@@ -159,14 +161,14 @@ func TestDockerIntegration(t *testing.T) {
 	}
 	// A same-generation container whose files copy never finished is
 	// replaced and the files copied again.
-	must(t, d.writeMarker(ctx, staged.Container.ID, "pending"))
+	must(t, writePendingMarker(ctx, cli, staged.Container.ID))
 	must(t, d.StageComputer(ctx, spec))
 	again, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
 	must(t, err)
 	if again.Container.ID == staged.Container.ID {
 		t.Error("pending-marker container was reported as staged")
 	}
-	if state, err := d.readFile(ctx, again.Container.ID, filesMarker); err != nil || state != "applied sha256:p1" {
+	if state, err := d.eng.ReadFile(ctx, again.Container.ID, engine.FilesMarker); err != nil || state != "applied sha256:p1" {
 		t.Errorf("marker after restage = %q, %v", state, err)
 	}
 
@@ -274,7 +276,7 @@ func TestDockerIntegration(t *testing.T) {
 			break
 		}
 	}
-	if _, err := cli.NetworkInspect(ctx, d.NetworkName("c"), client.NetworkInspectOptions{}); !isNotFound(err) {
+	if _, err := cli.NetworkInspect(ctx, d.NetworkName("c"), client.NetworkInspectOptions{}); !engine.IsNotFound(err) {
 		t.Errorf("network still present: %v", err)
 	}
 	obs, err = d.Observe(ctx)
@@ -290,7 +292,7 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 	res, err := cli.ContainerInspect(ctx, d.ContainerName("c"), client.ContainerInspectOptions{})
 	must(t, err)
 	c := res.Container
-	for k, v := range map[string]string{LabelFleet: d.fleet, LabelComputer: "c", LabelGeneration: "1", LabelRole: RoleComputer} {
+	for k, v := range map[string]string{engine.LabelFleet: d.fleet, engine.LabelComputer: "c", engine.LabelGeneration: "1", engine.LabelRole: engine.RoleComputer} {
 		if c.Config.Labels[k] != v {
 			t.Errorf("label %s = %q, want %q", k, c.Config.Labels[k], v)
 		}
@@ -299,7 +301,7 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 	if !h.ReadonlyRootfs || h.Privileged || len(h.Binds) != 0 || len(h.PortBindings) != 0 || h.PublishAllPorts {
 		t.Errorf("host config: ro=%v priv=%v binds=%v ports=%v", h.ReadonlyRootfs, h.Privileged, h.Binds, h.PortBindings)
 	}
-	if !slices.Equal(h.CapDrop, []string{"ALL"}) || !sameCaps(h.CapAdd, capAdd) || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") {
+	if !slices.Equal(h.CapDrop, []string{"ALL"}) || !sameCaps(h.CapAdd, []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"}) || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") {
 		t.Errorf("caps: drop=%v add=%v secopt=%v", h.CapDrop, h.CapAdd, h.SecurityOpt)
 	}
 	if h.Init == nil || !*h.Init {
@@ -330,7 +332,7 @@ func checkContainer(ctx context.Context, t *testing.T, d *Driver, cli *client.Cl
 	must(t, err)
 	n := nres.Network
 	if !n.Internal || n.Options["com.docker.network.bridge.gateway_mode_ipv4"] != "isolated" ||
-		len(n.IPAM.Config) != 1 || n.IPAM.Config[0].Subnet.Bits() != SubnetBits || n.Labels[LabelFleet] != d.fleet {
+		len(n.IPAM.Config) != 1 || n.IPAM.Config[0].Subnet.Bits() != SubnetBits || n.Labels[engine.LabelFleet] != d.fleet {
 		t.Errorf("network: internal=%v options=%v ipam=%+v labels=%v", n.Internal, n.Options, n.IPAM.Config, n.Labels)
 	}
 	if len(n.Containers) != 2 {
@@ -375,7 +377,7 @@ func checkInside(ctx context.Context, t *testing.T, d *Driver, address, bundlePa
 	expect(false, bundleJSON, "cat", bundlePath+"/bundle.json")
 	expect(false, "echo fake codex", "sed", "-n", "2p", bundlePath+"/bin/codex")
 	expect(true, "", "touch", "/run/a12s/x", "/tmp/x")
-	expect(true, "applied sha256:p1", "cat", filesMarker)
+	expect(true, "applied sha256:p1", "cat", engine.FilesMarker)
 	expect(true, "docker-init", "sh", "-c", "cat /proc/1/comm")
 	expect(true, "tmpfs 700", "sh", "-c", "echo $(stat -f -c %T /run/a12s) $(stat -c %a /run/a12s)")
 	// The secret-inject path: bytes on stdin into tmpfs.
@@ -477,7 +479,7 @@ func buildImage(ctx context.Context, t *testing.T, cli *client.Client, tag strin
 
 func cleanup(t *testing.T, cli *client.Client, fleetName string, images ...string) {
 	ctx := context.Background()
-	f := make(client.Filters).Add("label", LabelFleet+"="+fleetName)
+	f := make(client.Filters).Add("label", engine.LabelFleet+"="+fleetName)
 	if list, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f}); err == nil {
 		for _, c := range list.Items {
 			_, _ = cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true})
@@ -530,4 +532,15 @@ func equalMaps(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// writePendingMarker leaves the files marker as an interrupted copy leaves it.
+func writePendingMarker(ctx context.Context, cli *client.Client, containerID string) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	_ = tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(engine.FilesMarker), Mode: 0o600, Size: 7})
+	_, _ = tw.Write([]byte("pending"))
+	_ = tw.Close()
+	_, err := cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: path.Dir(engine.FilesMarker), Content: &buf})
+	return err
 }

@@ -174,7 +174,8 @@ internal/version/          the release version and the image refs it resolves (s
 cmd/a12s/                  the CLI and, as `a12s controller`, the Controller (one Go binary)
 internal/fleet/            Fleet file: parse, defaults merge, validation, image pins, Service manifests
 internal/driver/           Driver interface and types
-internal/driver/docker/    Docker driver: containers, internal networks, volumes, bundles
+internal/driver/engine/    one Docker engine's agent computer: container settings, files, exec, state, events, images, bundles
+internal/driver/docker/    Docker driver: internal networks, volumes, the controller's attachment, on engine
 internal/controller/       reconciler, power, CA and mTLS, credential injection, egress proxy, owner API
 internal/inbox/            inbox store (fleet.db), delivery, Batch rendering, tokens, certificate registry
 internal/api/              CLI ↔ Controller API types (JSON)

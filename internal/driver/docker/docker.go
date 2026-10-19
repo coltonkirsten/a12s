@@ -12,39 +12,24 @@ import (
 	"strings"
 	"sync"
 
-	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
+	"github.com/coltonkirsten/a12s/internal/driver/engine"
 )
 
+// Labels on drive and data volumes; containers, networks and volumes also carry engine.LabelFleet.
 const (
-	LabelFleet      = "a12s.fleet"
-	LabelComputer   = "a12s.computer"
-	LabelGeneration = "a12s.generation"
-	LabelRole       = "a12s.role"
-	LabelDrive      = "a12s.drive" // drive ID, on drive volumes
-	LabelSize       = "a12s.size"  // requested drive size in bytes (not enforced)
-	LabelPath       = "a12s.path"  // a keep drive's mount point
+	LabelDrive = "a12s.drive" // drive ID, on drive volumes
+	LabelSize  = "a12s.size"  // requested drive size in bytes (not enforced)
+	LabelPath  = "a12s.path"  // a keep drive's mount point
 	// LabelData's volume holds fleet.db; it survives down and only purge destroys it.
 	LabelData = "a12s.data"
-
-	RoleController = "controller"
-	RoleComputer   = "computer"
-	RoleService    = "service"
-	RoleInit       = "init"
-	LabelService   = "a12s.service"
 )
 
 var DefaultSubnetPool = netip.MustParsePrefix("10.213.0.0/16")
 
 const SubnetBits = 29
-
-// StopTimeout bounds the harness's flush on sleep before Docker kills it.
-const StopTimeout = 25
-
-// capAdd is the full set of Linux capabilities kept in Computers; everything else is dropped.
-var capAdd = []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"}
 
 type Config struct {
 	Fleet      string
@@ -55,6 +40,7 @@ type Config struct {
 
 type Driver struct {
 	cli   *client.Client
+	eng   *engine.Engine
 	fleet string
 	pool  netip.Prefix
 	mu    sync.Mutex // serializes subnet allocation and staging
@@ -88,7 +74,7 @@ func New(cfg Config) (*Driver, error) {
 			return nil, fmt.Errorf("docker driver: %w", err)
 		}
 	}
-	d := &Driver{cli: cli, fleet: cfg.Fleet, pool: pool.Masked(), initPath: cfg.InitBinary}
+	d := &Driver{cli: cli, eng: engine.New(cli, cfg.Fleet), fleet: cfg.Fleet, pool: pool.Masked(), initPath: cfg.InitBinary}
 	d.callers.Snapshot = d.callerSnapshot
 	return d, nil
 }
@@ -137,11 +123,11 @@ func (d *Driver) BundleVolume() string { return "a12s-" + d.fleet + "-bundles" }
 func (d *Driver) ControllerName() string { return "a12s-" + d.fleet + "-controller" }
 
 func (d *Driver) fleetFilter() client.Filters {
-	return make(client.Filters).Add("label", LabelFleet+"="+d.fleet)
+	return make(client.Filters).Add("label", engine.LabelFleet+"="+d.fleet)
 }
 
 func (d *Driver) computerFilter() client.Filters {
-	return d.fleetFilter().Add("label", LabelRole+"="+RoleComputer)
+	return d.fleetFilter().Add("label", engine.LabelRole+"="+engine.RoleComputer)
 }
 
 func (d *Driver) Capabilities(ctx context.Context) (driver.Capabilities, error) {
@@ -180,11 +166,4 @@ func goArch(a string) string {
 		return "arm64"
 	}
 	return a
-}
-
-func isNotFound(err error) bool { return cerrdefs.IsNotFound(err) }
-
-func parseGeneration(labels map[string]string) int64 {
-	g, _ := strconv.ParseInt(labels[LabelGeneration], 10, 64)
-	return g
 }
