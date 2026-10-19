@@ -23,11 +23,12 @@ g compute routers delete "$NET" --region "$REGION" 2> /dev/null
 g compute addresses delete "$NET-controller" --region "$REGION" 2> /dev/null
 g compute networks subnets delete "$NET" --region "$REGION" 2> /dev/null
 g compute networks delete "$NET" 2> /dev/null || { echo "network $NET still exists"; rc=1; }
+# The binding goes before the account: deleting the account first leaves a "deleted:serviceAccount:" member behind.
+g projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "projects/$PROJECT/roles/a12sController" \
+  --condition None > /dev/null 2>&1
 for sa in $(g iam service-accounts list --format 'value(email)' --filter "displayName~'^a12s '"); do
   g iam service-accounts delete "$sa" 2> /dev/null
 done
-g projects remove-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "projects/$PROJECT/roles/a12sController" \
-  --condition None > /dev/null 2>&1
 g iam service-accounts delete "$SA" 2> /dev/null
 g iam roles delete a12sController > /dev/null 2>&1
 exit "$rc"

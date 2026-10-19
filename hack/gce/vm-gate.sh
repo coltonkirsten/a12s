@@ -18,10 +18,11 @@ log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 check() { local name=$1; shift; if "$@" >> "$LOG" 2>&1; then PASS=$((PASS+1)); log "PASS $name"; else FAIL=$((FAIL+1)); log "FAIL $name"; fi; }
 # shellcheck disable=SC2329 # called through check
 fails() { ! "$@"; }
-vm_ip() {
+vm_field() {
   gcloud compute instances describe "a12s-lab-$1" --zone "$(curl -fsS -H 'Metadata-Flavor: Google' \
-    http://169.254.169.254/computeMetadata/v1/instance/zone | sed 's|.*/||')" --format='value(networkInterfaces[0].networkIP)'
+    http://169.254.169.254/computeMetadata/v1/instance/zone | sed 's|.*/||')" --format="$2"
 }
+vm_ip() { vm_field "$1" 'value(networkInterfaces[0].networkIP)'; }
 probe() { sudo HOME="$HOME" "$REPO/bin/probe" lab "$@"; }
 phase() {
   "$A12S" status --json -F examples/lab/fleet.yaml | python3 -c "
@@ -132,7 +133,7 @@ Y
   "$A12S" up -F examples/lab/fleet.yaml >> "$LOG" 2>&1
   for c in micro small; do
     wait_phase "$c" Ready 600 || { log "FAIL $c not Ready"; FAIL=$((FAIL+1)); continue; }
-    log "$c idle: $(probe stats "$c")"
+    log "$c on $(vm_field "$c" 'value(machineType.basename())') idle: $(probe stats "$c")"
     : > "/tmp/gce-peak.$c"
     t0=$(date +%s)
     "$A12S" send --wait "$c" -F examples/lab/fleet.yaml "Use your Bash tool to run exactly: cd /tmp && git clone --depth 1 https://github.com/coltonkirsten/a12s a && rg -c func a | wc -l && cd a/sdk/typescript && npm ci --ignore-scripts --no-audit --no-fund > /dev/null && echo ok. Then reply with the single word done." > "/tmp/gce-busy.$c" 2>&1 &
