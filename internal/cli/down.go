@@ -17,6 +17,7 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
+	"github.com/coltonkirsten/a12s/internal/driver/engine"
 )
 
 // Down talks to Docker directly: the Controller cannot remove its own
@@ -72,7 +73,7 @@ type DownResult struct {
 }
 
 func fleetFilter(fleetName string) client.Filters {
-	return make(client.Filters).Add("label", docker.LabelFleet+"="+fleetName)
+	return make(client.Filters).Add("label", engine.LabelFleet+"="+fleetName)
 }
 
 func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, error) {
@@ -85,15 +86,15 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
 	for _, c := range cl.Items {
-		if c.Labels[docker.LabelFleet] == fleetName {
+		if c.Labels[engine.LabelFleet] == fleetName {
 			p.Containers = append(p.Containers, c)
 		}
 	}
 	rank := func(c container.Summary) int {
-		switch c.Labels[docker.LabelRole] {
-		case docker.RoleController:
+		switch c.Labels[engine.LabelRole] {
+		case engine.RoleController:
 			return 0
-		case docker.RoleComputer:
+		case engine.RoleComputer:
 			return 1
 		}
 		return 2
@@ -110,7 +111,7 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 		return nil, fmt.Errorf("list networks: %w", err)
 	}
 	for _, n := range nl.Items {
-		if n.Labels[docker.LabelFleet] == fleetName {
+		if n.Labels[engine.LabelFleet] == fleetName {
 			p.Networks = append(p.Networks, n.Name)
 		}
 	}
@@ -121,7 +122,7 @@ func PlanDown(ctx context.Context, dc DownDocker, fleetName string) (*DownPlan, 
 		return nil, fmt.Errorf("list volumes: %w", err)
 	}
 	for _, v := range vl.Items {
-		if v.Labels[docker.LabelFleet] != fleetName {
+		if v.Labels[engine.LabelFleet] != fleetName {
 			continue
 		}
 		if _, isData := v.Labels[docker.LabelData]; isData {
@@ -171,7 +172,7 @@ func DriveName(id string) string {
 	return id
 }
 
-const computerStopTimeout = docker.StopTimeout
+const computerStopTimeout = engine.StopTimeout
 
 // Down removes every Controller first so nothing can recreate a Computer, and
 // purges only the drives the operator confirmed. Vanished objects are not errors.
@@ -213,8 +214,8 @@ func Down(ctx context.Context, dc DownDocker, plan *DownPlan, purge bool) (*Down
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			role := c.Labels[docker.LabelRole]
-			err := removeContainer(ctx, dc, c, role == docker.RoleComputer || role == docker.RoleService)
+			role := c.Labels[engine.LabelRole]
+			err := removeContainer(ctx, dc, c, role == engine.RoleComputer || role == engine.RoleService)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -291,7 +292,7 @@ const maxControllerRounds = 3
 func controllers(cs []container.Summary) []container.Summary {
 	var out []container.Summary
 	for _, c := range cs {
-		if c.Labels[docker.LabelRole] == docker.RoleController {
+		if c.Labels[engine.LabelRole] == engine.RoleController {
 			out = append(out, c)
 		}
 	}
@@ -333,7 +334,7 @@ func removeNetwork(ctx context.Context, dc DownDocker, fleetName, name string) e
 	if err != nil {
 		return fmt.Errorf("inspect network %s: %w", name, err)
 	}
-	if n.Network.Labels[docker.LabelFleet] != fleetName {
+	if n.Network.Labels[engine.LabelFleet] != fleetName {
 		return fmt.Errorf("network %s is not owned by fleet %s; left alone", name, fleetName)
 	}
 	if len(n.Network.Containers) > 0 {
@@ -367,7 +368,7 @@ func removeVolume(ctx context.Context, dc DownDocker, fleetName, name, driveID s
 	if _, isData := v.Volume.Labels[docker.LabelData]; isData {
 		return fmt.Errorf("volume %s is a data volume; left alone", name)
 	}
-	if v.Volume.Labels[docker.LabelFleet] != fleetName || isDrive != (driveID != "") || id != driveID {
+	if v.Volume.Labels[engine.LabelFleet] != fleetName || isDrive != (driveID != "") || id != driveID {
 		return fmt.Errorf("volume %s changed since it was listed; left alone", name)
 	}
 	if _, err := dc.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
@@ -386,7 +387,7 @@ func removeDataVolume(ctx context.Context, dc DownDocker, fleetName, name string
 	}
 	_, isData := v.Volume.Labels[docker.LabelData]
 	_, isDrive := v.Volume.Labels[docker.LabelDrive]
-	if v.Volume.Labels[docker.LabelFleet] != fleetName || !isData || isDrive {
+	if v.Volume.Labels[engine.LabelFleet] != fleetName || !isData || isDrive {
 		return fmt.Errorf("volume %s changed since it was listed; left alone", name)
 	}
 	if _, err := dc.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {

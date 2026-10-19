@@ -21,6 +21,7 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
+	"github.com/coltonkirsten/a12s/internal/driver/engine"
 	"github.com/coltonkirsten/a12s/internal/version"
 )
 
@@ -72,7 +73,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 	}
 	defer dc.Close()
 	n := NamesFor(o.Fleet)
-	labels := map[string]string{docker.LabelFleet: o.Fleet, docker.LabelRole: docker.RoleController}
+	labels := map[string]string{engine.LabelFleet: o.Fleet, engine.LabelRole: engine.RoleController}
 
 	if err := ensureBridge(ctx, dc, n.Network, o.Fleet, labels); err != nil {
 		return nil, err
@@ -102,7 +103,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 	case err != nil:
 		return nil, fmt.Errorf("inspect %s: %w", n.Container, err)
 	default:
-		if res.Container.Config == nil || res.Container.Config.Labels[docker.LabelFleet] != o.Fleet {
+		if res.Container.Config == nil || res.Container.Config.Labels[engine.LabelFleet] != o.Fleet {
 			return nil, fmt.Errorf("container %s exists but is not the Controller of fleet %s", n.Container, o.Fleet)
 		}
 		// The container's own env is the source of truth for its token.
@@ -150,7 +151,7 @@ func EnsureController(ctx context.Context, o StartOptions) (*Client, error) {
 func ensureBridge(ctx context.Context, dc *client.Client, name, fleetName string, labels map[string]string) error {
 	res, err := dc.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
 	if err == nil {
-		if res.Network.Labels[docker.LabelFleet] != fleetName {
+		if res.Network.Labels[engine.LabelFleet] != fleetName {
 			return fmt.Errorf("network %s exists but does not belong to fleet %s", name, fleetName)
 		}
 		return nil
@@ -167,7 +168,7 @@ func ensureBridge(ctx context.Context, dc *client.Client, name, fleetName string
 func ensureStateVolume(ctx context.Context, dc *client.Client, name, fleetName string, labels map[string]string) error {
 	res, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	if err == nil {
-		if res.Volume.Labels[docker.LabelFleet] != fleetName {
+		if res.Volume.Labels[engine.LabelFleet] != fleetName {
 			return fmt.Errorf("volume %s exists but does not belong to fleet %s", name, fleetName)
 		}
 		return nil
@@ -185,7 +186,7 @@ func ensureStateVolume(ctx context.Context, dc *client.Client, name, fleetName s
 func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName string) error {
 	res, err := dc.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	if err == nil {
-		if res.Volume.Labels[docker.LabelFleet] != fleetName || res.Volume.Labels[docker.LabelData] == "" {
+		if res.Volume.Labels[engine.LabelFleet] != fleetName || res.Volume.Labels[docker.LabelData] == "" {
 			return fmt.Errorf("volume %s exists but is not the data volume of fleet %s", name, fleetName)
 		}
 		return nil
@@ -193,7 +194,7 @@ func ensureDataVolume(ctx context.Context, dc *client.Client, name, fleetName st
 	if !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("inspect volume %s: %w", name, err)
 	}
-	labels := map[string]string{docker.LabelFleet: fleetName, docker.LabelData: "fleet.db"}
+	labels := map[string]string{engine.LabelFleet: fleetName, docker.LabelData: "fleet.db"}
 	if _, err := dc.VolumeCreate(ctx, client.VolumeCreateOptions{Name: name, Labels: labels}); err != nil {
 		return fmt.Errorf("create volume %s: %w", name, err)
 	}

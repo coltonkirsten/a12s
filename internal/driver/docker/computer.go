@@ -1,42 +1,22 @@
 package docker
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net/netip"
-	"path"
-	"regexp"
-	"strconv"
-	"strings"
 
-	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
 	"github.com/coltonkirsten/a12s/internal/driver"
+	"github.com/coltonkirsten/a12s/internal/driver/engine"
 )
 
-const (
-	homeMount = "/home"
-	agentHome = "/home/agent"
-	runA12S   = "/run/a12s"
-	agentUID  = 1000
-	agentGID  = 1000
-	agentUser = "1000:1000"
-
-	// filesMarker sits outside the agent's home and is root-owned so the agent can't forge it.
-	filesMarker = "/home/.a12s-files"
-
-	gatewayModeOption = "com.docker.network.bridge.gateway_mode_ipv4"
-)
+const gatewayModeOption = "com.docker.network.bridge.gateway_mode_ipv4"
 
 func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) error {
-	if err := checkSpec(spec); err != nil {
+	if err := engine.CheckSpec(spec); err != nil {
 		return fmt.Errorf("stage %s: %w", spec.Name, err)
 	}
 	d.mu.Lock()
@@ -45,24 +25,24 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 	name := d.ContainerName(spec.Name)
 	existing, err := d.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	switch {
-	case isNotFound(err):
+	case engine.IsNotFound(err):
 	case err != nil:
 		return fmt.Errorf("stage %s: %w", spec.Name, err)
 	default:
 		c := existing.Container
-		if c.Config.Labels[LabelFleet] != d.fleet || c.Config.Labels[LabelRole] != RoleComputer {
+		if c.Config.Labels[engine.LabelFleet] != d.fleet || c.Config.Labels[engine.LabelRole] != engine.RoleComputer {
 			return fmt.Errorf("stage %s: container %s exists but is not an agent computer of fleet %s", spec.Name, name, d.fleet)
 		}
 		if c.State != nil && (c.State.Running || c.State.Restarting || c.State.Paused) {
 			return fmt.Errorf("stage %s generation %d: %w", spec.Name, spec.Generation, driver.ErrRunning)
 		}
-		staged := parseGeneration(c.Config.Labels)
+		staged := engine.ParseGeneration(c.Config.Labels)
 		if staged > spec.Generation {
 			return fmt.Errorf("stage %s generation %d: generation %d is staged: %w", spec.Name, spec.Generation, staged, driver.ErrStaleGeneration)
 		}
 		if staged == spec.Generation {
 			// A stage interrupted mid-way is replaced, never reported as success.
-			done, err := d.bootstrapped(ctx, c.ID, spec)
+			done, err := d.eng.Bootstrapped(ctx, c.ID, spec)
 			if err != nil {
 				return fmt.Errorf("stage %s: %w", spec.Name, err)
 			}
@@ -71,14 +51,14 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 			}
 		}
 		if _, err := d.cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{}); err != nil {
-			return fmt.Errorf("stage %s: remove generation %s: %w", spec.Name, c.Config.Labels[LabelGeneration], err)
+			return fmt.Errorf("stage %s: remove generation %s: %w", spec.Name, c.Config.Labels[engine.LabelGeneration], err)
 		}
 	}
 
-	if _, err := d.ensureImage(ctx, spec.Image); err != nil {
+	if _, err := d.eng.EnsureImage(ctx, spec.Image); err != nil {
 		return fmt.Errorf("stage %s: image %s: %w", spec.Name, spec.Image, err)
 	}
-	if _, err := d.ensureBundleVolume(ctx); err != nil {
+	if _, err := d.eng.EnsureVolume(ctx, d.BundleVolume(), map[string]string{engine.LabelFleet: d.fleet}, engine.LabelFleet, d.fleet); err != nil {
 		return fmt.Errorf("stage %s: %w", spec.Name, err)
 	}
 	netName, err := d.ensureNetwork(ctx, spec.Name)
@@ -89,307 +69,39 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 		return fmt.Errorf("stage %s: %w", spec.Name, err)
 	}
 
-	created, err := d.cli.ContainerCreate(ctx, d.createOptions(spec))
-	if err != nil {
-		return fmt.Errorf("stage %s: create container: %w", spec.Name, explainMountError(err, spec.Attach))
-	}
-	if err := d.checkBundle(ctx, created.ID, spec); err != nil {
-		return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
-	}
-	if len(spec.Files) > 0 {
-		if err := d.applyFiles(ctx, created.ID, spec); err != nil {
-			// Without the container, a retry stages (and copies) again.
-			return fmt.Errorf("stage %s: %w", spec.Name, d.discard(ctx, created.ID, err))
-		}
+	if _, err := d.eng.CreateComputer(ctx, spec, d.placement(spec.Name)); err != nil {
+		return fmt.Errorf("stage %s: %w", spec.Name, err)
 	}
 	return nil
 }
 
-// discard reports a failed removal rather than assuming the container is gone.
-func (d *Driver) discard(ctx context.Context, containerID string, cause error) error {
-	if _, err := d.cli.ContainerRemove(context.WithoutCancel(ctx), containerID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
-		return errors.Join(cause, fmt.Errorf("remove half-staged container: %w", err))
+func (d *Driver) placement(computer string) engine.Placement {
+	return engine.Placement{
+		Name:    d.ContainerName(computer),
+		Network: d.NetworkName(computer),
+		Drive: func(driveID, target string) mount.Mount {
+			return engine.VolumeMount(d.VolumeName(driveID), target, false)
+		},
+		BundleVolume:  d.BundleVolume(),
+		ProxyURL:      "http://" + d.ControllerName() + ":3128",
+		ControllerURL: "https://" + d.ControllerName() + ":7443",
+		Limits:        true,
 	}
-	return cause
-}
-
-func (d *Driver) bootstrapped(ctx context.Context, containerID string, spec driver.ComputerSpec) (bool, error) {
-	if err := d.checkBundle(ctx, containerID, spec); err != nil {
-		return false, nil
-	}
-	if len(spec.Files) == 0 {
-		return true, nil
-	}
-	state, err := d.readFile(ctx, containerID, filesMarker)
-	if err != nil {
-		return false, fmt.Errorf("files: %w", err)
-	}
-	return state == appliedMarker(spec.FilesDigest), nil
-}
-
-// explainMountError names the attached folder Docker refused and the fix. Docker Desktop reports a folder it doesn't
-// share exactly like a missing one, so the fix covers both.
-func explainMountError(err error, attach []driver.Attach) error {
-	msg := err.Error()
-	if !strings.Contains(msg, "bind source path does not exist") && !strings.Contains(msg, "is not shared from the host") && !strings.Contains(msg, "mounts denied") {
-		return err
-	}
-	what, matched := "an attached folder", ""
-	for _, a := range attach {
-		// The longest match wins: /Users/me/app is also a prefix of a missing /Users/me/app2.
-		if strings.Contains(msg, a.Host) && len(a.Host) > len(matched) {
-			what, matched = fmt.Sprintf("attach.%s (%s)", path.Base(a.Target), a.Host), a.Host
-		}
-	}
-	return fmt.Errorf("%w; fix: Docker can't see %s: check that it exists and, with Docker Desktop, that it is inside a shared folder (Settings > Resources > File sharing; /Users, /Volumes, /private, /tmp and /var/folders by default), then apply the Fleet again", err, what)
-}
-
-// boundFolders reads a staged container's attached folders back from its bind mounts.
-func boundFolders(c container.InspectResponse) []driver.Attach {
-	var out []driver.Attach
-	if c.HostConfig == nil {
-		return nil
-	}
-	for _, m := range c.HostConfig.Mounts {
-		if m.Type == mount.TypeBind {
-			// Docker Desktop stores a host path as seen from its VM, under /host_mnt.
-			host := m.Source
-			if strings.HasPrefix(host, "/host_mnt/") {
-				host = strings.TrimPrefix(host, "/host_mnt")
-			}
-			out = append(out, driver.Attach{Host: host, Target: m.Target})
-		}
-	}
-	return out
-}
-
-var mountPointRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-
-func checkSpec(s driver.ComputerSpec) error {
-	switch {
-	case s.Name == "":
-		return errors.New("name is required")
-	case s.Generation < 1:
-		return errors.New("generation must be positive")
-	case s.Image == "":
-		return errors.New("image is required")
-	case s.HomeDrive == "":
-		return errors.New("home drive is required")
-	case s.Bundle.Kind == "" || s.Bundle.Version == "":
-		return errors.New("bundle kind and version are required")
-	case driver.ShortImageID(s.Bundle.Image) == "":
-		return fmt.Errorf("bundle image %q must be the image ID EnsureBundle returned", s.Bundle.Image)
-	}
-	for _, a := range s.Attach {
-		if !path.IsAbs(a.Host) || path.Clean(a.Host) != a.Host || a.Host == "/" {
-			return fmt.Errorf("attach host %q must be a clean absolute path other than /", a.Host)
-		}
-		if !mountPointRE.MatchString(a.Target) || path.Clean(a.Target) != a.Target || path.Dir(a.Target) != agentHome {
-			return fmt.Errorf("attach target %q must be a folder directly in %s", a.Target, agentHome)
-		}
-		for _, k := range a.Keep {
-			if k.Drive == "" || !mountPointRE.MatchString(k.Target) || path.Clean(k.Target) != k.Target || !strings.HasPrefix(k.Target, a.Target+"/") {
-				return fmt.Errorf("keep %q must be a drive mounted below %s", k.Target, a.Target)
-			}
-		}
-	}
-	return nil
 }
 
 func (d *Driver) createOptions(spec driver.ComputerSpec) client.ContainerCreateOptions {
-	if spec.ProxyURL == "" {
-		spec.ProxyURL = "http://" + d.ControllerName() + ":3128"
-	}
-	if spec.ControllerURL == "" {
-		spec.ControllerURL = "https://" + d.ControllerName() + ":7443"
-	}
-	netName := d.NetworkName(spec.Name)
-	volume := func(source, target string, readOnly bool) mount.Mount {
-		return mount.Mount{
-			Type: mount.TypeVolume, Source: source, Target: target, ReadOnly: readOnly,
-			// A drive holds only what was written to it, never image content.
-			VolumeOptions: &mount.VolumeOptions{NoCopy: true},
-		}
-	}
-	mounts := []mount.Mount{
-		volume(d.VolumeName(spec.HomeDrive), homeMount, false),
-		volume(d.BundleVolume(), driver.BundleRoot, true),
-	}
-	for _, a := range spec.Attach {
-		// CreateMountpoint stays off: a missing host folder must fail, not appear empty.
-		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: a.Host, Target: a.Target, ReadOnly: a.ReadOnly})
-		for _, k := range a.Keep {
-			mounts = append(mounts, volume(d.VolumeName(k.Drive), k.Target, false))
-		}
-	}
-	security := []string{"no-new-privileges:true"}
-	if spec.Seccomp != "" {
-		security = append(security, "seccomp="+spec.Seccomp)
-	}
-	stop := StopTimeout
-	useInit := true
-	return client.ContainerCreateOptions{
-		Name: d.ContainerName(spec.Name),
-		Config: &container.Config{
-			Image:       spec.Image,
-			Hostname:    spec.Name,
-			Env:         spec.Env(d.fleet),
-			StopTimeout: &stop,
-			Healthcheck: noHealthcheck, // a custom image's HEALTHCHECK would run image code as root
-			// A custom image's ENTRYPOINT or USER must not replace computerd, which starts as root and drops the
-			// harness to uid 1000 itself.
-			Entrypoint: []string{"node", driver.ComputerdMain},
-			User:       "0:0",
-			Labels: map[string]string{
-				LabelFleet:      d.fleet,
-				LabelComputer:   spec.Name,
-				LabelGeneration: strconv.FormatInt(spec.Generation, 10),
-				LabelRole:       RoleComputer,
-			},
-		},
-		HostConfig: &container.HostConfig{
-			NetworkMode:    container.NetworkMode(netName),
-			RestartPolicy:  container.RestartPolicy{Name: container.RestartPolicyDisabled},
-			Init:           &useInit, // --init: reap orphans, forward signals to computerd
-			ReadonlyRootfs: true,
-			CapDrop:        []string{"ALL"},
-			CapAdd:         capAdd,
-			SecurityOpt:    security,
-			Tmpfs: map[string]string{
-				runA12S: "rw,nosuid,nodev,noexec,mode=0700,size=16m",
-				"/tmp":  "rw,nosuid,nodev,mode=1777",
-			},
-			Mounts: mounts,
-			Resources: container.Resources{
-				Memory:   spec.Memory,
-				NanoCPUs: spec.CPUMillis * 1_000_000,
-			},
-		},
-		NetworkingConfig: &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{netName: {}},
-		},
-	}
-}
-
-func (d *Driver) checkBundle(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
-	p := path.Join(spec.Bundle.Path(), bundleManifest)
-	_, err := d.cli.ContainerStatPath(ctx, containerID, client.ContainerStatPathOptions{Path: p})
-	if isNotFound(err) {
-		return fmt.Errorf("bundle %s@%s (%s) is not in the cache; EnsureBundle first", spec.Bundle.Kind, spec.Bundle.Version, spec.Bundle.Image)
-	}
-	if err != nil {
-		return fmt.Errorf("check bundle: %w", err)
-	}
-	return nil
-}
-
-// appliedMarker names the files a home drive holds. The marker reads "pending" during a copy, so an interrupted copy
-// is retried.
-func appliedMarker(digest string) string { return "applied " + digest }
-
-// applyFiles copies the files onto the home drive unless this digest is already there. It overwrites those files
-// and leaves everything else the agent wrote.
-func (d *Driver) applyFiles(ctx context.Context, containerID string, spec driver.ComputerSpec) error {
-	state, err := d.readFile(ctx, containerID, filesMarker)
-	if err != nil {
-		return fmt.Errorf("files: %w", err)
-	}
-	if state == appliedMarker(spec.FilesDigest) {
-		return nil
-	}
-	if err := d.writeMarker(ctx, containerID, "pending"); err != nil {
-		return err
-	}
-	var buf bytes.Buffer
-	if err := rebaseFilesTar(bytes.NewReader(spec.Files), &buf, path.Base(agentHome)); err != nil {
-		return err
-	}
-	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: homeMount, Content: &buf}); err != nil {
-		return fmt.Errorf("files: copy: %w", err)
-	}
-	return d.writeMarker(ctx, containerID, appliedMarker(spec.FilesDigest))
-}
-
-func (d *Driver) writeMarker(ctx context.Context, containerID, state string) error {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	_ = tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(filesMarker), Mode: 0o600, Size: int64(len(state))})
-	_, _ = tw.Write([]byte(state))
-	_ = tw.Close()
-	if _, err := d.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: path.Dir(filesMarker), Content: &buf}); err != nil {
-		return fmt.Errorf("files: write marker: %w", err)
-	}
-	return nil
-}
-
-func (d *Driver) readFile(ctx context.Context, containerID, p string) (string, error) {
-	res, err := d.cli.CopyFromContainer(ctx, containerID, client.CopyFromContainerOptions{SourcePath: p})
-	if isNotFound(err) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", p, err)
-	}
-	defer res.Content.Close()
-	tr := tar.NewReader(res.Content)
-	if _, err := tr.Next(); err != nil {
-		return "", fmt.Errorf("read %s: %w", p, err)
-	}
-	b, err := io.ReadAll(io.LimitReader(tr, 4096))
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", p, err)
-	}
-	return string(b), nil
-}
-
-// rebaseFilesTar rejects entries that would escape dir.
-func rebaseFilesTar(r io.Reader, w io.Writer, dir string) error {
-	tr, tw := tar.NewReader(r), tar.NewWriter(w)
-	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeDir, Name: dir + "/", Mode: 0o755, Uid: agentUID, Gid: agentGID}); err != nil {
-		return fmt.Errorf("files tar: %w", err)
-	}
-	for {
-		h, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("files tar: %w", err)
-		}
-		clean := path.Clean("/" + h.Name)
-		if clean == "/" {
-			continue
-		}
-		if h.Typeflag == tar.TypeLink {
-			return fmt.Errorf("files tar: hard link %q not supported", h.Name)
-		}
-		h.Name = dir + clean
-		if h.Typeflag == tar.TypeDir {
-			h.Name += "/"
-		}
-		h.Uid, h.Gid, h.Uname, h.Gname = agentUID, agentGID, "", ""
-		if err := tw.WriteHeader(h); err != nil {
-			return fmt.Errorf("files tar: %w", err)
-		}
-		if _, err := io.Copy(tw, tr); err != nil {
-			return fmt.Errorf("files tar: %w", err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("files tar: %w", err)
-	}
-	return nil
+	return d.eng.CreateOptions(spec, d.placement(spec.Name))
 }
 
 func (d *Driver) ensureNetwork(ctx context.Context, computer string) (string, error) {
-	return d.ensureNetworkFor(ctx, computer, RoleComputer)
+	return d.ensureNetworkFor(ctx, computer, engine.RoleComputer)
 }
 
 func ownerLabel(role string) string {
-	if role == RoleService {
-		return LabelService
+	if role == engine.RoleService {
+		return engine.LabelService
 	}
-	return LabelComputer
+	return engine.LabelComputer
 }
 
 func (d *Driver) ensureNetworkFor(ctx context.Context, computer, role string) (string, error) {
@@ -401,7 +113,7 @@ func (d *Driver) ensureNetworkFor(ctx context.Context, computer, role string) (s
 		}
 		return name, nil
 	}
-	if !isNotFound(err) {
+	if !engine.IsNotFound(err) {
 		return "", fmt.Errorf("inspect network %s: %w", name, err)
 	}
 	list, err := d.cli.NetworkList(ctx, client.NetworkListOptions{})
@@ -426,9 +138,9 @@ func (d *Driver) ensureNetworkFor(ctx context.Context, computer, role string) (s
 		IPAM:     &network.IPAM{Config: []network.IPAMConfig{{Subnet: subnet}}},
 		Options:  map[string]string{gatewayModeOption: "isolated"},
 		Labels: map[string]string{
-			LabelFleet:       d.fleet,
-			ownerLabel(role): computer,
-			LabelRole:        role,
+			engine.LabelFleet: d.fleet,
+			ownerLabel(role):  computer,
+			engine.LabelRole:  role,
 		},
 	})
 	if err != nil {
@@ -444,7 +156,7 @@ func (d *Driver) checkNetwork(n network.Network, computer, role string) error {
 		return fmt.Errorf("network %s exists but is not internal; remove it", n.Name)
 	case n.Options[gatewayModeOption] != "isolated":
 		return fmt.Errorf("network %s exists without %s=isolated; remove it", n.Name, gatewayModeOption)
-	case n.Labels[LabelFleet] != d.fleet || n.Labels[ownerLabel(role)] != computer || n.Labels[LabelRole] != role:
+	case n.Labels[engine.LabelFleet] != d.fleet || n.Labels[ownerLabel(role)] != computer || n.Labels[engine.LabelRole] != role:
 		return fmt.Errorf("network %s exists but is not the network of %s %s in fleet %s", n.Name, role, computer, d.fleet)
 	}
 	return nil
@@ -472,13 +184,13 @@ next:
 // reattachController connects the controller container to every agent computer's and Service's network: a
 // Controller container that was replaced (an upgrade) starts attached to the Fleet bridge only.
 func (d *Driver) reattachController(ctx context.Context) error {
-	f := make(client.Filters).Add("label", LabelFleet+"="+d.fleet)
+	f := make(client.Filters).Add("label", engine.LabelFleet+"="+d.fleet)
 	list, err := d.cli.NetworkList(ctx, client.NetworkListOptions{Filters: f})
 	if err != nil {
 		return fmt.Errorf("list networks: %w", err)
 	}
 	for _, n := range list.Items {
-		if role := n.Labels[LabelRole]; role != RoleComputer && role != RoleService {
+		if role := n.Labels[engine.LabelRole]; role != engine.RoleComputer && role != engine.RoleService {
 			continue
 		}
 		if err := d.ConnectController(ctx, n.Name); err != nil {
@@ -491,7 +203,7 @@ func (d *Driver) reattachController(ctx context.Context) error {
 // ConnectController is a no-op when no controller container exists yet.
 func (d *Driver) ConnectController(ctx context.Context, networkName string) error {
 	res, err := d.cli.ContainerInspect(ctx, d.ControllerName(), client.ContainerInspectOptions{})
-	if isNotFound(err) {
+	if engine.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -511,14 +223,14 @@ func (d *Driver) ConnectController(ctx context.Context, networkName string) erro
 
 func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Power, generation int64) error {
 	res, err := d.cli.ContainerInspect(ctx, d.ContainerName(computer), client.ContainerInspectOptions{})
-	if isNotFound(err) {
+	if engine.IsNotFound(err) {
 		return fmt.Errorf("power %s %s: %w", computer, power, driver.ErrNotStaged)
 	}
 	if err != nil {
 		return fmt.Errorf("power %s %s: %w", computer, power, err)
 	}
 	c := res.Container
-	switch staged := parseGeneration(c.Config.Labels); {
+	switch staged := engine.ParseGeneration(c.Config.Labels); {
 	case generation < staged:
 		return fmt.Errorf("power %s generation %d: generation %d is staged: %w", computer, generation, staged, driver.ErrStaleGeneration)
 	case generation > staged:
@@ -534,13 +246,13 @@ func (d *Driver) SetPower(ctx context.Context, computer string, power driver.Pow
 			return fmt.Errorf("power %s awake: %w", computer, err)
 		}
 		if _, err := d.cli.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
-			return fmt.Errorf("power %s awake: %w", computer, explainMountError(err, boundFolders(c)))
+			return fmt.Errorf("power %s awake: %w", computer, engine.ExplainMountError(err, engine.BoundFolders(c)))
 		}
 	case driver.PowerAsleep:
 		if !running {
 			return nil
 		}
-		timeout := StopTimeout
+		timeout := engine.StopTimeout
 		if _, err := d.cli.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 			return fmt.Errorf("power %s asleep: %w", computer, err)
 		}
@@ -555,32 +267,32 @@ func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 	name := d.ContainerName(computer)
 	res, err := d.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	switch {
-	case isNotFound(err):
+	case engine.IsNotFound(err):
 	case err != nil:
 		return fmt.Errorf("remove %s: %w", computer, err)
-	case res.Container.Config.Labels[LabelFleet] != d.fleet || res.Container.Config.Labels[LabelRole] != RoleComputer:
+	case res.Container.Config.Labels[engine.LabelFleet] != d.fleet || res.Container.Config.Labels[engine.LabelRole] != engine.RoleComputer:
 		return fmt.Errorf("remove %s: container %s is not an agent computer of fleet %s", computer, name, d.fleet)
 	default:
-		if _, err := d.cli.ContainerRemove(ctx, res.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !isNotFound(err) {
+		if _, err := d.cli.ContainerRemove(ctx, res.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !engine.IsNotFound(err) {
 			return fmt.Errorf("remove %s: %w", computer, err)
 		}
 	}
 
 	netName := d.NetworkName(computer)
 	nres, err := d.cli.NetworkInspect(ctx, netName, client.NetworkInspectOptions{})
-	if isNotFound(err) {
+	if engine.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("remove %s: %w", computer, err)
 	}
-	if nres.Network.Labels[LabelFleet] != d.fleet {
+	if nres.Network.Labels[engine.LabelFleet] != d.fleet {
 		return fmt.Errorf("remove %s: network %s is not owned by fleet %s", computer, netName, d.fleet)
 	}
 	for id := range nres.Network.Containers {
 		_, _ = d.cli.NetworkDisconnect(ctx, netName, client.NetworkDisconnectOptions{Container: id, Force: true})
 	}
-	if _, err := d.cli.NetworkRemove(ctx, netName, client.NetworkRemoveOptions{}); err != nil && !isNotFound(err) {
+	if _, err := d.cli.NetworkRemove(ctx, netName, client.NetworkRemoveOptions{}); err != nil && !engine.IsNotFound(err) {
 		return fmt.Errorf("remove %s: network: %w", computer, err)
 	}
 	return nil
@@ -616,8 +328,8 @@ func (d *Driver) callerSnapshot(ctx context.Context) (map[netip.Addr]string, err
 	}
 	out := map[netip.Addr]string{}
 	for _, n := range list.Items {
-		role := n.Labels[LabelRole]
-		if role != RoleComputer && role != RoleService {
+		role := n.Labels[engine.LabelRole]
+		if role != engine.RoleComputer && role != engine.RoleService {
 			continue
 		}
 		owner := n.Labels[ownerLabel(role)]
