@@ -7,13 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/coltonkirsten/a12s"
 )
 
-// runInit writes a Fleet file and a README; the one step left is `a12s creds set`.
+// runInit writes a Fleet file plus a README, llms.txt and agent instructions; the one step left is `a12s creds set`.
 func runInit(g *globals, args []string) error {
-	fs := g.flags("init")
-	harness := fs.String("harness", "claude-code", "claude-code or codex")
-	pos, err := parse(fs, args)
+	flags := g.flags("init")
+	harness := flags.String("harness", "claude-code", "claude-code or codex")
+	pos, err := parse(flags, args)
 	if err != nil {
 		return err
 	}
@@ -42,21 +44,33 @@ func runInit(g *globals, args []string) error {
 	if *harness == "codex" {
 		cred = "openai"
 	}
-	readme := filepath.Join(dir, "README.md")
-	if _, err := os.Stat(readme); errors.Is(err, fs2NotExist) {
-		if err := os.WriteFile(readme, []byte(starterReadme(filepath.Base(absDir(dir)), cred)), 0o644); err != nil {
+	files := []string{fleetPath}
+	for _, f := range []struct{ name, text string }{
+		{"README.md", starterReadme(filepath.Base(absDir(dir)), cred)},
+		{"llms.txt", a12s.LLMsTxt},
+		{"AGENTS.md", starterAgents},
+		{"CLAUDE.md", "@AGENTS.md\n"},
+	} {
+		p := filepath.Join(dir, f.name)
+		if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err := os.WriteFile(p, []byte(f.text), 0o644); err != nil {
 			return err
 		}
+		files = append(files, p)
 	}
 	if g.json {
-		return printJSON(map[string]any{"dir": dir, "files": []string{fleetPath, readme}})
+		return printJSON(map[string]any{"dir": dir, "files": files})
 	}
-	fmt.Printf("wrote fleet.yaml and README.md in %s\n", dir)
+	names := make([]string, len(files))
+	for i, p := range files {
+		names[i] = filepath.Base(p)
+	}
+	fmt.Printf("wrote %s in %s\n", strings.Join(names, ", "), dir)
 	fmt.Printf("next: a12s creds set %s, then a12s up\n", cred)
 	return nil
 }
-
-var fs2NotExist = fs.ErrNotExist
 
 func absDir(d string) string {
 	if a, err := filepath.Abs(d); err == nil {
@@ -117,8 +131,16 @@ func starterReadme(name, cred string) string {
 		"`npm install @coltonkirsten/a12s`). Each one gets the defaults in fleet.yaml.\n\n" +
 		"```python\n" + helloPython + "```\n\n" +
 		"```js\n" + helloJS + "```\n\n" +
-		"Everything else: https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt\n"
+		"Everything else is in ./llms.txt, the whole a12s surface for the a12s version that wrote it.\n" +
+		"The latest is at https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt\n"
 }
+
+const starterAgents = `# Agent guidelines
+
+This folder is an a12s Fleet. Before writing code against a12s, read ./llms.txt: it is the whole user-facing
+surface (CLI, fleet.yaml, SDKs) for the installed a12s version. a12s is installed like Docker: never vendor or edit
+its source here; extend it through fleet.yaml, your own images and Services, and the client SDK.
+`
 
 // The repo README's hello example, verbatim; TestHelloMatchesReadme keeps the two the same.
 const helloPython = `import a12s
