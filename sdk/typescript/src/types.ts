@@ -177,6 +177,8 @@ export interface ComputerStatus {
   image: string;
   /** The Fleet's security.seccomp path, when the Computer runs with a custom seccomp profile. */
   seccomp?: string;
+  /** The cloud principal it acts as (a GCE service account with per-computer identity), for your app to grant access to. */
+  identity?: string;
   generation: number;
   stagedGeneration?: number;
   credentialGeneration?: number;

@@ -58,6 +58,8 @@ type Config struct {
 	// Local is the Controller VM's own engine: the Fleet's image store, as on a laptop.
 	Local *engine.Engine
 	Guest GuestOpener
+	// Identity is IdentityNone or IdentityPerComputer.
+	Identity string
 	// BootMetadata is what every Computer VM boots with: the in-VM half's cloud-init and what it needs.
 	BootMetadata []gceapi.MetadataItem
 	// Arch is the Controller's architecture; images come from its engine, so every Computer shares it.
@@ -113,6 +115,13 @@ func New(ctx context.Context, cfg Config) (*Driver, error) {
 	}
 	if family(cfg.DefaultShape) != cfg.Families[0] {
 		return nil, fmt.Errorf("gce driver: default shape %s is not in the first family, %s", cfg.DefaultShape, cfg.Families[0])
+	}
+	switch cfg.Identity {
+	case "":
+		cfg.Identity = IdentityNone
+	case IdentityNone, IdentityPerComputer:
+	default:
+		return nil, fmt.Errorf("gce driver: identity %q: want %s or %s", cfg.Identity, IdentityNone, IdentityPerComputer)
 	}
 	if cfg.BootImage == "" {
 		cfg.BootImage = DefaultBootImage

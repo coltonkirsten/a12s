@@ -129,6 +129,8 @@ type ComputerState struct {
 	OOMKilled  bool   `json:"oomKilled,omitempty"`
 	// Failure explains an abnormal stop (OOM, runtime error, non-zero exit). Empty otherwise.
 	Failure string `json:"failure,omitempty"`
+	// Identity is the cloud principal the Computer acts as, for the app to grant access to; empty without one.
+	Identity string `json:"identity,omitempty"`
 }
 
 type DriveState struct {

@@ -28,6 +28,10 @@ export function harnessEnv(deps: HarnessDeps): Record<string, string> {
     for (const k of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) env[k] = cfg.proxy;
     env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1,::1';
   }
+  for (const [k, v] of Object.entries(cfg.harnessEnv)) {
+    // The substrate's bypass hosts (a cloud metadata server) add to the proxy's, never replace them.
+    env[k] = (k === 'NO_PROXY' || k === 'no_proxy') && env[k] ? `${env[k]},${v}` : v;
+  }
   return { ...env, ...(deps.wiringEnv ?? {}), ...deps.credentialEnv() };
 }
 

@@ -25,3 +25,20 @@ gce:
 Any command that starts the Controller reads it. Changing it replaces the Controller container; the fleet's state
 stays. Without the file, the fleet runs on Docker. It is not part of the Fleet: the Fleet changes while the Controller
 runs, the substrate doesn't.
+
+## Identity: one service account per agent computer
+
+```yaml
+gce:
+  identity: per-computer   # default: none
+```
+
+With `per-computer`, every agent computer gets its own Google service account, with no keys and no roles, and its
+VM runs as it. Your app grants that account what it needs, for example `roles/storage.objectUser` on one bucket;
+Cloud Audit Logs then name the agent for every Google API call it makes. `a12s status` and the API's
+`agentComputers[].identity` show the account's email, which has a hash suffix you can't guess. Google client
+libraries and `gcloud` inside the agent computer get tokens from the metadata server, which only these agent
+computers can reach. The hosts it calls still need to be in `egress.allow` (for example `storage.googleapis.com`).
+
+Removing an agent computer deletes its account. A new account with the same email is a new principal, so an agent
+computer created again under the same name starts with no access.

@@ -25,6 +25,8 @@ type runtime struct {
 	resumePending bool
 	// background is computerd's live background task count: work the harness runs between Turns.
 	background int
+	// identity is the cloud principal the Driver last reported for it.
+	identity string
 	// transition is set while the Controller itself stops, stages or
 	// removes the Computer: deaths seen then are expected.
 	transition   bool

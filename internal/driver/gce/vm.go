@@ -181,6 +181,14 @@ func (d *Driver) create(ctx context.Context, spec driver.ComputerSpec, shape, di
 	if err := d.store.put(spec); err != nil {
 		return fmt.Errorf("stage %s: %w", spec.Name, err)
 	}
+	var accounts []gceapi.ServiceAccountRef
+	if d.cfg.Identity == IdentityPerComputer {
+		email, err := d.ensureIdentity(ctx, spec.Name)
+		if err != nil {
+			return fmt.Errorf("stage %s: %w", spec.Name, err)
+		}
+		accounts = []gceapi.ServiceAccountRef{{Email: email, Scopes: []string{cloudPlatformScope}}}
+	}
 	no := false
 	in := &gceapi.Instance{
 		Name:        d.instanceName(spec.Name),
@@ -199,12 +207,14 @@ func (d *Driver) create(ctx context.Context, spec driver.ComputerSpec, shape, di
 		},
 		// No access config: no external address.
 		NetworkInterfaces: []gceapi.NetworkInterface{{Subnetwork: d.subnetLink}},
+		// IAM bindings, not scopes, decide what the account can do.
+		ServiceAccounts: accounts,
 		// automaticRestart off: GCE never makes power decisions; a12s's power policy does.
 		Scheduling:       &gceapi.Scheduling{AutomaticRestart: &no, OnHostMaintenance: "MIGRATE", ProvisioningModel: "STANDARD"},
 		Tags:             &gceapi.Tags{Items: []string{NetworkTag}},
 		ShieldedInstance: &gceapi.ShieldedInstance{EnableSecureBoot: true, EnableVtpm: true, EnableIntegrityMonitoring: true},
 	}
-	if err := d.api.InsertInstance(ctx, in); err != nil {
+	if err := d.insert(ctx, in); err != nil {
 		return fmt.Errorf("stage %s: create VM: %w", spec.Name, err)
 	}
 	got, err := d.waitStatus(ctx, spec.Name, "RUNNING")
@@ -397,6 +407,11 @@ func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
 			return fmt.Errorf("remove %s: %w", computer, err)
 		}
 	}
+	if d.cfg.Identity == IdentityPerComputer {
+		if err := d.removeIdentity(ctx, computer); err != nil {
+			return fmt.Errorf("remove %s: %w", computer, err)
+		}
+	}
 	return d.store.remove(computer)
 }
 
@@ -459,6 +474,9 @@ func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.Comput
 		InstanceID: strconv.FormatUint(in.ID, 10),
 		Network:    d.cfg.Subnetwork,
 	}
+	if len(in.ServiceAccounts) > 0 {
+		st.Identity = in.ServiceAccounts[0].Email
+	}
 	switch in.Status {
 	case "PROVISIONING", "STAGING":
 		st.Power = driver.PowerAwake
@@ -482,7 +500,7 @@ func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.Comput
 	if !exists {
 		return st
 	}
-	cs.Name, cs.Generation, cs.InstanceID, cs.Network = name, st.Generation, st.InstanceID, st.Network
+	cs.Name, cs.Generation, cs.InstanceID, cs.Network, cs.Identity = name, st.Generation, st.InstanceID, st.Network, st.Identity
 	cs.Address = ""
 	if cs.Running {
 		cs.Address = addressOf(in).String()

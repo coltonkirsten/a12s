@@ -177,7 +177,10 @@ type ComputerStatus struct {
 	Harness       Harness  `json:"harness"`
 	Image         string   `json:"image"` // slim or an image reference
 	// Seccomp is the digest of the custom seccomp profile the agent computer runs with.
-	Seccomp    string `json:"seccomp,omitempty"`
+	Seccomp string `json:"seccomp,omitempty"`
+	// Identity is the cloud principal the agent computer acts as (a GCE service account with per-computer
+	// identity), for the app to grant access to. Empty when it has none.
+	Identity   string `json:"identity,omitempty"`
 	Generation int64  `json:"generation"`
 	// StagedGeneration is greater than Generation while a change waits for idle.
 	StagedGeneration     int64 `json:"stagedGeneration,omitempty"`
