@@ -153,6 +153,29 @@ starts from the first family again. If none has capacity, the wake fails and `a1
 | The Controller restarts | Nothing is lost: everything it needs is on the instances' labels and the disks, and the staged changes on its state disk. | |
 | The zone fails | Nothing automatic: home disks are zonal. Restore a snapshot into another zone, change `zone`, and `a12s up`. | |
 
+## Running the exit gate
+
+`hack/gce/gate.sh <project> <logfile> [region] [zone]` runs the exit gate on a real project made for it, from your
+machine: it bootstraps the project (fleet `gate`, an e2-standard-4 Controller VM), ships the checkout to the
+Controller VM, builds the images, bundles and `a12s` there, and runs `hack/exit-gate.sh` against the GCE driver with
+per-computer identity on. Then it checks, logging one `PASS`/`FAIL` line each:
+
+- wake-to-Ready p50 and p95 over 5 wakes, failing above `A12S_GCE_WAKE_P95` seconds (default 90);
+- from inside an agent computer: the allowed host works through the proxy, while a public IP, DNS (even the
+  metadata server's), its own VM's engine, the Docker bridge's gateway and another agent computer's VM don't;
+- the agent's own service account, granted `roles/storage.admin` for the test, creates a bucket with a token from
+  the metadata server, and Cloud Audit Logs name that account;
+- a sizing measurement: memory, CPU time and image and volume bytes of an e2-micro and an e2-small agent computer,
+  idle and through a Turn that clones a repository, searches it and installs npm packages.
+
+It ends with `a12s down --purge` and `hack/gce/teardown.sh`, which deletes what bootstrap made (`A12S_GCE_KEEP=1`
+keeps it). It needs `GH_TOKEN`, `~/.a12s/anthropic` and `~/.a12s/lab/openai.json` like `hack/exit-gate.sh`, and
+`gcloud` logged in as a principal with, on the project: `roles/serviceusage.serviceUsageAdmin`,
+`roles/compute.admin`, `roles/iam.serviceAccountAdmin`, `roles/iam.roleAdmin`,
+`roles/resourcemanager.projectIamAdmin`, `roles/iam.serviceAccountUser`, `roles/iap.tunnelResourceAccessor`,
+`roles/logging.viewer` and `roles/storage.admin` (or `roles/owner`). The project needs billing; a run costs cents
+of VM minutes.
+
 ## Taking a fleet down
 
 `a12s down` on the Controller VM deletes the agent computers' VMs (and their service accounts) and the Controller's
