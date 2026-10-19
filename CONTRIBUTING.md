@@ -217,7 +217,8 @@ Override `CLAUDE_BIN`, `CODEX_BIN` and `A12S_LAB_CREDS` as needed.
 
 ## End-to-end checks
 
-Two scripts run the whole system against the local Docker engine and log one `PASS`/`FAIL` line per check:
+Two scripts run the whole system against the local Docker engine, and a third against a real GCE project; each logs
+one `PASS`/`FAIL` line per check:
 
 ```sh
 hack/exit-gate.sh <logfile>
@@ -229,9 +230,14 @@ hack/exit-gate-enhancements.sh <workdir> <logfile> [setup inbox services amendme
 #   hack/gate/fleet.yaml: inbox delivery and crash safety, Services, grants, expiry, replace keys,
 #   power policy, CLI. Needs bin/a12s, the images, the claude-code bundle, ~/.a12s/anthropic and the v0.2.1
 #   reference Services, built from that tag by hack/gate/services.sh.
+
+hack/gce/gate.sh <project> <logfile> [region] [zone]
+#   the exit gate on a real GCE project: bootstrap, build on the Controller VM, hack/exit-gate.sh on the GCE driver,
+#   wake latency, the in-VM firewall, per-computer identity in Cloud Audit Logs, sizing, teardown
+#   (docs/drivers/gce.md#running-the-exit-gate).
 ```
 
-Both use real model calls. `A12S_TEST_TIME_SCALE` (≥ 1) divides `sleepAfterIdle` and the wake rate window so the
+All three use real model calls. `A12S_TEST_TIME_SCALE` (≥ 1) divides `sleepAfterIdle` and the wake rate window so the
 power-policy checks run in seconds; never set it in production (the Controller logs when it is in force).
 
 ## Pull requests
