@@ -13,8 +13,6 @@ const (
 	LabelRole       = "a12s-role"
 	LabelGeneration = "a12s-generation"
 	LabelSpec       = "a12s-spec" // digest of the staged spec
-	LabelExit       = "a12s-exit" // exit code of a container that died while the driver watched
-	LabelOOM        = "a12s-oom"
 	LabelDriveKind  = "a12s-drive"
 
 	RoleComputer = "computer"
