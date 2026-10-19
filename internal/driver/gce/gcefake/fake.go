@@ -40,6 +40,8 @@ type Fake struct {
 	calls      []string
 	types      []gceapi.MachineType
 
+	user string // the principal the API calls run as, recorded on their operations
+
 	hookMu sync.Mutex
 	hooks  map[string]func()
 }
@@ -88,6 +90,7 @@ func New(project, zone string) *Fake {
 		guest:     map[string]map[string]string{},
 		denied:    map[string]bool{},
 		types:     slices.Clone(MachineTypes),
+		user:      "a12s-controller@" + project + ".iam.gserviceaccount.com",
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	return f
@@ -449,11 +452,44 @@ func (f *Fake) zonal(r *http.Request, kind, name, verb string, body []byte) repl
 }
 
 func (f *Fake) done(opType string, target string, id uint64) reply {
-	return reply{200, f.recordOp(opType, target, id, "a12s-controller", nil)}
+	return reply{200, f.recordOp(opType, target, id, f.user, nil)}
 }
 
 func (f *Fake) failedOp(opType, target string, id uint64, e *gceapi.OperationError) reply {
-	return reply{200, f.recordOp(opType, target, id, "a12s-controller", e)}
+	return reply{200, f.recordOp(opType, target, id, f.user, e)}
+}
+
+// Clock is the fake's current time, which its operations are stamped with.
+func (f *Fake) Clock() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.clock
+}
+
+// Act records an operation by another principal on an instance, applying its effect: "stop" or "delete".
+func (f *Fake) Act(user, opType, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	in := f.instances[name]
+	if in == nil {
+		return
+	}
+	switch opType {
+	case "stop":
+		in.Status = "TERMINATED"
+	case "delete":
+		for _, d := range in.Disks {
+			if disk := f.disks[last(d.Source)]; disk != nil {
+				if d.AutoDelete {
+					delete(f.disks, disk.Name)
+				} else {
+					disk.Users = slices.DeleteFunc(disk.Users, func(u string) bool { return u == in.SelfLink })
+				}
+			}
+		}
+		delete(f.instances, name)
+	}
+	f.recordOp(opType, in.SelfLink, in.ID, user, nil)
 }
 
 func (f *Fake) instance(r *http.Request, call, name string, body []byte) reply {
