@@ -173,7 +173,7 @@ Trusted publishing works only from the workflow, so locally npm and PyPI need `N
 internal/version/          the release version and the image refs it resolves (set by -ldflags)
 cmd/a12s/                  the CLI and, as `a12s controller`, the Controller (one Go binary)
 internal/fleet/            Fleet file: parse, defaults merge, validation, image pins, Service manifests
-internal/driver/           Driver interface and types
+internal/driver/           Driver interface and types; drivertest: the behavior every driver owes, run against each
 internal/driver/engine/    one Docker engine's agent computer: container settings, files, exec, state, events, images, bundles
 internal/driver/docker/    Docker driver: internal networks, volumes, the controller's attachment, on engine
 internal/driver/gce/       GCE driver (experimental): VMs, disks, identity, firewall checks; the in-VM half (boot.sh,
