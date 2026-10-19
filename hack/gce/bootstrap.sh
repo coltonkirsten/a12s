@@ -85,15 +85,16 @@ for i in $(seq 1 30); do
   sleep 5
 done
 
+# Debian 13: its docker.io is new enough for BuildKit (docker-buildx), which the images' Dockerfiles need.
 log "Controller VM $VM ($MACHINE, Debian with Docker)"
 if ! exists compute instances describe "$VM" --zone "$ZONE"; then
   g compute instances create "$VM" --zone "$ZONE" --machine-type "$MACHINE" \
     --subnet "$NET" --private-network-ip "$CONTROLLER_IP" --no-address \
     --service-account "$SA" --scopes cloud-platform --tags a12s-controller \
-    --image-family debian-12 --image-project debian-cloud --boot-disk-size 30GB --boot-disk-type pd-balanced \
+    --image-family debian-13 --image-project debian-cloud --boot-disk-size 30GB --boot-disk-type pd-balanced \
     --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
     --metadata startup-script='#!/bin/bash
-command -v docker > /dev/null || { apt-get update -q && apt-get install -yq docker.io git make; }'
+command -v docker > /dev/null || { apt-get update -q && apt-get install -yq docker.io docker-buildx git make; }'
 fi
 
 cat <<EOF
