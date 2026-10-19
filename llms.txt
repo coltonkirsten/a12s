@@ -469,6 +469,9 @@ SDK objects (Python names; TypeScript is camelCase):
   the same file, the last save wins. The agent can delete anything in a writable folder: commit first.
 - Upgrading a12s: install the new release, rebuild custom images FROM the new slim under new tags, `a12s up`.
   After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored.
+- On the GCE driver (experimental, an operator's choice in ~/.a12s/<fleet>/driver.yaml, not a Fleet field) each
+  agent computer is its own VM: wakes take tens of seconds, no Services, no attach, no shell. With per-computer
+  identity, status's `agentComputers[].identity` is the service account to grant access to (docs/drivers/gce.md).
 
 ## Optional
 

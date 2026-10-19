@@ -317,6 +317,12 @@ func (c *Controller) handleShell(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, 1<<20, &req) {
 		return
 	}
+	if c.remoteEngines {
+		writeJSON(w, http.StatusNotImplemented, api.Error{Code: api.ErrInvalid,
+			Message: "a12s shell runs docker exec on the Controller's host, and this substrate runs agent computers elsewhere",
+			Fix:     "talk to the agent computer with a12s send, or use the Docker driver for shell access"})
+		return
+	}
 	cl, err := c.awake(name)
 	if err != nil {
 		fail(w, err)

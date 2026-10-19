@@ -159,7 +159,7 @@ func goodFirewall() []gceapi.Firewall {
 		{Name: "a12s-computers-to-controller", Network: "net", Priority: 900, Direction: "EGRESS", TargetTags: []string{NetworkTag},
 			DestinationRanges: []string{"10.128.0.2/32"}, Allowed: []gceapi.FirewallRule{{IPProtocol: "tcp", Ports: []string{"3128", "7443"}}}},
 		{Name: "a12s-controller-to-computers", Network: "net", Priority: 1000, Direction: "INGRESS", TargetTags: []string{NetworkTag},
-			SourceServiceAccounts: []string{controllerAccount}, Allowed: []gceapi.FirewallRule{{IPProtocol: "tcp", Ports: []string{"2376", "7443"}}}},
+			SourceRanges: []string{"10.128.0.2/32"}, Allowed: []gceapi.FirewallRule{{IPProtocol: "tcp", Ports: []string{"2376", "7443"}}}},
 	}
 }
 

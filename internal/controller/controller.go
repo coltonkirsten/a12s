@@ -148,6 +148,8 @@ type Controller struct {
 	ctx       context.Context // set by Start; outlives requests
 
 	newClient func(name string) computerdClient
+	// remoteEngines: a12s shell can't reach Computers' containers from the Controller's host.
+	remoteEngines bool
 
 	// bg counts the Controller's background goroutines (event streams,
 	// restarts, idle applies, the watch), so Stop can wait for them.
@@ -396,6 +398,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	c.remoteEngines = host.RemoteEngines
 
 	apiAddr := cfg.APIAddr
 	if apiAddr == "" {

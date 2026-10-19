@@ -37,45 +37,11 @@ type Settings struct {
 // Open runs on the Controller VM: the project, zone, address and service account come from its metadata server,
 // API calls use that service account's token, and the local engine is the fleet's image store.
 func Open(ctx context.Context, fleet string, s Settings, stateDir string, clientCert tls.Certificate, caPEM []byte) (*Driver, error) {
-	hc := &http.Client{Timeout: 10 * time.Second}
-	get := func(path string) (string, error) {
-		var v string
-		err := gceapi.MetadataGet(ctx, hc, gceapi.DefaultMetadataEndpoint, path, &v)
-		return v, err
-	}
-	project, err := get("project/project-id")
+	host, err := controllerVM(ctx, s.Zone)
 	if err != nil {
-		return nil, fmt.Errorf("gce driver: not on a GCE VM? %w", err)
+		return nil, err
 	}
-	zone := s.Zone
-	if zone == "" {
-		z, err := get("instance/zone")
-		if err != nil {
-			return nil, fmt.Errorf("gce driver: %w", err)
-		}
-		zone = last(z)
-	}
-	ip, err := get("instance/network-interfaces/0/ip")
-	if err != nil {
-		return nil, fmt.Errorf("gce driver: %w", err)
-	}
-	controller, err := netip.ParseAddr(ip)
-	if err != nil {
-		return nil, fmt.Errorf("gce driver: the Controller's address %q: %w", ip, err)
-	}
-	account, err := get("instance/service-accounts/default/email")
-	if err != nil {
-		return nil, fmt.Errorf("gce driver: the Controller VM has no service account: %w", err)
-	}
-	api := &gceapi.API{
-		HTTP:    &http.Client{Timeout: 5 * time.Minute},
-		Compute: gceapi.DefaultComputeEndpoint,
-		IAM:     gceapi.DefaultIAMEndpoint,
-		CRM:     gceapi.DefaultCRMEndpoint,
-		Project: project,
-		Zone:    zone,
-		Token:   gceapi.MetadataToken(hc, gceapi.DefaultMetadataEndpoint),
-	}
+	api, controller, account := host.api, host.address, host.account
 	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("gce driver: the Controller VM's engine: %w", err)
@@ -103,7 +69,56 @@ func Open(ctx context.Context, fleet string, s Settings, stateDir string, client
 	return d, nil
 }
 
+type controllerHost struct {
+	api     *gceapi.API
+	address netip.Addr
+	account string
+}
+
+// controllerVM reads the project, zone, address and service account from the metadata server of the VM this runs
+// on, and makes an API client that uses that account's token.
+func controllerVM(ctx context.Context, zone string) (controllerHost, error) {
+	hc := &http.Client{Timeout: 10 * time.Second}
+	get := func(path string) (string, error) {
+		var v string
+		err := gceapi.MetadataGet(ctx, hc, gceapi.DefaultMetadataEndpoint, path, &v)
+		return v, err
+	}
+	var h controllerHost
+	project, err := get("project/project-id")
+	if err != nil {
+		return h, fmt.Errorf("gce driver: not on a GCE VM? %w", err)
+	}
+	if zone == "" {
+		z, err := get("instance/zone")
+		if err != nil {
+			return h, fmt.Errorf("gce driver: %w", err)
+		}
+		zone = last(z)
+	}
+	ip, err := get("instance/network-interfaces/0/ip")
+	if err != nil {
+		return h, fmt.Errorf("gce driver: %w", err)
+	}
+	if h.address, err = netip.ParseAddr(ip); err != nil {
+		return h, fmt.Errorf("gce driver: the Controller's address %q: %w", ip, err)
+	}
+	if h.account, err = get("instance/service-accounts/default/email"); err != nil {
+		return h, fmt.Errorf("gce driver: the Controller VM has no service account: %w", err)
+	}
+	h.api = &gceapi.API{
+		HTTP:    &http.Client{Timeout: 5 * time.Minute},
+		Compute: gceapi.DefaultComputeEndpoint,
+		IAM:     gceapi.DefaultIAMEndpoint,
+		CRM:     gceapi.DefaultCRMEndpoint,
+		Project: project,
+		Zone:    zone,
+		Token:   gceapi.MetadataToken(hc, gceapi.DefaultMetadataEndpoint),
+	}
+	return h, nil
+}
+
 // Host: Computers reach the Controller by address (they resolve no names); the owner API stays on loopback.
 func (d *Driver) Host() driver.Host {
-	return driver.Host{ControllerName: d.cfg.Controller.String(), APIAddr: "127.0.0.1:7000"}
+	return driver.Host{ControllerName: d.cfg.Controller.String(), APIAddr: "127.0.0.1:7000", RemoteEngines: true}
 }

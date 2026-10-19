@@ -80,6 +80,26 @@ Resources carry `a12s.*` labels. Internal networks are small subnets from a pool
 each), so many agent computers don't exhaust Docker's default pool. There are no host ports. Containers run with Docker's
 `--init` so orphaned harness children are reaped.
 
+## GCE driver (experimental)
+
+Each agent computer is a Compute Engine VM running Container-Optimized OS and the agent computer's container in its
+own Docker engine, with the same container settings as above (both drivers build containers with
+`internal/driver/engine`). The Controller runs on a VM in the fleet's subnet, with its container on the host network:
+agent computer VMs reach its proxy and mTLS listener at its address, and the owner API listens on loopback.
+
+| Thing | GCE resource |
+|---|---|
+| Agent computer `C` | VM `a12s-<fleet>-C`, tag `a12s-computer`, labels `a12s-fleet`, `a12s-computer`, `a12s-generation`, `a12s-spec`, `a12s-failure` |
+| Home drive | pd-balanced disk `a12s-<fleet>-home-C`, attached as device `home` |
+| Identity (optional) | service account `<fleet>-C…-xxxx`, no keys, no roles |
+| Images and bundles | copied from the Controller VM's engine into each VM's engine |
+
+The Controller drives each VM's engine over mutual TLS (port 2376) and reaches computerd on 7443. A boot script run
+by cloud-init on every boot mounts the home disk, installs the in-VM firewall, makes the engine's key and opens the
+engine. A change to a stopped agent computer is recorded (the spec on the Controller's state disk, its generation in
+the VM's labels) and the container is rebuilt at the next wake. Egress is attributed by the connection's source
+address, which VPC anti-spoofing makes the VM's own. See [GCE driver](drivers/gce.md).
+
 ## Inside an agent computer
 
 - **Mounts:** the home drive at `/home` (`/home/agent` for the agent; `/home/.a12s` root-only for the journal and
