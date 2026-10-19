@@ -114,6 +114,7 @@ func (d *Driver) StageComputer(ctx context.Context, spec driver.ComputerSpec) er
 		labels := maps.Clone(in.Labels)
 		labels[LabelGeneration] = strconv.FormatInt(spec.Generation, 10)
 		labels[LabelSpec] = digest
+		delete(labels, LabelFailure)
 		err = d.api.SetLabels(ctx, in.Name, labels, in.LabelFingerprint)
 		if gceapi.IsConflict(err) {
 			continue // another writer moved the labels: read them again and re-check the generation
@@ -347,7 +348,7 @@ func (d *Driver) wake(ctx context.Context, in *gceapi.Instance, generation int64
 	if err := g.Start(ctx); err != nil {
 		return d.abandonWake(ctx, in, err)
 	}
-	return nil
+	return d.setFailure(ctx, computer, "")
 }
 
 // abandonWake stops a VM that booted but can't run its Computer, so it doesn't bill while the Controller retries.
@@ -356,22 +357,6 @@ func (d *Driver) abandonWake(ctx context.Context, in *gceapi.Instance, cause err
 		return errors.Join(cause, err)
 	}
 	return cause
-}
-
-func (d *Driver) start(ctx context.Context, in *gceapi.Instance, spec driver.ComputerSpec) error {
-	shape, err := d.shapeFor(ctx, spec, d.cfg.Families[0])
-	if err != nil {
-		return err
-	}
-	if lastSegment(in.MachineType) != shape {
-		if err := d.api.SetMachineType(ctx, in.Name, shape); err != nil {
-			return fmt.Errorf("set machine type %s: %w", shape, err)
-		}
-	}
-	if err := d.api.StartInstance(ctx, in.Name); err != nil {
-		return fmt.Errorf("start VM: %w", err)
-	}
-	return nil
 }
 
 func lastSegment(u string) string { return last(u) }
@@ -483,6 +468,7 @@ func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.Comput
 		return st
 	case "RUNNING":
 	default:
+		st.Failure, st.ExitCode, st.OOMKilled = failureText(in.Labels[LabelFailure], d.api.Zone, last(in.MachineType))
 		return st
 	}
 	gctx, cancel := context.WithTimeout(ctx, guestTimeout)

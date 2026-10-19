@@ -14,6 +14,9 @@ const (
 	LabelGeneration = "a12s-generation"
 	LabelSpec       = "a12s-spec" // digest of the staged spec
 	LabelDriveKind  = "a12s-drive"
+	// LabelFailure records why a Computer stopped on its own: "oom", "exit-<code>", "host-error",
+	// "guest-terminate" or "no-capacity". Its VM is stopped then, so its engine can't be asked.
+	LabelFailure = "a12s-failure"
 
 	RoleComputer = "computer"
 )
