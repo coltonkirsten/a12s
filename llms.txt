@@ -72,7 +72,7 @@ form of an OpenAI API key, `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-…"}` (C
 ## New project
 
 ```sh
-a12s init myproj && cd myproj         # fleet.yaml (defaults + one agent computer "assistant") and a README
+a12s init myproj && cd myproj         # fleet.yaml (defaults + one agent computer "assistant"), README, this llms.txt, AGENTS.md
 a12s creds set anthropic              # see Setup for pasting the token
 a12s up                               # creates the agent computers, returns when they are Ready
 a12s send assistant "Reply with the single word pong." --wait

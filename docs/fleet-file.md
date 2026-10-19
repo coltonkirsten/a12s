@@ -1,7 +1,7 @@
 # Fleet file reference
 
 `fleet.yaml` declares a Fleet: agent computers, Services, grants. It is optional: the live Fleet is the source
-of truth, and the file is one way to write it. `a12s init` scaffolds `fleet.yaml` and a README.
+of truth, and the file is one way to write it. `a12s init` scaffolds `fleet.yaml`, a README, `llms.txt` and `AGENTS.md`.
 
 The CLI finds the Fleet file from `--fleet`/`-F`, then `$A12S_FLEET`, then the nearest `fleet.yaml` in the current
 directory or a parent.

@@ -17,6 +17,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   as. The GCE driver's `identity: per-computer` gives each one its own service account; it is empty otherwise.
 - `a12s init`'s README shows how to create agent computers from code: the README's hello example in Python and
   TypeScript, after `a12s up`.
+- `a12s init` also writes `llms.txt` (the copy embedded in the CLI, so it matches the installed version), an
+  `AGENTS.md` telling coding agents to read it first, and a `CLAUDE.md` that imports `AGENTS.md`. Its README points at
+  `./llms.txt`; existing files are never overwritten.
 
 ## v0.8.1 (2026-10-13)
 
