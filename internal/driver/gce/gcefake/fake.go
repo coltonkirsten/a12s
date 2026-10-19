@@ -581,6 +581,13 @@ func (f *Fake) instance(r *http.Request, call, name string, body []byte) reply {
 			}
 		}
 		return f.done("start", in.SelfLink, in.ID)
+	case "instances.resume":
+		if in.Status != "SUSPENDED" {
+			return errReply(400, "resourceNotReady", "instance %s is not suspended", name)
+		}
+		in.Status = "RUNNING"
+		in.LastStartTimestamp = f.tick()
+		return f.done("resume", in.SelfLink, in.ID)
 	case "instances.stop":
 		if e := f.opFault("stop", name); e != nil {
 			return f.failedOp("stop", in.SelfLink, in.ID, e)

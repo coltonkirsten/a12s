@@ -84,7 +84,8 @@ DNS and traffic to the host are dropped.
 
 The Controller drives each VM's Docker engine over mutual TLS: the engine trusts only the Controller's client
 certificate from the Fleet's CA, and the Controller pins the engine's certificate, which the VM made at its first
-boot and published as a guest attribute (only the VM can write those). Credentials reach an agent computer the same
+boot and published as a guest attribute (only the VM can write those; with per-computer identity the agent computer
+reaches the metadata server and could overwrite it, which only makes its own wakes fail). Credentials reach an agent computer the same
 way as on Docker, over that link into tmpfs; nothing secret is in instance metadata, which anyone who can read the
 instance can read.
 

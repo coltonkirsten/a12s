@@ -82,7 +82,7 @@ func selfSigned(t *testing.T) tls.Certificate {
 
 // A boot script that failed is reported at once, with what failed, instead of waiting out the boot timeout.
 func TestOpenReportsABootFailure(t *testing.T) {
-	pollEvery = 0
+	pollEvery, bootGrace = 0, 0
 	f := gcefake.New("p", "us-central1-a")
 	defer f.Close()
 	if err := f.API().InsertInstance(context.Background(), &gceapi.Instance{Name: "vm"}); err != nil {
