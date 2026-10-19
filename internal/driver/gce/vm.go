@@ -324,9 +324,15 @@ func (d *Driver) wake(ctx context.Context, in *gceapi.Instance, generation int64
 			return err
 		}
 	}
-	if in.Status == "TERMINATED" || in.Status == "SUSPENDED" {
+	switch in.Status {
+	case "TERMINATED":
 		if err := d.start(ctx, in, spec); err != nil {
 			return err
+		}
+	case "SUSPENDED":
+		// Suspended outside a12s: a suspended VM resumes, it can't be started or reshaped.
+		if err := d.api.ResumeInstance(ctx, in.Name); err != nil {
+			return fmt.Errorf("resume VM: %w", err)
 		}
 	}
 	if in, err = d.waitStatus(ctx, computer, "RUNNING"); err != nil {
@@ -378,8 +384,8 @@ func (d *Driver) sleep(ctx context.Context, in *gceapi.Instance) error {
 }
 
 func (d *Driver) RemoveComputer(ctx context.Context, computer string) error {
-	defer d.callers.Remove(computer)()
 	defer d.lock(computer)()
+	defer d.callers.Remove(computer)()
 	in, err := d.instance(ctx, computer)
 	switch {
 	case errors.Is(err, driver.ErrNotFound):
@@ -448,8 +454,9 @@ func (d *Driver) Observe(ctx context.Context) (driver.Observation, error) {
 // guestTimeout bounds asking a running VM's engine about its container during Observe.
 const guestTimeout = 5 * time.Second
 
-// vmState is built from two layers. A stopped VM is asleep, with the failure its labels recorded. A running VM is
-// what its container is; while it boots, before its engine answers, it is awake and not yet running.
+// vmState is built from two layers. A VM that is up is awake, since it bills, and running only while its container
+// runs: the Controller then sleeps it or starts its container. A stopped VM is asleep, with the failure its labels
+// recorded.
 func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.ComputerState {
 	name := in.Labels[LabelComputer]
 	st := driver.ComputerState{
@@ -463,10 +470,11 @@ func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.Comput
 		st.Identity = in.ServiceAccounts[0].Email
 	}
 	switch in.Status {
-	case "PROVISIONING", "STAGING":
+	case "PROVISIONING", "STAGING", "STOPPING":
 		st.Power = driver.PowerAwake
 		return st
 	case "RUNNING":
+		st.Power = driver.PowerAwake
 	default:
 		st.Failure, st.ExitCode, st.OOMKilled = failureText(in.Labels[LabelFailure], d.api.Zone, last(in.MachineType))
 		return st
@@ -475,21 +483,15 @@ func (d *Driver) vmState(ctx context.Context, in *gceapi.Instance) driver.Comput
 	defer cancel()
 	g, err := d.guest(gctx, in)
 	if err != nil {
-		st.Power = driver.PowerAwake
 		return st
 	}
 	cs, exists, err := g.Container(gctx)
-	if err != nil {
-		st.Power = driver.PowerAwake
+	if err != nil || !exists {
 		return st
 	}
-	if !exists {
-		return st
-	}
-	cs.Name, cs.Generation, cs.InstanceID, cs.Network, cs.Identity = name, st.Generation, st.InstanceID, st.Network, st.Identity
-	cs.Address = ""
+	st.Running, st.ExitCode, st.OOMKilled, st.Failure = cs.Running, cs.ExitCode, cs.OOMKilled, cs.Failure
 	if cs.Running {
-		cs.Address = addressOf(in).String()
+		st.Address = addressOf(in).String()
 	}
-	return cs
+	return st
 }

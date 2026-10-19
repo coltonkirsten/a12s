@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"sync"
@@ -9,18 +10,20 @@ import (
 )
 
 // CallerMap maps the addresses a substrate attributes egress connections by to Computer and Service names, refreshed
-// from Snapshot. A refresh and a removal never interleave: once Remove has dropped a name, no snapshot taken before
-// its removal finished can publish that name's address again, so a reused address never inherits another Computer's
-// policy.
+// from Snapshot. A removal never waits for a refresh, nor a refresh for a removal, however slow either is. Instead a
+// refresh publishes only if no removal began or ended while it took its snapshot, and never publishes a name being
+// removed: once Remove has dropped a name, no snapshot taken before its removal finished can publish that name's
+// address again, so a reused address never inherits another Computer's policy.
 type CallerMap struct {
 	Snapshot func(ctx context.Context) (map[netip.Addr]string, error)
-	// Contended, if set (tests only), runs with the refresh's context when a refresh is about to wait for a removal.
-	Contended func(ctx context.Context)
 
-	refreshMu sync.Mutex // held by a refresh from snapshot to publish, and by a removal throughout
+	refreshMu sync.Mutex // one refresh at a time
 	mu        sync.Mutex
 	m         map[netip.Addr]string
 	at        time.Time
+	// epoch counts removals begun and ended; removing holds the names being removed.
+	epoch    uint64
+	removing map[string]int
 }
 
 // staleAfter bounds how often a miss triggers a refresh, so a client probing addresses cannot hammer the substrate.
@@ -44,22 +47,34 @@ func (c *CallerMap) Lookup(addr netip.Addr) (string, bool) {
 	return name, ok
 }
 
+var errRemovals = errors.New("removals kept changing the substrate during the refresh")
+
 func (c *CallerMap) Refresh(ctx context.Context) error {
-	if !c.refreshMu.TryLock() {
-		if c.Contended != nil {
-			c.Contended(ctx)
-		}
-		c.refreshMu.Lock()
-	}
+	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
-	m, err := c.Snapshot(ctx)
-	if err != nil {
-		return err
+	for range 5 {
+		c.mu.Lock()
+		start := c.epoch
+		c.mu.Unlock()
+		m, err := c.Snapshot(ctx)
+		if err != nil {
+			return err
+		}
+		c.mu.Lock()
+		if c.epoch != start {
+			c.mu.Unlock()
+			continue // a removal began or ended during the snapshot: it may show a removed name
+		}
+		for a, n := range m {
+			if c.removing[n] > 0 {
+				delete(m, a)
+			}
+		}
+		c.m, c.at = m, time.Now()
+		c.mu.Unlock()
+		return nil
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.m, c.at = m, time.Now()
-	return nil
+	return errRemovals
 }
 
 // Require refreshes and fails unless name has an address: a Computer whose egress would not be attributable must not
@@ -78,16 +93,30 @@ func (c *CallerMap) Require(ctx context.Context, name string) error {
 	return fmt.Errorf("the Controller has no address that identifies %s's egress", name)
 }
 
-// Remove drops name's addresses and holds off refreshes until done is called, after the substrate object that owned
-// the address is gone.
+// Remove drops name's addresses and keeps them out of every refresh until done is called, after the substrate object
+// that owned the address is gone.
 func (c *CallerMap) Remove(name string) (done func()) {
-	c.refreshMu.Lock()
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.epoch++
+	if c.removing == nil {
+		c.removing = map[string]int{}
+	}
+	c.removing[name]++
 	for a, n := range c.m {
 		if n == name {
 			delete(c.m, a)
 		}
 	}
-	c.mu.Unlock()
-	return c.refreshMu.Unlock
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.epoch++
+			if c.removing[name]--; c.removing[name] == 0 {
+				delete(c.removing, name)
+			}
+		})
+	}
 }

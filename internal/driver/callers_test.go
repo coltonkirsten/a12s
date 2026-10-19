@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type addrs struct {
@@ -90,10 +91,9 @@ func TestRequireFailsClosed(t *testing.T) {
 	}
 }
 
-// A refresh that starts while a Computer is being removed cannot publish a snapshot showing it after the address was
-// reused and verified by another Computer. The refresh is launched mid-removal and held, if its snapshot still shows
-// builder, until tester has taken builder's address and verified it; then it may publish. The removal waits until
-// the refresh has either snapshotted or is blocked behind it: no timing window.
+// A refresh whose snapshot was taken before a removal never publishes it: the snapshot still shows builder at its
+// old address, the removal finishes and tester takes the address, and only then is the stale snapshot handed back.
+// The refresh sees that a removal happened and takes a new snapshot.
 func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	ctx := context.Background()
 	src := &addrs{m: map[netip.Addr]string{ipB: "builder", ipT: "tester"}}
@@ -101,8 +101,8 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	stale, release := make(chan struct{}), make(chan struct{})
 	c := &CallerMap{Snapshot: func(ctx context.Context) (map[netip.Addr]string, error) {
 		m, err := src.snapshot(ctx)
-		if m[ipB] == "builder" && armed.CompareAndSwap(true, false) {
-			close(stale)
+		if armed.CompareAndSwap(true, false) {
+			close(stale) // a snapshot showing builder: hold it
 			<-release
 		}
 		return m, err
@@ -110,37 +110,42 @@ func TestStaleRefreshCannotOutliveRemoval(t *testing.T) {
 	if err := c.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-
-	type probe struct{}
-	probeCtx := context.WithValue(ctx, probe{}, true)
-	refreshed, contended := make(chan struct{}), make(chan struct{})
-	c.Contended = func(ctx context.Context) {
-		if ctx.Value(probe{}) != nil {
-			close(contended)
-		}
-	}
-	done := c.Remove("builder")
 	armed.Store(true)
-	go func() { c.Refresh(probeCtx); close(refreshed) }()
-	select {
-	case <-stale:
-	case <-contended:
-	}
+	refreshed := make(chan error)
+	go func() { refreshed <- c.Refresh(ctx) }()
+	<-stale
+	done := c.Remove("builder")
 	src.set(netip.Addr{}, "builder")
 	done()
-	armed.Store(false)
 	src.set(ipB, "tester")
-	if err := c.Require(ctx, "tester"); err != nil {
-		t.Fatal(err)
-	}
 	close(release)
-	<-refreshed
-	select {
-	case <-stale:
-		t.Error("a refresh snapshotted builder during its removal")
-	default:
+	if err := <-refreshed; err != nil {
+		t.Fatal(err)
 	}
 	if got, ok := c.Lookup(ipB); !ok || got != "tester" {
 		t.Fatalf("Lookup(reused address) = %q, %v; want tester", got, ok)
+	}
+}
+
+// A slow removal (a VM's deletion takes a minute) never holds up attributing other Computers' egress.
+func TestRemovalDoesNotBlockRefresh(t *testing.T) {
+	src := &addrs{m: map[netip.Addr]string{ipB: "builder", ipT: "tester"}}
+	c := &CallerMap{Snapshot: src.snapshot}
+	done := c.Remove("builder")
+	defer done()
+	finished := make(chan struct{})
+	go func() {
+		if got, ok := c.Lookup(ipT); !ok || got != "tester" {
+			t.Errorf("Lookup(tester) = %q, %v", got, ok)
+		}
+		if _, ok := c.Lookup(ipB); ok {
+			t.Error("a Computer being removed was attributed")
+		}
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Lookup waited for a removal")
 	}
 }

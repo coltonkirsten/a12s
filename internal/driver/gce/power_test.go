@@ -75,3 +75,30 @@ func TestFailureText(t *testing.T) {
 		t.Error("oom is not reported as an OOM kill")
 	}
 }
+
+// A VM that is up bills, so it is awake even when its container isn't running (a missed death, a stop that failed
+// half-way): the Controller's sleep then stops it.
+func TestUpVMWithAStoppedContainerIsAwake(t *testing.T) {
+	h := newHarness(t)
+	h.stageNew("scout")
+	h.must(h.d.SetPower(h.ctx, "scout", driver.PowerAwake, 1))
+	h.kill("scout")
+	if st := h.state("scout"); st.Power != driver.PowerAwake || st.Running {
+		t.Fatalf("state = %+v, want awake and not running", st)
+	}
+	h.must(h.d.SetPower(h.ctx, "scout", driver.PowerAsleep, 1))
+	if in, _ := h.fake.Instance(InstanceName("lab", "scout")); in.Status != "TERMINATED" {
+		t.Fatalf("VM is %s after sleep", in.Status)
+	}
+}
+
+// A VM suspended outside a12s wakes by resuming: GCE refuses to start or reshape a suspended VM.
+func TestSuspendedVMResumes(t *testing.T) {
+	h := newHarness(t)
+	h.stageNew("scout")
+	h.fake.SetStatus(InstanceName("lab", "scout"), "SUSPENDED")
+	h.must(h.d.SetPower(h.ctx, "scout", driver.PowerAwake, 1))
+	if st := h.state("scout"); !st.Running {
+		t.Fatalf("state = %+v", st)
+	}
+}

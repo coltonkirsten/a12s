@@ -44,7 +44,9 @@ iptables -C INPUT -s "$CONTROLLER" -p tcp --dport 2376 -j ACCEPT 2> /dev/null ||
   iptables -A INPUT -s "$CONTROLLER" -p tcp --dport 2376 -j ACCEPT
 
 # The engine's TLS: the server key is made here and never leaves the boot disk; its certificate is published as a
-# guest attribute, which only this VM can write and the Controller pins. Clients must hold a certificate from the
+# guest attribute, which only this VM can write, and the Controller pins it. (With per-computer identity the container
+# reaches the metadata server too, so it could overwrite the attribute; that only fails its own wakes, since it can't
+# listen on the engine's port.) Clients must hold a certificate from the
 # Fleet's CA with client-auth usage, which only the Controller's has.
 TLS=/var/lib/a12s/tls
 mkdir -p "$TLS"
@@ -68,6 +70,7 @@ if ! grep -q -- "--tlsverify" /etc/default/docker; then
   else
     echo "DOCKER_OPTS=\"$OPTS\"" >> /etc/default/docker
   fi
+  grep -q -- "--tlsverify" /etc/default/docker # the edit took: a DOCKER_OPTS line of another form fails here
   systemctl daemon-reload
   systemctl restart docker
 fi

@@ -419,6 +419,10 @@ func (a *API) StartInstance(ctx context.Context, name string) error {
 	return a.op(ctx, http.MethodPost, a.zonal("instances", name, "start"), nil)
 }
 
+func (a *API) ResumeInstance(ctx context.Context, name string) error {
+	return a.op(ctx, http.MethodPost, a.zonal("instances", name, "resume"), nil)
+}
+
 // StopInstance gives the guest GCE's own shutdown window; the driver stops the container first.
 func (a *API) StopInstance(ctx context.Context, name string) error {
 	return a.op(ctx, http.MethodPost, a.zonal("instances", name, "stop"), nil)

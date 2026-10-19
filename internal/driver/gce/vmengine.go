@@ -57,6 +57,7 @@ func (e *Engines) Open(ctx context.Context, vm VM) (Guest, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
+	start := time.Now()
 	var last error
 	for {
 		g, err := e.try(ctx, vm)
@@ -64,7 +65,7 @@ func (e *Engines) Open(ctx context.Context, vm VM) (Guest, error) {
 			return g, nil
 		}
 		var fatal bootError
-		if errors.As(err, &fatal) {
+		if errors.As(err, &fatal) && time.Since(start) >= bootGrace {
 			return nil, err
 		}
 		last = err
@@ -75,6 +76,10 @@ func (e *Engines) Open(ctx context.Context, vm VM) (Guest, error) {
 		}
 	}
 }
+
+// bootGrace is how long a boot error may be the previous boot's: guest attributes outlive a stop, and boot.sh clears
+// the error only once it runs.
+var bootGrace = 90 * time.Second
 
 type bootError string
 
