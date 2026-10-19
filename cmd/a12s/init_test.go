@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/coltonkirsten/a12s/internal/fleet"
@@ -18,6 +20,18 @@ func TestScaffoldParses(t *testing.T) {
 		}
 		if f.Metadata.Name != "fleet" || len(f.Services) != 0 || f.Computers["assistant"].Image != fleet.TierSlim {
 			t.Fatalf("%s: %+v", h, f)
+		}
+	}
+}
+
+func TestHelloMatchesReadme(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for lang, code := range map[string]string{"python": helloPython, "js": helloJS} {
+		if !strings.Contains(string(readme), "```"+lang+"\n"+code+"```") {
+			t.Errorf("README.md's %s hello example differs from init's starter README; change both", lang)
 		}
 	}
 }

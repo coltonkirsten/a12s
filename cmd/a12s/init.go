@@ -112,5 +112,27 @@ func starterReadme(name, cred string) string {
 	return "# " + name + "\n\n" +
 		"An a12s Fleet. a12s is installed like Docker: never vendor or edit its source here.\n" +
 		"Extend it through fleet.yaml, your own images and Services, and the client SDK.\n\n" +
-		"```sh\na12s creds set " + cred + "   # per Fleet, and again after a12s down\na12s up\na12s send assistant \"hi\" --wait\na12s down\n```\n"
+		"```sh\na12s creds set " + cred + "   # per Fleet, and again after a12s down\na12s up\na12s send assistant \"hi\" --wait\na12s down\n```\n\n" +
+		"After `a12s up`, create agent computers from code in this folder (`pip install a12s` or\n" +
+		"`npm install @coltonkirsten/a12s`). Each one gets the defaults in fleet.yaml.\n\n" +
+		"```python\n" + helloPython + "```\n\n" +
+		"```js\n" + helloJS + "```\n\n" +
+		"Everything else: https://raw.githubusercontent.com/coltonkirsten/a12s/main/llms.txt\n"
 }
+
+// The repo README's hello example, verbatim; TestHelloMatchesReadme keeps the two the same.
+const helloPython = `import a12s
+
+fleet = a12s.Fleet()            # connects to the running fleet (or url=, token=)
+hello = fleet.agent_computers.create("hello", instructions="Be helpful")
+print(hello.send("hi").wait().text)
+hello.remove()
+`
+
+const helloJS = `import { Fleet } from "@coltonkirsten/a12s";
+
+const fleet = await Fleet.connect();
+const hello = await fleet.agentComputers.create("hello", { instructions: "Be helpful" });
+console.log((await hello.send("hi").wait()).text);
+await hello.remove();
+`
