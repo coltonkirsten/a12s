@@ -80,7 +80,7 @@ Resources carry `a12s.*` labels. Internal networks are small subnets from a pool
 each), so many agent computers don't exhaust Docker's default pool. There are no host ports. Containers run with Docker's
 `--init` so orphaned harness children are reaped.
 
-## GCE driver (experimental)
+## GCE driver
 
 Each agent computer is a Compute Engine VM running Container-Optimized OS and the agent computer's container in its
 own Docker engine, with the same container settings as above (both drivers build containers with
