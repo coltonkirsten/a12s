@@ -195,6 +195,32 @@ func (ca *CA) ControllerServerCert(host string) (Leaf, error) {
 	return ca.issue(host, []string{host}, x509.ExtKeyUsageServerAuth)
 }
 
+// APIServerTLS serves the owner API off the Controller's host: names are its addresses and DNS names, which an app
+// checks against the CA it pins.
+func (ca *CA) APIServerTLS(names []string) (*tls.Config, error) {
+	if len(names) == 0 {
+		return nil, errors.New("API certificate: no names")
+	}
+	var dns []string
+	var ips []net.IP
+	for _, n := range names {
+		if ip := net.ParseIP(n); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			dns = append(dns, n)
+		}
+	}
+	leaf, err := ca.issueSAN(names[0], dns, ips, nil, x509.ExtKeyUsageServerAuth)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := leaf.TLS()
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
+}
+
 func (ca *CA) issue(cn string, dns []string, usage ...x509.ExtKeyUsage) (Leaf, error) {
 	return ca.issueURI(cn, dns, nil, usage...)
 }

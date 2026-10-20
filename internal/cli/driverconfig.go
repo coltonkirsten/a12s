@@ -51,8 +51,8 @@ func ReadDriverConfig(fleetName string) (DriverConfig, error) {
 	switch cfg.Driver {
 	case docker.Name:
 	case gce.Name:
-		if cfg.GCE.Subnetwork == "" {
-			return cfg, fmt.Errorf("%s: gce.subnetwork is required", p)
+		if err := cfg.GCE.Validate(); err != nil {
+			return cfg, fmt.Errorf("%s: %w", p, err)
 		}
 	default:
 		return cfg, fmt.Errorf("%s: driver %q: want %s or %s", p, cfg.Driver, docker.Name, gce.Name)

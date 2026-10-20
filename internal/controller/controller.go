@@ -409,7 +409,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	apiLn, err := net.Listen("tcp", apiAddr)
+	apiLns, err := listenAPI(apiAddr, host.TLSAPI, ca)
 	if err != nil {
 		return err
 	}
@@ -421,17 +421,29 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	servers := []*http.Server{
-		{Handler: c.Handler(), ReadHeaderTimeout: 10 * time.Second},
-		{Handler: c.MTLSHandler(), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second},
-		{Handler: c.newProxy(), ReadHeaderTimeout: 10 * time.Second},
+	type served struct {
+		srv *http.Server
+		ln  net.Listener
 	}
+	apiHandler := c.Handler()
+	var all []served
+	for _, ln := range apiLns {
+		all = append(all, served{&http.Server{Handler: apiHandler, ReadHeaderTimeout: 10 * time.Second}, ln})
+	}
+	all = append(all,
+		served{&http.Server{Handler: c.MTLSHandler(), TLSConfig: serverTLS, ReadHeaderTimeout: 10 * time.Second}, tls.NewListener(mtlsLn, serverTLS)},
+		served{&http.Server{Handler: c.newProxy(), ReadHeaderTimeout: 10 * time.Second}, proxyLn},
+	)
 	c.Start(ctx)
-	errc := make(chan error, 3)
-	go func() { errc <- servers[0].Serve(apiLn) }()
-	go func() { errc <- servers[1].Serve(tls.NewListener(mtlsLn, serverTLS)) }()
-	go func() { errc <- servers[2].Serve(proxyLn) }()
-	c.logf("fleet %s: API on %s, mTLS listener on :%d, egress proxy on :%d", cfg.Fleet, apiAddr, MTLSPort, ProxyPort)
+	errc := make(chan error, len(all))
+	for _, s := range all {
+		go func() { errc <- s.srv.Serve(s.ln) }()
+	}
+	apiOn := apiAddr
+	if host.TLSAPI.Addr != "" {
+		apiOn += " and " + host.TLSAPI.Addr + " (TLS)"
+	}
+	c.logf("fleet %s: API on %s, mTLS listener on :%d, egress proxy on :%d", cfg.Fleet, apiOn, MTLSPort, ProxyPort)
 
 	select {
 	case <-ctx.Done():
@@ -441,8 +453,8 @@ func Run(ctx context.Context, cfg Config) error {
 	c.logf("shutting down")
 	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, s := range servers {
-		_ = s.Shutdown(shut)
+	for _, s := range all {
+		_ = s.srv.Shutdown(shut)
 	}
 	if ctx.Err() != nil {
 		c.Wait()
@@ -453,6 +465,27 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	c.mu.Unlock()
 	return err
+}
+
+// listenAPI opens the owner API's plain listener on addr and, when the driver asks for one, its TLS listener. The
+// TLS listener asks for no client certificate: apps authenticate with the bearer token, which TLS keeps off the wire.
+func listenAPI(addr string, extra driver.TLSAPI, ca *CA) ([]net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if extra.Addr == "" {
+		return []net.Listener{ln}, nil
+	}
+	tlsCfg, err := ca.APIServerTLS(extra.Names)
+	if err == nil {
+		var tln net.Listener
+		if tln, err = net.Listen("tcp", extra.Addr); err == nil {
+			return []net.Listener{ln, tls.NewListener(tln, tlsCfg)}, nil
+		}
+	}
+	ln.Close()
+	return nil, err
 }
 
 func (c *Controller) newProxy() *Proxy {

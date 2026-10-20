@@ -220,6 +220,44 @@ func TestFirewallCheck(t *testing.T) {
 	if _, err := h.d.Capabilities(h.ctx); err != nil {
 		t.Errorf("a rule of another network counted: %v", err)
 	}
+	fw = append(goodFirewall(), gceapi.Firewall{Name: "app-to-controller-api", Network: "net", Priority: 1000, Direction: "INGRESS",
+		TargetTags: []string{"a12s-controller"}, SourceRanges: []string{"10.30.0.0/26"}, Allowed: []gceapi.FirewallRule{{IPProtocol: "tcp", Ports: []string{"7000"}}}})
+	h.fake.SetFirewalls(fw)
+	if _, err := h.d.Capabilities(h.ctx); err != nil {
+		t.Errorf("a rule letting an app reach the Controller's API was refused: %v", err)
+	}
+}
+
+func TestHostAPI(t *testing.T) {
+	h := newHarness(t)
+	if got := h.d.Host(); got.APIAddr != "127.0.0.1:7000" || got.TLSAPI.Addr != "" {
+		t.Errorf("default Host = %+v, want the API on loopback only", got)
+	}
+	h = newHarness(t, func(c *Config) {
+		c.InternalAPI, c.ControllerHostname = true, "a12s-lab-controller.us-central1-a.c.proj.internal"
+	})
+	got := h.d.Host()
+	if got.APIAddr != "127.0.0.1:7000" || got.TLSAPI.Addr != "10.128.0.2:7000" ||
+		!slices.Equal(got.TLSAPI.Names, []string{"10.128.0.2", "a12s-lab-controller.us-central1-a.c.proj.internal"}) {
+		t.Errorf("Host = %+v, want loopback plus TLS on the internal address", got)
+	}
+}
+
+func TestSettingsValidate(t *testing.T) {
+	for _, tc := range []struct {
+		s  Settings
+		ok bool
+	}{
+		{Settings{Subnetwork: "a12s-lab"}, true},
+		{Settings{Subnetwork: "a12s-lab", API: &APISettings{Listen: APIListenInternal}}, true},
+		{Settings{Subnetwork: "a12s-lab", API: &APISettings{Listen: "0.0.0.0"}}, false},
+		{Settings{Subnetwork: "a12s-lab", API: &APISettings{}}, false},
+		{Settings{}, false},
+	} {
+		if err := tc.s.Validate(); (err == nil) != tc.ok {
+			t.Errorf("%+v: Validate = %v", tc.s, err)
+		}
+	}
 }
 
 func TestExecAndSessions(t *testing.T) {

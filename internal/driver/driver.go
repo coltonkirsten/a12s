@@ -112,6 +112,14 @@ type Host struct {
 	// RemoteEngines: Computers' containers run in engines other than the one on the Controller's host, so the CLI
 	// can't docker exec into them (a12s shell).
 	RemoteEngines bool
+	// TLSAPI, when its Addr is set, is a second owner API listener, over TLS with a server certificate from the
+	// fleet's CA for Names and no client certificate: the bearer token stays the authentication.
+	TLSAPI TLSAPI
+}
+
+type TLSAPI struct {
+	Addr  string
+	Names []string
 }
 
 type Observation struct {
