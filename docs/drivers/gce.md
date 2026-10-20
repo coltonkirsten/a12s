@@ -117,7 +117,7 @@ computer created again under the same name starts with no access.
 Sleep stops the agent computer's container (with the same 25-second flush as on Docker), then its VM. A stopped VM
 bills only for its disks. Wake starts the VM, waits for its engine, rebuilds the container if the agent computer
 changed while it slept, and starts it: expect tens of seconds, not the second or so a container takes (the exit
-gate measured wake-to-Ready p50 38 to 53 s, p95 45 to 59 s on e2-medium in us-central1-a). Messages wait
+gate measured wake-to-Ready at p50 42 s and p95 59 s over 15 wakes of an e2-medium in us-central1-a). Messages wait
 in the Controller's inbox meanwhile, so a sleeping agent computer loses nothing; it answers later. A change to a
 sleeping agent computer never boots its VM: it applies at the next wake.
 
@@ -135,8 +135,8 @@ Machine shapes: an agent computer that sets `resources` gets the cheapest shape 
 that much sustained CPU and memory (E2 custom shapes included; shared-core shapes count as their sustained CPU:
 e2-micro 0.25, e2-small 0.5, e2-medium 1). One that sets none gets `defaultShape` (e2-small: 2 GiB, enough for one
 agent's harness and computerd). e2-micro (`cpu: 250m, memory: 1Gi`) also works for light agents: in the exit gate a
-Turn that clones a repository, searches it and runs `npm ci` peaked at 360 MB on it and took 17 s, against 200 MB and
-11 s on e2-small, since its shared CPU throttles sooner. The VM is the limit; the container itself has none. When the zone has no capacity
+Turn that clones a repository, searches it and runs `npm ci` peaked at 360 to 370 MB of the container's memory on it
+(200 to 250 MB on e2-small) and took about as long; its 1 GiB leaves little room for heavier tools. The VM is the limit; the container itself has none. When the zone has no capacity
 for the shape, wake tries the same size in each next family (`families`, default `e2, n2d, t2d`); the next wake
 starts from the first family again. If none has capacity, the wake fails and `a12s status` says so.
 
