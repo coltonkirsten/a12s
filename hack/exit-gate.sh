@@ -94,12 +94,12 @@ PY
 python3 /tmp/gate6.py /tmp/gate6.a /tmp/gate6.b "$last" > /tmp/gate6.res 2>&1; rc=$?; tee -a "$LOG" < /tmp/gate6.res
 check "6 reconnect lost nothing and duplicated nothing" test "$rc" -eq 0
 
-log "## 7 a request to a host that isn't allowed is blocked and shows up as a diagnostic"
+log "## 7 a request to a host that isn't allowed is blocked and shows up as an egress.denied event"
 since7=$($A12S logs builder 2>/dev/null | awk '{print $1}' | tail -1); since7=${since7:-0}
 $A12S send --wait builder "Run exactly this shell command and report its exit code and the first line of output: curl -sS -m 10 https://example.com" > /tmp/gate7.out; cat /tmp/gate7.out >> "$LOG"
 $A12S logs builder | awk -v s="$since7" '$1 > s' > /tmp/gate7.log; cat /tmp/gate7.log >> "$LOG"
-denied7() { grep -q '^turn t_[0-9a-f]* completed$' /tmp/gate7.out && grep ' diagnostic ' /tmp/gate7.log | grep -q '"host":"example.com"'; }
-check "7 example.com denied with a diagnostic event (this turn)" denied7
+denied7() { grep -q '^turn t_[0-9a-f]* completed$' /tmp/gate7.out && grep ' egress.denied ' /tmp/gate7.log | grep -q '"host":"example.com"'; }
+check "7 example.com denied with an egress.denied event (this turn)" denied7
 
 log "## 8 bump the harness version; next turn uses it; no image rebuilt"
 before=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'a12s/slim:dev' | sort)
