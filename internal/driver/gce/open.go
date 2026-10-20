@@ -3,10 +3,13 @@ package gce
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/moby/moby/client"
@@ -32,11 +35,39 @@ type Settings struct {
 	SnapshotPolicy string   `json:"snapshotPolicy,omitempty" yaml:"snapshotPolicy,omitempty"`
 	// Identity "per-computer" gives each agent computer its own service account; default "none".
 	Identity string `json:"identity,omitempty" yaml:"identity,omitempty"`
+	// A pointer, so a driver.yaml without it keeps the Controller's driver digest and its container.
+	API *APISettings `json:"api,omitempty" yaml:"api,omitempty"`
 }
+
+type APISettings struct {
+	// Listen "internal" also serves the owner API on the Controller VM's internal address, over TLS, on APIPort.
+	Listen string `json:"listen" yaml:"listen"`
+}
+
+const (
+	APIListenInternal = "internal"
+	// APIPort is fixed, unlike the loopback port, so a firewall rule can name it.
+	APIPort = 7000
+)
+
+func (s Settings) Validate() error {
+	if s.Subnetwork == "" {
+		return errors.New("gce.subnetwork is required")
+	}
+	if s.API != nil && s.API.Listen != APIListenInternal {
+		return fmt.Errorf("gce.api.listen %q: want %s", s.API.Listen, APIListenInternal)
+	}
+	return nil
+}
+
+func (s Settings) internalAPI() bool { return s.API != nil && s.API.Listen == APIListenInternal }
 
 // Open runs on the Controller VM: the project, zone, address and service account come from its metadata server,
 // API calls use that service account's token, and the local engine is the fleet's image store.
 func Open(ctx context.Context, fleet string, s Settings, stateDir string, clientCert tls.Certificate, caPEM []byte) (*Driver, error) {
+	if err := s.Validate(); err != nil {
+		return nil, fmt.Errorf("gce driver: %w", err)
+	}
 	host, err := controllerVM(ctx, s.Zone)
 	if err != nil {
 		return nil, err
@@ -60,6 +91,7 @@ func Open(ctx context.Context, fleet string, s Settings, stateDir string, client
 		Families: s.Families, DefaultShape: s.DefaultShape, BootImage: s.BootImage, BootDiskGB: s.BootDiskGB,
 		SnapshotPolicy: s.SnapshotPolicy, StateDir: stateDir, Local: local, Guest: engines.Open,
 		Identity: s.Identity, BootMetadata: BootMetadata(controller, caPEM, identity), Arch: runtime.GOARCH,
+		InternalAPI: s.internalAPI(), ControllerHostname: host.hostname,
 	})
 	if err != nil {
 		cli.Close()
@@ -70,9 +102,10 @@ func Open(ctx context.Context, fleet string, s Settings, stateDir string, client
 }
 
 type controllerHost struct {
-	api     *gceapi.API
-	address netip.Addr
-	account string
+	api      *gceapi.API
+	address  netip.Addr
+	account  string
+	hostname string
 }
 
 // controllerVM reads the project, zone, address and service account from the metadata server of the VM this runs
@@ -106,6 +139,9 @@ func controllerVM(ctx context.Context, zone string) (controllerHost, error) {
 	if h.account, err = get("instance/service-accounts/default/email"); err != nil {
 		return h, fmt.Errorf("gce driver: the Controller VM has no service account: %w", err)
 	}
+	if h.hostname, err = get("instance/hostname"); err != nil {
+		return h, fmt.Errorf("gce driver: %w", err)
+	}
 	h.api = &gceapi.API{
 		HTTP:    &http.Client{Timeout: 5 * time.Minute},
 		Compute: gceapi.DefaultComputeEndpoint,
@@ -118,7 +154,16 @@ func controllerVM(ctx context.Context, zone string) (controllerHost, error) {
 	return h, nil
 }
 
-// Host: Computers reach the Controller by address (they resolve no names); the owner API stays on loopback.
+// Host: Computers reach the Controller by address (they resolve no names). The owner API is on loopback, and with
+// api.listen internal also on the internal address, over TLS, for apps in the VPC.
 func (d *Driver) Host() driver.Host {
-	return driver.Host{ControllerName: d.cfg.Controller.String(), APIAddr: "127.0.0.1:7000", RemoteEngines: true}
+	ctl := d.cfg.Controller.String()
+	h := driver.Host{ControllerName: ctl, APIAddr: "127.0.0.1:7000", RemoteEngines: true}
+	if d.cfg.InternalAPI {
+		h.TLSAPI = driver.TLSAPI{Addr: net.JoinHostPort(ctl, strconv.Itoa(APIPort)), Names: []string{ctl}}
+		if d.cfg.ControllerHostname != "" {
+			h.TLSAPI.Names = append(h.TLSAPI.Names, d.cfg.ControllerHostname)
+		}
+	}
+	return h
 }

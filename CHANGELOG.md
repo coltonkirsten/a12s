@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: on the GCE driver, `api: { listen: internal }` in `driver.yaml` also serves the owner API on the Controller
+  VM's internal address (port 7000), over TLS with a certificate from the fleet's CA, so apps in the VPC can call it.
+  Off by default; it needs a firewall rule you add
+  ([GCE driver](docs/drivers/gce.md#reaching-the-api-from-the-vpc)).
 - Added: a GCE driver that runs each agent computer as its own Compute Engine VM. Select it with
   `~/.a12s/<fleet>/driver.yaml` on the Controller VM ([GCE driver](docs/drivers/gce.md)). It passed the exit gate on a
   real project (wake-to-Ready p95 under 60 s).

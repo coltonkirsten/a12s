@@ -64,6 +64,10 @@ type Config struct {
 	BootMetadata []gceapi.MetadataItem
 	// Arch is the Controller's architecture; images come from its engine, so every Computer shares it.
 	Arch string
+	// InternalAPI also serves the owner API on the Controller's internal address; ControllerHostname is the
+	// Controller VM's internal DNS name, which its certificate names too.
+	InternalAPI        bool
+	ControllerHostname string
 }
 
 type Driver struct {

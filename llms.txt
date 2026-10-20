@@ -471,7 +471,9 @@ SDK objects (Python names; TypeScript is camelCase):
   After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored.
 - On the GCE driver (an operator's choice in ~/.a12s/<fleet>/driver.yaml, not a Fleet field) each
   agent computer is its own VM: wakes take tens of seconds, no Services, no attach, no shell. With per-computer
-  identity, status's `agentComputers[].identity` is the service account to grant access to (docs/drivers/gce.md).
+  identity, status's `agentComputers[].identity` is the service account to grant access to. An app in the VPC
+  reaches the API at https://<controller address>:7000 when driver.yaml sets `api: { listen: internal }`; it must
+  trust the fleet's CA (docs/drivers/gce.md#reaching-the-api-from-the-vpc).
 
 ## Optional
 

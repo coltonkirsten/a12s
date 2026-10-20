@@ -85,7 +85,8 @@ each), so many agent computers don't exhaust Docker's default pool. There are no
 Each agent computer is a Compute Engine VM running Container-Optimized OS and the agent computer's container in its
 own Docker engine, with the same container settings as above (both drivers build containers with
 `internal/driver/engine`). The Controller runs on a VM in the fleet's subnet, with its container on the host network:
-agent computer VMs reach its proxy and mTLS listener at its address, and the owner API listens on loopback.
+agent computer VMs reach its proxy and mTLS listener at its address, and the owner API listens on loopback (with
+`api: { listen: internal }`, also on its address over TLS, for apps in the VPC).
 
 | Thing | GCE resource |
 |---|---|

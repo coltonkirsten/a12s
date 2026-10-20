@@ -54,6 +54,7 @@ gce:
   # bootDiskGb: 10
   # snapshotPolicy: a12s-nightly
   # identity: per-computer      # default: none
+  # api: { listen: internal }   # also serve the API on the Controller's internal address, over TLS
 ```
 
 Any command that starts the Controller reads it. Changing it replaces the Controller container; the fleet's state
@@ -85,6 +86,62 @@ boot and published as a guest attribute (only the VM can write those; with per-c
 reaches the metadata server and could overwrite it, which only makes its own wakes fail). Credentials reach an agent computer the same
 way as on Docker, over that link into tmpfs; nothing secret is in instance metadata, which anyone who can read the
 instance can read.
+
+## Reaching the API from the VPC
+
+The owner API listens on the Controller VM's loopback, for the CLI on that VM. An app elsewhere in the VPC (another
+VM, or Cloud Run with Direct VPC egress) reaches it once `driver.yaml` has:
+
+```yaml
+gce:
+  subnetwork: a12s-lab
+  api: { listen: internal }
+```
+
+The Controller then also serves the same API on `https://<controller address>:7000` (`10.20.0.2` after
+`bootstrap.sh`). The loopback listener and the CLI are unchanged. The internal listener is TLS only: its server
+certificate comes from the fleet's CA and names the Controller's internal address and its internal DNS name
+(`a12s-<fleet>-controller.<zone>.c.<project>.internal`). It asks for no client certificate; apps authenticate with a
+bearer token, as on loopback. Give the app a scoped token (`a12s token create <name> --prefix <p>`), not the owner
+token.
+
+The app trusts the fleet's CA, which isn't in any public trust store. Copy it on the Controller VM:
+
+```sh
+docker exec a12s-<fleet>-controller cat /var/lib/a12s/ca.crt > a12s-<fleet>-ca.pem
+```
+
+The certificate is public; the CA's key never leaves the Controller's state volume. Give the app the PEM (an env
+var or a mounted secret) and trust it for this client only:
+
+```ts
+import { Agent, fetch as undiciFetch } from "undici";
+const dispatcher = new Agent({ connect: { ca: process.env.A12S_CA_PEM } });
+const fleet = await Fleet.connect({
+  url: "https://10.20.0.2:7000", token,
+  fetch: ((u, init) => undiciFetch(u, { ...init, dispatcher })) as typeof fetch,
+});
+```
+
+```python
+ctx = ssl.create_default_context(cadata=os.environ["A12S_CA_PEM"])
+fleet = a12s.Fleet(url="https://10.20.0.2:7000", token=token, http=httpx.Client(verify=ctx, timeout=None))
+```
+
+`NODE_EXTRA_CA_CERTS` also works, but it makes the process trust the fleet's CA for every host. `a12s down` deletes
+the Controller's state volume, so the next `a12s up` makes a new CA: copy and deploy the PEM again.
+
+`bootstrap.sh` opens nothing for this. Add one ingress rule from the app's address range only, for example the
+subnet Cloud Run's Direct VPC egress uses:
+
+```sh
+gcloud compute firewall-rules create a12s-<fleet>-app-to-api --network a12s-<fleet> --direction INGRESS \
+  --target-tags a12s-controller --source-ranges <app range> --allow tcp:7000
+```
+
+Keep the range to the app's: anything in it with a token can call the API. The driver's firewall check accepts this
+rule, and agent computers still can't reach port 7000: their egress rules allow only 3128 and 7443 to the Controller,
+which the check enforces.
 
 ## Controller permissions
 

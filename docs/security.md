@@ -115,6 +115,8 @@ Every agent computer's and Service's only route out is the Controller's validati
   container stops.
 - The Controller talks to computerd over mutual TLS.
 - The owner API listens on `127.0.0.1` with a random bearer token in `~/.a12s/<fleet>/controller.json` (0600).
+  On GCE, `api: { listen: internal }` also serves it on the Controller VM's internal address, over TLS only, with a
+  certificate from the fleet's CA ([GCE driver](drivers/gce.md#reaching-the-api-from-the-vpc)).
 - `a12s gateway` listens on `127.0.0.1`, answers only loopback host names, and needs a key made for each run (a
   cookie after the printed link is opened, or a bearer token) before it forwards `/v1/` with its scoped token.
 - Other programs get one of the [tokens](#tokens) below instead of the owner token.
