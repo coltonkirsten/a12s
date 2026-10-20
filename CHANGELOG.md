@@ -4,9 +4,13 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
-- Added (experimental): a GCE driver that runs each agent computer as its own Compute Engine VM. Select it with
-  `~/.a12s/<fleet>/driver.yaml` on the Controller VM ([GCE driver](docs/drivers/gce.md)). It has not passed the exit
-  gate on a real project yet.
+- Added: a GCE driver that runs each agent computer as its own Compute Engine VM. Select it with
+  `~/.a12s/<fleet>/driver.yaml` on the Controller VM ([GCE driver](docs/drivers/gce.md)). It passed the exit gate on a
+  real project (wake-to-Ready p95 under 60 s).
+- Fixed: a container's published ports are also exposed, so Docker publishes them (the GCE driver's computerd port
+  was never bound).
+- Changed: `hack/gce/bootstrap.sh` makes the Controller VM on Debian 13 (BuildKit), retries the role binding while a
+  new service account propagates, and undeletes a role teardown left deleted.
 - Added: on the GCE driver, `a12s down` deletes the agent computers' VMs (and service accounts) and keeps their disks;
   `--purge` deletes the disks too. `a12s shell` is refused there with a fix: agent computers run in other engines.
 - Added: `hack/gce/bootstrap.sh` creates a fleet project's network, firewall rules, NAT, Controller service account
