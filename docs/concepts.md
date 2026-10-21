@@ -142,15 +142,15 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `turn.started` | `{harness, model, resumed, prompt, cwd, inbox: {batch, messages: [{id, sender, via, …}]}}`: the Messages this Turn delivers. A Turn the harness started by itself has `reason: "background"` and no `inbox` |
 | `turn.dispatched` | `{}`: the harness has received the prompt |
 | `text.delta` | `{text}`: streamed text from the agent |
-| `tool.started` | `{id, name, input}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send` |
-| `tool.finished` | `{id, name, isError, output}` |
+| `tool.started` | `{id, name, input, parent?}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send`. Claude Code only: a sub-agent's call has `parent`, the `id` of the `Agent` call that started the sub-agent; the agent's own calls have none. A background sub-agent's calls between Turns are journaled with no `turn` |
+| `tool.finished` | `{id, name, isError, output, parent?}`, `parent` as on `tool.started` |
 | `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, tokens?, error?}`: `usage` is the harness's own; `tokens` is `{input, output, cacheRead, cacheWrite}` for every harness (`input` excludes cached input) |
 | `egress.denied` | `{host, port, reason}`: the egress proxy refused a connection. Every Claude Code Turn has one or two, for telemetry hosts; they are harmless |
 | `diagnostic` | `{message, …}`: something an operator should see |
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
-| `task.started`, `task.finished` | `{id, kind, description, status?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`; Codex `agent`, `shell`); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns |
+| `task.started`, `task.finished` | `{id, kind, description, toolUseId?, status?, summary?, result?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`; Codex `agent`, `shell`); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns. Claude Code only: `toolUseId` is the `id` of the tool call that started the task (on both events); `task.finished` has the CLI's `summary` when it gave one and, for a sub-agent, `result`: its last text, cut at 2000 characters |
 
 The fleet-wide stream (`GET /v1/events`) adds the events the Controller makes: `fleet.changed`
 `{version, by, names}` when a write changes the Fleet, `agent_computer.phase` `{phase, error?, waiting?}` when an agent

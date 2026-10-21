@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type TurnInput } from '../adapters/adapter.js';
+import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type ToolEvent, type TurnInput } from '../adapters/adapter.js';
 import { ClaudeAdapter } from '../adapters/claude.js';
 import { collect, fixtures, testConfig, until } from './helpers.js';
 
@@ -16,7 +16,7 @@ function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 
   const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile, ...env }), mcpServers: {} }, fake, timing);
   adapters.push(adapter);
   const background: RunningTurn[] = [];
-  const tasks: TaskEvent[] = [];
+  const tasks: (TaskEvent | ToolEvent)[] = [];
   adapter.listen({ backgroundTurn: (run) => background.push(run), taskEvent: (ev) => tasks.push(ev) });
   const input: TurnInput = {
     prompt: 'reply with pong',
@@ -134,15 +134,38 @@ test('claude: background work outlives its turn; the CLI starts a turn by itself
   const run = await adapter.startTurn({ ...input, prompt: 'bg 300' });
   const evs = await collect(run.events);
   assert.deepEqual(types(evs), ['turn.dispatched', 'tool.started', 'task.started', 'tool.finished', 'text.delta', 'turn.finished']);
-  assert.deepEqual(evs[2]?.data, { id: 'task_1', kind: 'local_agent', description: 'sleep 300' });
+  assert.deepEqual(evs[2]?.data, { id: 'task_1', kind: 'local_agent', description: 'sleep 300', toolUseId: 'toolu_task_1' });
   assert.equal(adapter.backgroundTasks(), 1, 'still running after the turn ended');
   await until(() => background.length === 1);
   const own = await collect(background[0]!.events);
   assert.equal(background[0]!.sessionId, run.sessionId);
   assert.deepEqual(types(own), ['text.delta', 'turn.finished'], 'no receipt, and no sub-agent output from between turns');
   assert.equal(text(own), 'task task_1 finished');
-  assert.deepEqual(tasks.map((t) => [t.type, t.data.id, 'status' in t.data ? t.data.status : null]), [['task.finished', 'task_1', 'completed']]);
+  assert.deepEqual(
+    tasks.map((t) => ({ type: t.type, data: t.data })),
+    [
+      { type: 'tool.started', data: { id: 'toolu_sub_task_1', name: 'Bash', input: {}, parent: 'toolu_task_1' } },
+      { type: 'tool.finished', data: { id: 'toolu_sub_task_1', name: 'Bash', isError: false, output: 'ok', parent: 'toolu_task_1' } },
+      { type: 'task.finished', data: { id: 'task_1', kind: 'local_agent', description: 'sleep 300', toolUseId: 'toolu_task_1', status: 'completed', summary: 'done', result: `${'x'.repeat(2000)}…` } },
+    ],
+    'the background sub-agent tool calls and the task end are journaled without a turn',
+  );
   assert.equal(adapter.backgroundTasks(), 0);
+});
+
+test('claude: a sub-agent tool call carries the id of the Agent call it runs under', async () => {
+  const { adapter, input, tasks } = setup('normal');
+  const evs = await collect((await adapter.startTurn({ ...input, prompt: 'subagent' })).events);
+  const tools = evs.filter((e) => e.type === 'tool.started' || e.type === 'tool.finished').map((e) => [e.type, e.data.id, e.data.name, 'parent' in e.data ? e.data.parent : null]);
+  assert.deepEqual(tools, [
+    ['tool.started', 'toolu_agent', 'Agent', null],
+    ['tool.started', 'toolu_inner', 'Read', 'toolu_agent'],
+    ['tool.finished', 'toolu_inner', 'Read', 'toolu_agent'],
+    ['tool.finished', 'toolu_agent', 'Agent', null],
+  ]);
+  assert.equal(text(evs), 'done', 'sub-agent text is not the agent reply');
+  assert.ok(!evs.some((e) => e.type === 'task.started'), 'a foreground sub-agent is no background task');
+  assert.equal(tasks.length, 0);
 });
 
 test('claude: a prompt while background work runs starts at once', async () => {
@@ -249,8 +272,9 @@ test('claude: the count follows the CLI live task set, so a lost end event canno
   assert.equal(adapter.backgroundTasks(), 1);
   await until(() => background.length === 1);
   assert.equal(adapter.backgroundTasks(), 0, 'the live set dropped it, with no task_notification');
-  await until(() => tasks.length === 1, 5000);
-  assert.deepEqual([tasks[0]?.type, (tasks[0]?.data as { status: string }).status], ['task.finished', 'completed'], 'journaled after the grace period');
+  await until(() => tasks.some((t) => t.type === 'task.finished'), 5000);
+  const ends = tasks.filter((t) => t.type === 'task.finished');
+  assert.deepEqual(ends.map((t) => [t.data.status, 'summary' in t.data, 'result' in t.data]), [['completed', false, true]], 'journaled after the grace period, with the sub-agent last text');
 });
 
 test('claude: without the live task set (an older CLI) start and end events count', async () => {

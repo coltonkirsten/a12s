@@ -28,10 +28,13 @@ its own fleet.yaml, images, Services and app code.
   or command still running at the Turn's end) outlives its Turn.
   status shows it as background {tasks}; the agent computer stays Ready (Messages run at once) but never idle.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
-  turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input},
-  tool.finished {id, name, isError, output}, turn.finished {status, usage (the harness's own), tokens?: {input
-  (without cached), output, cacheRead, cacheWrite}, error?}, egress.denied {host, port, reason}, task.started and
-  task.finished {id, kind, description, status? (completed | failed | stopped | killed)}; fleet-wide only:
+  turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input,
+  parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of
+  the Agent call that started it; a background sub-agent's calls between Turns have no turn), turn.finished {status,
+  usage (the harness's own), tokens?: {input (without cached), output, cacheRead, cacheWrite}, error?}, egress.denied
+  {host, port, reason}, task.started and task.finished {id, kind, description, toolUseId?, status? (completed |
+  failed | stopped | killed), summary?, result?} (Claude Code: toolUseId is the tool call that started it, result a
+  sub-agent's last text); fleet-wide only:
   agent_computer.phase {phase, error?, waiting?}; SDK-made: gap (events lost; resync). Others: docs/api.md.
 - via: who really sent a Message: local (owner CLI/SDK), token:<name>, service:<name>, computer:<name>. sender is
   only the sender's own label. Trust via, not sender.

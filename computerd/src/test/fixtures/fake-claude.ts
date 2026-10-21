@@ -111,6 +111,9 @@ function promptTurn(m: Prompt): void {
         // Sub-agent output between turns belongs to no turn.
         out({ type: 'assistant', parent_tool_use_id: `toolu_${id}`, message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_sub_${id}`, name: 'Bash', input: {} }] } });
         out({ type: 'stream_event', parent_tool_use_id: `toolu_${id}`, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'sub-agent text' } } });
+        out({ type: 'user', parent_tool_use_id: `toolu_${id}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_sub_${id}`, content: 'ok', is_error: false }] } });
+        out({ type: 'assistant', parent_tool_use_id: `toolu_${id}`, message: { role: 'assistant', content: [{ type: 'text', text: 'first look' }] } });
+        out({ type: 'assistant', parent_tool_use_id: `toolu_${id}`, message: { role: 'assistant', content: [{ type: 'text', text: `${'x'.repeat(2500)}` }] } });
         if (!process.env.FAKE_LOST_END) out({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '', summary: 'done' });
         queue.push({ kind: 'notification', task: id });
         next();
@@ -119,6 +122,18 @@ function promptTurn(m: Prompt): void {
     level();
     text('launched');
     return finishTurn('success', false, 'launched');
+  }
+  if (body === 'subagent') {
+    // A foreground sub-agent: its own tool calls stream inside the turn, marked with the Agent call's id.
+    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { prompt: 'look' } }] } });
+    out({ type: 'system', subtype: 'task_started', task_id: 'task_fg', tool_use_id: 'toolu_agent', description: 'look', task_type: 'local_agent' });
+    out({ type: 'assistant', parent_tool_use_id: 'toolu_agent', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_inner', name: 'Read', input: { file_path: '/x' } }] } });
+    out({ type: 'stream_event', parent_tool_use_id: 'toolu_agent', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'sub-agent text' } } });
+    out({ type: 'user', parent_tool_use_id: 'toolu_agent', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_inner', content: 'x', is_error: false }] } });
+    out({ type: 'system', subtype: 'task_notification', task_id: 'task_fg', status: 'completed', output_file: '', summary: 'looked' });
+    out({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_agent', content: 'found x', is_error: false }] } });
+    text('done');
+    return finishTurn('success', false, 'done');
   }
   const slow = /^slow (\d+)$/.exec(body);
   if (slow) {

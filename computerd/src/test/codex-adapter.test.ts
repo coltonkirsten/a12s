@@ -17,7 +17,7 @@ function setup(mode: string, env: Record<string, string> = {}) {
   after(() => adapter.close());
   const tasks: TaskEvent[] = [];
   const background: RunningTurn[] = [];
-  adapter.listen({ backgroundTurn: (run) => background.push(run), taskEvent: (ev) => tasks.push(ev) });
+  adapter.listen({ backgroundTurn: (run) => background.push(run), taskEvent: (ev) => tasks.push(ev as TaskEvent) });
   const log = () => readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, any>);
   return { adapter, input, log, tasks, background };
 }
