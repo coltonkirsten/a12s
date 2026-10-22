@@ -4,6 +4,16 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.9.0 (2026-10-22)
+
+Claude Code sub-agents' tool calls and background results are attributed to the call that started them, the Fleet
+file takes Claude Code settings (`harness.settings`, e.g. fast mode), and a GCE driver runs each agent computer as its
+own VM.
+
+Upgrading: install the new release, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.9.0` under new
+tags (computerd changed, and admission wants the CLI's minor version), and `a12s up`. Nothing else to change: every
+new field is optional.
+
 - Added: Claude Code sub-agents are attributable. `tool.started` / `tool.finished` of a sub-agent's call carry
   `parent`, the id of the `Agent` call that started it, and a background sub-agent's tool calls between Turns are
   journaled with no `turn` (like `task.*`). `task.started` / `task.finished` carry `toolUseId`, the tool call that

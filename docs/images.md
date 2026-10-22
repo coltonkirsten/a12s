@@ -44,7 +44,7 @@ profile that is Docker's default plus those syscalls.
 ```yaml
 agent_computers:
   browser:
-    image: ghcr.io/you/browser-agent:1      # FROM ghcr.io/coltonkirsten/a12s/slim:0.8.1 + Chromium
+    image: ghcr.io/you/browser-agent:1      # FROM ghcr.io/coltonkirsten/a12s/slim:0.9.0 + Chromium
     security:
       seccomp: ./profiles/chromium.json     # relative to fleet.yaml
 ```
