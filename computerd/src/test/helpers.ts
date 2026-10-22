@@ -24,6 +24,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     credentials: [],
     proxy: null,
     harnessEnv: {},
+    harnessSettings: {},
     send: [],
     uses: '',
     attach: [],

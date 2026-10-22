@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ func TestSpecMergesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, b := f.Computers["a"], f.Computers["b"]
-	if a.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "sonnet"}) || len(a.Files) != 2 || a.Credentials[0] != "anthropic" {
+	if !reflect.DeepEqual(a.Harness, Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "sonnet"}) || len(a.Files) != 2 || a.Credentials[0] != "anthropic" {
 		t.Errorf("a = %+v", a)
 	}
 	if !slices.Equal(b.Credentials, []string{"anthropic"}) || b.Image != "slim" {

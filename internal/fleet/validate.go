@@ -81,6 +81,9 @@ func (c Computer) validate(field string) []error {
 	default:
 		bad("harness.kind", "must be %s or %s, got %q", HarnessClaudeCode, HarnessCodex, c.Harness.Kind)
 	}
+	if c.Harness.Kind == HarnessCodex && len(c.Harness.Settings) > 0 {
+		bad("harness.settings", "only claude-code takes settings; remove it for %s", HarnessCodex)
+	}
 	if !versionRE.MatchString(c.Harness.Version) {
 		bad("harness.version", "%q is not a valid version", c.Harness.Version)
 	}

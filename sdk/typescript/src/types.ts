@@ -385,7 +385,15 @@ export interface TurnFinishedData {
   usage: unknown;
   /** The same usage, normalized across harnesses, when the harness reported it. */
   tokens?: TokenUsage;
+  /** Claude Code's fast mode for the Turn, when the CLI reported it. `usage.speed` says how the Turn ran. */
+  fastMode?: FastMode;
   error?: string;
+}
+
+/** `state` is "on", "off" or "cooldown"; `disabledReason` (e.g. "extra_usage_disabled") says why it is not on. */
+export interface FastMode {
+  state: string;
+  disabledReason?: string;
 }
 
 /** A Turn's token usage, the same for every harness. `input` excludes cached input. */

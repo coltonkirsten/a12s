@@ -169,6 +169,7 @@ export class ClaudeAdapter implements Adapter {
       cwd: input.cwd,
       env: { ...harnessEnv(this.deps), CLAUDE_AGENT_SDK_CLIENT_APP: 'a12s-computerd/0.1.0' },
       ...(input.model ? { model: input.model } : {}),
+      ...(Object.keys(this.deps.cfg.harnessSettings).length ? { settings: this.deps.cfg.harnessSettings } : {}),
       ...(input.sessionId ? { resume: input.sessionId } : { sessionId }),
       settingSources: ['user', 'project', 'local'],
       mcpServers: Object.fromEntries(
@@ -531,9 +532,13 @@ export class ClaudeMapper {
           costUsd: m.total_cost_usd,
           durationMs: m.duration_ms,
           numTurns: m.num_turns,
+          ...(m.usage.speed ? { speed: m.usage.speed } : {}),
         };
+        const fastMode = m.fast_mode_state
+          ? { state: m.fast_mode_state, ...(m.fast_mode_disabled_reason ? { disabledReason: m.fast_mode_disabled_reason } : {}) }
+          : undefined;
         const error = ok ? undefined : m.subtype === 'success' ? m.result : m.errors.join('; ') || m.subtype;
-        out.push({ type: 'turn.finished', data: { status: ok ? 'completed' : 'failed', usage, ...(error ? { error } : {}) } });
+        out.push({ type: 'turn.finished', data: { status: ok ? 'completed' : 'failed', usage, ...(fastMode ? { fastMode } : {}), ...(error ? { error } : {}) } });
         break;
       }
     }
