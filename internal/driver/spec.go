@@ -113,6 +113,8 @@ type ComputerSpec struct {
 	Send    []string   `json:"send,omitempty"`
 	// Attach is sorted by name.
 	Attach []Attach `json:"attach,omitempty"`
+	// Settings are Claude Code's --settings, from harness.settings.
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 // Attach is a host folder bound at Target, with each kept path on a drive of its own.
@@ -164,6 +166,10 @@ func (s ComputerSpec) Env(fleet string) []string {
 	}
 	if s.Model != "" {
 		env = append(env, "A12S_MODEL="+s.Model)
+	}
+	if len(s.Settings) > 0 {
+		b, _ := json.Marshal(s.Settings)
+		env = append(env, "A12S_HARNESS_SETTINGS="+string(b))
 	}
 	if len(s.Uses) > 0 {
 		b, _ := json.Marshal(s.Uses)

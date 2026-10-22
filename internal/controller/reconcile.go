@@ -856,6 +856,7 @@ func (c *Controller) buildSpec(name string) (driver.ComputerSpec, string, error)
 		Tier:        comp.Tier(),
 		Bundle:      driver.BundleRef{Kind: comp.Harness.Kind, Version: comp.Harness.Version, Image: bundle},
 		Model:       comp.Harness.Model,
+		Settings:    comp.Harness.Settings,
 		CPUMillis:   comp.Resources.CPU.Millis(),
 		Memory:      int64(comp.Resources.Memory),
 		HomeDrive:   driver.HomeDriveID(name),

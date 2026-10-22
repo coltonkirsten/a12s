@@ -24,3 +24,12 @@ test('A12S_HARNESS_ENV must be a JSON object of strings', () => {
   assert.throws(() => loadConfig({ ...base, A12S_HARNESS_ENV: '{"A":1}' }), /JSON object of strings/);
   assert.throws(() => loadConfig({ ...base, A12S_HARNESS_ENV: '["A"]' }), /JSON object of strings/);
 });
+
+test('A12S_HARNESS_SETTINGS must be a JSON object', () => {
+  const base = { A12S_COMPUTER: 'c', A12S_HARNESS_KIND: 'claude-code' };
+  assert.deepEqual(loadConfig({ ...base, A12S_HARNESS_SETTINGS: '{"fastMode":true,"env":{"A":"b"}}' }).harnessSettings, { fastMode: true, env: { A: 'b' } });
+  assert.deepEqual(loadConfig(base).harnessSettings, {});
+  assert.throws(() => loadConfig({ ...base, A12S_HARNESS_SETTINGS: '[]' }), /JSON object/);
+  assert.throws(() => loadConfig({ ...base, A12S_HARNESS_SETTINGS: 'true' }), /JSON object/);
+  assert.throws(() => loadConfig({ ...base, A12S_HARNESS_SETTINGS: '{fastMode' }), SyntaxError);
+});

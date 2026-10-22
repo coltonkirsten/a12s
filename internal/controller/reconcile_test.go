@@ -396,6 +396,36 @@ func TestChangedInstructionsAreApplied(t *testing.T) {
 	}
 }
 
+// harness.settings reach computerd through the environment, so a change makes a new generation like a model change.
+func TestChangedHarnessSettingsAreApplied(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	withSettings := func(s fleet.Settings) *fleet.Fleet {
+		return labFleet(t, func(f *fleet.Fleet) {
+			c := f.Computers["scout"]
+			c.Harness.Settings = s
+			f.Computers["scout"] = c
+		})
+	}
+	if res := h.up(withSettings(fleet.Settings{"fastMode": true, "alwaysThinkingEnabled": false}), false); !slices.Equal(res.Updated, []string{"scout"}) {
+		t.Fatalf("up = %+v, want scout updated", res)
+	}
+	if env := h.d.get("scout").spec.Env("lab"); !slices.Contains(env, `A12S_HARNESS_SETTINGS={"alwaysThinkingEnabled":false,"fastMode":true}`) {
+		t.Fatalf("env = %q", env)
+	}
+	if res := h.up(withSettings(fleet.Settings{"alwaysThinkingEnabled": false, "fastMode": true}), false); len(res.Updated)+len(res.Staged) != 0 {
+		t.Fatalf("the same settings made a new generation: %+v", res)
+	}
+	if res := h.up(withSettings(nil), false); !slices.Equal(res.Updated, []string{"scout"}) {
+		t.Fatalf("up = %+v, want scout updated", res)
+	}
+	for _, kv := range h.d.get("scout").spec.Env("lab") {
+		if strings.HasPrefix(kv, "A12S_HARNESS_SETTINGS=") {
+			t.Fatalf("settings left in env: %s", kv)
+		}
+	}
+}
+
 // A custom seccomp profile comes only from the Fleet, inline: it is carried into the spec, and editing it restages
 // the Computer like any other generation change. A path is refused: only a Fleet file has paths.
 func TestSeccompProfileIsApplied(t *testing.T) {

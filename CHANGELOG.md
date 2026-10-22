@@ -10,6 +10,11 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   started the task, and `task.finished` carries the CLI's `summary` and, for a sub-agent, `result` (its last text,
   up to 2000 characters). All optional; Codex events are unchanged
   ([event journal](docs/concepts.md#event-journal)).
+- Added: `harness.settings` in the Fleet file, an object of Claude Code settings passed as its `--settings` every
+  time the harness starts. `settings: { fastMode: true }` runs an agent computer in fast mode; start a new session
+  after turning it on. Claude Code only: `codex` refuses it ([Fleet file](docs/fleet-file.md#agent-computer-fields)).
+- Added: Claude Code's `turn.finished` carries `usage.speed` (`fast` or `standard`) and `fastMode`
+  (`{state, disabledReason?}`) when the CLI reports them, so an app can tell whether a Turn really ran fast.
 - Added: on the GCE driver, `api: { listen: internal }` in `driver.yaml` also serves the owner API on the Controller
   VM's internal address (port 7000), over TLS with a certificate from the fleet's CA, so apps in the VPC can call it.
   Off by default; it needs a firewall rule you add

@@ -144,7 +144,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `text.delta` | `{text}`: streamed text from the agent |
 | `tool.started` | `{id, name, input, parent?}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send`. Claude Code only: a sub-agent's call has `parent`, the `id` of the `Agent` call that started the sub-agent; the agent's own calls have none. A background sub-agent's calls between Turns are journaled with no `turn` |
 | `tool.finished` | `{id, name, isError, output, parent?}`, `parent` as on `tool.started` |
-| `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, tokens?, error?}`: `usage` is the harness's own; `tokens` is `{input, output, cacheRead, cacheWrite}` for every harness (`input` excludes cached input) |
+| `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, tokens?, fastMode?, error?}`: `usage` is the harness's own (Claude Code's has `speed`, `"fast"` or `"standard"`, when the CLI reports it); `tokens` is `{input, output, cacheRead, cacheWrite}` for every harness (`input` excludes cached input); `fastMode` is Claude Code's `{state: "on" \| "off" \| "cooldown", disabledReason?}` (e.g. `extra_usage_disabled`), when the CLI reports it |
 | `egress.denied` | `{host, port, reason}`: the egress proxy refused a connection. Every Claude Code Turn has one or two, for telemetry hosts; they are harmless |
 | `diagnostic` | `{message, …}`: something an operator should see |
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |

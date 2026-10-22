@@ -4,14 +4,15 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type ToolEvent, type TurnInput } from '../adapters/adapter.js';
 import { ClaudeAdapter } from '../adapters/claude.js';
+import type { Config } from '../config.js';
 import { collect, fixtures, testConfig, until } from './helpers.js';
 
 const fake = join(fixtures, 'fake-claude.js');
 const adapters: ClaudeAdapter[] = [];
 after(() => Promise.all(adapters.map((a) => a.close())));
 
-function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 }, env: Record<string, string> = {}) {
-  const cfg = testConfig();
+function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 }, env: Record<string, string> = {}, overrides: Partial<Config> = {}) {
+  const cfg = testConfig(overrides);
   const argsFile = join(cfg.runDir, 'args.jsonl');
   const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile, ...env }), mcpServers: {} }, fake, timing);
   adapters.push(adapter);
@@ -59,6 +60,29 @@ test('claude: maps deltas, tools and the result; passes the pinned flags', async
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'bypassPermissions');
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"a12s"'));
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"alwaysLoad":true'), 'the system tools are never deferred');
+});
+
+test('claude: harness settings go to the CLI as --settings; the result reports speed and fast mode', async () => {
+  const { adapter, input, args } = setup('normal', undefined, { FAKE_FAST: 'on' }, { harnessSettings: { fastMode: true } });
+  const fin = finished(await collect((await adapter.startTurn(input)).events));
+  const a = args();
+  assert.deepEqual(JSON.parse(a[a.indexOf('--settings') + 1] ?? 'null'), { fastMode: true });
+  assert.equal(fin.usage?.speed, 'fast');
+  assert.deepEqual(fin.fastMode, { state: 'on' });
+});
+
+test('claude: no settings, no --settings; a disabled fast mode carries its reason', async () => {
+  const { adapter, input, args } = setup('normal', undefined, { FAKE_FAST: 'extra_usage_disabled' });
+  const fin = finished(await collect((await adapter.startTurn(input)).events));
+  assert.ok(!args().includes('--settings'));
+  assert.deepEqual(fin.fastMode, { state: 'off', disabledReason: 'extra_usage_disabled' });
+});
+
+test('claude: a result without fast mode fields has no fastMode', async () => {
+  const { adapter, input } = setup('normal');
+  const fin = finished(await collect((await adapter.startTurn(input)).events));
+  assert.ok(!('fastMode' in fin));
+  assert.ok(!('speed' in (fin.usage ?? {})));
 });
 
 test('claude: denials become permission events once each', async () => {

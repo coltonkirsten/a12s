@@ -31,10 +31,11 @@ its own fleet.yaml, images, Services and app code.
   turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input,
   parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of
   the Agent call that started it; a background sub-agent's calls between Turns have no turn), turn.finished {status,
-  usage (the harness's own), tokens?: {input (without cached), output, cacheRead, cacheWrite}, error?}, egress.denied
-  {host, port, reason}, task.started and task.finished {id, kind, description, toolUseId?, status? (completed |
-  failed | stopped | killed), summary?, result?} (Claude Code: toolUseId is the tool call that started it, result a
-  sub-agent's last text); fleet-wide only:
+  usage (the harness's own; Claude Code's has speed: fast | standard), tokens?: {input (without cached), output,
+  cacheRead, cacheWrite}, fastMode?: {state: on | off | cooldown, disabledReason?} (Claude Code), error?},
+  egress.denied {host, port, reason}, task.started and task.finished {id, kind, description, toolUseId?, status?
+  (completed | failed | stopped | killed), summary?, result?} (Claude Code: toolUseId is the tool call that started
+  it, result a sub-agent's last text); fleet-wide only:
   agent_computer.phase {phase, error?, waiting?}; SDK-made: gap (events lost; resync). Others: docs/api.md.
 - via: who really sent a Message: local (owner CLI/SDK), token:<name>, service:<name>, computer:<name>. sender is
   only the sender's own label. Trust via, not sender.
@@ -111,6 +112,8 @@ Agent computer fields (all optional except a harness, image and credential, whic
 
 - harness: {kind: claude-code, version: 2.1.280, model} or {kind: codex, version: 0.154.0} with credentials
   [openai]. Use these versions (published bundles); a version that has no bundle fails `a12s up`.
+  Claude Code only: settings: {fastMode: true} (any Claude Code settings, passed as its --settings at every start;
+  merges with defaults key by key; a change restages it). Start a new session after turning on fast mode.
 - image: `slim` or a custom image ref (see Custom images).
 - instructions: text written to its home as CLAUDE.md (claude-code) or AGENTS.md (codex): its standing role.
 - files: {path: text}: more text files for its home, by path relative to /home/agent (`.claude/skills/x/SKILL.md`,

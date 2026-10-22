@@ -16,6 +16,8 @@ export interface Config {
   proxy: string | null;
   /** What the substrate adds to the harness's environment (A12S_HARNESS_ENV, a JSON object). */
   harnessEnv: Record<string, string>;
+  /** Claude Code's --settings, from harness.settings (A12S_HARNESS_SETTINGS, a JSON object). */
+  harnessSettings: Record<string, unknown>;
   /** Computers this one may send to (A12S_SEND, from grants.send). */
   send: string[];
   /** Raw A12S_USES (the endpoints of the Services it uses). */
@@ -64,6 +66,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     credentials: (env.A12S_CREDENTIALS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     proxy: env.A12S_PROXY || null,
     harnessEnv: parseHarnessEnv(env.A12S_HARNESS_ENV),
+    harnessSettings: parseHarnessSettings(env.A12S_HARNESS_SETTINGS),
     send: (env.A12S_SEND ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     uses: env.A12S_USES ?? '',
     attach: (env.A12S_ATTACH ?? '').split(',').map((s) => s.trim()).filter(Boolean),
@@ -90,4 +93,11 @@ function parseHarnessEnv(raw: string | undefined): Record<string, string> {
     throw new Error('A12S_HARNESS_ENV must be a JSON object of strings');
   }
   return v as Record<string, string>;
+}
+
+function parseHarnessSettings(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  const v: unknown = JSON.parse(raw);
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error('A12S_HARNESS_SETTINGS must be a JSON object');
+  return v as Record<string, unknown>;
 }

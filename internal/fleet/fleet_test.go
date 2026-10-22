@@ -21,7 +21,7 @@ func TestParseLabExample(t *testing.T) {
 		t.Errorf("ComputerNames = %v", got)
 	}
 	scout, builder, tester := f.Computers["scout"], f.Computers["builder"], f.Computers["tester"]
-	if scout.Harness != (Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"}) || scout.Instructions != "You are scout.\n" ||
+	if !reflect.DeepEqual(scout.Harness, Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-fable-5-1"}) || scout.Instructions != "You are scout.\n" ||
 		!reflect.DeepEqual(scout.Egress.Allow, []string{"api.anthropic.com"}) || !reflect.DeepEqual(scout.Credentials, []string{"anthropic"}) {
 		t.Errorf("scout %+v", scout)
 	}
@@ -61,6 +61,35 @@ agent_computers:
 				Harness:   Harness{Kind: HarnessCodex, Version: "0.154.0", Model: "gpt-6-astra"},
 				Image:     TierSlim,
 				Resources: Resources{CPU: 1000, Memory: 4 << 30},
+			},
+		},
+		{
+			name: "harness settings are inherited with the rest of the harness",
+			yaml: `
+defaults:
+  harness: { kind: claude-code, version: 2.1.280, model: claude-opus-5-5, settings: { fastMode: true } }
+  image: slim
+agent_computers:
+  c:
+`,
+			want: Computer{
+				Harness: Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "claude-opus-5-5", Settings: Settings{"fastMode": true}},
+				Image:   TierSlim,
+			},
+		},
+		{
+			name: "harness settings merge key by key, like model overrides",
+			yaml: `
+defaults:
+  harness: { kind: claude-code, version: 2.1.280, model: claude-opus-5-5, settings: { fastMode: true, effortLevel: high } }
+  image: slim
+agent_computers:
+  c:
+    harness: { model: haiku, settings: { fastMode: false } }
+`,
+			want: Computer{
+				Harness: Harness{Kind: HarnessClaudeCode, Version: "2.1.280", Model: "haiku", Settings: Settings{"fastMode": false, "effortLevel": "high"}},
+				Image:   TierSlim,
 			},
 		},
 		{
@@ -179,6 +208,10 @@ agent_computers:
 		{"credentials", base + c + "    credentials: [openai, github]\n", ""},
 		{"duplicate credential", base + c + "    credentials: [openai, openai]\n", "listed twice"},
 		{"no fleet drives", base + "drives: { d: { access: exclusive } }\n" + c, "field drives not found"},
+		{"codex settings", base + strings.Replace(c, "0.154.0 }", "0.154.0, settings: { fastMode: true } }", 1), "harness.settings: only claude-code"},
+		{"claude-code settings", base + strings.Replace(c, "kind: codex, version: 0.154.0 }", "kind: claude-code, version: 2.1.296, settings: { fastMode: true, permissions: { allow: [Bash] } } }", 1), ""},
+		{"settings not an object", base + strings.Replace(c, "kind: codex, version: 0.154.0 }", "kind: claude-code, version: 2.1.296, settings: fast }", 1), "cannot unmarshal"},
+		{"settings key not a string", base + strings.Replace(c, "kind: codex, version: 0.154.0 }", "kind: claude-code, version: 2.1.296, settings: { env: { 1: x } } }", 1), "harness.settings: not JSON"},
 		{"no drive mounts", base + c + "    drives: [{ name: d, at: /w }]\n", "field drives not found"},
 	}
 	for _, tt := range tests {

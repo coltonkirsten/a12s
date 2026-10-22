@@ -116,7 +116,7 @@ address, which VPC anti-spoofing makes the VM's own. See [GCE driver](drivers/gc
 - **computerd** (`/opt/a12s/computerd`) waits for its TLS files, listens with mTLS on `:7443`, keeps the journal
   (`/home/.a12s/journal.db`, SQLite) and runs the harness as uid 1000.
 - **Environment** set by the driver includes `A12S_COMPUTER`, `A12S_FLEET`, `A12S_HARNESS_KIND`,
-  `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_BUNDLE`, `A12S_CREDENTIALS`,
+  `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_HARNESS_SETTINGS` (`harness.settings` as JSON), `A12S_BUNDLE`, `A12S_CREDENTIALS`,
   `A12S_PROXY` and `A12S_CONTROLLER`, plus `A12S_SERVICE_<SVC>_<PORT>` for each used Service port.
 
 ### computerd API

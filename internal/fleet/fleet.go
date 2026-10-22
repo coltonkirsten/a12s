@@ -2,7 +2,13 @@
 // holds the image pins the Controller keeps.
 package fleet
 
-import "sort"
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+
+	"gopkg.in/yaml.v3"
+)
 
 const (
 	APIVersion = "a12s.ai/v1alpha1"
@@ -99,6 +105,24 @@ type Harness struct {
 	Kind    string `yaml:"kind,omitempty" json:"kind,omitempty"`
 	Version string `yaml:"version,omitempty" json:"version,omitempty"`
 	Model   string `yaml:"model,omitempty" json:"model,omitempty"`
+	// Settings go to Claude Code as its --settings at every process start.
+	Settings Settings `yaml:"settings,omitempty" json:"settings,omitempty"`
+}
+
+type Settings map[string]any
+
+// UnmarshalYAML refuses what JSON can't carry (non-string keys, .inf): the Spec stores every computer as JSON.
+func (s *Settings) UnmarshalYAML(n *yaml.Node) error {
+	var v map[string]any
+	if err := n.Decode(&v); err != nil {
+		return err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("harness.settings: not JSON: %v", err)
+	}
+	*s = nil
+	return json.Unmarshal(b, s)
 }
 
 func (h Harness) BundleKey() string { return BundleKey(h.Kind, h.Version) }
