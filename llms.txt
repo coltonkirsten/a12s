@@ -6,7 +6,7 @@
 > SDK (`a12s` on PyPI), a browser gateway, or an HTTP API.
 
 This file is for coding agents building ON a12s, and it is meant to be enough on its own: every command, field,
-method and file layout below is exact, so copy them rather than guessing. Current release: v0.8.1 (CLI, images,
+method and file layout below is exact, so copy them rather than guessing. Current release: v0.9.0 (CLI, images,
 svckit, npm and PyPI packages all share the version). You never edit or vendor a12s itself: a project changes only
 its own fleet.yaml, images, Services and app code.
 
@@ -95,7 +95,7 @@ kind: Fleet
 metadata: { name: team }              # DNS label; also names ~/.a12s/team/
 defaults:                             # applies to every agent computer (not Services); maps merge, lists replace (credentials add)
   harness: { kind: claude-code, version: 2.1.280, model: haiku }   # model: haiku | sonnet | opus | a full model id
-  image: slim                         # slim | your image built FROM ghcr.io/coltonkirsten/a12s/slim:0.8.1
+  image: slim                         # slim | your image built FROM ghcr.io/coltonkirsten/a12s/slim:0.9.0
   credentials: [anthropic]            # names; values are set with a12s creds set (never in the file)
   egress: { allow: [] }               # deny by default; the model API needs no entry (see below)
 agent_computers:
@@ -293,12 +293,12 @@ node:24-bookworm-slim (Debian, apt) plus git, ripgrep, python3, curl, ca-certifi
 
 ```dockerfile
 # images/agent/Dockerfile; build: docker build -t my-agent:1 images/agent; use: worker: { image: my-agent:1 }
-FROM ghcr.io/coltonkirsten/a12s/slim:0.8.1
+FROM ghcr.io/coltonkirsten/a12s/slim:0.9.0
 RUN apt-get update && apt-get install -y --no-install-recommends jq ffmpeg && rm -rf /var/lib/apt/lists/*
 ```
 
 - A local tag works; a12s up pulls only images it doesn't have. The base tag is the release without the v
-  (slim:0.8.1). Admission needs the `ai.a12s.computerd.version` label FROM slim sets (same minor as the CLI) and
+  (slim:0.9.0). Admission needs the `ai.a12s.computerd.version` label FROM slim sets (same minor as the CLI) and
   computerd at /opt/a12s/computerd/dist/main.js; don't remove either.
 - The Dockerfile runs as root; don't set USER, ENTRYPOINT or CMD (a12s ignores them: computerd starts as root and
   runs the agent as uid 1000 with /home mounted over). Install system-wide (/usr, /opt), not into /home/agent.
@@ -337,7 +337,7 @@ agent_computers:
   Credentials it names are files at /run/a12s/secrets/<name>.
 - Any language works: read config.json, call POST $A12S_API/v1/agent-computers/{c}/inbox (body as in HTTP API) with
   the client certificate in /run/a12s/tls/{ca.crt,cert.pem,key.pem}.
-- In Go, svckit (package `github.com/coltonkirsten/a12s/services/svckit` inside the a12s module, v0.8.1; no separate
+- In Go, svckit (package `github.com/coltonkirsten/a12s/services/svckit` inside the a12s module, v0.9.0; no separate
   module or tag) does the config, mTLS client, send and health check. A complete clock (go.mod, main.go,
   service.json, Dockerfile): https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/go-service
 - Build the image before `a12s up` (a12s doesn't build it); `a12s service logs <svc> -f` shows its output. No
