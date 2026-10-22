@@ -120,8 +120,14 @@ type TaskData struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"` // the harness's own: local_agent, local_bash, shell, …
 	Description string `json:"description"`
+	// ToolUseID is the tool call that started the task (Claude Code only), as in tool.started's id.
+	ToolUseID string `json:"toolUseId,omitempty"`
 	// Status is on task.finished: TaskCompleted, TaskFailed, TaskStopped or TaskKilled.
 	Status string `json:"status,omitempty"`
+	// Summary is on task.finished when the harness reported one (Claude Code only).
+	Summary string `json:"summary,omitempty"`
+	// Result is on task.finished of a sub-agent: its last text, truncated to 2000 characters (Claude Code only).
+	Result string `json:"result,omitempty"`
 }
 
 const (

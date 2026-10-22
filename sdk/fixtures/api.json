@@ -979,7 +979,10 @@
     "id": "id",
     "kind": "kind",
     "description": "description",
-    "status": "completed"
+    "toolUseId": "toolUseId",
+    "status": "completed",
+    "summary": "summary",
+    "result": "result"
   },
   "taskDataMinimal": {
     "id": "id",

@@ -11,8 +11,10 @@ import {
   type AdapterEvent,
   type RunningTurn,
   type SessionListener,
+  type TaskData,
   type TaskEvent,
   type TaskStatus,
+  type ToolEvent,
   type TurnInput,
 } from './adapter.js';
 import { harnessEnv, spawnAsAgent, type HarnessDeps } from './spawn.js';
@@ -34,10 +36,7 @@ interface CliTurn {
   announced: boolean;
 }
 
-interface Task {
-  kind: string;
-  description: string;
-}
+type Task = Omit<TaskData, 'id'>;
 
 /** One long-lived Claude Code process for one session. */
 interface Live {
@@ -64,6 +63,10 @@ interface Live {
   /** The last status task_updated reported, for a task whose notification never comes. */
   lastStatus: Map<string, TaskStatus>;
   levelTimer: NodeJS.Timeout | null;
+  /** Tool names by call id, across turns: a sub-agent's call can start in one turn and finish between turns. */
+  toolNames: Map<string, string>;
+  /** A sub-agent's last assistant text, by the tool call that started it: a background task's result. */
+  subagentText: Map<string, string>;
   /** Being ended on purpose: stop, restart, close or a switch to another session. */
   ending: boolean;
   resumeFailed: string | null;
@@ -147,6 +150,8 @@ export class ClaudeAdapter implements Adapter {
       level: null,
       lastStatus: new Map(),
       levelTimer: null,
+      toolNames: new Map(),
+      subagentText: new Map(),
       ending: false,
       resumeFailed: null,
       timers: [],
@@ -193,7 +198,7 @@ export class ClaudeAdapter implements Adapter {
     for (const t of live.timers) clearTimeout(t);
     if (live.levelTimer) clearTimeout(live.levelTimer);
     if (this.live === live) this.live = null;
-    for (const [id, task] of live.tasks) this.emit(live, { type: 'task.finished', data: { id, ...task, status: 'killed' } });
+    for (const [id, task] of live.tasks) this.finished(live, id, task, 'killed');
     live.tasks.clear();
     for (const turn of [live.current, live.pending]) {
       if (!turn?.announced) continue;
@@ -229,9 +234,14 @@ export class ClaudeAdapter implements Adapter {
         else this.open(live, { uuid: null, out: new EventQueue(), mapper: null, announced: false });
       }
     }
+    this.subagent(live, m);
     const turn = live.current;
-    // Between turns the CLI streams sub-agent work and status frames that belong to no turn.
-    if (!turn?.mapper) return;
+    if (!turn?.mapper) {
+      // Between turns the CLI streams sub-agent work and status frames that belong to no turn; a background
+      // sub-agent's tool calls are journaled without a turn, like task events.
+      if ((m.type === 'assistant' || m.type === 'user') && m.parent_tool_use_id) for (const ev of toolEvents(m, live.toolNames)) this.listener?.taskEvent(ev);
+      return;
+    }
     if (m.type === 'system' && m.subtype === 'init') live.initSeen = true;
     const events = turn.mapper.map(m);
     if (!turn.announced && !live.ending && ((m.type === 'system' && m.subtype === 'status') || events.some((ev) => ev.type !== 'turn.finished'))) {
@@ -281,7 +291,7 @@ export class ClaudeAdapter implements Adapter {
       for (const [id, task] of live.tasks) {
         if (live.level?.has(id)) continue;
         live.tasks.delete(id);
-        this.emit(live, { type: 'task.finished', data: { id, ...task, status: live.lastStatus.get(id) ?? 'completed' } });
+        this.finished(live, id, task, live.lastStatus.get(id) ?? 'completed');
         live.lastStatus.delete(id);
       }
     }, LEVEL_GRACE_MS);
@@ -294,7 +304,7 @@ export class ClaudeAdapter implements Adapter {
       live.current.out.end();
     }
     if (live.pending === turn) live.pending = null;
-    turn.mapper = new ClaudeMapper(live.sessionId, live.resuming && !live.initSeen, turn.uuid);
+    turn.mapper = new ClaudeMapper(live.sessionId, live.resuming && !live.initSeen, turn.uuid, live.toolNames);
     live.current = turn;
     // A queued prompt survives the interrupt of the turn before it.
     if (live.ending) live.query.interrupt().catch(() => {});
@@ -306,6 +316,8 @@ export class ClaudeAdapter implements Adapter {
       task_id: string;
       task_type?: string;
       description?: string;
+      tool_use_id?: string;
+      summary?: string;
       is_backgrounded?: boolean;
       ambient?: boolean;
       skip_transcript?: boolean;
@@ -321,7 +333,7 @@ export class ClaudeAdapter implements Adapter {
     switch (t.subtype) {
       case 'task_started': {
         if (t.ambient || t.skip_transcript || live.tasks.has(id)) return;
-        const task = { kind: t.task_type ?? 'task', description: t.description ?? '' };
+        const task: Task = { kind: t.task_type ?? 'task', description: t.description ?? '', ...(t.tool_use_id ? { toolUseId: t.tool_use_id } : {}) };
         if (t.is_backgrounded) started(task);
         else live.foreground.set(id, task);
         return;
@@ -339,7 +351,28 @@ export class ClaudeAdapter implements Adapter {
         const task = live.tasks.get(id);
         if (!task) return;
         live.tasks.delete(id);
-        this.emit(live, { type: 'task.finished', data: { id, ...task, status: t.status ?? 'completed' } });
+        this.finished(live, id, task, t.status ?? 'completed', t.summary);
+      }
+    }
+  }
+
+  private finished(live: Live, id: string, task: Task, status: TaskStatus, summary?: string): void {
+    const said = task.toolUseId ? live.subagentText.get(task.toolUseId) : undefined;
+    if (task.toolUseId) live.subagentText.delete(task.toolUseId);
+    const extra = { ...(summary ? { summary } : {}), ...(said ? { result: truncate(said) as string } : {}) };
+    this.emit(live, { type: 'task.finished', data: { id, ...task, status, ...extra } });
+  }
+
+  /** Keeps each sub-agent's last text until its task ends, or until its Agent call returns when it is no task. */
+  private subagent(live: Live, m: SDKMessage): void {
+    if (m.type === 'assistant' && m.parent_tool_use_id) {
+      const said = blocks(m.message.content).flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('');
+      if (said) live.subagentText.set(m.parent_tool_use_id, said);
+    } else if (m.type === 'user' && !m.parent_tool_use_id && live.subagentText.size) {
+      const owned = new Set([...live.tasks.values()].map((t) => t.toolUseId));
+      for (const b of blocks(m.message.content)) {
+        // A background sub-agent's call returns at launch; its text belongs to the task's end.
+        if (b.type === 'tool_result' && !owned.has(String(b.tool_use_id))) live.subagentText.delete(String(b.tool_use_id));
       }
     }
   }
@@ -437,7 +470,6 @@ function blocks(content: unknown): Block[] {
 
 /** Maps SDK messages of one CLI turn onto a12s events. */
 export class ClaudeMapper {
-  private readonly toolNames = new Map<string, string>();
   private readonly denied = new Set<string>();
   /** The init record passed the session check; the user-message echo seen; turn.dispatched emitted. */
   private initOk = false;
@@ -449,6 +481,7 @@ export class ClaudeMapper {
     private sessionId: string,
     private readonly resuming = false,
     private readonly prompt: string | null = null,
+    private readonly toolNames = new Map<string, string>(),
   ) {}
 
   map(m: SDKMessage): AdapterEvent[] {
@@ -477,23 +510,11 @@ export class ClaudeMapper {
         break;
       }
       case 'assistant':
-        for (const b of blocks(m.message.content)) {
-          if (b.type === 'tool_use' || b.type === 'server_tool_use' || b.type === 'mcp_tool_use') {
-            const id = String(b.id);
-            const name = String(b.name);
-            this.toolNames.set(id, name);
-            out.push({ type: 'tool.started', data: { id, name, input: b.input } });
-          }
-        }
+        out.push(...toolEvents(m, this.toolNames));
         break;
       case 'user':
         if ((m as { isReplay?: boolean }).isReplay === true && m.parent_tool_use_id === null && this.prompt !== null && m.uuid === this.prompt) this.echoed = true;
-        for (const b of blocks(m.message.content)) {
-          if (b.type === 'tool_result') {
-            const id = String(b.tool_use_id);
-            out.push({ type: 'tool.finished', data: { id, name: this.toolNames.get(id) ?? 'unknown', isError: b.is_error === true, output: truncate(b.content) } });
-          }
-        }
+        out.push(...toolEvents(m, this.toolNames));
         break;
       case 'result': {
         for (const d of m.permission_denials) {
@@ -523,6 +544,26 @@ export class ClaudeMapper {
     }
     return out;
   }
+}
+
+/** `names` remembers a call's tool name from its start until its result. */
+function toolEvents(m: SDKMessage & { type: 'assistant' | 'user' }, names: Map<string, string>): ToolEvent[] {
+  const out: ToolEvent[] = [];
+  const parent = m.parent_tool_use_id ? { parent: m.parent_tool_use_id } : {};
+  for (const b of blocks(m.message.content)) {
+    if (m.type === 'assistant' && (b.type === 'tool_use' || b.type === 'server_tool_use' || b.type === 'mcp_tool_use')) {
+      const id = String(b.id);
+      const name = String(b.name);
+      names.set(id, name);
+      out.push({ type: 'tool.started', data: { id, name, input: b.input, ...parent } });
+    } else if (m.type === 'user' && b.type === 'tool_result') {
+      const id = String(b.tool_use_id);
+      const name = names.get(id) ?? 'unknown';
+      names.delete(id);
+      out.push({ type: 'tool.finished', data: { id, name, isError: b.is_error === true, output: truncate(b.content), ...parent } });
+    }
+  }
+  return out;
 }
 
 function truncate(v: unknown, max = 2000): unknown {

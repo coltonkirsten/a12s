@@ -1172,7 +1172,10 @@ export const taskData: T.TaskData = {
   "id": "id",
   "kind": "kind",
   "description": "description",
-  "status": "completed"
+  "toolUseId": "toolUseId",
+  "status": "completed",
+  "summary": "summary",
+  "result": "result"
 };
 
 export const taskDataMinimal: T.TaskData = {

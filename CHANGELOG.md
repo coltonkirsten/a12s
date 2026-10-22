@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: Claude Code sub-agents are attributable. `tool.started` / `tool.finished` of a sub-agent's call carry
+  `parent`, the id of the `Agent` call that started it, and a background sub-agent's tool calls between Turns are
+  journaled with no `turn` (like `task.*`). `task.started` / `task.finished` carry `toolUseId`, the tool call that
+  started the task, and `task.finished` carries the CLI's `summary` and, for a sub-agent, `result` (its last text,
+  up to 2000 characters). All optional; Codex events are unchanged
+  ([event journal](docs/concepts.md#event-journal)).
 - Added: on the GCE driver, `api: { listen: internal }` in `driver.yaml` also serves the owner API on the Controller
   VM's internal address (port 7000), over TLS with a certificate from the fleet's CA, so apps in the VPC can call it.
   Off by default; it needs a firewall rule you add

@@ -363,8 +363,14 @@ export interface TaskData {
   /** The harness's own kind: local_agent, local_bash, shell, … */
   kind: string;
   description: string;
+  /** The tool call that started it (Claude Code only): the `id` of its tool.started. */
+  toolUseId?: string;
   /** On task.finished. "killed": the session ended (stop, sleep, restart, a new session) while it ran. */
   status?: "completed" | "failed" | "stopped" | "killed";
+  /** On task.finished, when the harness reported one (Claude Code only). */
+  summary?: string;
+  /** On task.finished of a sub-agent: its last text, truncated to 2000 characters (Claude Code only). */
+  result?: string;
 }
 
 /** POST /v1/agent-computers/{name}/stop: the Turns it stopped and how many background tasks it ended. */
@@ -427,6 +433,8 @@ export interface ToolStartedData {
   /** MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send`. */
   name: string;
   input?: unknown;
+  /** A sub-agent's call (Claude Code only): the id of the tool call that started the sub-agent. Absent for the agent's own calls. */
+  parent?: string;
 }
 
 export interface ToolFinishedData {
@@ -434,6 +442,8 @@ export interface ToolFinishedData {
   name: string;
   isError: boolean;
   output?: unknown;
+  /** As on tool.started. */
+  parent?: string;
 }
 
 export interface DiagnosticData {

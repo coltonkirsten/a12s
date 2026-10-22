@@ -140,7 +140,9 @@ address, which VPC anti-spoofing makes the VM's own. See [GCE driver](drivers/gc
   survive them: a Turn is one prompt pushed into it (priority `later`, so it never joins a running turn), ending at
   its `result`. The CLI's `command_lifecycle` frames tell a pushed prompt's turn from one the CLI starts by itself
   when background work ends; computerd journals the latter as a Turn with reason `background` once it calls the
-  model. `task_started` / `task_notification` frames of background tasks become `task.started` / `task.finished`;
+  model. `task_started` / `task_notification` frames of background tasks become `task.started` / `task.finished`,
+  carrying the launching tool call's id and the sub-agent's last text; a sub-agent's tool calls carry its
+  `parent_tool_use_id` as `parent`, and those that arrive between turns are journaled with no turn;
   the count in status follows the CLI's full live set (`background_tasks_changed`), and a task that leaves it with
   no notification is finished after 2 s.
   Ending the session closes stdin (the CLI stops its tasks and exits); a running turn is interrupted first, then

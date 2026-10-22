@@ -26,14 +26,24 @@ export type TaskStatus = 'completed' | 'failed' | 'stopped' | 'killed';
 
 /** Background work (a sub-agent, a shell) the harness keeps running after the turn that started it. */
 export type TaskEvent =
-  | { type: 'task.started'; data: { id: string; kind: string; description: string } }
-  | { type: 'task.finished'; data: { id: string; kind: string; description: string; status: TaskStatus } };
+  | { type: 'task.started'; data: TaskData }
+  | { type: 'task.finished'; data: TaskData & { status: TaskStatus; summary?: string; result?: string } };
+
+/**
+ * `toolUseId`: the tool call that started the task, when the harness reports it (Claude does, Codex does not).
+ * On task.finished, Claude's `summary` and, for a sub-agent, `result`: its last text.
+ */
+export type TaskData = { id: string; kind: string; description: string; toolUseId?: string };
+
+/** `parent`: the tool call that started the sub-agent which made this call (Claude only); absent for the agent's own calls. */
+export type ToolEvent =
+  | { type: 'tool.started'; data: { id: string; name: string; input?: unknown; parent?: string } }
+  | { type: 'tool.finished'; data: { id: string; name: string; isError: boolean; output?: unknown; parent?: string } };
 
 /** What an adapter yields; computerd journals each one under the turn. */
 export type AdapterEvent =
   | { type: 'text.delta'; data: { text: string } }
-  | { type: 'tool.started'; data: { id: string; name: string; input?: unknown } }
-  | { type: 'tool.finished'; data: { id: string; name: string; isError: boolean; output?: unknown } }
+  | ToolEvent
   | { type: 'permission'; data: { decision: 'allow' | 'deny'; kind: string; tool?: string; detail?: unknown } }
   | { type: 'diagnostic'; data: { message: string; [k: string]: unknown } }
   | { type: 'session.changed'; data: { from: string | null; to: string } }
@@ -57,8 +67,8 @@ export interface RunningTurn {
 export interface SessionListener {
   /** A turn the harness started by itself, when background work finished. */
   backgroundTurn(run: RunningTurn): void;
-  /** A task event while no turn runs. */
-  taskEvent(ev: TaskEvent): void;
+  /** A task event, or a background sub-agent's tool event, while no turn runs. */
+  taskEvent(ev: TaskEvent | ToolEvent): void;
 }
 
 export interface Adapter {
