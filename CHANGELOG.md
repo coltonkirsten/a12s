@@ -4,6 +4,13 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: a terminal and files for apps, on every driver (GCE included, where `a12s shell` isn't available).
+  `GET /v1/agent-computers/{c}/terminal` upgrades the connection to a login shell's TTY as the agent user
+  (`POST …/terminal/{id}/resize` resizes it); closing it ends the shell and everything it started, and an open one
+  keeps the agent computer awake. `GET` / `PUT /v1/agent-computers/{c}/files?path=` lists a folder, reads a file
+  (up to 1 MiB) or replaces one, as the agent user. Owner or prefix token; journaled
+  ([API: terminal and files](docs/api.md#terminal-and-files)).
+
 ## v0.9.0 (2026-10-22)
 
 Claude Code sub-agents' tool calls and background results are attributed to the call that started them, the Fleet

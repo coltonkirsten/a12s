@@ -12,7 +12,8 @@ laptop or a single host, the Docker driver stays simpler, faster to wake and che
 
 - **Wake takes tens of seconds**, not a second: a VM boots. See [Sleep and wake](#sleep-and-wake).
 - **No Services** (`services:` is refused at admission) and **no `attach`** (there is no owner host to bind a folder
-  from). `a12s shell` isn't available; talk to agent computers with `a12s send`.
+  from). `a12s shell` isn't available (it runs `docker exec` on the Controller's host); an app gets a shell through the
+  API's [terminal](../api.md#terminal-and-files) instead, and reads and writes files through its files routes.
 - **Home drives have a hard size**: persistent disks, 10 GiB unless `resources` asks for more. They grow, never
   shrink.
 - **Egress** is enforced by the VPC firewall plus rules inside each VM: an agent computer can reach only the

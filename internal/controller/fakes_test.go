@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -53,6 +55,8 @@ type fakeDriver struct {
 	observeGate chan struct{}
 	// sessions are attached shell sessions, by Computer.
 	sessions map[string]int
+	// terminals are the ones opened, in order.
+	terminals []*fakeTerminal
 	// services are Service containers; svcImages what each image declares;
 	// svcUnhealthy fails a Service's exec health check.
 	services     map[string]*fakeService
@@ -306,6 +310,17 @@ func (d *fakeDriver) Exec(_ context.Context, name string, cmd []string, stdin io
 	if c == nil || !c.running {
 		return -1, "", fmt.Errorf("exec %s: not running", name)
 	}
+	if !asRoot && len(cmd) > 2 && (cmd[2] == readScript || cmd[2] == writeFileScript) {
+		// Files calls run for real, on this machine's sh, against paths the test made.
+		x := exec.Command(cmd[0], cmd[1:]...)
+		x.Stdin = stdin
+		out, err := x.CombinedOutput()
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode(), string(out), nil
+		}
+		return 0, string(out), err
+	}
 	if len(cmd) != 8 || cmd[0] != "sh" || cmd[2] != writeScript || !asRoot {
 		return 1, "unexpected command", nil
 	}
@@ -334,6 +349,80 @@ func (d *fakeDriver) RemoveComputer(_ context.Context, name string) error {
 		d.record("remove %s", name)
 	}
 	return nil
+}
+
+// fakeTerminal echoes what is typed, upper-cased, and records resizes.
+type fakeTerminal struct {
+	in      *io.PipeReader
+	out     *io.PipeWriter
+	r       *io.PipeReader
+	w       *io.PipeWriter
+	mu      sync.Mutex
+	sizes   []string
+	closed  bool
+	onClose func()
+}
+
+func newFakeTerminal(onClose func()) *fakeTerminal {
+	t := &fakeTerminal{onClose: onClose}
+	t.in, t.w = io.Pipe()
+	t.r, t.out = io.Pipe()
+	go func() {
+		b := make([]byte, 1024)
+		for {
+			n, err := t.in.Read(b)
+			if err != nil {
+				t.out.Close()
+				return
+			}
+			if _, err := t.out.Write(bytes.ToUpper(b[:n])); err != nil {
+				return
+			}
+		}
+	}()
+	return t
+}
+
+func (t *fakeTerminal) Read(p []byte) (int, error)  { return t.r.Read(p) }
+func (t *fakeTerminal) Write(p []byte) (int, error) { return t.w.Write(p) }
+func (t *fakeTerminal) Resize(_ context.Context, rows, cols uint) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sizes = append(t.sizes, fmt.Sprintf("%dx%d", rows, cols))
+	return nil
+}
+func (t *fakeTerminal) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.closed {
+		t.closed = true
+		t.w.Close()
+		t.r.Close()
+		t.onClose()
+	}
+	return nil
+}
+
+func (d *fakeDriver) Terminal(_ context.Context, name string, rows, cols uint) (driver.Terminal, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	c := d.computers[name]
+	if c == nil || !c.running {
+		return nil, fmt.Errorf("terminal %s: not running", name)
+	}
+	if d.sessions == nil {
+		d.sessions = map[string]int{}
+	}
+	d.sessions[name]++
+	t := newFakeTerminal(func() {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.sessions[name]--
+	})
+	_ = t.Resize(context.Background(), rows, cols)
+	d.terminals = append(d.terminals, t)
+	d.record("terminal %s", name)
+	return t, nil
 }
 
 func (d *fakeDriver) Sessions(_ context.Context, name string) (int, error) {

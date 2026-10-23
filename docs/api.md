@@ -39,6 +39,10 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/agent-computers/{c}/turns` | `?limit=20` (1 to 200) → `{turns: [Turn]}`: its last finished Turns, newest first |
 | `POST /v1/agent-computers/{c}/turns/{turn}/stop` | `{}` → interrupt the Turn and end the session's background work |
 | `POST /v1/agent-computers/{c}/stop` | `{}` → `{turns, background}`: interrupt whatever Turn runs and end the session's background work; what it stopped |
+| `GET /v1/agent-computers/{c}/terminal` | `?rows=24&cols=80`, `Upgrade: a12s-terminal` → `101`, then the TTY's bytes both ways ([below](#terminal-and-files); owner or prefix) |
+| `POST /v1/agent-computers/{c}/terminal/{id}/resize` | `{rows, cols}` → `204` (owner or prefix) |
+| `GET /v1/agent-computers/{c}/files` | `?path=/home/agent/…` → a folder's `entries` or a file's `content` ([below](#terminal-and-files); owner or prefix) |
+| `PUT /v1/agent-computers/{c}/files` | `?path=…`, the file's bytes → `204`: replace it as the agent user (owner or prefix) |
 | `POST /v1/agent-computers/{c}/power` | `{"state": "asleep"\|"awake"}` |
 | `POST /v1/agent-computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written |
@@ -200,6 +204,28 @@ data: {"v":1,"agentComputer":"analyst","session":"…","turn":"t_9","seq":42,"ts
 - A sleeping agent computer answers `503 asleep`: retry, and its journal streams again once it wakes.
 
 The event types and their `data` are listed in [Concepts](concepts.md#event-journal).
+
+## Terminal and files
+
+An app can open a shell in an agent computer, and read and write its files, on every substrate (the Controller
+drives each computer's engine; on GCE, the engine in its VM). Both need the agent computer awake: asleep is `503
+asleep`, so wake it first (`POST …/power {"state":"awake"}`). Both run as the agent user (uid 1000), so they see and
+change exactly what the agent can.
+
+**Terminal.** `GET /v1/agent-computers/{c}/terminal?rows=24&cols=80` with `Connection: Upgrade` and `Upgrade:
+a12s-terminal` (HTTP/1.1) answers `101 Switching Protocols` with the terminal's id in `A12s-Terminal`; from then on
+the connection carries a login shell's TTY, raw bytes both ways, started in `/home/agent` with `TERM=xterm-256color`.
+`POST …/terminal/{id}/resize {rows, cols}` resizes it. Closing the connection ends the shell and every process it
+started. An open terminal is a session: it keeps the agent computer awake, like `a12s shell`. Opening and closing
+are journaled as diagnostics (`terminal opened`, `terminal closed`, with the caller).
+
+**Files.** `GET /v1/agent-computers/{c}/files?path=<absolute path>` (default `/home/agent`) answers a FileResponse:
+for a folder, `{path, kind: "dir", entries: [{name, kind: file|dir|link|other, size, modTime}]}`, folders first;
+for a regular file, `{path, kind: "file", size, modTime, encoding: "utf-8"|"base64", content, truncated}` with at
+most 1 MiB of content. `404 not_found`, `403 forbidden` (the agent user can't read it), `400 invalid` (not absolute
+and clean, or not a file or folder). `PUT …/files?path=<file>` with the bytes as the body (at most 8 MiB) makes its
+folder and replaces the file, owned by the agent; it is journaled (`file written`). The calls use the image's `sh`,
+`stat` and `head` (GNU or busybox).
 
 ## Errors
 
