@@ -30,11 +30,12 @@ const StopTimeout = 25
 
 const (
 	HomeMount = "/home"
-	agentHome = "/home/agent"
 	runA12S   = "/run/a12s"
 	agentUID  = 1000
 	agentGID  = 1000
 	AgentUser = "1000:1000"
+	// AgentHome is the agent's home, where its harness and a12s shell start.
+	AgentHome = "/home/agent"
 )
 
 // capAdd is the full set of Linux capabilities kept in Computers; everything else is dropped.

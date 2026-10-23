@@ -363,6 +363,14 @@ func (d *Driver) Exec(ctx context.Context, computer string, cmd []string, stdin 
 	return g.Exec(ctx, user, cmd, stdin)
 }
 
+func (d *Driver) Terminal(ctx context.Context, computer string, rows, cols uint) (driver.Terminal, error) {
+	g, err := d.runningGuest(ctx, computer)
+	if err != nil {
+		return nil, fmt.Errorf("terminal %s: %w", computer, err)
+	}
+	return g.Terminal(ctx, rows, cols)
+}
+
 func (d *Driver) Sessions(ctx context.Context, computer string) (int, error) {
 	in, err := d.instance(ctx, computer)
 	if errors.Is(err, driver.ErrNotFound) {

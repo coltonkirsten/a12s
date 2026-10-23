@@ -303,6 +303,10 @@ func (g *vmGuest) Exec(ctx context.Context, user string, cmd []string, stdin io.
 	return g.eng.Exec(ctx, g.containerName(), g.vm.Computer, user, cmd, stdin)
 }
 
+func (g *vmGuest) Terminal(ctx context.Context, rows, cols uint) (driver.Terminal, error) {
+	return g.eng.Terminal(ctx, g.containerName(), engine.AgentUser, engine.AgentHome, engine.TerminalShell, rows, cols)
+}
+
 func (g *vmGuest) Sessions(ctx context.Context) (int, error) {
 	return g.eng.Sessions(ctx, g.containerName())
 }

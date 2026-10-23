@@ -150,6 +150,8 @@ type Controller struct {
 	newClient func(name string) computerdClient
 	// remoteEngines: a12s shell can't reach Computers' containers from the Controller's host.
 	remoteEngines bool
+	// terms are the open terminals (GET …/terminal), for resizes.
+	terms terminals
 
 	// bg counts the Controller's background goroutines (event streams,
 	// restarts, idle applies, the watch), so Stop can wait for them.

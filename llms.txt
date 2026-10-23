@@ -406,6 +406,10 @@ POST /v1/agent-computers/{c}/turns/{id}/stop    stop
 POST /v1/agent-computers/{c}/stop               stop
 POST /v1/agent-computers/{c}/power              power
 POST /v1/agent-computers/{c}/shell              owner, or prefix
+GET /v1/agent-computers/{c}/terminal            owner, or prefix
+POST /v1/agent-computers/{c}/terminal/{id}/resize owner, or prefix
+GET /v1/agent-computers/{c}/files               owner, or prefix
+PUT /v1/agent-computers/{c}/files               owner, or prefix
 GET /v1/drives                                  owner
 DELETE /v1/drives/{d}                           owner
 POST /v1/agent-computers/{c}/inbox              send
@@ -476,7 +480,7 @@ SDK objects (Python names; TypeScript is camelCase):
 - Upgrading a12s: install the new release, rebuild custom images FROM the new slim under new tags, `a12s up`.
   After Docker or the Controller restarts, the Controller resumes the Fleet with the credentials it stored.
 - On the GCE driver (an operator's choice in ~/.a12s/<fleet>/driver.yaml, not a Fleet field) each
-  agent computer is its own VM: wakes take tens of seconds, no Services, no attach, no shell. With per-computer
+  agent computer is its own VM: wakes take tens of seconds, no Services, no attach, no `a12s shell` (the API's terminal and files routes work). With per-computer
   identity, status's `agentComputers[].identity` is the service account to grant access to. An app in the VPC
   reaches the API at https://<controller address>:7000 when driver.yaml sets `api: { listen: internal }`; it must
   trust the fleet's CA (docs/drivers/gce.md#reaching-the-api-from-the-vpc).
