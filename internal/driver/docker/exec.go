@@ -28,6 +28,13 @@ func (d *Driver) Exec(ctx context.Context, computer string, cmd []string, stdin 
 	return d.eng.Exec(ctx, d.ContainerName(computer), computer, user, cmd, stdin)
 }
 
+func (d *Driver) Terminal(ctx context.Context, computer string, rows, cols uint) (driver.Terminal, error) {
+	if _, err := d.runningComputer(ctx, computer); err != nil {
+		return nil, fmt.Errorf("terminal %s: %w", computer, err)
+	}
+	return d.eng.Terminal(ctx, d.ContainerName(computer), engine.AgentUser, engine.AgentHome, engine.TerminalShell, rows, cols)
+}
+
 // Connect works only from a process on the Computer's internal network (the controller).
 func (d *Driver) Connect(ctx context.Context, computer, service string) (net.Conn, error) {
 	if service != driver.ServiceComputerd {

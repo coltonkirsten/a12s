@@ -51,6 +51,10 @@ type Driver interface {
 	// RemoveDrive refuses with ErrDriveAttached while anything has it attached.
 	RemoveDrive(ctx context.Context, id string) error
 
+	// Terminal starts an interactive login shell on a TTY of rows×cols in a running Computer, as its agent user in
+	// its home. Closing it ends the shell and everything it started. A open Terminal is a session (below).
+	Terminal(ctx context.Context, computer string, rows, cols uint) (Terminal, error)
+
 	// Sessions counts attached interactive/exec sessions; any keeps the Computer from auto-sleeping.
 	Sessions(ctx context.Context, computer string) (int, error)
 
@@ -59,6 +63,12 @@ type Driver interface {
 	Caller(local, remote netip.Addr) (name string, ok bool)
 
 	ServiceDriver
+}
+
+// Terminal is a shell on a TTY: reads are its output, writes its input.
+type Terminal interface {
+	io.ReadWriteCloser
+	Resize(ctx context.Context, rows, cols uint) error
 }
 
 var (

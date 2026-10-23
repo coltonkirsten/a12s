@@ -21,6 +21,7 @@ type Guest interface {
 	// Stop gives the harness the engine's StopTimeout to flush.
 	Stop(ctx context.Context) error
 	Exec(ctx context.Context, user string, cmd []string, stdin io.Reader) (exitCode int, output string, err error)
+	Terminal(ctx context.Context, rows, cols uint) (driver.Terminal, error)
 	Sessions(ctx context.Context) (int, error)
 	// Events streams the container's deaths until ctx ends or the engine goes away.
 	Events(ctx context.Context) <-chan driver.Event

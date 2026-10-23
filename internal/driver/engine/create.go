@@ -141,8 +141,8 @@ func CheckSpec(s driver.ComputerSpec) error {
 		if !path.IsAbs(a.Host) || path.Clean(a.Host) != a.Host || a.Host == "/" {
 			return fmt.Errorf("attach host %q must be a clean absolute path other than /", a.Host)
 		}
-		if !MountPointRE.MatchString(a.Target) || path.Clean(a.Target) != a.Target || path.Dir(a.Target) != agentHome {
-			return fmt.Errorf("attach target %q must be a folder directly in %s", a.Target, agentHome)
+		if !MountPointRE.MatchString(a.Target) || path.Clean(a.Target) != a.Target || path.Dir(a.Target) != AgentHome {
+			return fmt.Errorf("attach target %q must be a folder directly in %s", a.Target, AgentHome)
 		}
 		for _, k := range a.Keep {
 			if k.Drive == "" || !MountPointRE.MatchString(k.Target) || path.Clean(k.Target) != k.Target || !strings.HasPrefix(k.Target, a.Target+"/") {

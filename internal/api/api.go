@@ -252,6 +252,40 @@ type ShellResponse struct {
 	User      string `json:"user"` // uid:gid
 }
 
+// TerminalResize is POST /v1/agent-computers/{c}/terminal/{id}/resize.
+type TerminalResize struct {
+	Rows uint `json:"rows"`
+	Cols uint `json:"cols"`
+}
+
+// FileEntry is one name in a folder of an agent computer.
+type FileEntry struct {
+	Name string `json:"name"`
+	// Kind is file, dir, link or other.
+	Kind    string `json:"kind"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"modTime"` // RFC 3339
+}
+
+// FileResponse is GET /v1/agent-computers/{c}/files?path=: a folder's entries, or a file's content.
+type FileResponse struct {
+	Path    string      `json:"path"`
+	Kind    string      `json:"kind"` // dir or file
+	Entries []FileEntry `json:"entries,omitempty"`
+	Size    int64       `json:"size,omitempty"`
+	ModTime string      `json:"modTime,omitempty"`
+	// Encoding is utf-8 for text and base64 otherwise; Content holds at most MaxFileRead bytes.
+	Encoding  string `json:"encoding,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// MaxFileRead and MaxFileWrite bound one file read and one file write through the API.
+const (
+	MaxFileRead  = 1 << 20
+	MaxFileWrite = 8 << 20
+)
+
 type DrivesResponse struct {
 	Drives []DriveRow `json:"drives"`
 }
