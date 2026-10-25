@@ -106,6 +106,10 @@ func (c *Controller) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agent-computers/{c}/stop", allow(api.ActionStop, "c", c.handleStopAll))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/power", allow(api.ActionPower, "c", c.handlePower))
 	mux.HandleFunc("POST /v1/agent-computers/{c}/shell", allowOwnerOrPrefix("c", c.handleShell))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/terminal", allowOwnerOrPrefix("c", c.handleTerminal))
+	mux.HandleFunc("POST /v1/agent-computers/{c}/terminal/{id}/resize", allowOwnerOrPrefix("c", c.handleTerminalResize))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/files", allowOwnerOrPrefix("c", c.handleFileGet))
+	mux.HandleFunc("PUT /v1/agent-computers/{c}/files", allowOwnerOrPrefix("c", c.handleFilePut))
 	mux.HandleFunc("GET /v1/drives", allow("", "", c.handleDrives))
 	mux.HandleFunc("DELETE /v1/drives/{d}", allow("", "", c.handleRemoveDrive))
 

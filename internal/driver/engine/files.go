@@ -92,7 +92,7 @@ func (e *Engine) applyFiles(ctx context.Context, containerID string, spec driver
 		return err
 	}
 	var buf bytes.Buffer
-	if err := rebaseFilesTar(bytes.NewReader(spec.Files), &buf, path.Base(agentHome)); err != nil {
+	if err := rebaseFilesTar(bytes.NewReader(spec.Files), &buf, path.Base(AgentHome)); err != nil {
 		return err
 	}
 	if _, err := e.cli.CopyToContainer(ctx, containerID, client.CopyToContainerOptions{DestinationPath: HomeMount, Content: &buf}); err != nil {

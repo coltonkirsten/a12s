@@ -115,6 +115,10 @@ func (g *fakeGuest) Exec(_ context.Context, user string, cmd []string, _ io.Read
 	return 0, "ok", nil
 }
 
+func (g *fakeGuest) Terminal(context.Context, uint, uint) (driver.Terminal, error) {
+	return nil, errors.New("fake guest: no terminal")
+}
+
 func (g *fakeGuest) Sessions(context.Context) (int, error) {
 	g.f.mu.Lock()
 	defer g.f.mu.Unlock()
