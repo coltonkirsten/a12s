@@ -21,9 +21,12 @@ laptop or a single host, the Docker driver stays simpler, faster to wake and che
 
 ## Setting up a project
 
-Use a GCP project for the fleet alone. The Controller's service account can attach any service account in its
-project to a VM (that is how per-computer identity works), so a project of its own keeps that power away from every
-other account. It also gives the fleet its own quotas, audit log and billing line.
+Use a GCP project for the fleet and the app it serves. The Controller's service account can attach any service
+account in its project to a VM (that is how per-computer identity works) except one tagged `sa-tier=infra`: tag every
+account that is not an agent's (your app's, Google's Compute default) with
+`gcloud resource-manager tags bindings create --tag-value <project>/sa-tier/infra --parent
+//iam.googleapis.com/projects/<project>/serviceAccounts/<unique id>`. Bootstrap makes the tag and tags the
+Controller's own account. A project of its own also gives the fleet its own quotas, audit log and billing line.
 
 `hack/gce/bootstrap.sh <project> <fleet> [region] [zone] [controller-machine-type]` creates, idempotently:
 
@@ -34,7 +37,8 @@ other account. It also gives the fleet its own quotas, audit log and billing lin
 | Firewall rules | see [below](#network-and-firewall) | |
 | Cloud Router and NAT | `a12s-<fleet>` | The Controller's way out (model APIs, allowed hosts). |
 | Service account | `a12s-controller@<project>.iam.gserviceaccount.com` | The Controller's identity. |
-| Custom role | `a12sController`, bound on the project | [Controller permissions](#controller-permissions) |
+| Tag | `sa-tier` with value `infra`, on the Controller's account | Accounts the Controller may not act as or delete. |
+| Custom roles | `a12sController` and `a12sControllerIdentities`, bound on the project | [Controller permissions](#controller-permissions) |
 | Controller VM | `a12s-<fleet>-controller` (Debian with Docker, e2-small) | Runs the Controller and holds the fleet's images. |
 
 Then, on the Controller VM (`gcloud compute ssh a12s-<fleet>-controller --tunnel-through-iap`): install a12s, write
@@ -146,13 +150,20 @@ which the check enforces.
 
 ## Controller permissions
 
-The `a12sController` role holds exactly what the driver calls:
+The two roles hold exactly what the driver calls. `a12sController`:
 
 - `compute.instances.{create,delete,get,list,start,stop,setMetadata,setLabels,setTags,setMachineType,attachDisk,detachDisk,setServiceAccount,getGuestAttributes}`
 - `compute.disks.{create,get,list,delete,resize,use,setLabels}`, `compute.resourcePolicies.use`
 - `compute.subnetworks.{get,use}`, `compute.zoneOperations.{get,list}`, `compute.firewalls.list`,
   `compute.machineTypes.list`
-- `iam.serviceAccounts.{create,delete,get,actAs}` (used only with per-computer identity)
+- `iam.serviceAccounts.{create,get}` (used only with per-computer identity)
+
+`a12sControllerIdentities`, bound with the condition `!resource.matchTag('<project>/sa-tier', 'infra')` (IAM
+Conditions can't match a service account's name for these permissions, but they can match its tags):
+
+- `iam.serviceAccounts.{actAs,delete}` (used only with per-computer identity): run an agent computer's VM as its
+  account, and delete the account with the agent computer. Never an account tagged `sa-tier=infra`. The Controller
+  holds no tag permission, so it can't remove a tag.
 
 A project allows 100 user-managed service accounts by default; more agent computers with their own identity need a
 quota increase.
