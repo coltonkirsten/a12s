@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Creates what a fleet on the GCE driver needs and the driver never creates itself: a VPC and subnet, the firewall
-# rules, Cloud NAT for the Controller, the Controller's service account and custom role, a static internal address,
-# and the Controller VM (Debian with Docker). Idempotent: an existing resource is left as it is.
+# rules, Cloud NAT for the Controller, the Controller's service account and custom roles, the sa-tier=infra tag, a
+# static internal address, and the Controller VM (Debian with Docker).
+# Idempotent: an existing resource is left as it is (custom roles are updated to the permissions below).
 # Usage: hack/gce/bootstrap.sh <project> <fleet> [region] [zone] [controller-machine-type]
 # Needs gcloud logged in as a principal that can enable services, create those resources and set the project's IAM
 # policy (roles/owner on a project made for the fleet is simplest). See docs/drivers/gce.md.
@@ -19,6 +20,7 @@ NET=a12s-$FLEET
 SA_NAME=a12s-controller
 SA=$SA_NAME@$PROJECT.iam.gserviceaccount.com
 ROLE=a12sController
+ID_ROLE=a12sControllerIdentities
 VM=a12s-$FLEET-controller
 
 g() { gcloud --project "$PROJECT" --quiet "$@"; }
@@ -59,8 +61,67 @@ exists compute routers nats describe "$NET" --router "$NET" --region "$REGION" |
   g compute routers nats create "$NET" --router "$NET" --region "$REGION" \
     --nat-custom-subnet-ip-ranges "$NET" --auto-allocate-nat-external-ips
 
-log "service account $SA and role $ROLE"
+log "service account $SA"
 exists iam service-accounts describe "$SA" || g iam service-accounts create "$SA_NAME" --display-name "a12s Controller ($FLEET)"
+
+# The tag sa-tier=infra marks every service account that is not an agent's: the Controller may not run a VM as one or
+# delete it (the conditioned binding below). Tag your app's own accounts with it too; the Controller's is tagged here.
+# Tags, not names: IAM Conditions can't match a service account's name for actAs, but they can match its tags.
+log "tag $PROJECT/sa-tier=infra on $SA"
+exists resource-manager tags keys describe "$PROJECT/sa-tier" ||
+  g resource-manager tags keys create sa-tier --parent "projects/$PROJECT" \
+    --description "Service account tier. infra: not an agent's; out of reach of the a12s Controller's actAs."
+exists resource-manager tags values describe "$PROJECT/sa-tier/infra" ||
+  g resource-manager tags values create infra --parent "$PROJECT/sa-tier" --description "Not an agent's account."
+# A new service account takes a while to reach other services ("not found"), so tagging retries.
+for i in $(seq 1 30); do
+  SA_ID=$(g iam service-accounts describe "$SA" --format 'value(uniqueId)')
+  SA_PARENT=//iam.googleapis.com/projects/$PROJECT/serviceAccounts/$SA_ID
+  g resource-manager tags bindings list --parent "$SA_PARENT" --format 'value(tagValueNamespacedName)' 2> /dev/null |
+    grep -qx "$PROJECT/sa-tier/infra" && break
+  g resource-manager tags bindings create --parent "$SA_PARENT" --tag-value "$PROJECT/sa-tier/infra" \
+    > /dev/null 2>&1 && break
+  [ "$i" -lt 30 ] || { echo "could not tag $SA" >&2; exit 1; }
+  sleep 5
+done
+
+# role <id> <title> <condition file or ""> <permissions>: create or update a custom role and bind it to the Controller.
+# A deleted custom role stays (deleted) for 7 days and its ID can't be reused, so a fleet made again within a week
+# (after hack/gce/teardown.sh) undeletes it.
+role() {
+  local id=$1 title=$2 cond=$3 perms=$4 i
+  if [ "$(g iam roles describe "$id" --format 'value(deleted)' 2> /dev/null)" = True ]; then
+    g iam roles undelete "$id" > /dev/null
+  fi
+  if exists iam roles describe "$id"; then
+    g iam roles update "$id" --permissions "$perms" > /dev/null
+  else
+    g iam roles create "$id" --title "$title" --permissions "$perms" > /dev/null
+  fi
+  local c=(--condition None)
+  [ -n "$cond" ] && c=(--condition-from-file "$cond")
+  # A new service account takes a while to reach IAM policy checks ("does not exist"), so the binding retries.
+  for i in $(seq 1 30); do
+    g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "projects/$PROJECT/roles/$id" \
+      "${c[@]}" > /dev/null 2> /tmp/a12s-bootstrap-iam && break
+    grep -q 'does not exist' /tmp/a12s-bootstrap-iam && [ "$i" -lt 30 ] || { cat /tmp/a12s-bootstrap-iam >&2; exit 1; }
+    sleep 5
+  done
+}
+
+# actAs and delete, for per-computer identity: project-wide (an agent's account name can't be known in advance) but
+# never on an account tagged sa-tier=infra. Bound before the main role drops them, so a re-run never leaves a gap.
+log "role $ID_ROLE (accounts not tagged sa-tier=infra)"
+COND=$(mktemp)
+cat > "$COND" << EOF
+title: not-infra-service-accounts
+description: Not service accounts tagged sa-tier=infra
+expression: "!resource.matchTag('$PROJECT/sa-tier', 'infra')"
+EOF
+role "$ID_ROLE" "a12s Controller: agents' identities" "$COND" iam.serviceAccounts.actAs,iam.serviceAccounts.delete
+rm -f "$COND"
+
+log "role $ROLE"
 PERMS=compute.instances.create,compute.instances.delete,compute.instances.get,compute.instances.list
 PERMS+=,compute.instances.start,compute.instances.stop,compute.instances.setMetadata,compute.instances.setLabels
 PERMS+=,compute.instances.setTags,compute.instances.setMachineType,compute.instances.attachDisk
@@ -69,26 +130,8 @@ PERMS+=,compute.disks.create,compute.disks.get,compute.disks.list,compute.disks.
 PERMS+=,compute.disks.use,compute.disks.setLabels,compute.resourcePolicies.use
 PERMS+=,compute.subnetworks.get,compute.subnetworks.use,compute.zoneOperations.get,compute.zoneOperations.list
 PERMS+=,compute.firewalls.list,compute.machineTypes.list
-PERMS+=,iam.serviceAccounts.create,iam.serviceAccounts.delete,iam.serviceAccounts.get,iam.serviceAccounts.actAs
-# A deleted custom role stays (deleted) for 7 days and its ID can't be reused, so a fleet made again within a week
-# (after hack/gce/teardown.sh) undeletes it.
-if [ "$(g iam roles describe "$ROLE" --format 'value(deleted)' 2> /dev/null)" = True ]; then
-  g iam roles undelete "$ROLE" > /dev/null
-fi
-if exists iam roles describe "$ROLE"; then
-  g iam roles update "$ROLE" --permissions "$PERMS" > /dev/null
-else
-  g iam roles create "$ROLE" --title "a12s Controller" --permissions "$PERMS" > /dev/null
-fi
-# actAs is project-wide: the Controller could run a VM as any account in the project. That is why a fleet gets a
-# project of its own, holding only the Controller's and the agents' accounts.
-# A new service account takes a while to reach IAM policy checks ("does not exist"), so the binding retries.
-for i in $(seq 1 30); do
-  g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "projects/$PROJECT/roles/$ROLE" \
-    --condition None > /dev/null 2> /tmp/a12s-bootstrap-iam && break
-  grep -q 'does not exist' /tmp/a12s-bootstrap-iam && [ "$i" -lt 30 ] || { cat /tmp/a12s-bootstrap-iam >&2; exit 1; }
-  sleep 5
-done
+PERMS+=,iam.serviceAccounts.create,iam.serviceAccounts.get
+role "$ROLE" "a12s Controller" "" "$PERMS"
 
 # Debian 13: its docker.io is new enough for BuildKit (docker-buildx), which the images' Dockerfiles need.
 log "Controller VM $VM ($MACHINE, Debian with Docker)"
