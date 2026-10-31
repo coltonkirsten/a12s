@@ -99,7 +99,8 @@ type Timing struct {
 	Poll           time.Duration // status polling and stream reconnects
 	SleepFlush     time.Duration // bounded flush of an interrupted turn
 	RestartBackoff time.Duration // first restart delay after an unexpected death; doubles
-	MaxRestarts    int           // then Error{retryable}
+	MaxRestarts    int           // then Error{retryable}; also the retries of a failed auto-wake
+	WakeBackoff    time.Duration // first retry delay after a retryable auto-wake failure; doubles
 	ReadBack       time.Duration // a Driver change showing in Observe
 	PowerTick      time.Duration // power-policy evaluation
 	// Service health: polling during startup, and caps on the manifest's
@@ -115,6 +116,7 @@ var defaultTiming = Timing{
 	SleepFlush:     20 * time.Second,
 	RestartBackoff: time.Second,
 	MaxRestarts:    3,
+	WakeBackoff:    10 * time.Second,
 	ReadBack:       10 * time.Second,
 	PowerTick:      time.Second,
 	HealthPoll:     time.Second,

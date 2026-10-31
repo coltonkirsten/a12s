@@ -295,8 +295,8 @@ func (c *Controller) maybeAutoWake(ctx context.Context, name string) {
 }
 
 // autoWake wakes a Computer on its policy through the same path as a
-// manual wake, with the credentials the Controller holds. A wake that fails
-// pauses auto-wake until a manual wake or a12s up.
+// manual wake, with the credentials the Controller holds. A wake that still
+// fails after its retries pauses auto-wake until a manual wake or a12s up.
 func (c *Controller) autoWake(name string, p fleet.PowerSettings) {
 	ctx := c.ctx
 	defer c.lockComputer(name)()
@@ -322,18 +322,47 @@ func (c *Controller) autoWake(name string, p fleet.PowerSettings) {
 	if err := c.inbox.SetSlept(ctx, name, ""); err != nil {
 		c.logf("%s: auto-wake: %v", name, err)
 	}
-	obs, ok, err := c.observeOne(ctx, name)
-	if err == nil {
-		_, err = c.converge(ctx, name, obs, ok)
-	}
-	if err != nil {
-		c.logf("%s: auto-wake failed: %v; auto-wake paused until a12s wake %s or a12s up", name, err, name)
-		_ = c.inbox.SetPaused(ctx, name, "wake_failed")
-		return
+	// A retryable failure (a cloud API blip, a slow boot) is retried with
+	// backoff; only one that persists pauses auto-wake, so a one-off error
+	// can't strand a Computer until an operator runs a12s wake.
+	for attempt := 0; ; attempt++ {
+		err := c.wakeOnce(ctx, name)
+		if err == nil {
+			break
+		}
+		if !c.retryableFailure(name) || attempt >= c.timing.MaxRestarts {
+			c.logf("%s: auto-wake failed: %v; auto-wake paused until a12s wake %s or a12s up", name, err, name)
+			_ = c.inbox.SetPaused(ctx, name, "wake_failed")
+			return
+		}
+		backoff := c.timing.WakeBackoff << attempt
+		c.logf("%s: auto-wake failed: %v; retry %d of %d in %s", name, err, attempt+1, c.timing.MaxRestarts, backoff)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
 	}
 	dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	_ = c.client(name).Diagnostic(dctx, "power.auto_wake", data)
 	cancel()
+}
+
+func (c *Controller) wakeOnce(ctx context.Context, name string) error {
+	obs, ok, err := c.observeOne(ctx, name)
+	if err != nil {
+		return err
+	}
+	_, err = c.converge(ctx, name, obs, ok)
+	return err
+}
+
+// retryableFailure reports whether the Computer's current Error says a retry may succeed.
+func (c *Controller) retryableFailure(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f := c.rtLocked(name).failure
+	return f != nil && f.Retryable
 }
 
 func (c *Controller) powerStatus(ctx context.Context, name string, phase api.Phase) *api.PowerStatus {

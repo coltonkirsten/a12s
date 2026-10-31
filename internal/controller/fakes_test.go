@@ -46,6 +46,8 @@ type fakeDriver struct {
 	// ghostStarts makes Observe never show a container running (a start
 	// the substrate reported but that did not take).
 	lostStages, ghostStarts bool
+	// powerOnErrs fails that many power-on calls, as a cloud API blip does.
+	powerOnErrs int
 	// ips is the Controller's address on each Computer network (by
 	// Computer), allocated when a network first appears, freed with it.
 	ips map[string]netip.Addr
@@ -276,6 +278,10 @@ func (d *fakeDriver) SetPower(_ context.Context, name string, power driver.Power
 	}
 	if c.running == (power == driver.PowerAwake) {
 		return nil
+	}
+	if power == driver.PowerAwake && d.powerOnErrs > 0 {
+		d.powerOnErrs--
+		return errors.New("start VM: INTERNAL_ERROR: Internal error. Please try again")
 	}
 	c.running = power == driver.PowerAwake
 	d.record("power %s %s %d", name, power, gen)
@@ -878,7 +884,7 @@ func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) 
 	}
 	buf := &bytes.Buffer{}
 	c.logger = log.New(&lockedWriter{w: buf}, "", 0)
-	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, ReadBack: time.Second, PowerTick: 5 * time.Millisecond, HealthPoll: 5 * time.Millisecond, HealthStartup: 300 * time.Millisecond, HealthInterval: 20 * time.Millisecond}
+	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, WakeBackoff: time.Millisecond, ReadBack: time.Second, PowerTick: 5 * time.Millisecond, HealthPoll: 5 * time.Millisecond, HealthStartup: 300 * time.Millisecond, HealthInterval: 20 * time.Millisecond}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
 	skew := &atomic.Int64{}
 	c.now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
