@@ -200,17 +200,37 @@ func TestCredentialsPaused(t *testing.T) {
 	h.waitMessage("scout", m.ID, api.MsgDelivered)
 }
 
-// A wake that fails pauses auto-wake (no loop).
+// A one-off retryable wake failure (GCE INTERNAL_ERROR on start) is retried,
+// not left in Error with auto-wake paused (silico-ribo, 2026-10-30).
+func TestFailedWakeRetries(t *testing.T) {
+	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
+	h.up(powerFleet(t, 6), false)
+	h.waitPhase("scout", api.PhaseAsleep)
+	h.d.mu.Lock()
+	h.d.powerOnErrs = 1
+	h.d.mu.Unlock()
+	m := h.send("scout", "x")
+	h.waitMessage("scout", m.ID, api.MsgDelivered)
+	if ps := h.powerOf("scout"); ps.AutoWake != api.AutoWakeOn {
+		t.Fatalf("auto-wake %s (%s) after a retried wake", ps.AutoWake, ps.Reason)
+	}
+}
+
+// A wake that keeps failing pauses auto-wake (no loop).
 func TestFailedWakePauses(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	h.up(powerFleet(t, 6), false)
 	h.waitPhase("scout", api.PhaseAsleep)
 	h.cds.get("scout").setBroken(true)
 	h.send("scout", "x")
-	waitFor(t, func() bool {
-		ps := h.powerOf("scout")
-		return ps.AutoWake == api.AutoWakePaused && ps.Reason == "wake_failed"
-	})
+	// Each attempt waits out ReadyTimeout, and the wake is retried MaxRestarts times first.
+	deadline := time.Now().Add(time.Duration(h.c.timing.MaxRestarts+2) * h.c.timing.ReadyTimeout)
+	for ps := h.powerOf("scout"); ps.AutoWake != api.AutoWakePaused || ps.Reason != "wake_failed"; ps = h.powerOf("scout") {
+		if time.Now().After(deadline) {
+			t.Fatalf("auto-wake %s (%s), want paused (wake_failed)", ps.AutoWake, ps.Reason)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if h.events("scout", "power.auto_wake") != 1 {
 		t.Fatalf("wakes %d", h.events("scout", "power.auto_wake"))
 	}

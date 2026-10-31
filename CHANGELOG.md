@@ -4,6 +4,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Fixed: a retryable failure of an automatic wake (e.g. GCE `INTERNAL_ERROR` on instance start) is retried with
+  backoff (3 times, from 10 s) before auto-wake pauses. Before, one transient cloud error left the agent computer in
+  Error with auto-wake paused until someone ran `a12s wake`.
 - Changed (GCE): the Controller can no longer act as or delete a service account tagged `sa-tier=infra`.
   `hack/gce/bootstrap.sh` makes the tag, tags the Controller's account, and moves `iam.serviceAccounts.{actAs,delete}`
   out of `a12sController` into `a12sControllerIdentities`, bound with a tag condition. Upgrading: re-run

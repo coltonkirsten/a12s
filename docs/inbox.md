@@ -154,7 +154,9 @@ agent_computers:
   `a12s wake`.
 - **Credentials.** While a credential the agent computer uses has no value, auto-wake pauses until
   `a12s creds set` sets it. The Controller stores the values, so auto-wake carries on after a restart.
-- A failed automatic wake pauses auto-wake for that agent computer until a manual `a12s wake` or `a12s up`.
+- A failed automatic wake is retried up to 3 times, 10 s apart and doubling, when the failure is retryable (a cloud
+  API error on start, a slow boot). One that still fails, or a non-retryable one, pauses auto-wake for that agent
+  computer until a manual `a12s wake` or `a12s up`.
 - `--expires 0` never wakes anything: a wake takes seconds. Send a window (`--expires 60s`) instead.
 
 `a12s status` shows each agent computer's power state:
