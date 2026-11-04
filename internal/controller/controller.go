@@ -361,7 +361,7 @@ func (c *Controller) Start(ctx context.Context) {
 		}
 		c.reconcileCerts(ctx, running)
 		// Finish removals an apply had not completed: owned Computers the
-		// Fleet no longer declares go (their drives stay).
+		// Fleet no longer declares go.
 		for _, name := range slices.Sorted(maps.Keys(obs.Computers)) {
 			if _, ok := f.Computers[name]; !ok {
 				if err := c.removeComputer(ctx, name); err != nil {
@@ -382,7 +382,9 @@ func (c *Controller) Start(ctx context.Context) {
 	})
 	if !resumed { // ctx already ended: nothing will release it
 		c.applyMu.Unlock()
+		return
 	}
+	c.spawn(func() { c.retirementLoop(ctx) }) // its applyMu waits for the resume
 }
 
 func Run(ctx context.Context, cfg Config) error {

@@ -29,6 +29,7 @@ type Fake struct {
 	clock      time.Time
 	instances  map[string]*gceapi.Instance
 	disks      map[string]*gceapi.Disk
+	snapshots  map[string]*gceapi.Snapshot
 	ops        []gceapi.Operation
 	firewalls  []gceapi.Firewall
 	subnets    []gceapi.Subnetwork
@@ -86,6 +87,7 @@ func New(project, zone string) *Fake {
 		clock:     time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC),
 		instances: map[string]*gceapi.Instance{},
 		disks:     map[string]*gceapi.Disk{},
+		snapshots: map[string]*gceapi.Snapshot{},
 		accounts:  map[string]*gceapi.ServiceAccount{},
 		guest:     map[string]map[string]string{},
 		denied:    map[string]bool{},
@@ -207,6 +209,23 @@ func (f *Fake) Disk(name string) (gceapi.Disk, bool) {
 	return clone(*d), true
 }
 
+func (f *Fake) Snapshot(name string) (gceapi.Snapshot, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.snapshots[name]
+	if !ok {
+		return gceapi.Snapshot{}, false
+	}
+	return clone(*s), true
+}
+
+// SetClock moves the fake's clock, which stamps operations and snapshot creation times.
+func (f *Fake) SetClock(t time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clock = t
+}
+
 func (f *Fake) ServiceAccounts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -266,6 +285,8 @@ var (
 	zonalRE    = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/zones/([^/]+)/([a-zA-Z]+)(?:/([^/]+))?(?:/([a-zA-Z]+))?$`)
 	regionalRE = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/regions/([^/]+)/subnetworks/([^/]+)$`)
 	globalRE   = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/global/([a-zA-Z]+)$`)
+	snapshotRE = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/global/snapshots(?:/([^/]+))?$`)
+	globalOpRE = regexp.MustCompile(`^/compute/v1/projects/([^/]+)/global/operations/([^/]+)/wait$`)
 	saRE       = regexp.MustCompile(`^/iam/v1/projects/([^/]+)/serviceAccounts(?:/([^/]+))?$`)
 	crmRE      = regexp.MustCompile(`^/crm/v1/projects/([^/:]+):testIamPermissions$`)
 )
@@ -357,6 +378,17 @@ func (f *Fake) route(r *http.Request, body []byte) reply {
 			}
 		}
 		return errReply(404, "notFound", "subnetwork %s", m[3])
+	}
+	if m := snapshotRE.FindStringSubmatch(p); m != nil {
+		return f.snapshot(r, m[2])
+	}
+	if m := globalOpRE.FindStringSubmatch(p); m != nil {
+		for _, op := range f.ops {
+			if op.Name == m[2] {
+				return reply{200, op}
+			}
+		}
+		return errReply(404, "notFound", "operation %s", m[2])
 	}
 	if m := globalRE.FindStringSubmatch(p); m != nil && m[2] == "firewalls" && r.Method == http.MethodGet {
 		return f.listReply(f.firewalls, r)
@@ -691,6 +723,13 @@ func (f *Fake) disk(r *http.Request, call, name string, body []byte) reply {
 		}
 		f.nextID++
 		d.ID, d.SelfLink, d.Status = f.nextID, f.zonalLink("disks", d.Name), "READY"
+		if d.SourceSnapshot != "" {
+			snap := f.snapshots[last(d.SourceSnapshot)]
+			if snap == nil {
+				return errReply(404, "notFound", "The resource '%s' was not found", d.SourceSnapshot)
+			}
+			d.SizeGb = max(d.SizeGb, snap.DiskSizeGb)
+		}
 		if d.SizeGb == 0 {
 			d.SizeGb = 10
 		}
@@ -718,6 +757,23 @@ func (f *Fake) disk(r *http.Request, call, name string, body []byte) reply {
 		}
 		d.SizeGb = req.SizeGb
 		return f.done("resize", d.SelfLink, d.ID)
+	case "disks.createSnapshot":
+		var snap gceapi.Snapshot
+		if err := json.Unmarshal(body, &snap); err != nil {
+			return errReply(400, "invalid", "bad snapshot: %v", err)
+		}
+		if _, ok := f.snapshots[snap.Name]; ok {
+			return errReply(409, "alreadyExists", "snapshot %s already exists", snap.Name)
+		}
+		if e := f.opFault("createSnapshot", d.Name); e != nil {
+			return f.failedOp("createSnapshot", d.SelfLink, d.ID, e)
+		}
+		f.nextID++
+		snap.ID, snap.Status, snap.SourceDisk, snap.DiskSizeGb = f.nextID, "READY", d.SelfLink, d.SizeGb
+		snap.SelfLink = f.Server.URL + "/compute/v1/projects/" + f.project + "/global/snapshots/" + snap.Name
+		snap.CreationTimestamp = f.tick()
+		f.snapshots[snap.Name] = &snap
+		return f.done("createSnapshot", d.SelfLink, d.ID)
 	case "disks.delete":
 		if len(d.Users) > 0 {
 			return errReply(400, "resourceInUseByAnotherResource", "The disk resource '%s' is already being used by '%s'", d.Name, d.Users[0])
@@ -726,6 +782,36 @@ func (f *Fake) disk(r *http.Request, call, name string, body []byte) reply {
 		return f.done("delete", d.SelfLink, d.ID)
 	}
 	return errReply(404, "notFound", "no route for %s", call)
+}
+
+func (f *Fake) snapshot(r *http.Request, name string) reply {
+	switch {
+	case name == "" && r.Method == http.MethodGet:
+		var list []gceapi.Snapshot
+		for _, s := range f.snapshots {
+			list = append(list, *s)
+		}
+		slices.SortFunc(list, func(a, b gceapi.Snapshot) int { return strings.Compare(a.Name, b.Name) })
+		return f.listReply(list, r)
+	case name == "":
+	case r.Method == http.MethodGet:
+		if s := f.snapshots[name]; s != nil {
+			return reply{200, s}
+		}
+		return errReply(404, "notFound", "The resource 'projects/%s/global/snapshots/%s' was not found", f.project, name)
+	case r.Method == http.MethodDelete:
+		if rep, ok := f.fault("snapshots.delete", name); ok {
+			return rep
+		}
+		f.calls = append(f.calls, "snapshots.delete "+name)
+		s := f.snapshots[name]
+		if s == nil {
+			return errReply(404, "notFound", "The resource 'projects/%s/global/snapshots/%s' was not found", f.project, name)
+		}
+		delete(f.snapshots, name)
+		return f.done("delete", s.SelfLink, s.ID)
+	}
+	return errReply(404, "notFound", "no route for %s %s", r.Method, r.URL.Path)
 }
 
 func (f *Fake) serviceAccounts(r *http.Request, email string, body []byte) reply {

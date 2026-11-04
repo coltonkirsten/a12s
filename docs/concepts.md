@@ -110,9 +110,11 @@ and `task.finished`, and status shows the count as `background: {tasks: N}` whil
 ## Data safety
 
 Removing an agent computer from the Fleet (from the file, or with `remove()`) stops it and keeps its drives and
-inbox; `a12s status` lists them as orphans.
+inbox; `a12s status` lists them as orphans. On GCE its home is kept as a snapshot for 30 days, then deleted
+([GCE: removed agent computers](drivers/gce.md#removed-agent-computers)).
 Plain `a12s down` removes the Fleet's containers, networks and Controller state and keeps every drive and the inbox
-database; the next `a12s up` reattaches them. Only two commands destroy data, and both ask first:
+database; the next `a12s up` reattaches them. Apart from that expiry of a GCE home snapshot, only two commands
+destroy data, and both ask first:
 
 - `a12s drive rm <name>`
 - `a12s down --purge` (lists the drives and the inbox database, `--yes` skips the question)

@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Changed (GCE): removing an agent computer retires its home disk: the Controller snapshots it, deletes the disk
+  once the snapshot is ready, and deletes the snapshot after 30 days. Adding an agent computer of the same name
+  within that time restores its home from the snapshot. An orphaned home disk (from an earlier removal) is retired
+  the same way within the hour. An attached disk is never touched. Upgrading: re-run `hack/gce/bootstrap.sh`, which
+  adds the snapshot permissions to `a12sController`
+  ([GCE: removed agent computers](docs/drivers/gce.md#removed-agent-computers)).
 - Fixed: a retryable failure of an automatic wake (e.g. GCE `INTERNAL_ERROR` on instance start) is retried with
   backoff (3 times, from 10 s) before auto-wake pauses. Before, one transient cloud error left the agent computer in
   Error with auto-wake paused until someone ran `a12s wake`.

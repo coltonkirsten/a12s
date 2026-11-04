@@ -3,6 +3,7 @@ package gce
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +15,8 @@ const (
 	LabelGeneration = "a12s-generation"
 	LabelSpec       = "a12s-spec" // digest of the staged spec
 	LabelDriveKind  = "a12s-drive"
+	// LabelExpires is the Unix time after which a retired home's snapshot is deleted.
+	LabelExpires = "a12s-expires"
 	// LabelFailure records why a Computer stopped on its own: "oom", "exit-<code>", "host-error",
 	// "guest-terminate" or "no-capacity". Its VM is stopped then, so its engine can't be asked.
 	LabelFailure = "a12s-failure"
@@ -36,6 +39,11 @@ func fitName(name string) string {
 func InstanceName(fleet, computer string) string { return fitName("a12s-" + fleet + "-" + computer) }
 
 func DiskName(fleet, driveID string) string { return fitName("a12s-" + fleet + "-" + driveID) }
+
+// SnapshotName is unique per disk, so retiring the same disk again finds its snapshot instead of making another.
+func SnapshotName(disk string, diskID uint64) string {
+	return fitName(disk + "-" + strconv.FormatUint(diskID, 10))
+}
 
 // ServiceAccountID is 6 to 30 characters, starts with a letter and never ends with '-'. The hash keeps two
 // Computers whose names share a long prefix apart.

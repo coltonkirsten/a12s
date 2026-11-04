@@ -113,7 +113,20 @@ type Disk struct {
 	Labels           map[string]string `json:"labels,omitempty"`
 	LabelFingerprint string            `json:"labelFingerprint,omitempty"`
 	ResourcePolicies []string          `json:"resourcePolicies,omitempty"`
+	SourceSnapshot   string            `json:"sourceSnapshot,omitempty"`
 	SelfLink         string            `json:"selfLink,omitempty"`
+}
+
+type Snapshot struct {
+	ID                uint64            `json:"id,string,omitempty"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description,omitempty"`
+	SourceDisk        string            `json:"sourceDisk,omitempty"`
+	DiskSizeGb        int64             `json:"diskSizeGb,string,omitempty"`
+	Status            string            `json:"status,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
+	SelfLink          string            `json:"selfLink,omitempty"`
 }
 
 type Operation struct {
@@ -485,6 +498,28 @@ func (a *API) DeleteDisk(ctx context.Context, name string) error {
 	return a.op(ctx, http.MethodDelete, a.zonal("disks", name), nil)
 }
 
+// CreateSnapshot snapshots a zonal disk; the zonal operation ends when the snapshot is READY or failed.
+func (a *API) CreateSnapshot(ctx context.Context, disk string, s *Snapshot) error {
+	return a.op(ctx, http.MethodPost, a.zonal("disks", disk, "createSnapshot"), s)
+}
+
+func (a *API) GetSnapshot(ctx context.Context, name string) (*Snapshot, error) {
+	var out Snapshot
+	return &out, a.do(ctx, http.MethodGet, a.global("snapshots", name), nil, &out)
+}
+
+func (a *API) ListSnapshots(ctx context.Context, filter string) ([]Snapshot, error) {
+	return listOf[Snapshot](ctx, a, withFilter(a.global("snapshots"), filter))
+}
+
+func (a *API) DeleteSnapshot(ctx context.Context, name string) error {
+	var out Operation
+	if err := a.do(ctx, http.MethodDelete, a.global("snapshots", name), nil, &out); err != nil {
+		return err
+	}
+	return a.wait(ctx, &out, a.global)
+}
+
 func (a *API) ListOperations(ctx context.Context, filter string) ([]Operation, error) {
 	return listOf[Operation](ctx, a, withFilter(a.zonal("operations"), filter))
 }
@@ -511,11 +546,13 @@ func (a *API) op(ctx context.Context, method, u string, in any) error {
 	return a.Wait(ctx, &out)
 }
 
-// Wait blocks until the operation is DONE and returns its error, if any, as an *APIError.
-func (a *API) Wait(ctx context.Context, op *Operation) error {
+// Wait blocks until the zonal operation is DONE and returns its error, if any, as an *APIError.
+func (a *API) Wait(ctx context.Context, op *Operation) error { return a.wait(ctx, op, a.zonal) }
+
+func (a *API) wait(ctx context.Context, op *Operation, scope func(parts ...string) string) error {
 	for op.Status != "DONE" {
 		var next Operation
-		if err := a.do(ctx, http.MethodPost, a.zonal("operations", op.Name, "wait"), nil, &next); err != nil {
+		if err := a.do(ctx, http.MethodPost, scope("operations", op.Name, "wait"), nil, &next); err != nil {
 			return err
 		}
 		op = &next

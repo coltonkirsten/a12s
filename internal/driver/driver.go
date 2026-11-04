@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"time"
 )
 
 type Driver interface {
@@ -63,6 +64,17 @@ type Driver interface {
 	Caller(local, remote netip.Addr) (name string, ok bool)
 
 	ServiceDriver
+}
+
+// HomeRetirer is a Driver that keeps a removed Computer's home as a snapshot instead of a drive. A drive created
+// again under the same ID starts from its newest retired snapshot.
+type HomeRetirer interface {
+	// RetireDrive snapshots an unattached home drive, marked to expire at until, then deletes the drive. It returns
+	// the snapshot's name, or "" when there was no drive. It refuses with ErrDriveAttached while anything has it
+	// attached, and keeps the drive when the snapshot is not complete.
+	RetireDrive(ctx context.Context, id string, until time.Time) (snapshot string, err error)
+	// ExpireRetired deletes the retired snapshots whose expiry is before now and returns their names.
+	ExpireRetired(ctx context.Context, now time.Time) ([]string, error)
 }
 
 // Terminal is a shell on a TTY: reads are its output, writes its input.
