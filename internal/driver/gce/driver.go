@@ -94,7 +94,10 @@ type openGuest struct {
 	g  Guest
 }
 
-var _ driver.Driver = (*Driver)(nil)
+var (
+	_ driver.Driver      = (*Driver)(nil)
+	_ driver.HomeRetirer = (*Driver)(nil)
+)
 
 // New checks the configuration and reads the subnet; it creates nothing.
 func New(ctx context.Context, cfg Config) (*Driver, error) {

@@ -16,6 +16,8 @@ laptop or a single host, the Docker driver stays simpler, faster to wake and che
   API's [terminal](../api.md#terminal-and-files) instead, and reads and writes files through its files routes.
 - **Home drives have a hard size**: persistent disks, 10 GiB unless `resources` asks for more. They grow, never
   shrink.
+- **A removed agent computer's home is a snapshot** for 30 days, not a disk kept until `a12s drive rm`. See
+  [Removed agent computers](#removed-agent-computers).
 - **Egress** is enforced by the VPC firewall plus rules inside each VM: an agent computer can reach only the
   Controller's egress proxy and mTLS listener, with no DNS, as on Docker.
 
@@ -153,7 +155,9 @@ which the check enforces.
 The two roles hold exactly what the driver calls. `a12sController`:
 
 - `compute.instances.{create,delete,get,list,start,stop,setMetadata,setLabels,setTags,setMachineType,attachDisk,detachDisk,setServiceAccount,getGuestAttributes}`
-- `compute.disks.{create,get,list,delete,resize,use,setLabels}`, `compute.resourcePolicies.use`
+- `compute.disks.{create,get,list,delete,resize,use,setLabels,createSnapshot}`, `compute.resourcePolicies.use`
+- `compute.snapshots.{create,get,list,delete,setLabels,useReadOnly}`: retiring and restoring a removed agent
+  computer's home
 - `compute.subnetworks.{get,use}`, `compute.zoneOperations.{get,list}`, `compute.firewalls.list`,
   `compute.machineTypes.list`
 - `iam.serviceAccounts.{create,get}` (used only with per-computer identity)
@@ -209,6 +213,22 @@ Turn that clones a repository, searches it and runs `npm ci` peaked at 360 to 37
 for the shape, wake tries the same size in each next family (`families`, default `e2, n2d, t2d`); the next wake
 starts from the first family again. If none has capacity, the wake fails and `a12s status` says so.
 
+## Removed agent computers
+
+Removing an agent computer (from the Fleet file, or `remove()`) deletes its VM and retires its home disk: the
+Controller snapshots the disk, deletes the disk once the snapshot is `READY`, and logs both. The snapshot is named
+`<disk>-<disk id>` and labelled `a12s-fleet`, `a12s-computer`, `a12s-drive=home` and `a12s-expires` (Unix seconds,
+30 days on). An hourly pass deletes expired snapshots and retires any orphaned home disk (`a12s drive ls` shows
+it), so a retire that failed is retried and a home disk left by an older a12s is retired too. A disk attached to
+any VM is never snapshotted or deleted; if the snapshot fails, the disk stays.
+
+Adding an agent computer with the same name before the snapshot expires restores its home from the newest one:
+same files, sessions and tools as when it was removed. To start it fresh instead, delete its snapshots first:
+`gcloud compute snapshots list --filter=labels.a12s-computer=<name>`, then `gcloud compute snapshots delete`. To
+keep a home longer, change its `a12s-expires` label, or remove the label (then nothing expires or restores it).
+
+`a12s down` keeps home disks as disks, and `a12s drive rm` and `down --purge` delete them without a snapshot.
+
 ## When things fail
 
 | Event | What happens | What `a12s status` shows |
@@ -249,5 +269,6 @@ of VM minutes.
 ## Taking a fleet down
 
 `a12s down` on the Controller VM deletes the agent computers' VMs (and their service accounts) and the Controller's
-container, and keeps the home disks; `a12s up` reattaches them. `a12s down --purge` also deletes the home disks after
+container, and keeps the home disks; `a12s up` reattaches them (an `up` whose Fleet leaves an agent computer out
+retires that one's home). `a12s down --purge` also deletes the home disks after
 asking. The VPC, firewall rules, Controller VM and service account stay: delete the project to remove everything.

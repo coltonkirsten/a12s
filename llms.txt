@@ -245,6 +245,7 @@ await lead.stop(); await lead.wake();               // stop the active Turn and 
 await lead.sleep();                                 // a sender listed in wakeOnMessage wakes it
 await lead.sleep({ hold: true });                   // until wake(): NO Message wakes it. Py: sleep(hold=True)
 await coder.remove();                               // stops and removes it; its home drive and inbox are kept
+                                                    //   (GCE: the home as a snapshot for 30 days)
 await fleet.status();                               // every agent computer and Service: phase, inbox, power
 
 const clock = await fleet.services.get("clock");    // fleet.services: create, get, list

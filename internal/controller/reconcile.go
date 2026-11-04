@@ -707,8 +707,8 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 	return errorf(http.StatusBadRequest, api.ErrInvalid, "state must be %q or %q", api.PowerAwake, api.PowerAsleep)
 }
 
-// removeComputer stops and deletes a Computer the Fleet no longer
-// declares. Its drives stay (status lists them as orphans).
+// removeComputer stops and deletes a Computer the Fleet no longer declares. Its drives stay (status lists them as
+// orphans), except a home the Driver retires to a snapshot.
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
 	c.setTransition(name, true)
 	c.stopEvents(name)
@@ -727,7 +727,10 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 			c.logf("%s: turn history: %v", name, err)
 		}
 	}
-	c.logf("%s: removed (drives kept)", name)
+	c.logf("%s: removed", name)
+	if r, ok := c.drv.(driver.HomeRetirer); ok {
+		c.retireHome(ctx, r, name)
+	}
 	return err
 }
 

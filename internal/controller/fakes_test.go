@@ -868,6 +868,12 @@ func startHarness(t *testing.T, dir string, d *fakeDriver) *harness {
 // divided by scale.
 func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) *harness {
 	t.Helper()
+	return startHarnessOn(t, dir, d, nil, scale)
+}
+
+// startHarnessOn runs the Controller on wrap(d) when wrap is set, so a test can add an optional Driver interface.
+func startHarnessOn(t *testing.T, dir string, d *fakeDriver, wrap func(*fakeDriver) driver.Driver, scale float64) *harness {
+	t.Helper()
 	cds := &fakeComputerds{}
 	if d == nil {
 		d = newFakeDriver(cds)
@@ -878,7 +884,11 @@ func startHarnessScaled(t *testing.T, dir string, d *fakeDriver, scale float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale}, d, ca)
+	var drv driver.Driver = d
+	if wrap != nil {
+		drv = wrap(d)
+	}
+	c, err := New(Config{Fleet: "lab", StateDir: dir, APIToken: "test-token-0123456789", TimeScale: scale}, drv, ca)
 	if err != nil {
 		t.Fatal(err)
 	}

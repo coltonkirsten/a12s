@@ -71,7 +71,8 @@ with a12s.Fleet() as fleet:
 ```
 
 Names are DNS labels of at most 40 characters. `remove()` keeps the home drive: `a12s drive ls` lists it as
-orphaned, and `a12s drive rm home-<name>` deletes it. `a12s up` removes agent computers the file doesn't list, so
+orphaned, and `a12s drive rm home-<name>` deletes it. On GCE the home is kept as a snapshot for 30 days instead
+([GCE: removed agent computers](drivers/gce.md#removed-agent-computers)). `a12s up` removes agent computers the file doesn't list, so
 run it when no task is in flight.
 
 ## Lead and workers
