@@ -482,6 +482,34 @@ func (c *Controller) statusNow(name string) (api.ComputerdStatus, error) {
 	return c.client(name).Status(ctx)
 }
 
+// stopSettle bounds afterStop: a stopped harness exits within seconds (computerd kills it after 15s at most).
+const stopSettle = 30 * time.Second
+
+// afterStop watches a stopped session until its background work is gone, then treats that as the idle boundary
+// it is. computerd reports the stopped tasks while the harness still counts them, and the count drops when the
+// harness exits, with no event: a change staged behind that work would otherwise wait for an event that never
+// comes, and hold the inbox with it.
+func (c *Controller) afterStop(name string) {
+	deadline := time.Now().Add(stopSettle)
+	for time.Now().Before(deadline) {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-time.After(c.timing.Poll):
+		}
+		st, err := c.statusNow(name)
+		if err != nil {
+			continue
+		}
+		c.observeStatus(name, st)
+		if st.Background == nil || st.Background.Tasks == 0 {
+			c.maybeApplyStaged(name)
+			c.kick(name)
+			return
+		}
+	}
+}
+
 func (c *Controller) maybeApplyStaged(name string) {
 	c.mu.Lock()
 	rec := c.state.Computers[name]
