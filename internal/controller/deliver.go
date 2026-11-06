@@ -133,6 +133,9 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 		return false
 	case reason == "unreachable":
 		return true
+	case reason == "busy" && st.ActiveTurn == "":
+		// Busy with no Turn (a harness restart) ends without an event: look again.
+		return true
 	case reason == "asleep":
 		// An enqueue, a hold lifted or credentials loaded: wake on policy.
 		c.maybeAutoWake(ctx, name)
@@ -168,17 +171,20 @@ func (c *Controller) deliverable(ctx context.Context, name string) (string, api.
 	switch {
 	case phase == api.PhaseAsleep || phase == api.PhaseStopping:
 		return "asleep", api.ComputerdStatus{}
-	case phase == api.PhaseBusy:
-		return "busy", api.ComputerdStatus{}
-	case phase != api.PhaseReady || closed || transition:
+	case (phase != api.PhaseReady && phase != api.PhaseBusy) || closed || transition:
 		return "not_ready", api.ComputerdStatus{}
 	}
 	if held, _, err := c.inbox.Held(ctx, name); err == nil && held {
 		return "held", api.ComputerdStatus{}
 	}
+	// Busy is asked of computerd, never taken from the last read: computerd is busy without a Turn
+	// while it restarts the harness (credentials applied at the idle boundary), and that ends with no event.
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	st, err := c.client(name).Status(sctx)
 	cancel()
+	if err == nil {
+		c.observeStatus(name, st)
+	}
 	switch {
 	case err != nil:
 		return "unreachable", st

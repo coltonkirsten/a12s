@@ -16,6 +16,7 @@ func TestTimeLimitStopTellsTheAgent(t *testing.T) {
 	h := newHarness(t)
 	h.up(labFleet(t, nil), false)
 	builder := h.cds.get("builder")
+	waitFor(t, builder.subscribed)
 	builder.task(true)
 	seq := builder.timeLimit(7200)
 	waitFor(t, func() bool { return len(builder.requestsSnapshot()) == 1 })
