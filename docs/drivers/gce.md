@@ -47,6 +47,13 @@ Then, on the Controller VM (`gcloud compute ssh a12s-<fleet>-controller --tunnel
 `driver.yaml`, and `a12s up` as usual. The images the fleet uses are pulled to the Controller VM; each agent
 computer's VM gets them from there, so agent computer VMs need no registry and no internet.
 
+An agent computer's VM holds only the images its agent computer runs. When it switches to another image, the
+Controller first removes every image no container uses (the old generation's included), then checks the boot disk
+has room for the load: the engine stages the whole image before unpacking it, so a load needs about the new images'
+size plus the largest one again. If it still doesn't fit, the agent computer goes to Error before anything is
+loaded, saying how many bytes are free and how many the load needs; grow that VM's boot disk (it is
+`a12s-<fleet>-<name>`) or use a smaller image. `bootDiskGb` sets the size of new VMs only.
+
 ## Choosing the driver
 
 Put `driver.yaml` next to `controller.json`, in `~/.a12s/<fleet>/` on the Controller VM:
