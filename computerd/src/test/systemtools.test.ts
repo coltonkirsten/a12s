@@ -14,7 +14,11 @@ test('system tools MCP server forwards to the computerd socket', async () => {
   const cfg = testConfig();
   mkdirSync(dirname(cfg.sockPath), { recursive: true });
   let restarts = 0;
-  const computer = { requestRestart: () => `restart #${++restarts}` } as unknown as Computer;
+  const extended: unknown[] = [];
+  const computer = {
+    requestRestart: () => `restart #${++restarts}`,
+    backgroundTasksTool: (id?: string, hours?: number) => (extended.push([id, hours]), { tasks: [] }),
+  } as unknown as Computer;
   const server = createServer(localHandler(computer));
   await new Promise<void>((r) => server.listen(cfg.sockPath, r));
   const transport = new StdioClientTransport({
@@ -26,10 +30,14 @@ test('system tools MCP server forwards to the computerd socket', async () => {
   try {
     await client.connect(transport);
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name), ['restart_harness']);
+    assert.deepEqual(tools.map((t) => t.name), ['restart_harness', 'background_tasks']);
     const r = await client.callTool({ name: 'restart_harness', arguments: {} });
     assert.equal(restarts, 1);
     assert.deepEqual(r.content, [{ type: 'text', text: '{"message":"restart #1"}' }]);
+    await client.callTool({ name: 'background_tasks', arguments: {} });
+    const b = await client.callTool({ name: 'background_tasks', arguments: { id: 'b5w202475', hours: 6 } });
+    assert.equal(b.isError, false);
+    assert.deepEqual(extended, [[undefined, undefined], ['b5w202475', 6]]);
   } finally {
     await client.close();
     server.close();

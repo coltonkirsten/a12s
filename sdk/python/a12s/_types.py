@@ -88,8 +88,19 @@ class PowerStatus:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BackgroundTask:
+    id: str
+    kind: str
+    description: str
+    started_at: str
+    deadline: str
+    """When a12s stops it: 2 hours after it started unless the agent asked for more."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Background:
     tasks: int
+    items: list[BackgroundTask] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

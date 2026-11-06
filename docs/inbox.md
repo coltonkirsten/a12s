@@ -55,7 +55,8 @@ Run the nightly dependency audit.
 [end of inbox batch b_01JBX8C2]
 ```
 
-- `from` is the sender's own, unverified label. `via` is the authenticated principal (`local`, `token:<name>`,
+- `from` is the sender's own, unverified label. `via` is the authenticated principal (`a12s` for a Message a12s
+  writes itself, such as [a background task stopped at its time limit](concepts.md#background-work), `local`, `token:<name>`,
   `service:<name>`, `computer:<name>`) and the only field an agent should trust.
 - The **intro** line and the **safety block** after it are fixed in the binary; nothing in the Fleet, API or CLI can
   remove or edit them.

@@ -86,6 +86,11 @@ export interface Adapter {
   stop(): Promise<void>;
   /** Live background tasks in the session. */
   backgroundTasks(): number;
+  /**
+   * Stops one background task; its task.finished follows with status `stopped`. Resolves false when the session has
+   * no such task (it already ended); rejects when the harness cannot stop that task on its own.
+   */
+  stopTask(id: string): Promise<boolean>;
   /** Checks a session can be resumed without running a model turn. Resolves null if fine, else a reason. */
   precheck(sessionId: string): Promise<string | null>;
   /** Ends the live session and its background work; the next turn resumes it in a new process. */

@@ -1,4 +1,4 @@
-import { EventQueue, ResumeError, type Adapter, type AdapterEvent, type SessionListener, type TaskEvent, type TurnInput, type TurnStatus } from '../adapters/adapter.js';
+import { EventQueue, ResumeError, type Adapter, type AdapterEvent, type SessionListener, type TaskEvent, type TaskStatus, type TurnInput, type TurnStatus } from '../adapters/adapter.js';
 
 /** An in-memory harness: turns stay open until finish() or stop(). */
 export class StubAdapter implements Adapter {
@@ -28,11 +28,23 @@ export class StubAdapter implements Adapter {
     return this.tasks.size;
   }
 
+  /** Ids stopTask was called with. */
+  readonly stoppedTasks: string[] = [];
+  /** When false, stopTask resolves but the task keeps running (a harness that ignores the stop). */
+  honourStopTask = true;
+
+  async stopTask(id: string): Promise<boolean> {
+    this.stoppedTasks.push(id);
+    if (!this.tasks.has(id)) return false;
+    if (this.honourStopTask) this.task(id, false, 'stopped');
+    return true;
+  }
+
   /** Background work starts (inside the open turn if any) or ends. */
-  task(id: string, running: boolean): void {
+  task(id: string, running: boolean, status: TaskStatus = 'completed'): void {
     const ev: TaskEvent = running
       ? { type: 'task.started', data: { id, kind: 'local_agent', description: id } }
-      : { type: 'task.finished', data: { id, kind: 'local_agent', description: id, status: 'completed' } };
+      : { type: 'task.finished', data: { id, kind: 'local_agent', description: id, status } };
     if (running) this.tasks.add(id);
     else this.tasks.delete(id);
     const q = this.queue ?? this.bgQueue;
@@ -57,7 +69,7 @@ export class StubAdapter implements Adapter {
 
   /** Stop and restart end the session: its background work is gone. */
   private endSession(): void {
-    for (const id of [...this.tasks]) this.task(id, false);
+    for (const id of [...this.tasks]) this.task(id, false, 'killed');
   }
 
   async startTurn(input: TurnInput) {

@@ -83,7 +83,16 @@ export const statusResponse: T.StatusResponse = {
         "sleptAt": "2026-10-12T12:00:00Z"
       },
       "background": {
-        "tasks": 1
+        "tasks": 1,
+        "items": [
+          {
+            "id": "id",
+            "kind": "kind",
+            "description": "description",
+            "startedAt": "2026-10-12T12:00:00Z",
+            "deadline": "2026-10-12T12:00:00Z"
+          }
+        ]
       }
     }
   ],
@@ -327,7 +336,16 @@ export const putFleetResponse: T.PutFleetResponse = {
         "sleptAt": "2026-10-12T12:00:00Z"
       },
       "background": {
-        "tasks": 1
+        "tasks": 1,
+        "items": [
+          {
+            "id": "id",
+            "kind": "kind",
+            "description": "description",
+            "startedAt": "2026-10-12T12:00:00Z",
+            "deadline": "2026-10-12T12:00:00Z"
+          }
+        ]
       }
     }
   },
@@ -595,7 +613,16 @@ export const agentComputersResponse: T.AgentComputersResponse = {
           "sleptAt": "2026-10-12T12:00:00Z"
         },
         "background": {
-          "tasks": 1
+          "tasks": 1,
+          "items": [
+            {
+              "id": "id",
+              "kind": "kind",
+              "description": "description",
+              "startedAt": "2026-10-12T12:00:00Z",
+              "deadline": "2026-10-12T12:00:00Z"
+            }
+          ]
         }
       }
     }
@@ -1175,7 +1202,8 @@ export const taskData: T.TaskData = {
   "toolUseId": "toolUseId",
   "status": "completed",
   "summary": "summary",
-  "result": "result"
+  "result": "result",
+  "timeLimit": 1
 };
 
 export const taskDataMinimal: T.TaskData = {

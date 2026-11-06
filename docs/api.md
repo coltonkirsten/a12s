@@ -55,8 +55,9 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `PUT /v1/fleet` | `{fleet, credentials?}` → replace the whole Fleet (owner only); `a12s up` sends this |
 
 The field-by-field shapes are in `internal/api` and the SDKs' types. A ComputerStatus carries `seccomp` (the
-profile's `sha256:` digest) when the agent computer runs with its own seccomp profile, and `background: {tasks}` while
-its session runs [background work](concepts.md#background-work). A Turn has `reason: "background"` when the harness
+profile's `sha256:` digest) when the agent computer runs with its own seccomp profile, and `background: {tasks, items}` while
+its session runs [background work](concepts.md#background-work); each item is `{id, kind, description, startedAt,
+deadline}`, the deadline being when a12s stops the task. A Turn has `reason: "background"` when the harness
 started it by itself.
 
 ## Tokens

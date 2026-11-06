@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chownSync, existsSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type TurnStatus } from './adapters/adapter.js';
+import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type TaskEvent, type ToolEvent, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
 import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import type { Journal } from './journal.js';
@@ -49,6 +49,33 @@ interface ActiveTurn {
   resolveDone: () => void;
 }
 
+/** How long background work may run: `defaultMs` unless the agent asks for up to `maxMs`; `graceMs` for a stop to land. */
+export interface TaskLimits {
+  defaultMs: number;
+  maxMs: number;
+  graceMs: number;
+}
+
+export const TASK_LIMITS: TaskLimits = { defaultMs: 2 * 3600_000, maxMs: 24 * 3600_000, graceMs: 30_000 };
+
+/** A running background task's clock. `expired`: its limit passed and computerd is stopping it. */
+interface TaskClock {
+  kind: string;
+  description: string;
+  startedAt: number;
+  deadline: number;
+  timer: NodeJS.Timeout | null;
+  expired: boolean;
+}
+
+export interface BackgroundTask {
+  id: string;
+  kind: string;
+  description: string;
+  startedAt: string;
+  deadline: string;
+}
+
 const CONTINUE_PROMPT = 'a12s restarted your harness at your request and resumed this session. Continue the task you were working on.';
 const PRECHECK_TIMEOUT_MS = 60_000;
 const RECLAIM_DEBOUNCE_MS = 200;
@@ -76,6 +103,14 @@ export class Computer {
   private failedGeneration: number | null = null;
   private watchers: FSWatcher[] = [];
   private reclaimTimer: NodeJS.Timeout | null = null;
+  private readonly clocks = new Map<string, TaskClock>();
+  /**
+   * Tasks whose end was journaled before their start: a start travels in the turn's stream, an end after the turn
+   * through the listener, which can overtake it.
+   */
+  private readonly endedEarly = new Set<string>();
+  /** A task outlived its stop: the session restarts at the next moment no turn runs. */
+  private forceStop = false;
 
   constructor(
     private readonly cfg: Config,
@@ -83,10 +118,11 @@ export class Computer {
     private readonly adapter: Adapter,
     private readonly mcpServers: Record<string, McpServer>,
     private readonly credentialPollMs = 2_000,
+    private readonly limits: TaskLimits = TASK_LIMITS,
   ) {
     adapter.listen({
       backgroundTurn: (run) => this.beginBackgroundTurn(run),
-      taskEvent: (ev) => this.journal.append(ev.type, ev.data, { session: this.session?.sessionId ?? null }),
+      taskEvent: (ev) => this.journal.append(ev.type, this.clockTask(ev), { session: this.session?.sessionId ?? null }),
     });
   }
 
@@ -147,7 +183,7 @@ export class Computer {
       phase: this.phase,
       session: this.session?.sessionId ?? null,
       activeTurn: this.running?.turnId ?? null,
-      background: { tasks: this.adapter.backgroundTasks() },
+      background: { tasks: this.adapter.backgroundTasks(), items: this.backgroundList() },
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
       credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
@@ -355,7 +391,8 @@ export class Computer {
             continue;
           }
         }
-        this.journal.append(ev.type, ev.data, { turn: active.turnId, session });
+        const data = ev.type === 'task.started' || ev.type === 'task.finished' ? this.clockTask(ev) : ev.data;
+        this.journal.append(ev.type, data, { turn: active.turnId, session });
       }
     } catch (err) {
       this.journal.append('diagnostic', { message: `adapter stream failed: ${(err as Error).message}` }, { turn: active.turnId, session });
@@ -368,7 +405,8 @@ export class Computer {
     if (resumed && status === 'completed') this.resumePending = false;
     this.endTurn(active);
     if (this.active || this.background) return;
-    if (this.restartRequested) void this.restartHarness(active.turnId, status);
+    if (this.forceStop) void this.forceStopSession();
+    else if (this.restartRequested) void this.restartHarness(active.turnId, status);
     else void this.applyCredentials();
   }
 
@@ -377,6 +415,100 @@ export class Computer {
     if (this.active === active) this.active = null;
     if (this.background === active) this.background = null;
     active.resolveDone();
+  }
+
+  /**
+   * Starts a background task's clock, or stops it and returns the task.finished data to journal: with `timeLimit`
+   * (seconds) when computerd stopped the task at its limit.
+   */
+  private clockTask(ev: TaskEvent | ToolEvent): Record<string, unknown> {
+    if (ev.type === 'task.started') {
+      if (this.endedEarly.delete(ev.data.id)) return ev.data;
+      const now = Date.now();
+      const clock: TaskClock = { kind: ev.data.kind, description: ev.data.description, startedAt: now, deadline: now + this.limits.defaultMs, timer: null, expired: false };
+      const previous = this.clocks.get(ev.data.id)?.timer;
+      if (previous) clearTimeout(previous);
+      this.clocks.set(ev.data.id, clock);
+      this.arm(ev.data.id, clock);
+      return ev.data;
+    }
+    if (ev.type !== 'task.finished') return ev.data;
+    const clock = this.clocks.get(ev.data.id);
+    if (!clock) {
+      this.endedEarly.add(ev.data.id);
+      return ev.data;
+    }
+    this.clocks.delete(ev.data.id);
+    if (clock.timer) clearTimeout(clock.timer);
+    if (!clock.expired) return ev.data;
+    if (![...this.clocks.values()].some((c) => c.expired)) this.forceStop = false;
+    return { ...ev.data, status: 'stopped', timeLimit: Math.max(1, Math.round((clock.deadline - clock.startedAt) / 1000)) };
+  }
+
+  private arm(id: string, clock: TaskClock): void {
+    if (clock.timer) clearTimeout(clock.timer);
+    clock.timer = setTimeout(() => this.expire(id, clock), Math.max(0, clock.deadline - Date.now()));
+    clock.timer.unref();
+  }
+
+  /**
+   * A task reached its limit: the harness stops it alone. A harness that cannot, or a task still running after the
+   * grace period, ends the whole session (as `a12s stop` does) once no turn runs, so it can never keep the computer up.
+   */
+  private expire(id: string, clock: TaskClock): void {
+    if (this.clocks.get(id) !== clock) return;
+    clock.expired = true;
+    clock.timer = null;
+    const force = () => {
+      if (this.clocks.get(id) !== clock) return;
+      this.forceStop = true;
+      if (!this.running) void this.forceStopSession();
+    };
+    this.adapter.stopTask(id).then(
+      (running) => {
+        if (!running) {
+          if (this.clocks.get(id) === clock) this.clocks.delete(id);
+          return;
+        }
+        const t = setTimeout(force, this.limits.graceMs);
+        t.unref();
+      },
+      (err: Error) => {
+        this.journal.append('diagnostic', { message: `stopping background task ${id} at its time limit failed: ${err.message}` }, { session: this.session?.sessionId ?? null });
+        force();
+      },
+    );
+  }
+
+  private async forceStopSession(): Promise<void> {
+    if (!this.forceStop || this.running || this.restarting) return;
+    this.forceStop = false;
+    this.restarting = true;
+    try {
+      await this.adapter.restart();
+    } catch (err) {
+      this.journal.append('diagnostic', { message: `ending the session after a task outlived its time limit failed: ${(err as Error).message}` });
+    } finally {
+      this.restarting = false;
+    }
+  }
+
+  backgroundList(): BackgroundTask[] {
+    return [...this.clocks].map(([id, c]) => ({ id, kind: c.kind, description: c.description, startedAt: new Date(c.startedAt).toISOString(), deadline: new Date(c.deadline).toISOString() }));
+  }
+
+  /** The background_tasks tool: lists the tasks, and with `id` and `hours` gives that task `hours` from now. */
+  backgroundTasksTool(id?: string, hours?: number): { tasks: BackgroundTask[]; message?: string } {
+    if (id === undefined) return { tasks: this.backgroundList() };
+    const clock = this.clocks.get(id);
+    if (!clock || clock.expired) throw new HttpError(404, `no running background task ${id}; call background_tasks without arguments to list them`);
+    const maxHours = this.limits.maxMs / 3600_000;
+    if (typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0 || hours > maxHours) {
+      throw new HttpError(400, `hours must be more than 0 and at most ${maxHours}`);
+    }
+    clock.deadline = Date.now() + hours * 3600_000;
+    this.arm(id, clock);
+    return { tasks: this.backgroundList(), message: `${id} may now run until ${new Date(clock.deadline).toISOString()}` };
   }
 
   /** POST /v1/turns/{id}/stop: the turn ends interrupted and the session's background work ends too. Idempotent. */

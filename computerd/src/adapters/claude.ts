@@ -101,6 +101,13 @@ export class ClaudeAdapter implements Adapter {
     return live.level ? live.level.size : live.tasks.size;
   }
 
+  async stopTask(id: string): Promise<boolean> {
+    const live = this.live;
+    if (!live || !live.tasks.has(id)) return false;
+    await live.query.stopTask(id);
+    return true;
+  }
+
   async startTurn(input: TurnInput): Promise<RunningTurn> {
     const busy = this.live && (this.live.pending || this.live.current?.uuid);
     if (this.starting || busy) throw new Error('a turn is already running');

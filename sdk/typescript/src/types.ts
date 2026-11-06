@@ -187,7 +187,16 @@ export interface ComputerStatus {
   inbox?: InboxSummary;
   power?: PowerStatus;
   /** Set while the harness session runs background work (sub-agents, shells) between Turns; it is not idle then. */
-  background?: { tasks: number };
+  background?: { tasks: number; items?: BackgroundTask[] };
+}
+
+/** A running background task and when a12s stops it: 2 hours after it started unless the agent asked for more. */
+export interface BackgroundTask {
+  id: string;
+  kind: string;
+  description: string;
+  startedAt: string;
+  deadline: string;
 }
 
 export interface DriveRow {
@@ -371,6 +380,8 @@ export interface TaskData {
   summary?: string;
   /** On task.finished of a sub-agent: its last text, truncated to 2000 characters (Claude Code only). */
   result?: string;
+  /** On task.finished when a12s stopped the task at its time limit: the limit, in seconds. */
+  timeLimit?: number;
 }
 
 /** POST /v1/agent-computers/{name}/stop: the Turns it stopped and how many background tasks it ended. */

@@ -15,6 +15,21 @@ const tools: { name: string; description: string; inputSchema: Record<string, un
       'Restart your harness when this turn ends, resume this same session, and continue with a new turn. Use it to load skills or MCP servers you just wrote.',
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'background_tasks',
+    description:
+      'List your background tasks (background shells and sub-agents) with when each started and when its time limit ends. ' +
+      'a12s stops a background task at its time limit, 2 hours unless you ask for more, and tells you in your inbox. ' +
+      'When you start work that needs longer, call this with its id (the id the harness gave it) and hours: it may then ' +
+      'run that many hours from now, up to 24. Call again to extend.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The background task to give more time' },
+        hours: { type: 'number', exclusiveMinimum: 0, maximum: 24, description: 'Hours from now it may run' },
+      },
+    },
+  },
 ];
 if (sendTo.length) {
   tools.push({
@@ -58,7 +73,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (!tools.some((t) => t.name === name)) return { isError: true, content: [{ type: 'text', text: `unknown tool ${name}` }] };
   try {
     const args = req.params.arguments ?? {};
-    const payload = name === 'send' ? args : {};
+    const payload = name === 'restart_harness' ? {} : args;
     const out = await call(`/v1/system/${name}`, payload);
     const controllerStatus = (JSON.parse(out) as { status?: unknown }).status;
     const refused = typeof controllerStatus === 'number' && controllerStatus >= 300;

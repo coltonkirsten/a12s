@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // The fixtures are copied from computerd/src/computer.ts and
@@ -79,5 +80,13 @@ func TestComputerdPayloads(t *testing.T) {
 				t.Errorf("got  %+v\nwant %+v", tt.into, tt.want)
 			}
 		})
+	}
+}
+
+func TestShortDuration(t *testing.T) {
+	for in, want := range map[time.Duration]string{2 * time.Hour: "2h", 90 * time.Minute: "1h30m", 90 * time.Second: "1m30s", 10 * time.Minute: "10m", 24 * time.Hour: "24h", 0: "0s"} {
+		if got := ShortDuration(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coltonkirsten/a12s/internal/api"
 )
@@ -87,5 +88,23 @@ func TestWriteStatus(t *testing.T) {
 		if strings.HasSuffix(line, " ") {
 			t.Errorf("trailing space: %q", line)
 		}
+	}
+}
+
+func TestBackgroundCell(t *testing.T) {
+	now := time.Date(2026, 11, 5, 18, 0, 0, 0, time.UTC)
+	b := &api.Background{Tasks: 2, Items: []api.BackgroundTask{
+		{ID: "b1", StartedAt: now.Add(-26 * time.Hour), Deadline: now.Add(-time.Minute)},
+		{ID: "b2", StartedAt: now.Add(-30 * time.Minute), Deadline: now.Add(90 * time.Minute)},
+	}}
+	if got := BackgroundCell(b, now); got != "background 2 (oldest 26h, stopping)" {
+		t.Errorf("got %q", got)
+	}
+	b.Items = b.Items[1:]
+	if got := BackgroundCell(b, now); got != "background 2 (oldest 30m, next stop in 1h30m)" {
+		t.Errorf("got %q", got)
+	}
+	if got := BackgroundCell(&api.Background{Tasks: 1}, now); got != "background 1" {
+		t.Errorf("got %q", got)
 	}
 }
