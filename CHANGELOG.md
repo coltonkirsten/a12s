@@ -14,6 +14,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   `a12s status` shows the oldest task's age and the time to the next stop. An agent that runs a dev server or other
   long work in the background must now extend it ([Background work](docs/concepts.md#background-work)).
 
+- Fixed: on GCE, an agent computer's VM no longer keeps every image it ever ran. Each switch to a new image loaded
+  it next to all the old ones, so a 10 GB boot disk that had run two images couldn't take a third: the load failed
+  half-way with "no space left on device" and the agent computer went to Error. The Controller now removes the
+  images no container uses before it loads (and the bundles of earlier versions), and again after the switch. If the
+  new image still doesn't fit, the agent computer goes to Error before loading anything, with the bytes free and the
+  bytes the load needs ([GCE driver](docs/drivers/gce.md)).
 - Fixed: `a12s up` no longer holds up Message deliveries, wakes or sleeps of the agent computers it isn't changing.
   Before, while one agent computer was restaged (a VM wake can take minutes), every other agent computer's inbox
   waited for it. Each agent computer and Service is now converged under its own lock; applies still run one at a time.

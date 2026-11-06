@@ -233,6 +233,15 @@ func loadedImageID(r io.Reader) (string, error) {
 
 func (g *vmGuest) Materialize(ctx context.Context, spec driver.ComputerSpec) error {
 	cli := g.eng.Client()
+	image, err := g.wanted(ctx, spec.Image)
+	if err != nil {
+		return fmt.Errorf("image %s: %w", spec.Image, err)
+	}
+	bundle, err := g.wanted(ctx, spec.Bundle.Image)
+	if err != nil {
+		return fmt.Errorf("bundle %s: %w", spec.Bundle.Image, err)
+	}
+	var replaced string // the image of the generation this one replaces
 	res, err := cli.ContainerInspect(ctx, g.containerName(), client.ContainerInspectOptions{})
 	switch {
 	case engine.IsNotFound(err):
@@ -248,27 +257,47 @@ func (g *vmGuest) Materialize(ctx context.Context, spec driver.ComputerSpec) err
 			if done, err := g.eng.Bootstrapped(ctx, c.ID, spec); err != nil {
 				return err
 			} else if done {
+				// Images an earlier switch left behind go now.
+				_ = g.prune(ctx, image.localID, bundle.localID)
 				return nil
 			}
 		}
 		if _, err := cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{}); err != nil {
 			return fmt.Errorf("remove generation %s: %w", c.Config.Labels[engine.LabelGeneration], err)
 		}
+		replaced = c.Image
 	}
-	image, err := g.copyImage(ctx, spec.Image)
+	fresh, err := g.resetBundleVolume(ctx, bundle.id)
+	if err != nil {
+		return err
+	}
+	var extract int64
+	if fresh {
+		extract = bundle.size
+	}
+	if err := g.makeRoom(ctx, []wantedImage{image, bundle}, extract, replaced); err != nil {
+		return err
+	}
+	imageRef, err := g.copyImage(ctx, spec.Image)
 	if err != nil {
 		return fmt.Errorf("image %s: %w", spec.Image, err)
 	}
-	bundle, err := g.copyImage(ctx, spec.Bundle.Image)
+	bundleRef, err := g.copyImage(ctx, spec.Bundle.Image)
 	if err != nil {
 		return fmt.Errorf("bundle %s: %w", spec.Bundle.Image, err)
 	}
-	if _, err := g.eng.EnsureBundleAs(ctx, bundle, BundleVolume(g.e.Fleet), spec.Bundle.Image); err != nil {
+	if _, err := g.eng.EnsureBundleAs(ctx, bundleRef, BundleVolume(g.e.Fleet), spec.Bundle.Image); err != nil {
 		return err
 	}
-	spec.Image = image
+	spec.Image = imageRef
 	if _, err := g.eng.CreateComputer(ctx, spec, g.placement()); err != nil {
 		return err
+	}
+	// Whatever is left of the generation this replaced (an image a failed load half-registered, say) goes too.
+	if image, err = g.wanted(ctx, image.ref); err == nil {
+		if bundle, err = g.wanted(ctx, bundle.ref); err == nil {
+			_ = g.prune(ctx, image.localID, bundle.localID)
+		}
 	}
 	return nil
 }
