@@ -104,7 +104,8 @@ and `task.finished`, and status shows the count as `background: {tasks: N}` whil
   or automatic), `restart_harness`, a Message sent with `--fresh`, applying a config change, and the agent computer
   stopping or restarting. A rotated credential reaches a long-lived harness only by restarting it, so it is applied
   once no background work runs. Background work that never ends (a dev server, say) keeps a config change staged
-  and the agent computer awake until `a12s stop <name>` ends it. A harness that crashes fails the running Turn; the
+  and the agent computer awake until `a12s stop <name>` ends it; Messages are still delivered meanwhile, on the
+  running generation. A harness that crashes fails the running Turn; the
   next Turn resumes the session in a new process.
 
 ## Data safety

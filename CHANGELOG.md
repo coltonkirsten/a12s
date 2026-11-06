@@ -4,6 +4,11 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Fixed: a staged config change no longer holds the inbox while background work runs. Before, an agent computer
+  with a change staged and a background task running took no Messages until the task ended, so a task that never
+  ended (a stray `until` loop) held its Messages forever, contrary to [the inbox rules](docs/inbox.md#the-rules).
+  Now Messages go on the running generation; the change still applies at the next idle boundary, before the next
+  Batch.
 - Changed (GCE): removing an agent computer retires its home disk: the Controller snapshots it, deletes the disk
   once the snapshot is ready, and deletes the snapshot after 30 days. Adding an agent computer of the same name
   within that time restores its home from the snapshot. An orphaned home disk (from an earlier removal) is retired
