@@ -53,6 +53,18 @@ func (g *vmGuest) wanted(ctx context.Context, ref string) (wantedImage, error) {
 	return w, nil
 }
 
+// pruneAround removes the images no container uses, keeping the copy of the Controller's image bundleID. It is
+// best-effort: images left behind go at the next Materialize.
+func (g *vmGuest) pruneAround(ctx context.Context, bundleID string) {
+	res, err := g.eng.Client().ImageInspect(ctx, localImageRef(bundleID))
+	switch {
+	case err == nil:
+		_ = g.prune(ctx, res.ID)
+	case engine.IsNotFound(err):
+		_ = g.prune(ctx)
+	}
+}
+
 // prune removes every image no container uses, except keep. A removal that fails is skipped: the space check after
 // it measures what is actually free.
 func (g *vmGuest) prune(ctx context.Context, keep ...string) error {

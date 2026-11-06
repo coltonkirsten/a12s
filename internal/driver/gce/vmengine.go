@@ -233,14 +233,6 @@ func loadedImageID(r io.Reader) (string, error) {
 
 func (g *vmGuest) Materialize(ctx context.Context, spec driver.ComputerSpec) error {
 	cli := g.eng.Client()
-	image, err := g.wanted(ctx, spec.Image)
-	if err != nil {
-		return fmt.Errorf("image %s: %w", spec.Image, err)
-	}
-	bundle, err := g.wanted(ctx, spec.Bundle.Image)
-	if err != nil {
-		return fmt.Errorf("bundle %s: %w", spec.Bundle.Image, err)
-	}
 	var replaced string // the image of the generation this one replaces
 	res, err := cli.ContainerInspect(ctx, g.containerName(), client.ContainerInspectOptions{})
 	switch {
@@ -257,8 +249,8 @@ func (g *vmGuest) Materialize(ctx context.Context, spec driver.ComputerSpec) err
 			if done, err := g.eng.Bootstrapped(ctx, c.ID, spec); err != nil {
 				return err
 			} else if done {
-				// Images an earlier switch left behind go now.
-				_ = g.prune(ctx, image.localID, bundle.localID)
+				// Images an earlier switch left behind go now. The container keeps its own image.
+				g.pruneAround(ctx, spec.Bundle.Image)
 				return nil
 			}
 		}
@@ -266,6 +258,14 @@ func (g *vmGuest) Materialize(ctx context.Context, spec driver.ComputerSpec) err
 			return fmt.Errorf("remove generation %s: %w", c.Config.Labels[engine.LabelGeneration], err)
 		}
 		replaced = c.Image
+	}
+	image, err := g.wanted(ctx, spec.Image)
+	if err != nil {
+		return fmt.Errorf("image %s: %w", spec.Image, err)
+	}
+	bundle, err := g.wanted(ctx, spec.Bundle.Image)
+	if err != nil {
+		return fmt.Errorf("bundle %s: %w", spec.Bundle.Image, err)
 	}
 	fresh, err := g.resetBundleVolume(ctx, bundle.id)
 	if err != nil {
@@ -293,12 +293,8 @@ func (g *vmGuest) Materialize(ctx context.Context, spec driver.ComputerSpec) err
 	if _, err := g.eng.CreateComputer(ctx, spec, g.placement()); err != nil {
 		return err
 	}
-	// Whatever is left of the generation this replaced (an image a failed load half-registered, say) goes too.
-	if image, err = g.wanted(ctx, image.ref); err == nil {
-		if bundle, err = g.wanted(ctx, bundle.ref); err == nil {
-			_ = g.prune(ctx, image.localID, bundle.localID)
-		}
-	}
+	// Anything else left from before the switch goes too. The new container keeps its own image.
+	g.pruneAround(ctx, bundle.id)
 	return nil
 }
 
