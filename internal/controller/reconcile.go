@@ -52,11 +52,11 @@ type writeOpts struct {
 
 func (o writeOpts) touches(name string) bool { return o.whole || slices.Contains(o.only, name) }
 
-// applySpec runs mutate on a copy of the stored Spec under the exclusive apply lock, admits the result and converges
-// what the write touches. Nothing changes when admission fails or on a dry run.
+// applySpec runs mutate on a copy of the stored Spec under specMu, admits the result and converges what the write
+// touches, each Computer and Service under its own lock. Nothing changes when admission fails or on a dry run.
 func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec) (*fleet.Spec, error), o writeOpts) (api.PutFleetResponse, error) {
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	c.specMu.Lock()
+	defer c.specMu.Unlock()
 
 	c.mu.Lock()
 	cur, version, oldFleet := c.state.Spec, c.state.Version, c.state.Fleet
@@ -221,7 +221,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		res.Services.Removed = append(res.Services.Removed, name)
 	}
 	svcNames := slices.DeleteFunc(f.ServiceNames(), func(n string) bool { return !o.touches(n) })
-	souts := c.convergeServices(ctx, svcNames, obs)
+	souts := c.convergeServices(ctx, svcNames, nil)
 	for _, name := range svcNames {
 		o := souts[name]
 		_, existed := previousServices[name]
@@ -262,7 +262,7 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	}
 
 	names := slices.DeleteFunc(f.ComputerNames(), func(n string) bool { return !o.touches(n) })
-	outcomes := c.convergeAll(ctx, names, obs)
+	outcomes := c.convergeAll(ctx, names, nil)
 	for _, name := range names {
 		o := outcomes[name]
 		_, existed := previous[name]
@@ -395,16 +395,32 @@ type outcome struct {
 	err    error
 }
 
-// convergeAll converges Computers in parallel; each reports as soon as it
-// is done, whatever the others do. applyMu must be held exclusively.
-func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver.Observation) map[string]outcome {
+// convergeAll converges Computers in parallel, each under its own lock (from held, else taken here, and
+// released as soon as that one is done), so a slow one delays nothing else of any other. specMu must be held.
+func (c *Controller) convergeAll(ctx context.Context, names []string, held map[string]func()) map[string]outcome {
+	return convergeEach(c, names, held, func(name string) (result, error) {
+		// Observed under the lock: a wake or restart may have run since the caller last looked.
+		st, ok, err := c.observeOne(ctx, name)
+		if err != nil {
+			return unchanged, err
+		}
+		return c.converge(ctx, name, st, ok)
+	})
+}
+
+func convergeEach(c *Controller, names []string, held map[string]func(), one func(name string) (result, error)) map[string]outcome {
 	var mu sync.Mutex
 	out := map[string]outcome{}
 	var wg sync.WaitGroup
 	for _, name := range names {
-		st, ok := obs.Computers[name]
+		unlock := held[name]
+		delete(held, name)
 		wg.Go(func() {
-			r, err := c.converge(ctx, name, st, ok)
+			if unlock == nil {
+				unlock = c.lockComputer(name)
+			}
+			r, err := one(name)
+			unlock()
 			mu.Lock()
 			out[name] = outcome{r, err}
 			mu.Unlock()
@@ -416,8 +432,7 @@ func (c *Controller) convergeAll(ctx context.Context, names []string, obs driver
 
 // converge brings one Computer to the applied Fleet: unchanged ones only
 // get their power state enforced; a changed one is restaged now, or staged
-// for its next idle boundary when it is busy. The caller holds applyMu
-// exclusively or the Computer's lock.
+// for its next idle boundary when it is busy. The caller holds the Computer's lock.
 func (c *Controller) converge(ctx context.Context, name string, obs driver.ComputerState, exists bool) (result, error) {
 	spec, hash, err := c.buildSpec(name)
 	if err != nil {
@@ -557,8 +572,7 @@ func (c *Controller) idle(ctx context.Context, name string) bool {
 }
 
 // restage stops the Computer if it runs, stages a new generation of the
-// applied spec, and starts it unless it should sleep. The caller holds
-// applyMu exclusively or the Computer's lock.
+// applied spec, and starts it unless it should sleep. The caller holds the Computer's lock.
 func (c *Controller) restage(ctx context.Context, name string) error {
 	spec, hash, err := c.buildSpec(name)
 	if err != nil {
@@ -713,8 +727,9 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 }
 
 // removeComputer stops and deletes a Computer the Fleet no longer declares. Its drives stay (status lists them as
-// orphans), except a home the Driver retires to a snapshot.
+// orphans), except a home the Driver retires to a snapshot. The caller holds specMu.
 func (c *Controller) removeComputer(ctx context.Context, name string) error {
+	defer c.lockComputer(name)()
 	c.setTransition(name, true)
 	c.stopEvents(name)
 	if err := c.removeFromDriver(ctx, name); err != nil {

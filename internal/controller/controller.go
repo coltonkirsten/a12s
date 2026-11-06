@@ -163,11 +163,10 @@ type Controller struct {
 	bgMu     sync.Mutex
 	stopping bool
 
-	// applyMu is held exclusively by Fleet-wide changes (apply, resume,
-	// drive rm) and shared by single-Computer ones (power, restarts, idle
-	// applies), which also take that Computer's lock: one slow Computer
-	// never delays another.
-	applyMu sync.RWMutex
+	// specMu serializes changes to the Fleet itself (apply, resume, drive rm, home retirement). Work on one
+	// Computer or Service, deliveries included, takes only that one's lock (lockComputer), so a slow
+	// restage or wake never delays any other.
+	specMu sync.Mutex
 
 	mu    sync.Mutex // guards everything below
 	state *State
@@ -175,7 +174,7 @@ type Controller struct {
 	// credTimes is when each credential's value last changed.
 	credTimes map[string]time.Time
 	rt        map[string]*runtime
-	locks     map[string]*sync.Mutex // per Computer, see applyMu
+	locks     map[string]*sync.Mutex // per Computer or Service, see specMu
 	clients   map[string]computerdClient
 	drains    map[string]*drainState
 	srt       map[string]*serviceRuntime
@@ -248,9 +247,8 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 	return c, nil
 }
 
-// lockComputer takes applyMu shared, then the Computer's own lock.
+// lockComputer takes the lock of one Computer or Service (they share a namespace). With specMu, specMu comes first.
 func (c *Controller) lockComputer(name string) func() {
-	c.applyMu.RLock()
 	c.mu.Lock()
 	l := c.locks[name]
 	if l == nil {
@@ -259,10 +257,7 @@ func (c *Controller) lockComputer(name string) func() {
 	}
 	c.mu.Unlock()
 	l.Lock()
-	return func() {
-		l.Unlock()
-		c.applyMu.RUnlock()
-	}
+	return l.Unlock
 }
 
 // spawn runs f in a background goroutine that Wait waits for, and reports
@@ -333,14 +328,27 @@ func (c *Controller) Start(ctx context.Context) {
 	c.spawn(func() { c.expiryLoop(ctx) })
 	c.spawn(func() { c.powerLoop(ctx) })
 	// Taken here, before Start returns, and released by the resume pass: an
-	// apply or power request that arrives first waits for the resume
-	// instead of the resume re-converging after it.
-	c.applyMu.Lock()
+	// apply, or a power request or delivery for a Computer, that arrives first waits for the resume of what it
+	// touches instead of the resume re-converging after it. Each Computer's lock goes as soon as it is resumed.
+	c.specMu.Lock()
+	c.mu.Lock()
+	f := c.state.Fleet
+	c.mu.Unlock()
+	held := map[string]func(){}
+	if f != nil {
+		for _, name := range slices.Concat(f.ServiceNames(), f.ComputerNames()) {
+			held[name] = c.lockComputer(name)
+		}
+	}
+	release := func() {
+		for _, unlock := range held {
+			unlock()
+		}
+		clear(held)
+		c.specMu.Unlock()
+	}
 	resumed := c.spawn(func() {
-		defer c.applyMu.Unlock()
-		c.mu.Lock()
-		f := c.state.Fleet
-		c.mu.Unlock()
+		defer release()
 		if f == nil {
 			return
 		}
@@ -376,15 +384,15 @@ func (c *Controller) Start(ctx context.Context) {
 				}
 			}
 		}
-		c.convergeServices(ctx, f.ServiceNames(), obs)
-		c.convergeAll(ctx, f.ComputerNames(), obs)
+		c.convergeServices(ctx, f.ServiceNames(), held)
+		c.convergeAll(ctx, f.ComputerNames(), held)
 		c.kickAll()
 	})
 	if !resumed { // ctx already ended: nothing will release it
-		c.applyMu.Unlock()
+		release()
 		return
 	}
-	c.spawn(func() { c.retirementLoop(ctx) }) // its applyMu waits for the resume
+	c.spawn(func() { c.retirementLoop(ctx) }) // its specMu waits for the resume
 }
 
 func Run(ctx context.Context, cfg Config) error {

@@ -42,8 +42,8 @@ func TestApplyWaitsForTheResume(t *testing.T) {
 	h2 := startHarness(t, h.dir, h.d)
 	// Held by the resume from the moment Start returned, not from whenever
 	// its goroutine happens to be scheduled.
-	if h2.c.applyMu.TryLock() {
-		h2.c.applyMu.Unlock()
+	if h2.c.specMu.TryLock() {
+		h2.c.specMu.Unlock()
 		close(gate)
 		t.Fatal("Start returned with the apply lock free")
 	}

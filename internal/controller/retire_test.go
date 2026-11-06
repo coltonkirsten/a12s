@@ -42,9 +42,9 @@ func TestRemovalRetiresTheHomeAndTheSweepRetiresOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.d.takeCalls()
-	h.c.applyMu.Lock()
+	h.c.specMu.Lock()
 	h.c.retireOrphanHomes(context.Background(), retiringDriver{h.d})
-	h.c.applyMu.Unlock()
+	h.c.specMu.Unlock()
 	if calls := h.d.takeCalls(); !slices.Equal(calls, []string{"rm drive home-left", "retire home-left"}) {
 		t.Fatalf("the sweep called %v; it must retire only the orphan", calls)
 	}
