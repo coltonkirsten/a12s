@@ -14,6 +14,11 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   `a12s status` shows the oldest task's age and the time to the next stop. An agent that runs a dev server or other
   long work in the background must now extend it ([Background work](docs/concepts.md#background-work)).
 
+- Fixed: an agent computer's inbox no longer stops when its Turn ends just before computerd applies new credentials.
+  computerd restarts the harness at that idle boundary and reports busy with no Turn until it is done, with no event
+  at the end; a Controller that read status in that window kept the agent computer Busy, so its Messages waited until
+  the next Controller restart (a Controller restart re-injects credentials, so it could cause this too). The Controller
+  now asks computerd before treating an agent computer as busy, and looks again while it is busy with no Turn.
 - Fixed: after a Controller restart, an agent computer with a config change staged behind a running Turn or
   background work is attached like any running one. Before, it stayed in Provisioning: no events followed, its inbox
   held, and the change never applied.

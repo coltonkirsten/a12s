@@ -504,6 +504,9 @@ type fakeComputerd struct {
 	sealed map[string]map[string]any
 	// background is the session's live background task count.
 	background int
+	// restarting reports busy with no Turn, as computerd does while it restarts the harness
+	// (a credential generation applied at an idle boundary); its end emits no event.
+	restarting bool
 }
 
 func (f *fakeComputerd) JournalInbox(_ context.Context, records any) ([]string, error) {
@@ -592,7 +595,7 @@ func (f *fakeComputerd) Status(context.Context) (api.ComputerdStatus, error) {
 		return api.ComputerdStatus{}, errDown
 	}
 	phase := "ready"
-	if f.active != "" {
+	if f.active != "" || f.restarting {
 		phase = "busy"
 	}
 	st := api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation}
@@ -612,6 +615,14 @@ func (f *fakeComputerd) task(started bool) {
 		typ, d.Status = api.EventTaskFinished, api.TaskCompleted
 	}
 	f.emitLocked(typ, "", d)
+}
+
+// subscribed reports whether the Controller follows this computerd's events: the fake starts every
+// stream live, so an event emitted before that is never seen.
+func (f *fakeComputerd) subscribed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.subs) > 0
 }
 
 // timeLimit ends the background task as computerd does when it stops one at its time limit.

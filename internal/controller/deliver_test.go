@@ -398,3 +398,24 @@ func TestMessageStream(t *testing.T) {
 		t.Fatalf("events %v", types)
 	}
 }
+
+// computerd restarts the harness right after a Turn (a credential generation applied at the idle
+// boundary) and reports busy with no Turn until it is done, with no event at the end. The Busy read on
+// turn.finished must not stick: the inbox keeps flowing once computerd is ready again.
+func TestBusyWithoutTurnDoesNotStick(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	builder := h.cds.get("builder")
+	first := h.send("builder", "work")
+	h.waitMessage("builder", first.ID, api.MsgDelivered)
+	h.waitPhase("builder", api.PhaseBusy)
+	builder.set(func(f *fakeComputerd) { f.restarting = true })
+	builder.finish(api.TurnCompleted)
+	time.Sleep(50 * time.Millisecond)
+	builder.set(func(f *fakeComputerd) { f.restarting = false })
+	h.waitPhase("builder", api.PhaseReady)
+	next := h.send("builder", "next")
+	if m := h.waitMessage("builder", next.ID, api.MsgDelivered); m.Turn != "t_2" {
+		t.Fatalf("delivered in %s", m.Turn)
+	}
+}
