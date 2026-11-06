@@ -55,6 +55,9 @@ type fakeDriver struct {
 	noHostFolders bool
 	// observeGate, when set, holds the next Observe until it is closed.
 	observeGate chan struct{}
+	// stageGates hold StageComputer for that Computer until closed; staging reports each held stage.
+	stageGates map[string]chan struct{}
+	staging    chan string
 	// sessions are attached shell sessions, by Computer.
 	sessions map[string]int
 	// terminals are the ones opened, in order.
@@ -230,6 +233,15 @@ func (d *fakeDriver) EnsureBundle(_ context.Context, ref string) (driver.Bundle,
 }
 
 func (d *fakeDriver) StageComputer(_ context.Context, spec driver.ComputerSpec) error {
+	d.mu.Lock()
+	gate, staging := d.stageGates[spec.Name], d.staging
+	d.mu.Unlock()
+	if gate != nil {
+		if staging != nil {
+			staging <- spec.Name
+		}
+		<-gate
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if c := d.computers[spec.Name]; c != nil {

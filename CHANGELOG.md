@@ -14,6 +14,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   `a12s status` shows the oldest task's age and the time to the next stop. An agent that runs a dev server or other
   long work in the background must now extend it ([Background work](docs/concepts.md#background-work)).
 
+- Fixed: `a12s up` no longer holds up Message deliveries, wakes or sleeps of the agent computers it isn't changing.
+  Before, while one agent computer was restaged (a VM wake can take minutes), every other agent computer's inbox
+  waited for it. Each agent computer and Service is now converged under its own lock; applies still run one at a time.
 - Fixed: an agent computer's inbox no longer stops when its Turn ends just before computerd applies new credentials.
   computerd restarts the harness at that idle boundary and reports busy with no Turn until it is done, with no event
   at the end; a Controller that read status in that window kept the agent computer Busy, so its Messages waited until

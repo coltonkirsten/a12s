@@ -20,9 +20,9 @@ func (c *Controller) retirementLoop(ctx context.Context) {
 		return
 	}
 	for {
-		c.applyMu.Lock()
+		c.specMu.Lock()
 		c.retireOrphanHomes(ctx, r)
-		c.applyMu.Unlock()
+		c.specMu.Unlock()
 		expired, err := r.ExpireRetired(ctx, time.Now())
 		for _, s := range expired {
 			c.logf("retired home snapshot %s expired: deleted", s)
@@ -40,7 +40,7 @@ func (c *Controller) retirementLoop(ctx context.Context) {
 	}
 }
 
-// retireOrphanHomes needs applyMu held exclusively, so no apply declares a Computer while its home is retired.
+// retireOrphanHomes needs specMu held, so no apply declares a Computer while its home is retired.
 func (c *Controller) retireOrphanHomes(ctx context.Context, r driver.HomeRetirer) {
 	c.mu.Lock()
 	applied := c.state.Fleet != nil

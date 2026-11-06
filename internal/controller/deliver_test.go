@@ -419,3 +419,46 @@ func TestBusyWithoutTurnDoesNotStick(t *testing.T) {
 		t.Fatalf("delivered in %s", m.Turn)
 	}
 }
+
+// A slow restage of one agent computer (a VM wake can take minutes) never holds up a delivery to another.
+func TestSlowRestageDoesNotStallOtherDeliveries(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	gate := make(chan struct{})
+	h.d.mu.Lock()
+	h.d.stageGates = map[string]chan struct{}{"tester": gate}
+	h.d.staging = make(chan string, 1)
+	h.d.mu.Unlock()
+	applied := make(chan error, 1)
+	go func() {
+		f := labFleet(t, func(f *fleet.Fleet) {
+			c := f.Computers["tester"]
+			c.Instructions = "You are tester, now restaged."
+			f.Computers["tester"] = c
+		})
+		_, err := h.c.PutFleet(context.Background(), api.PutFleetRequest{Fleet: specFor(f), Credentials: labCreds}, writeOpts{})
+		applied <- err
+	}()
+	select {
+	case <-h.d.staging:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restage of tester never reached the driver")
+	}
+	// A second agent's apply-unrelated delivery, while tester's restage is held.
+	m := h.send("scout", "status?")
+	for deadline := time.Now().Add(3 * time.Second); h.message("scout", m.ID).State != api.MsgDelivered; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			close(gate)
+			<-applied
+			t.Fatal("a delivery to scout waited for tester's restage")
+		}
+	}
+	if p := h.phase("tester"); p != api.PhaseProvisioning {
+		t.Fatalf("tester is %s, want it still Provisioning behind the held stage", p)
+	}
+	close(gate)
+	if err := <-applied; err != nil {
+		t.Fatal(err)
+	}
+	h.waitPhase("tester", api.PhaseReady)
+}

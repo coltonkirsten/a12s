@@ -339,23 +339,15 @@ func (c *Controller) confirmService(ctx context.Context, name, what string, want
 	}
 }
 
-// convergeServices converges Services in parallel. applyMu must be held
-// exclusively.
-func (c *Controller) convergeServices(ctx context.Context, names []string, obs driver.Observation) map[string]outcome {
-	var mu sync.Mutex
-	out := map[string]outcome{}
-	var wg sync.WaitGroup
-	for _, name := range names {
-		st, ok := obs.Services[name]
-		wg.Go(func() {
-			r, err := c.convergeService(ctx, name, st, ok)
-			mu.Lock()
-			out[name] = outcome{r, err}
-			mu.Unlock()
-		})
-	}
-	wg.Wait()
-	return out
+// convergeServices converges Services in parallel, like convergeAll. specMu must be held.
+func (c *Controller) convergeServices(ctx context.Context, names []string, held map[string]func()) map[string]outcome {
+	return convergeEach(c, names, held, func(name string) (result, error) {
+		st, ok, err := c.observeService(ctx, name)
+		if err != nil {
+			return unchanged, err
+		}
+		return c.convergeService(ctx, name, st, ok)
+	})
 }
 
 // convergeService restarts a changed Service at once: a Service has no idle boundary.
@@ -837,8 +829,9 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 }
 
 // removeService stops and deletes a Service the Fleet no longer declares.
-// Its state drive stays (an orphan until `a12s drive rm`).
+// Its state drive stays (an orphan until `a12s drive rm`). The caller holds specMu.
 func (c *Controller) removeService(ctx context.Context, name string) error {
+	defer c.lockComputer(name)()
 	c.setServiceTransition(name, true)
 	c.stopHealth(name)
 	c.unregisterCert(KindService, name)

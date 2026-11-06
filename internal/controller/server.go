@@ -511,16 +511,23 @@ func (c *Controller) drives(ctx context.Context) ([]api.DriveRow, error) {
 	return rows, nil
 }
 
+// driveOwner is the Computer or Service a drive belongs to.
+func driveOwner(id string, d driver.DriveState) string {
+	if driver.IsKeepDrive(id) {
+		return d.Computer
+	}
+	if owner, ok := strings.CutPrefix(id, "home-"); ok {
+		return owner
+	}
+	owner, _ := strings.CutPrefix(id, "state-")
+	return owner
+}
+
 // handleRemoveDrive is `a12s drive rm`: the only path that destroys data.
 func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("d")
-	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
-	obs, err := c.drv.Observe(r.Context())
-	if err != nil {
-		fail(w, err)
-		return
-	}
+	c.specMu.Lock()
+	defer c.specMu.Unlock()
 	var id string
 	// A keep drive ID ends in its digest, never "-state": a Service named keep-… keeps its state drive.
 	if strings.HasPrefix(name, "home-") {
@@ -530,10 +537,27 @@ func (c *Controller) handleRemoveDrive(w http.ResponseWriter, r *http.Request) {
 	} else if driver.IsKeepDrive(name) {
 		id = name
 	}
+	obs, err := c.drv.Observe(r.Context())
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	d, ok := obs.Drives[id]
 	if !ok {
 		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no drive %q", name))
 		return
+	}
+	// The owner's lock keeps a wake or restart from attaching the drive while it is destroyed.
+	if owner := driveOwner(id, d); owner != "" {
+		defer c.lockComputer(owner)()
+		if obs, err = c.drv.Observe(r.Context()); err != nil {
+			fail(w, err)
+			return
+		}
+		if d, ok = obs.Drives[id]; !ok {
+			fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no drive %q", name))
+			return
+		}
 	}
 	if len(d.AttachedTo) > 0 {
 		fail(w, errorf(http.StatusConflict, api.ErrAttached, "drive %s is attached to %s", name, strings.Join(d.AttachedTo, ", ")))
