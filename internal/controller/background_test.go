@@ -92,3 +92,29 @@ func TestStagedChangeWaitsForBackgroundAndStopEndsIt(t *testing.T) {
 	}
 	waitFor(t, func() bool { return readState(t, h.dir).Computers["scout"].Generation == 2 })
 }
+
+// A staged change waits for background work, but the inbox doesn't: Messages still go, on the running generation.
+func TestStagedChangeDoesNotHoldTheInboxWhileBackgroundWorkRuns(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	scout := h.cds.get("scout")
+	scout.task(true)
+	waitFor(t, func() bool { return h.c.computerStatus(context.Background(), "scout").Background != nil })
+	res := h.up(labFleet(t, func(f *fleet.Fleet) {
+		c := f.Computers["scout"]
+		c.Harness.Model = "claude-fable-5-2"
+		f.Computers["scout"] = c
+	}), false)
+	if len(res.Staged) != 1 {
+		t.Fatalf("up with background work = %+v", res)
+	}
+	m := h.send("scout", "are you there?")
+	h.waitMessage("scout", m.ID, api.MsgDelivered)
+	scout.finish(api.TurnCompleted)
+	time.Sleep(50 * time.Millisecond)
+	if readState(t, h.dir).Computers["scout"].Generation != 1 {
+		t.Fatal("applied while background work runs")
+	}
+	scout.task(false)
+	waitFor(t, func() bool { return readState(t, h.dir).Computers["scout"].Generation == 2 })
+}

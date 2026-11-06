@@ -15,8 +15,10 @@ a12s inbox builder                                      # list pending Messages,
 1. One durable inbox per agent computer. It survives restarts, sleep, wake, Controller restarts and a plain `a12s down`.
 2. Anyone with API access, or a Service or agent computer holding `grants.send`, can enqueue. Bodies are untrusted data.
 3. When no Turn is running, the Controller drains **all** pending Messages, in order, into **one** Turn, also while
-   [background work](concepts.md#background-work) runs. Messages that arrive during a Turn wait for the next one,
-   including during a Turn the harness started by itself when background work ended.
+   [background work](concepts.md#background-work) runs, and also while a [config change](concepts.md#config-changes)
+   is staged behind that background work. Messages that arrive during a Turn wait for the next one, including during
+   a Turn the harness started by itself when background work ended. At a true idle boundary (no Turn, no background
+   work) a staged change applies first, then the inbox drains on the new generation.
 4. A Batch continues the current session by default. A Message sent with `--fresh` starts a new
    session; it begins a new Batch, so it never drags another sender's Message out of the conversation it was written
    for.

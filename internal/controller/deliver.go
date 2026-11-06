@@ -170,8 +170,7 @@ func (c *Controller) deliverable(ctx context.Context, name string) (string, api.
 		return "asleep", api.ComputerdStatus{}
 	case phase == api.PhaseBusy:
 		return "busy", api.ComputerdStatus{}
-	case phase != api.PhaseReady || closed || transition || staged:
-		// A staged generation applies before the next drain (applyStaged kicks).
+	case phase != api.PhaseReady || closed || transition:
 		return "not_ready", api.ComputerdStatus{}
 	}
 	if held, _, err := c.inbox.Held(ctx, name); err == nil && held {
@@ -186,6 +185,10 @@ func (c *Controller) deliverable(ctx context.Context, name string) (string, api.
 	case st.ActiveTurn != "" || st.Phase == "busy":
 		return "busy", st
 	case st.Phase != "ready":
+		return "not_ready", st
+	case staged && (st.Background == nil || st.Background.Tasks == 0):
+		// Idle: a staged generation applies first (applyStaged kicks). While background work runs it
+		// can't apply, and the inbox keeps flowing: a task that never ends must not hold Messages too.
 		return "not_ready", st
 	case st.Continuation != "":
 		return "continuation", st
