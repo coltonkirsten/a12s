@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Computer, HttpError } from '../computer.js';
+import { Computer, HttpError, type TaskLimits } from '../computer.js';
 import type { Config } from '../config.js';
 import { Journal } from '../journal.js';
 import { testConfig, until } from './helpers.js';
 import { StubAdapter } from './stub-adapter.js';
 
-function setup(cfg: Config = testConfig()) {
+function setup(cfg: Config = testConfig(), limits?: TaskLimits) {
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const adapter = new StubAdapter();
-  const computer = new Computer(cfg, journal, adapter, {});
+  const computer = new Computer(cfg, journal, adapter, {}, 2_000, limits);
   const types = (turn?: string) => journal.after(0, turn ?? null, 1000).map((e) => e.type);
   const finished = (turn: string) => journal.turnInfo(turn)?.finished;
   return { cfg, journal, adapter, computer, types, finished };
@@ -363,7 +363,8 @@ test('background: a turn the harness starts by itself is journaled with reason b
   adapter.task('a1', true);
   adapter.finish();
   await until(() => finished(t.turnId) === 'completed');
-  assert.deepEqual([computer.status().phase, computer.status().background], ['ready', { tasks: 1 }], 'background work alone leaves it ready');
+  const bgStatus = computer.status().background as { tasks: number; items: { id: string }[] };
+  assert.deepEqual([computer.status().phase, bgStatus.tasks, bgStatus.items.map((i) => i.id)], ['ready', 1, ['a1']], 'background work alone leaves it ready');
 
   adapter.task('a1', false);
   adapter.backgroundTurn();
@@ -399,13 +400,13 @@ test('background: stop ends a turn and the background work; stopAll ends backgro
   adapter.task('a1', true);
   computer.stopTurn(t.turnId);
   await until(() => finished(t.turnId) === 'interrupted');
-  assert.deepEqual(computer.status().background, { tasks: 0 });
+  assert.deepEqual(computer.status().background, { tasks: 0, items: [] });
   const u = await computer.submitTurn({ requestId: 'r2', session: 'current', prompt: 'x' });
   adapter.task('a2', true);
   adapter.finish();
   await until(() => finished(u.turnId) === 'completed');
   assert.deepEqual(computer.stopAll(), { turns: [], background: 1 });
-  assert.deepEqual(computer.status().background, { tasks: 0 });
+  assert.deepEqual(computer.status().background, { tasks: 0, items: [] });
 });
 
 test('background: restart_harness from a background turn waits for it; credentials wait for background work', async () => {
@@ -463,4 +464,59 @@ test('background: a background turn that starts while a Message is admitted bloc
   await until(() => computer.status().credentialGeneration === 2);
   assert.equal(adapter.restarts, 1, 'applied at the idle boundary');
   await computer.shutdown(100);
+});
+
+const taskEnds = (journal: Journal) => journal.after(0, null, 1000).filter((e) => e.type === 'task.finished').map((e) => e.data);
+
+test('time limit: a background task is stopped at its limit and its end says so', async () => {
+  const { journal, adapter, computer, finished } = setup(testConfig(), { defaultMs: 150, maxMs: 3600_000, graceMs: 5_000 });
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  adapter.task('loop', true);
+  adapter.task('quick', true);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  const items = (computer.status().background as { items: { id: string; startedAt: string; deadline: string }[] }).items;
+  assert.deepEqual(items.map((i) => i.id), ['loop', 'quick']);
+  assert.equal(Date.parse(items[0]!.deadline) - Date.parse(items[0]!.startedAt), 150);
+  adapter.task('quick', false);
+  await until(() => adapter.tasks.size === 0);
+  assert.deepEqual(adapter.stoppedTasks, ['loop']);
+  assert.deepEqual(taskEnds(journal), [
+    { id: 'quick', kind: 'local_agent', description: 'quick', status: 'completed' },
+    { id: 'loop', kind: 'local_agent', description: 'loop', status: 'stopped', timeLimit: 1 },
+  ]);
+  assert.deepEqual(computer.status().background, { tasks: 0, items: [] });
+  assert.equal(adapter.restarts, 0, 'only the task stopped, not the session');
+});
+
+test('time limit: the agent gives a task more time with background_tasks, within the maximum', async () => {
+  const { adapter, computer } = setup(testConfig(), { defaultMs: 200, maxMs: 3600_000, graceMs: 5_000 });
+  await computer.start();
+  adapter.task('server', true);
+  assert.equal(await status(Promise.resolve().then(() => computer.backgroundTasksTool('server', 2))), 400, 'over the maximum');
+  assert.equal(await status(Promise.resolve().then(() => computer.backgroundTasksTool('server', 0))), 400);
+  assert.equal(await status(Promise.resolve().then(() => computer.backgroundTasksTool('nope', 0.5))), 404);
+  const r = computer.backgroundTasksTool('server', 1);
+  assert.match(String(r.message), /^server may now run until /);
+  const deadline = Date.parse(r.tasks[0]!.deadline);
+  assert.ok(Math.abs(deadline - (Date.now() + 3600_000)) < 1000);
+  await new Promise((res) => setTimeout(res, 400));
+  assert.deepEqual(adapter.stoppedTasks, [], 'extended past the default');
+  assert.deepEqual(computer.backgroundTasksTool().tasks.map((x) => x.id), ['server']);
+});
+
+test('time limit: a task that outlives its stop ends the session once no turn runs', async () => {
+  const { journal, adapter, computer, finished } = setup(testConfig(), { defaultMs: 50, maxMs: 3600_000, graceMs: 100 });
+  adapter.honourStopTask = false;
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  adapter.task('stuck', true);
+  await until(() => adapter.stoppedTasks.length === 1);
+  await new Promise((res) => setTimeout(res, 250));
+  assert.equal(adapter.restarts, 0, 'never in the middle of a turn');
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  await until(() => adapter.restarts === 1);
+  assert.deepEqual(taskEnds(journal), [{ id: 'stuck', kind: 'local_agent', description: 'stuck', status: 'stopped', timeLimit: 1 }]);
 });

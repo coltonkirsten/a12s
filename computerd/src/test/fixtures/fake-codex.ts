@@ -10,17 +10,25 @@ const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
 const notify = (method: string, params: unknown) => send({ method, params });
 let threads = 0;
 let current: { threadId: string; turnId: string } | null = null;
+/** Background terminals and sub-agents still running, by process id and by sub-agent thread. */
+const terminals = new Map<string, () => void>();
+const children = new Map<string, () => void>();
 
 function runTurn(threadId: string, turnId: string, prompt: string): void {
   notify('turn/started', { threadId, turn: { id: turnId, status: 'inProgress', items: [] } });
   if (mode === 'hang' || mode === 'ignore-interrupt') return;
   if (prompt === 'bg') {
     // A command still running when the turn ends stays a background terminal; its completion names the old turn.
-    const item = { type: 'commandExecution', id: `item_bg_${turnId}`, command: 'sleep 1; make', cwd: '/', status: 'inProgress', aggregatedOutput: '' };
+    const processId = `proc_${turnId}`;
+    const item = { type: 'commandExecution', id: `item_bg_${turnId}`, command: 'sleep 1; make', cwd: '/', processId, status: 'inProgress', aggregatedOutput: '' };
     notify('item/started', { threadId, turnId, item });
     notify('turn/completed', { threadId, turn: { id: turnId, status: process.env.FAKE_BG_STATUS ?? 'completed', items: [] } });
     current = null;
-    setTimeout(() => notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', exitCode: 0, aggregatedOutput: 'built' } }), Number(process.env.FAKE_BG_MS ?? 200));
+    const done = setTimeout(() => notify('item/completed', { threadId, turnId, item: { ...item, status: 'completed', exitCode: 0, aggregatedOutput: 'built' } }), Number(process.env.FAKE_BG_MS ?? 200));
+    terminals.set(processId, () => {
+      clearTimeout(done);
+      notify('item/completed', { threadId, turnId, item: { ...item, status: 'failed', exitCode: 143, aggregatedOutput: 'Terminated' } });
+    });
     return;
   }
   if (prompt === 'spawn' || prompt === 'spawn-wait') {
@@ -39,7 +47,14 @@ function runTurn(threadId: string, turnId: string, prompt: string): void {
     if (prompt === 'spawn-wait') childDone();
     notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
     current = null;
-    if (prompt === 'spawn') setTimeout(childDone, Number(process.env.FAKE_BG_MS ?? 200));
+    if (prompt === 'spawn') {
+      const done = setTimeout(childDone, Number(process.env.FAKE_BG_MS ?? 200));
+      children.set(child, () => {
+        clearTimeout(done);
+        notify('turn/completed', { threadId: child, turn: { id: childTurn, status: 'interrupted', items: [] } });
+        notify('item/completed', { threadId, turnId, item: activity('interrupted') });
+      });
+    }
     return;
   }
   notify('item/started', { threadId, turnId, item: { type: 'commandExecution', id: 'item_1', command: 'ls', cwd: '/', status: 'inProgress' } });
@@ -78,8 +93,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       send({ id: m.id, result: { turn: { id: turnId, status: 'inProgress', items: [] } } });
       return runTurn(current.threadId, turnId, String(m.params?.input?.[0]?.text ?? ''));
     }
+    case 'thread/backgroundTerminals/terminate': {
+      const stop = terminals.get(String(m.params?.processId));
+      if (!stop) return send({ id: m.id, error: { code: -32600, message: 'no such process' } });
+      send({ id: m.id, result: {} });
+      return stop();
+    }
     case 'turn/interrupt':
       send({ id: m.id, result: {} });
+      if (children.has(String(m.params?.threadId))) return children.get(String(m.params?.threadId))!();
       if (mode !== 'ignore-interrupt') notify('turn/completed', { threadId: m.params?.threadId, turn: { id: m.params?.turnId, status: 'interrupted', items: [] } });
       return;
   }

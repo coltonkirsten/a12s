@@ -4,6 +4,16 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: every background task (a Claude Code background shell or sub-agent, a Codex background terminal or
+  sub-agent) has a time limit, 2 hours by default. The agent can give a task up to 24 hours from now with the new
+  `background_tasks` system tool, which also lists its tasks. At the limit computerd stops that task alone, journals
+  `task.finished` with `status: "stopped"` and `timeLimit`, and the Controller puts a Message (via `a12s`) in the
+  agent's inbox saying which task was stopped after how long. A task that survives its stop ends with the session
+  once no Turn runs. Before, a forgotten background loop kept the agent computer awake and a config change staged
+  until someone ran `a12s stop`. Status's `background` gains `items` (each task's `startedAt` and `deadline`), and
+  `a12s status` shows the oldest task's age and the time to the next stop. An agent that runs a dev server or other
+  long work in the background must now extend it ([Background work](docs/concepts.md#background-work)).
+
 - Fixed: after a Controller restart, an agent computer with a config change staged behind a running Turn or
   background work is attached like any running one. Before, it stayed in Provisioning: no events followed, its inbox
   held, and the change never applied.

@@ -614,6 +614,16 @@ func (f *fakeComputerd) task(started bool) {
 	f.emitLocked(typ, "", d)
 }
 
+// timeLimit ends the background task as computerd does when it stops one at its time limit.
+// It returns the event's seq.
+func (f *fakeComputerd) timeLimit(seconds int64) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.background--
+	f.emitLocked(api.EventTaskFinished, "", api.TaskData{ID: "task", Kind: "local_bash", Description: "until [ -f /tmp/never ]", Status: api.TaskStopped, TimeLimit: seconds})
+	return f.seq
+}
+
 // selfTurn starts a Turn the harness started by itself, with no request behind it.
 func (f *fakeComputerd) selfTurn() string {
 	f.mu.Lock()

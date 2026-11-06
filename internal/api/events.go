@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -128,6 +129,8 @@ type TaskData struct {
 	Summary string `json:"summary,omitempty"`
 	// Result is on task.finished of a sub-agent: its last text, truncated to 2000 characters (Claude Code only).
 	Result string `json:"result,omitempty"`
+	// TimeLimit is on task.finished when a12s stopped the task at its time limit: the limit, in seconds.
+	TimeLimit int64 `json:"timeLimit,omitempty"`
 }
 
 const (
@@ -265,5 +268,28 @@ type StopResponse struct {
 
 // Background is the work the harness session keeps running between Turns.
 type Background struct {
-	Tasks int `json:"tasks"`
+	Tasks int              `json:"tasks"`
+	Items []BackgroundTask `json:"items,omitempty"`
+}
+
+// ShortDuration renders 2h0m0s as 2h and 1h30m0s as 1h30m.
+func ShortDuration(d time.Duration) string {
+	s := d.Round(time.Second).String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
+// BackgroundTask is one running background task and when a12s stops it.
+type BackgroundTask struct {
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	Description string    `json:"description"`
+	StartedAt   time.Time `json:"startedAt"`
+	// Deadline is 2 hours after StartedAt unless the agent asked for more with its background_tasks tool.
+	Deadline time.Time `json:"deadline"`
 }

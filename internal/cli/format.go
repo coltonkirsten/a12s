@@ -146,7 +146,7 @@ func WriteStatus(w io.Writer, st *api.StatusResponse) {
 			extra = append(extra, "turn "+c.ActiveTurn)
 		}
 		if c.Background != nil {
-			extra = append(extra, fmt.Sprintf("background %d", c.Background.Tasks))
+			extra = append(extra, BackgroundCell(c.Background, time.Now()))
 		}
 		if c.StagedGeneration > c.Generation {
 			extra = append(extra, fmt.Sprintf("staged gen %d", c.StagedGeneration))
@@ -531,6 +531,28 @@ func PowerCell(ps *api.PowerStatus, phase api.Phase) string {
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// BackgroundCell is "background N", with the oldest task's age and the time until the next one hits its limit.
+func BackgroundCell(b *api.Background, now time.Time) string {
+	s := fmt.Sprintf("background %d", b.Tasks)
+	if len(b.Items) == 0 {
+		return s
+	}
+	oldest, next := b.Items[0].StartedAt, b.Items[0].Deadline
+	for _, t := range b.Items[1:] {
+		if t.StartedAt.Before(oldest) {
+			oldest = t.StartedAt
+		}
+		if t.Deadline.Before(next) {
+			next = t.Deadline
+		}
+	}
+	left := "stopping"
+	if d := next.Sub(now); d > 0 {
+		left = "next stop in " + api.ShortDuration(idleFor(d))
+	}
+	return fmt.Sprintf("%s (oldest %s, %s)", s, api.ShortDuration(idleFor(now.Sub(oldest))), left)
 }
 
 func idleFor(d time.Duration) time.Duration {

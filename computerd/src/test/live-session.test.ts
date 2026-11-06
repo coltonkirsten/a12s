@@ -17,12 +17,13 @@ test('live session: background work survives the turn, a Message meanwhile runs 
 
   const launch = await computer.submitTurn({ requestId: 'b_1', session: 'new', prompt: 'bg 400' });
   await until(() => finished(launch.turnId) === 'completed');
-  assert.deepEqual([computer.status().phase, computer.status().background], ['ready', { tasks: 1 }]);
+  const tasks = () => (computer.status().background as { tasks: number; items: { id: string }[] });
+  assert.deepEqual([computer.status().phase, tasks().tasks, tasks().items.map((i) => i.id)], ['ready', 1, ['task_1']]);
 
   const ask = await computer.submitTurn({ requestId: 'b_2', session: 'current', prompt: 'what is 17*3' });
   await until(() => finished(ask.turnId) === 'completed');
   assert.equal(journal.turnSummary(ask.turnId)?.dispatched, true);
-  assert.deepEqual(computer.status().background, { tasks: 1 }, 'answered while the background work still runs');
+  assert.equal(tasks().tasks, 1, 'answered while the background work still runs');
 
   await until(() => (computer.status().background as { tasks: number }).tasks === 0 && computer.status().phase === 'ready' && journal.after(0, null, 200).filter((e) => e.type === 'turn.finished').length === 3);
   const evs = journal.after(0, null, 200);

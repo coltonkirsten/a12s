@@ -38,6 +38,8 @@ interface SubAgent {
   description: string;
   status: TaskStatus;
   text: string;
+  /** The sub-agent's own running turn, which interrupting stops it. */
+  turnId?: string;
 }
 
 function activeTurn(threadId: string, background: boolean): ActiveTurn {
@@ -91,10 +93,12 @@ export class CodexAdapter implements Adapter {
   private stderr = new Tail();
   private listener: SessionListener | null = null;
   /** Commands of the running turn that have not completed, by item id. */
-  private readonly commands = new Map<string, string>();
+  private readonly commands = new Map<string, { description: string; processId?: string }>();
   /** Background work: commands still running when their turn ended (Codex keeps them as background terminals until
    * they exit) and sub-agents that outlived the turn that spawned them. */
-  private readonly tasks = new Map<string, { threadId: string; kind: 'agent' | 'shell'; description: string }>();
+  private readonly tasks = new Map<string, { threadId: string; kind: 'agent' | 'shell'; description: string; processId?: string }>();
+  /** Background tasks stopTask ended: their end is journaled `stopped` and not reported in a background turn. */
+  private readonly stopped = new Set<string>();
   /** Sub-agents of the running turn that have not finished; at the turn's end they become background tasks. */
   private readonly agents = new Map<string, SubAgent>();
   private readonly bgAgents = new Map<string, SubAgent>();
@@ -118,6 +122,28 @@ export class CodexAdapter implements Adapter {
 
   backgroundTasks(): number {
     return this.tasks.size;
+  }
+
+  async stopTask(id: string): Promise<boolean> {
+    const task = this.tasks.get(id);
+    if (!task) return false;
+    if (task.kind === 'shell') {
+      if (!task.processId) throw new Error(`background terminal ${id} has no process id`);
+      this.stopped.add(id);
+      await this.request('thread/backgroundTerminals/terminate', { threadId: task.threadId, processId: task.processId }).catch((err) => {
+        this.stopped.delete(id);
+        throw err;
+      });
+      return true;
+    }
+    const agent = this.bgAgents.get(id);
+    if (!agent?.turnId) throw new Error(`sub-agent ${id} has no running turn`);
+    this.stopped.add(id);
+    await this.request('turn/interrupt', { threadId: id, turnId: agent.turnId }).catch((err) => {
+      this.stopped.delete(id);
+      throw err;
+    });
+    return true;
   }
 
   async startTurn(input: TurnInput): Promise<RunningTurn> {
@@ -262,7 +288,8 @@ export class CodexAdapter implements Adapter {
     createInterface({ input: child.stdout }).on('line', (line) => this.onLine(line));
     child.once('error', (err) => this.onExit(child, `spawn failed: ${err.message}`));
     child.once('exit', (code, signal) => this.onExit(child, `exited (code ${code}, signal ${signal})`));
-    await this.request('initialize', { clientInfo: { name: 'a12s', title: 'a12s computerd', version: '0.1.0' } });
+    // experimentalApi: thread/backgroundTerminals/terminate, which stops one background terminal.
+    await this.request('initialize', { clientInfo: { name: 'a12s', title: 'a12s computerd', version: '0.1.0' }, capabilities: { experimentalApi: true } });
     this.send({ method: 'initialized' });
   }
 
@@ -276,6 +303,7 @@ export class CodexAdapter implements Adapter {
     this.commands.clear();
     for (const [id, task] of this.tasks) this.emit({ type: 'task.finished', data: { id, kind: task.kind, description: task.description, status: 'killed' } });
     this.tasks.clear();
+    this.stopped.clear();
     this.agents.clear();
     this.bgAgents.clear();
     this.results = [];
@@ -291,8 +319,8 @@ export class CodexAdapter implements Adapter {
     // Only a completed turn leaves background terminals: after a failed or interrupted one nothing guarantees a late
     // item/completed, and a task that never ends would keep the computer awake forever.
     if (status === 'completed') {
-      for (const [id, description] of this.commands) {
-        this.tasks.set(id, { threadId: t.threadId, kind: 'shell', description });
+      for (const [id, { description, processId }] of this.commands) {
+        this.tasks.set(id, { threadId: t.threadId, kind: 'shell', description, ...(processId ? { processId } : {}) });
         t.out.push({ type: 'task.started', data: { id, kind: 'shell', description } });
       }
       for (const [id, agent] of this.agents) {
@@ -318,6 +346,10 @@ export class CodexAdapter implements Adapter {
     if (!task) return;
     this.tasks.delete(id);
     this.bgAgents.delete(id);
+    if (this.stopped.delete(id)) {
+      this.emit({ type: 'task.finished', data: { id, kind: task.kind, description: task.description, status: 'stopped' } });
+      return;
+    }
     this.emit({ type: 'task.finished', data: { id, kind: task.kind, description: task.description, status } });
     this.results.push({ threadId: task.threadId, kind: task.kind, description: task.description, status, text });
     this.reportBackground();
@@ -444,6 +476,7 @@ export class CodexAdapter implements Adapter {
   private subAgentEvent(method: string, p: Json): boolean {
     const own = this.agents.get(String(p.threadId)) ?? this.bgAgents.get(String(p.threadId));
     if (own) {
+      if (method === 'turn/started' && p.turn?.id) own.turnId = String(p.turn.id);
       if (method === 'item/completed' && p.item?.type === 'agentMessage' && typeof p.item.text === 'string') own.text = p.item.text;
       if (method === 'turn/completed') own.status = p.turn?.status === 'completed' ? 'completed' : p.turn?.status === 'interrupted' ? 'stopped' : 'failed';
       return true;
@@ -487,7 +520,9 @@ export class CodexAdapter implements Adapter {
       case 'item/started': {
         const tool = toolOf(p.item);
         received(t);
-        if (p.item?.type === 'commandExecution') this.commands.set(String(p.item.id), String(p.item.command ?? '').slice(0, 200));
+        if (p.item?.type === 'commandExecution') {
+          this.commands.set(String(p.item.id), { description: String(p.item.command ?? '').slice(0, 200), ...(p.item.processId ? { processId: String(p.item.processId) } : {}) });
+        }
         if (tool) t.out.push({ type: 'tool.started', data: { id: String(p.item.id), name: tool.name, input: tool.input } });
         break;
       }

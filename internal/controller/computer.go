@@ -434,6 +434,9 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 		case api.EventTurnDispatched, api.EventHarnessRestarted:
 			c.kick(name)
 		case api.EventTaskStarted, api.EventTaskFinished:
+			if ev.Type == api.EventTaskFinished {
+				c.reportTimeLimit(name, ev)
+			}
 			if st, err := c.statusNow(name); err == nil {
 				c.observeStatus(name, st)
 			}

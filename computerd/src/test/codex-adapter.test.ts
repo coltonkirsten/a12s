@@ -217,3 +217,22 @@ test('codex: a failed turn leaves no background tasks behind', async () => {
   assert.ok(!evs.some((e) => e.type === 'task.started'));
   assert.deepEqual([adapter.backgroundTasks(), tasks.length], [0, 0]);
 });
+
+test('codex: stopTask terminates one background terminal or interrupts one sub-agent; no background turn reports it', async () => {
+  const { adapter, input, tasks, background, log } = setup('normal', { FAKE_BG_MS: '60000' });
+  const first = await adapter.startTurn({ ...input, prompt: 'bg' });
+  const shell = (await collect(first.events)).find((e) => e.type === 'task.started') as TaskEvent;
+  const agent = (await collect((await adapter.startTurn({ ...input, sessionId: first.sessionId, prompt: 'spawn' })).events)).find((e) => e.type === 'task.started') as TaskEvent;
+  assert.equal(adapter.backgroundTasks(), 2);
+  assert.equal(await adapter.stopTask(shell.data.id), true);
+  assert.equal(await adapter.stopTask(agent.data.id), true);
+  await until(() => tasks.length === 2);
+  assert.deepEqual(tasks.map((t) => [t.data.kind, (t.data as { status?: string }).status]), [['shell', 'stopped'], ['agent', 'stopped']]);
+  assert.equal(adapter.backgroundTasks(), 0);
+  assert.equal(await adapter.stopTask(shell.data.id), false, 'an ended task');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(background.length, 0);
+  const init = log().find((m) => m.method === 'initialize');
+  assert.deepEqual(init?.params.capabilities, { experimentalApi: true });
+  await adapter.close();
+});

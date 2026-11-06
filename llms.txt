@@ -26,7 +26,10 @@ its own fleet.yaml, images, Services and app code.
 - Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one. The harness
   process lives across Turns, so background work (a sub-agent or Bash run with run_in_background; a Codex sub-agent
   or command still running at the Turn's end) outlives its Turn.
-  status shows it as background {tasks}; the agent computer stays Ready (Messages run at once) but never idle.
+  status shows it as background {tasks, items: [{id, kind, description, startedAt, deadline}]}; the agent computer
+  stays Ready (Messages run at once) but never idle. Each background task is stopped at its time limit, 2h unless the
+  agent extends it (a12s MCP tool background_tasks {id, hours ≤ 24}); task.finished then has status stopped and
+  timeLimit (seconds), and the agent gets an inbox Message via "a12s" saying so.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
   turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input,
   parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of
@@ -467,8 +470,8 @@ SDK objects (Python names; TypeScript is camelCase):
 - Every Claude Code Turn logs one or two `egress.denied` events for telemetry hosts: harmless.
 - Background work survives Turns, not the session: stop, sleep (manual or sleepAfterIdle), restart_harness, a
   fresh=true Message and a config change end it (task.finished status killed or stopped). sleepAfterIdle and staged
-  config changes wait while it runs, so a never-ending one (a dev server) keeps the agent computer awake until
-  `a12s stop <c>`.
+  config changes wait while it runs, so a long one (a dev server) keeps the agent computer awake until its time
+  limit (2h, or what the agent asked for) or `a12s stop <c>`.
 - Nothing is delivered? `a12s inbox <c>` (held? says why; `a12s inbox resume <c>`), `a12s status` (asleep?
   `a12s wake <c>`), `a12s doctor`.
 - attach: Docker Desktop must share the folder (/Users, /Volumes, /private, /tmp, /var/folders by default; else

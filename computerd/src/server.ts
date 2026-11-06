@@ -216,6 +216,11 @@ export function localHandler(computer: Computer, sendTo: ((req: SendRequest) => 
   return wrap(async (req, res, url) => {
     if (req.method !== 'POST') throw new HttpError(405, 'POST only');
     if (url.pathname === '/v1/system/restart_harness') return send(res, 200, { message: computer.requestRestart() });
+    if (url.pathname === '/v1/system/background_tasks') {
+      const body = await readJson(req);
+      const id = typeof body.id === 'string' && body.id ? body.id : undefined;
+      return send(res, 200, computer.backgroundTasksTool(id, typeof body.hours === 'number' ? body.hours : undefined));
+    }
     if (url.pathname === '/v1/system/send') {
       if (!sendTo) throw new HttpError(403, 'this Computer has no send grant');
       const body = await readJson(req);
