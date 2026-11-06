@@ -4,6 +4,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Fixed: after a Controller restart, an agent computer with a config change staged behind a running Turn or
+  background work is attached like any running one. Before, it stayed in Provisioning: no events followed, its inbox
+  held, and the change never applied.
 - Fixed: `a12s stop` on an agent computer whose only work was in the background now applies a staged config change.
   computerd reports the stopped tasks while the harness still counts them and the count drops when the harness exits,
   with no event, so the change (and, before the previous fix, the inbox) waited for an event that never came. The

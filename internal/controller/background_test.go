@@ -118,3 +118,28 @@ func TestStagedChangeDoesNotHoldTheInboxWhileBackgroundWorkRuns(t *testing.T) {
 	scout.task(false)
 	waitFor(t, func() bool { return readState(t, h.dir).Computers["scout"].Generation == 2 })
 }
+
+// After a Controller restart, an agent computer with a change staged behind background work is picked up like any
+// other running one: Ready, its Messages delivered, and the change applied once the work ends.
+func TestRestartAttachesAComputerWithAChangeStagedBehindBackgroundWork(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	scout := h.cds.get("scout")
+	scout.task(true)
+	waitFor(t, func() bool { return h.c.computerStatus(context.Background(), "scout").Background != nil })
+	res := h.up(labFleet(t, func(f *fleet.Fleet) {
+		c := f.Computers["scout"]
+		c.Harness.Model = "claude-fable-5-2"
+		f.Computers["scout"] = c
+	}), false)
+	if len(res.Staged) != 1 {
+		t.Fatalf("up with background work = %+v", res)
+	}
+	h2 := h.restart()
+	h2.waitPhase("scout", api.PhaseReady)
+	m := h2.send("scout", "are you there?")
+	h2.waitMessage("scout", m.ID, api.MsgDelivered)
+	scout.finish(api.TurnCompleted)
+	scout.task(false)
+	waitFor(t, func() bool { return readState(t, h2.dir).Computers["scout"].Generation == 2 })
+}

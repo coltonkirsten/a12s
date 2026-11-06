@@ -458,7 +458,12 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 		c.closeAdmission(name)
 		if c.busy(ctx, name) {
 			c.openAdmission(name)
-			return staged, c.stageLater(name, hash, obs.Generation, "applies when the current turn and background work end")
+			if err := c.stageLater(name, hash, obs.Generation, "applies when the current turn and background work end"); err != nil {
+				return staged, err
+			}
+			// It keeps running its current generation, so it is picked up like any running one (after a
+			// Controller restart nothing else attaches it, and it would sit in Provisioning with its inbox).
+			return staged, c.ensurePower(ctx, name, true)
 		}
 	}
 	return restaged, c.restage(ctx, name)
