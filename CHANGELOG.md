@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Fixed: `a12s stop` on an agent computer whose only work was in the background now applies a staged config change.
+  computerd reports the stopped tasks while the harness still counts them and the count drops when the harness exits,
+  with no event, so the change (and, before the previous fix, the inbox) waited for an event that never came. The
+  Controller now watches a stopped session until its background work is gone, then applies the change and drains.
 - Fixed: a staged config change no longer holds the inbox while background work runs. Before, an agent computer
   with a change staged and a background task running took no Messages until the task ended, so a task that never
   ended (a stray `until` loop) held its Messages forever, contrary to [the inbox rules](docs/inbox.md#the-rules).

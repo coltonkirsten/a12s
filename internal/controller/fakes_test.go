@@ -631,8 +631,17 @@ func (f *fakeComputerd) StopAll(context.Context) (api.StopResponse, error) {
 		res.Turns = append(res.Turns, f.active)
 	}
 	f.stops = append(f.stops, "*")
-	for ; f.background > 0; f.background-- {
+	// As computerd does: the stopped tasks are reported while the harness still counts them, and the count
+	// drops only when the harness exits, a moment later and with no event.
+	for range f.background {
 		f.emitLocked(api.EventTaskFinished, "", api.TaskData{ID: "task", Status: api.TaskKilled})
+	}
+	if f.background > 0 {
+		time.AfterFunc(20*time.Millisecond, func() {
+			f.mu.Lock()
+			f.background = 0
+			f.mu.Unlock()
+		})
 	}
 	f.mu.Unlock()
 	f.finish(api.TurnInterrupted)

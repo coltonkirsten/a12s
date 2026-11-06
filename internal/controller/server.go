@@ -238,6 +238,10 @@ func (c *Controller) handleStopAll(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	if res.Background > 0 {
+		name := r.PathValue("c")
+		c.spawn(func() { c.afterStop(name) })
+	}
 	writeJSON(w, http.StatusOK, res)
 }
 
