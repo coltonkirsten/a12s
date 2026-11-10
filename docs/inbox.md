@@ -144,6 +144,7 @@ agent_computers:
 | `sleepAfterIdle` | `off` | `off`, or `1s` to `7d` (`5s`, `15m`, `2h`, `1d`) |
 | `wakeOnMessage.from` | nothing wakes it | principals: `local`, `token:<name>`, `service:<name>`, `computer:<name>`; no wildcard |
 | `wakeOnMessage.maxWakesPerHour` | 6 | 1 to 60 automatic wakes in a rolling hour |
+| `compactBeforeSleep.minTokens` | never compacts | `1000` to `1000000`; `claude-code` harness only |
 
 - **Idle** means `Ready`, with no Turn running, no [background work](concepts.md#background-work) (`background` in
   status: Claude Code sub-agents and background shells, Codex background terminals), no work owed, nothing pending
@@ -160,6 +161,12 @@ agent_computers:
 - A failed automatic wake is retried up to 3 times, 10 s apart and doubling, when the failure is retryable (a cloud
   API error on start, a slow boot). One that still fails, or a non-retryable one, pauses auto-wake for that agent
   computer until a manual `a12s wake` or `a12s up`.
+- **Compact before sleep.** With `compactBeforeSleep`, an automatic sleep first runs `/compact` in the session when
+  the last Turn's context (its input tokens per model call) reached `minTokens`, waits for it (up to 10 minutes)
+  and then sleeps if still idle. Sleep comes well inside the harness's one-hour prompt cache, so the summary costs a
+  cached read; the next wake, often past that hour, then re-sends the summary instead of the whole conversation. The
+  compaction is a Turn with the prompt `/compact`, and `power.compact` records it in the event log. A plain
+  `a12s sleep` never compacts.
 - `--expires 0` never wakes anything: a wake takes seconds. Send a window (`--expires 60s`) instead.
 
 `a12s status` shows each agent computer's power state:

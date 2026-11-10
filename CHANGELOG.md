@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: `power.compactBeforeSleep: {minTokens: N}` (claude-code only). Before an automatic sleep, the Controller
+  runs `/compact` in the session when the last Turn's context reached N tokens, then sleeps. The summary is written
+  while the one-hour prompt cache is still warm, so a wake after that hour re-sends the summary instead of the whole
+  conversation. Off unless set ([Power policy](docs/inbox.md#power-policy)).
 - Added: a Fleet can name where the Controller reads a credential, so nobody pastes it: the top-level
   `credentials: {anthropic: {gcpSecret: projects/<project>/secrets/<name>}}` reads Google Secret Manager's latest
   version with the Controller VM's own service account (no key), every minute. Adding a version rotates it for every

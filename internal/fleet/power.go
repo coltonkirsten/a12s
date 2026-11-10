@@ -13,12 +13,15 @@ const (
 	MaxSleepAfterIdle      = 7 * 24 * time.Hour
 	DefaultMaxWakesPerHour = 6
 	MaxMaxWakesPerHour     = 60
+	MinCompactTokens       = 1_000
+	MaxCompactTokens       = 1_000_000
 )
 
 type PowerSettings struct {
 	SleepAfterIdle  time.Duration // 0: off
 	WakeFrom        []string      // empty: nothing wakes it
 	MaxWakesPerHour int
+	CompactAbove    int64 // 0: never compact before an auto-sleep
 }
 
 func (p PowerSettings) On() bool { return p.SleepAfterIdle > 0 || len(p.WakeFrom) > 0 }
@@ -51,6 +54,9 @@ func (f *Fleet) ResolvePower(name string) PowerSettings {
 	if p.SleepAfterIdle != nil {
 		out.SleepAfterIdle, _ = ParseIdle(*p.SleepAfterIdle)
 	}
+	if p.CompactBeforeSleep != nil {
+		out.CompactAbove = p.CompactBeforeSleep.MinTokens
+	}
 	if p.WakeOnMessage != nil {
 		out.WakeFrom = append([]string(nil), p.WakeOnMessage.From...)
 		if p.WakeOnMessage.MaxWakesPerHour != nil {
@@ -75,6 +81,9 @@ func validatePower(field string, p Power, computer func(string) bool, service fu
 		case d != 0 && (d < MinSleepAfterIdle || d > MaxSleepAfterIdle):
 			bad("sleepAfterIdle", "use off, or 1s to 7d (e.g. 5s, 15m, 2h, 1d)", "%s is out of range", *p.SleepAfterIdle)
 		}
+	}
+	if cb := p.CompactBeforeSleep; cb != nil && (cb.MinTokens < MinCompactTokens || cb.MinTokens > MaxCompactTokens) {
+		bad("compactBeforeSleep.minTokens", "set 1000 to 1000000 (e.g. 100000)", "%d is out of range", cb.MinTokens)
 	}
 	if w := p.WakeOnMessage; w != nil {
 		if w.MaxWakesPerHour != nil && (*w.MaxWakesPerHour < 1 || *w.MaxWakesPerHour > MaxMaxWakesPerHour) {

@@ -71,6 +71,8 @@ func TestPowerValidation(t *testing.T) {
 		{Power{SleepAfterIdle: p("500ms")}, "sleepAfterIdle", "500ms"},
 		{Power{SleepAfterIdle: p("8d")}, "sleepAfterIdle", "8d"},
 		{Power{SleepAfterIdle: p("soon")}, "sleepAfterIdle", "soon"},
+		{Power{CompactBeforeSleep: &CompactBeforeSleep{MinTokens: 999}}, "compactBeforeSleep.minTokens", "999"},
+		{Power{CompactBeforeSleep: &CompactBeforeSleep{MinTokens: 1_000_001}}, "compactBeforeSleep.minTokens", "1000001"},
 	} {
 		_, err := validateWith(t, func(f *Fleet) {
 			s := f.Computers["scout"]
@@ -79,4 +81,11 @@ func TestPowerValidation(t *testing.T) {
 		})
 		refuses(t, err, field+c.sub, c.value)
 	}
+	_, err := validateWith(t, func(f *Fleet) {
+		s := f.Computers["scout"]
+		s.Harness.Kind = HarnessCodex
+		s.Power = Power{CompactBeforeSleep: &CompactBeforeSleep{MinTokens: 100_000}}
+		f.Computers["scout"] = s
+	})
+	refuses(t, err, field+"compactBeforeSleep", "needs harness kind claude-code")
 }

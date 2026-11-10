@@ -60,6 +60,9 @@ func (f *Fleet) Validate() error {
 		errs = append(errs, c.validate(field)...)
 		errs = append(errs, validateInbox(field+".inbox", c.Inbox)...)
 		errs = append(errs, validatePower(field+".power", c.Power, isComputer, isService)...)
+		if c.Power.CompactBeforeSleep != nil && c.Harness.Kind != HarnessClaudeCode {
+			bad(field+".power.compactBeforeSleep", "needs harness kind %s, not %s  fix: remove compactBeforeSleep", HarnessClaudeCode, c.Harness.Kind)
+		}
 		errs = append(errs, f.validateUses(field, "", c.Uses)...)
 		errs = append(errs, f.validateGrants(field, c.Grants)...)
 	}
