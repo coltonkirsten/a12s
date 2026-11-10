@@ -176,6 +176,9 @@ Conditions can't match a service account's name for these permissions, but they 
   account, and delete the account with the agent computer. Never an account tagged `sa-tier=infra`. The Controller
   holds no tag permission, so it can't remove a tag.
 
+For a credential [read from Secret Manager](../credentials.md#from-a-secret-manager), grant the Controller's account
+`roles/secretmanager.secretAccessor` on that secret alone, not on the project.
+
 A project allows 100 user-managed service accounts by default; more agent computers with their own identity need a
 quota increase.
 

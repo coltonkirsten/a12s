@@ -1,8 +1,9 @@
 # Credentials
 
 A Fleet names credentials (`credentials: [anthropic, github]`); you set each value on the Fleet's Controller with
-`a12s creds set <name>` or from code ([below](#from-code-and-the-api)). Values never go into an image, the Fleet
-file, a container's config or a drive; the Controller stores them in its own state volume.
+`a12s creds set <name>` or from code ([below](#from-code-and-the-api)), or the Fleet names a secret manager the
+Controller reads it from itself ([From a secret manager](#from-a-secret-manager)). Values never go into an image, the
+Fleet file, a container's config or a drive; the Controller stores them in its own state volume.
 
 ## What to set
 
@@ -47,6 +48,44 @@ Use a setup token or an API key, not a copy of your interactive Claude login.
 
 Services receive their credentials the same way, at `/run/a12s/secrets/<name>` owned by the Service's user.
 
+## From a secret manager
+
+The Fleet's top-level `credentials` names where the Controller reads a credential's value, so nobody pastes it into
+the Controller and rotating it is one step in the secret manager:
+
+```yaml
+credentials:
+  anthropic:
+    gcpSecret: projects/my-project/secrets/fleet-anthropic   # Google Secret Manager; the latest version
+agent_computers:
+  lead:
+    credentials: [anthropic]          # used as before
+```
+
+- **`gcpSecret`** is a Secret Manager secret, `projects/<project id or number>/secrets/<name>`. The Controller reads its
+  `latest` version with the service account of the VM it runs on, from the metadata server: no key file. It needs a
+  Controller on a GCE VM (any driver) whose service account has `roles/secretmanager.secretAccessor` on that secret.
+  Surrounding whitespace, such as the newline `gcloud secrets versions add` keeps from a file, is trimmed. It is the
+  only source today.
+- The Controller reads every source when the Fleet names it and then **every minute**, and stores the value as if it
+  had been set by hand: agent computers and Services that use it get a new value within a minute, with the same
+  harness restart as [rotation](#how-secrets-are-handled), and wake and restart inject the stored value. A minute
+  keeps a rotation quick for about 45,000 reads a month per secret.
+- **To rotate**, add a new version to the secret. The new version is `latest`, so the old one is no longer read; disable
+  or destroy it afterwards.
+- **To withdraw a value**, disable or destroy the latest version (Secret Manager doesn't fall back to an older one), or
+  delete the secret. At the next read the Controller drops the value, stops the running agent computers and Services
+  that use it so none keeps the old value, and leaves them in Provisioning with
+  `waiting: {credentials: [anthropic], fix: "add an enabled version to projects/…"}`. A new version starts them again.
+- **A read that fails otherwise** (no permission, an outage, no metadata server) keeps the value in use; the
+  credential's `sourceError` says why, and the Controller logs each new error once.
+- A credential with a source can't be set or removed by hand: `a12s creds set`, `credentials.set`/`remove` and a
+  `PUT /v1/fleet` that carries its value answer `409 conflict` with the fix. Remove it from the Fleet's `credentials` to
+  set it by hand again; it keeps the value it had until then.
+- No value is ever logged. The Controller logs which version it uses
+  (`credential anthropic: value from projects/123/secrets/fleet-anthropic/versions/4`), and `GET /v1/credentials`
+  shows it as `sourceVersion`.
+
 ## From code and the API
 
 The SDKs and the API set, list and remove credentials on the running Fleet by name. These calls take the owner
@@ -78,7 +117,8 @@ fleet.credentials.remove("stripe-test")
   in its status and `agent_computer.phase` event. Setting the value (`creds set` or `credentials.set`) starts it.
 - A value stays until you remove it or run `a12s down`; `a12s up` never touches values.
 
-The routes: `GET /v1/credentials` → `{credentials: [{name, set, usedBy, updatedAt?}]}`; `PUT /v1/credentials/{name}`
+The routes: `GET /v1/credentials` → `{credentials: [{name, set, usedBy, updatedAt?, source?, sourceVersion?,
+sourceError?}]}` (`source` and the rest for a credential [from a secret manager](#from-a-secret-manager)); `PUT /v1/credentials/{name}`
 `{"value": "…"}` → `{name, set, usedBy, updatedAt}`; `DELETE /v1/credentials/{name}` → 204. A name is lowercase
 letters, digits, `-` and `_`. `updatedAt` is when the value last changed (`credentials-updated.json` next to the
 values; absent for a value stored by an older Controller).

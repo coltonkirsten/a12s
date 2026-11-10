@@ -130,8 +130,8 @@ func (c *Controller) setStateLocked(name string, phase api.Phase, failure *api.F
 
 // waitForCredentials leaves the Computer stopped in Provisioning; setting the credentials starts it.
 func (c *Controller) waitForCredentials(name string, missing []string) error {
-	w := credentialWait(missing)
 	c.mu.Lock()
+	w := credentialWait(missing, c.sourcesLocked())
 	c.setStateLocked(name, api.PhaseProvisioning, nil, w)
 	c.mu.Unlock()
 	return &credentialsMissing{w}
@@ -556,6 +556,25 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	if err := c.powerOff(ctx, name); err != nil {
+		return err
+	}
+	c.setPhase(name, api.PhaseAsleep, nil)
+	return nil
+}
+
+// withdrawCredentials stops a running Computer whose credentials lost their value, so nothing keeps using the old
+// one, and leaves it waiting for them in Provisioning.
+func (c *Controller) withdrawCredentials(ctx context.Context, name string, missing []string) error {
+	if err := c.powerOff(ctx, name); err != nil {
+		return err
+	}
+	c.logf("%s: stopped: credentials %v have no value", name, missing)
+	return c.waitForCredentials(name, missing)
+}
+
+// powerOff stops the Computer after settling its open work, keeping its desired power.
+func (c *Controller) powerOff(ctx context.Context, name string) error {
 	c.closeAdmission(name)
 	obs, ok, err := c.observeOne(ctx, name)
 	if err != nil {
@@ -563,7 +582,6 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	}
 	if !ok || obs.Power != driver.PowerAwake {
 		c.stopEvents(name)
-		c.setPhase(name, api.PhaseAsleep, nil)
 		return nil
 	}
 	c.setPhase(name, api.PhaseStopping, nil)
@@ -578,7 +596,6 @@ func (c *Controller) sleep(ctx context.Context, name string) error {
 	if err := c.stop(ctx, name, obs.Generation); err != nil {
 		return c.fail(name, err, true)
 	}
-	c.setPhase(name, api.PhaseAsleep, nil)
 	return nil
 }
 
@@ -661,7 +678,9 @@ func (c *Controller) unexpected(ev driver.Event) bool {
 	defer c.mu.Unlock()
 	rec := c.state.Computers[ev.Computer]
 	r := c.rt[ev.Computer]
-	return rec != nil && r != nil && !r.transition && rec.DesiredPower == driver.PowerAwake && ev.Generation == rec.Generation
+	// One whose credentials lost their value was stopped for that, and waits for them instead of restarting.
+	return rec != nil && r != nil && !r.transition && rec.DesiredPower == driver.PowerAwake && ev.Generation == rec.Generation &&
+		c.state.Fleet != nil && len(missingCredentials(c.state.Fleet.Computers[ev.Computer].Credentials, c.creds)) == 0
 }
 
 func (c *Controller) removed(ev driver.Event) {

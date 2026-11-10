@@ -18,12 +18,13 @@ import (
 // Spec is a Fleet as written: defaults and each agent computer before the defaults are merged in. The Controller
 // stores it, GET /v1/fleet returns it, and per-agent-computer writes change one entry of it.
 type Spec struct {
-	APIVersion     string                     `json:"apiVersion"`
-	Kind           string                     `json:"kind"`
-	Metadata       Metadata                   `json:"metadata"`
-	Defaults       json.RawMessage            `json:"defaults,omitempty"`
-	AgentComputers map[string]json.RawMessage `json:"agent_computers"`
-	Services       map[string]Service         `json:"services,omitempty"`
+	APIVersion     string                      `json:"apiVersion"`
+	Kind           string                      `json:"kind"`
+	Metadata       Metadata                    `json:"metadata"`
+	Defaults       json.RawMessage             `json:"defaults,omitempty"`
+	AgentComputers map[string]json.RawMessage  `json:"agent_computers"`
+	Services       map[string]Service          `json:"services,omitempty"`
+	Credentials    map[string]CredentialSource `json:"credentials,omitempty"`
 }
 
 type specAlias Spec
@@ -62,11 +63,12 @@ func (s *Spec) Clone() *Spec {
 // the defaults') without validating.
 func (s *Spec) Effective() (*Fleet, error) {
 	f := &Fleet{
-		APIVersion: s.APIVersion,
-		Kind:       s.Kind,
-		Metadata:   s.Metadata,
-		Services:   s.Services,
-		Computers:  make(map[string]Computer, len(s.AgentComputers)),
+		APIVersion:  s.APIVersion,
+		Kind:        s.Kind,
+		Metadata:    s.Metadata,
+		Services:    s.Services,
+		Credentials: s.Credentials,
+		Computers:   make(map[string]Computer, len(s.AgentComputers)),
 	}
 	defaults, err := objectOf(s.Defaults)
 	if err != nil {

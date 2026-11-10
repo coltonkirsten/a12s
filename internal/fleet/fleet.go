@@ -37,7 +37,18 @@ type Fleet struct {
 	Defaults   Computer            `json:"defaults,omitzero"`
 	Computers  map[string]Computer `json:"agent_computers"`
 	Services   map[string]Service  `json:"services,omitempty"`
+	// Credentials names where the Controller reads a credential's value itself, by credential name.
+	Credentials map[string]CredentialSource `json:"credentials,omitempty"`
 }
+
+// CredentialSource is where the Controller reads a credential's value. Exactly one field is set.
+type CredentialSource struct {
+	// GCPSecret is a Secret Manager secret, projects/<project>/secrets/<name>: its latest version, read with the
+	// Controller VM's own service account.
+	GCPSecret string `yaml:"gcpSecret,omitempty" json:"gcpSecret,omitempty"`
+}
+
+func (s CredentialSource) String() string { return "gcpSecret " + s.GCPSecret }
 
 type Metadata struct {
 	Name string `yaml:"name" json:"name"`

@@ -887,6 +887,8 @@ type harness struct {
 	dir  string
 	log  *bytes.Buffer
 	stop func()
+	// secrets is the credential sources' store.
+	secrets *fakeSecrets
 	// skew moves the power clock and fleet.db's clock forward (advance).
 	skew *atomic.Int64
 }
@@ -938,11 +940,14 @@ func startHarnessOn(t *testing.T, dir string, d *fakeDriver, wrap func(*fakeDriv
 	c.logger = log.New(&lockedWriter{w: buf}, "", 0)
 	c.timing = Timing{ReadyTimeout: 2 * time.Second, Poll: 5 * time.Millisecond, SleepFlush: 300 * time.Millisecond, RestartBackoff: time.Millisecond, MaxRestarts: 3, WakeBackoff: time.Millisecond, ReadBack: time.Second, PowerTick: 5 * time.Millisecond, HealthPoll: 5 * time.Millisecond, HealthStartup: 300 * time.Millisecond, HealthInterval: 20 * time.Millisecond}
 	c.newClient = func(name string) computerdClient { return cds.get(name) }
+	secrets := &fakeSecrets{}
+	c.secrets = secrets
+	c.timing.SourcePoll = 10 * time.Millisecond
 	skew := &atomic.Int64{}
 	c.now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
 	c.inbox.SetClock(c.now)
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf, skew: skew}
+	h := &harness{t: t, c: c, d: d, cds: cds, dir: dir, log: buf, skew: skew, secrets: secrets}
 	h.stop = sync.OnceFunc(func() {
 		cancel()
 		c.Wait() // nothing of this Controller runs on after it stops
@@ -985,7 +990,7 @@ func labFleet(t *testing.T, edit func(f *fleet.Fleet)) *fleet.Fleet {
 
 // specFor is what a12s up sends for f: each agent computer as written is its merged form.
 func specFor(f *fleet.Fleet) *fleet.Spec {
-	s := &fleet.Spec{APIVersion: f.APIVersion, Kind: f.Kind, Metadata: f.Metadata, Services: f.Services, AgentComputers: map[string]json.RawMessage{}}
+	s := &fleet.Spec{APIVersion: f.APIVersion, Kind: f.Kind, Metadata: f.Metadata, Services: f.Services, Credentials: f.Credentials, AgentComputers: map[string]json.RawMessage{}}
 	if raw := fleet.SpecOf(f.Defaults); string(raw) != "{}" {
 		s.Defaults = raw
 	}

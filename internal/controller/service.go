@@ -398,6 +398,7 @@ func (c *Controller) ensureServicePower(ctx context.Context, name string, runnin
 	phase := r.phase
 	material := c.credsHashLocked(c.state.Fleet.Services[name].Credentials)
 	rotate := running && material != "" && r.credsHash != material && len(c.state.Fleet.Services[name].Credentials) > 0
+	missing := missingCredentials(c.state.Fleet.Services[name].Credentials, c.creds)
 	c.mu.Unlock()
 	switch {
 	case desired == driver.PowerAsleep && running:
@@ -406,6 +407,23 @@ func (c *Controller) ensureServicePower(ctx context.Context, name string, runnin
 		c.setServicePhase(name, api.PhaseAsleep, nil)
 		return nil
 	case !running:
+		return c.startService(ctx, name)
+	case len(missing) > 0:
+		// A credential it uses was withdrawn at its source: stop it, so nothing keeps using the old value.
+		c.stopHealth(name)
+		obs, ok, err := c.observeService(ctx, name)
+		if err != nil {
+			return err
+		}
+		if ok && obs.Power == driver.PowerAwake {
+			c.setServiceTransition(name, true)
+			defer c.setServiceTransition(name, false)
+			c.setServicePhase(name, api.PhaseStopping, nil)
+			if err := c.stopService(ctx, name, obs.Generation); err != nil {
+				return c.failService(name, err)
+			}
+		}
+		c.auditf(name, "stopped: credentials %v have no value", missing)
 		return c.startService(ctx, name)
 	}
 	if rotate {
@@ -484,7 +502,7 @@ func (c *Controller) startService(ctx context.Context, name string) error {
 	gen := c.state.Services[name].Generation
 	var w *api.Waiting
 	if missing := missingCredentials(s.Credentials, c.creds); len(missing) > 0 {
-		w = credentialWait(missing)
+		w = credentialWait(missing, c.sourcesLocked())
 		c.setServiceStateLocked(name, api.PhaseProvisioning, nil, w)
 	}
 	c.mu.Unlock()
@@ -532,6 +550,7 @@ func (c *Controller) injectService(ctx context.Context, name string, withCert bo
 		gen, generation, send = rec.CredentialGeneration, rec.Generation, slices.Clone(rec.Active.Send)
 	}
 	hash := c.credsHashLocked(s.Credentials)
+	sources := c.sourcesLocked()
 	c.mu.Unlock()
 	switch {
 	case !ok || rec == nil:
@@ -540,7 +559,7 @@ func (c *Controller) injectService(ctx context.Context, name string, withCert bo
 		return err
 	}
 	if missing := missingCredentials(s.Credentials, material); len(missing) > 0 {
-		return &credentialsMissing{credentialWait(missing)}
+		return &credentialsMissing{credentialWait(missing, sources)}
 	}
 	for _, cred := range s.Credentials {
 		if err := c.drv.ServiceWrite(ctx, name, secretsDir+"/"+cred, user, "0400", secretsDirMode, material[cred]); err != nil {
@@ -795,6 +814,10 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 	if inFleet {
 		_, inFleet = c.state.Fleet.Services[name]
 	}
+	if err := c.refuseSourcedLocked(req.Credentials); err != nil {
+		c.mu.Unlock()
+		return err
+	}
 	if inFleet && req.State == api.PowerAwake {
 		_ = c.setCredsLocked(req.Credentials)
 		c.state.Services[name].Restarts = 0
@@ -860,7 +883,8 @@ func (c *Controller) unexpectedService(ev driver.Event) bool {
 	c.mu.Lock()
 	rec := c.state.Services[ev.Computer]
 	r := c.srt[ev.Computer]
-	ok := rec != nil && r != nil && !r.transition && ev.Generation == rec.Generation
+	ok := rec != nil && r != nil && !r.transition && ev.Generation == rec.Generation &&
+		c.state.Fleet != nil && len(missingCredentials(c.state.Fleet.Services[ev.Computer].Credentials, c.creds)) == 0
 	c.mu.Unlock()
 	return ok && c.serviceDesired(c.ctx, ev.Computer) == driver.PowerAwake
 }

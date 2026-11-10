@@ -62,6 +62,14 @@ export interface FleetSpec {
   defaults?: AgentComputerSpec;
   agent_computers: Record<string, AgentComputerSpec>;
   services?: Record<string, Record<string, unknown>>;
+  /** Where the Controller reads a credential's value itself, by credential name. */
+  credentials?: Record<string, CredentialSource>;
+}
+
+/** Where the Controller reads a credential's value. Exactly one field is set. */
+export interface CredentialSource {
+  /** A Secret Manager secret, `projects/<project>/secrets/<name>`: its latest version, read with the Controller VM's service account. */
+  gcpSecret?: string;
 }
 
 export interface Change {
@@ -608,6 +616,12 @@ export interface CredentialInfo {
   usedBy?: string[];
   /** When the value last changed (RFC 3339); absent if unknown. */
   updatedAt?: string;
+  /** Where the Controller reads the value, from the Fleet's `credentials`. */
+  source?: CredentialSource;
+  /** The source's version the value came from. */
+  sourceVersion?: string;
+  /** Why the last read of the source failed. The value in use stays, unless the source has none. */
+  sourceError?: string;
 }
 
 export interface CredentialsResponse {

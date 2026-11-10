@@ -79,6 +79,7 @@ agent_computers:
 | `defaults` | Any agent computer field but `attach`, applied to every agent computer. |
 | `agent_computers` | Agent computers, by name (DNS labels). |
 | `services` | Services, by name. See [Services](services.md). |
+| `credentials` | Where the Controller reads a credential's value itself, by credential name: `{ anthropic: { gcpSecret: projects/<project>/secrets/<name> } }`. A credential listed here can't be set by hand. See [Credentials: From a secret manager](credentials.md#from-a-secret-manager). |
 
 ## Agent computer fields
 
@@ -92,7 +93,7 @@ agent_computers:
 | `instructions` | Text written to the home drive as `CLAUDE.md` (claude-code) or `AGENTS.md` (codex): the agent's standing role. |
 | `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.claude/skills/x/SKILL.md`, `.mcp.json`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB; `instructions` and a `files` entry for the same `CLAUDE.md` (`AGENTS.md` for codex) is an error. |
 | `resources` | `{cpu, memory}`, e.g. `{ cpu: 2, memory: 4Gi }`. Zero means no limit. |
-| `credentials` | Credential names, added to `defaults.credentials`; set each value with `a12s creds set <name>`. See [Credentials](credentials.md). |
+| `credentials` | Credential names, added to `defaults.credentials`; set each value with `a12s creds set <name>`, or name its source in the top-level `credentials`. See [Credentials](credentials.md). |
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Only the owner sets it: a prefix token can't. Default: Docker's default profile. |
 | `attach` | `{name: {host, readOnly, keep}}`: folders on this machine mounted into the home at `/home/agent/<name>`. See [Attached folders](#attached-folders). Only the owner sets it, never in `defaults`. |

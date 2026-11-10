@@ -94,6 +94,11 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 	if err := f.Validate(); err != nil {
 		return api.PutFleetResponse{}, errorf(http.StatusBadRequest, api.ErrInvalid, "%v", err)
 	}
+	for _, name := range slices.Sorted(maps.Keys(o.creds)) {
+		if src, ok := f.Credentials[name]; ok {
+			return api.PutFleetResponse{}, sourcedError(name, src)
+		}
+	}
 	c.mu.Lock()
 	creds := maps.Clone(c.creds)
 	c.mu.Unlock()
@@ -141,6 +146,9 @@ func (c *Controller) applySpec(ctx context.Context, mutate func(cur *fleet.Spec)
 		previous, previousServices = c.state.Fleet.Computers, c.state.Fleet.Services
 	}
 	changed := c.state.Spec == nil || specJSON(c.state.Spec) != specJSON(spec)
+	if oldFleet == nil || !maps.Equal(oldFleet.Credentials, f.Credentials) {
+		defer c.kickSources()
+	}
 	c.state.Spec, c.state.Fleet, c.state.Pins = spec, f, pins
 	if changed {
 		c.state.Version++
@@ -307,12 +315,12 @@ func credentialWaits(f *fleet.Fleet, creds api.Credentials, o writeOpts) []strin
 	var out []string
 	for _, name := range f.ComputerNames() {
 		if missing := missingCredentials(f.Computers[name].Credentials, creds); o.touches(name) && len(missing) > 0 {
-			out = append(out, "agent_computers."+name+": "+credentialWait(missing).String())
+			out = append(out, "agent_computers."+name+": "+credentialWait(missing, f.Credentials).String())
 		}
 	}
 	for _, name := range f.ServiceNames() {
 		if missing := missingCredentials(f.Services[name].Credentials, creds); o.touches(name) && len(missing) > 0 {
-			out = append(out, "services."+name+": "+credentialWait(missing).String())
+			out = append(out, "services."+name+": "+credentialWait(missing, f.Credentials).String())
 		}
 	}
 	return out
@@ -516,6 +524,7 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 	// that is present and not known to be in the Computer is injected.
 	material := c.credsHashLocked(c.state.Fleet.Computers[name].Credentials)
 	rotate := material != "" && r.credsHash != material
+	missing := missingCredentials(c.state.Fleet.Computers[name].Credentials, c.creds)
 	c.mu.Unlock()
 	switch {
 	case desired == driver.PowerAsleep && running:
@@ -525,6 +534,8 @@ func (c *Controller) ensurePower(ctx context.Context, name string, running bool)
 		return nil
 	case !running:
 		return c.start(ctx, name)
+	case len(missing) > 0:
+		return c.withdrawCredentials(ctx, name, missing)
 	case phase != api.PhaseReady && phase != api.PhaseBusy:
 		if err := c.attach(ctx, name); err != nil {
 			return c.start(ctx, name)
@@ -697,6 +708,10 @@ func (c *Controller) setPowerLocked(ctx context.Context, name string, req api.Po
 	inFleet := c.state.Fleet != nil && rec != nil
 	if inFleet {
 		_, inFleet = c.state.Fleet.Computers[name]
+	}
+	if err := c.refuseSourcedLocked(req.Credentials); err != nil {
+		c.mu.Unlock()
+		return err
 	}
 	if inFleet && req.State == api.PowerAwake {
 		_ = c.setCredsLocked(req.Credentials)

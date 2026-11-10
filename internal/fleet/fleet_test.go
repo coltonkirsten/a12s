@@ -212,6 +212,12 @@ agent_computers:
 		{"claude-code settings", base + strings.Replace(c, "kind: codex, version: 0.154.0 }", "kind: claude-code, version: 2.1.296, settings: { fastMode: true, permissions: { allow: [Bash] } } }", 1), ""},
 		{"settings not an object", base + strings.Replace(c, "kind: codex, version: 0.154.0 }", "kind: claude-code, version: 2.1.296, settings: fast }", 1), "cannot unmarshal"},
 		{"settings key not a string", base + strings.Replace(c, "kind: codex, version: 0.154.0 }", "kind: claude-code, version: 2.1.296, settings: { env: { 1: x } } }", 1), "harness.settings: not JSON"},
+		{"credential source", base + "credentials: { anthropic: { gcpSecret: projects/my-proj-1/secrets/anthropic-token } }\n" + c, ""},
+		{"credential source by project number", base + "credentials: { anthropic: { gcpSecret: projects/123456789/secrets/a_b } }\n" + c, ""},
+		{"credential source pins a version", base + "credentials: { anthropic: { gcpSecret: projects/my-proj-1/secrets/x/versions/3 } }\n" + c, "credentials.anthropic.gcpSecret"},
+		{"credential source names nothing", base + "credentials: { anthropic: {} }\n" + c, "credentials.anthropic.gcpSecret"},
+		{"credential source unknown kind", base + "credentials: { anthropic: { vault: x } }\n" + c, "field vault not found"},
+		{"credential source bad name", base + "credentials: { Anthropic: { gcpSecret: projects/my-proj-1/secrets/x } }\n" + c, "credentials.Anthropic"},
 		{"no drive mounts", base + c + "    drives: [{ name: d, at: /w }]\n", "field drives not found"},
 	}
 	for _, tt := range tests {
