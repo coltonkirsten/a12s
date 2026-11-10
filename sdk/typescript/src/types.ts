@@ -46,7 +46,7 @@ export interface AgentComputerSpec {
    */
   attach?: Record<string, { host: string; readOnly?: boolean; keep?: string[] }>;
   inbox?: { maxMessages?: number; maxBytes?: string };
-  power?: { sleepAfterIdle?: string; wakeOnMessage?: { from: string[]; maxWakesPerHour?: number } };
+  power?: { sleepAfterIdle?: string; wakeOnMessage?: { from: string[]; maxWakesPerHour?: number }; compactBeforeSleep?: { minTokens: number } };
   uses?: Array<string | { name: string; mcp?: boolean }>;
   grants?: { send?: string[] };
 }

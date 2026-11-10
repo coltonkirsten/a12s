@@ -2,6 +2,9 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -180,14 +183,15 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 	if len(p.WakeFrom) > 0 && !c.credsLoaded(name) {
 		return
 	}
-	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	st, err := c.client(name).Status(sctx)
-	cancel()
-	if err != nil || st.ActiveTurn != "" || st.Phase != "ready" || st.Continuation != "" || st.Background != nil && st.Background.Tasks > 0 {
+	if !c.stillIdle(ctx, name) {
 		c.setIdle(name, false)
 		return
 	}
 	if n, err := c.drv.Sessions(ctx, name); err != nil || n > 0 {
+		c.setIdle(name, false)
+		return
+	}
+	if c.compactBeforeSleep(ctx, name, p) && !c.stillIdle(ctx, name) {
 		c.setIdle(name, false)
 		return
 	}
@@ -220,6 +224,77 @@ func (c *Controller) autoSleep(name string, p fleet.PowerSettings) {
 		c.logf("%s: auto-sleep: %v", name, err)
 	}
 	c.setIdle(name, false)
+}
+
+// compactTimeout bounds the wait for a compaction; one still running then keeps the Computer awake.
+const compactTimeout = 10 * time.Minute
+
+// compactBeforeSleep runs /compact when the last Turn's context reached the policy's threshold. Sleep comes well
+// inside the one-hour prompt cache, so the summary is written from a cached read; the next wake, often past that
+// hour, then re-sends the summary instead of the whole conversation. It reports whether a compaction ran.
+func (c *Controller) compactBeforeSleep(ctx context.Context, name string, p fleet.PowerSettings) bool {
+	if p.CompactAbove <= 0 {
+		return false
+	}
+	turns, err := c.inbox.Turns(ctx, name, 1)
+	if err != nil || len(turns) == 0 {
+		return false
+	}
+	size := contextTokens(turns[0])
+	if size < p.CompactAbove {
+		return false
+	}
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	req := api.TurnRequest{RequestID: "compact-" + hex.EncodeToString(b[:]), Session: api.SessionCurrent, Prompt: "/compact"}
+	pctx, cancel := context.WithTimeout(ctx, postTimeout)
+	res, err := c.client(name).StartTurn(pctx, req)
+	cancel()
+	if err != nil {
+		c.logf("%s: compact before sleep: %v", name, err)
+		return false
+	}
+	data := map[string]any{"turn": res.TurnID, "contextTokens": size, "minTokens": p.CompactAbove}
+	_ = c.inbox.PowerEvent(ctx, name, "power.compact", data)
+	c.logf("%s: compacting before sleep (last turn's context about %d tokens) in turn %s", name, size, res.TurnID)
+	deadline := time.Now().Add(compactTimeout)
+	for time.Now().Before(deadline) {
+		sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		sum, err := c.client(name).TurnSummary(sctx, res.TurnID)
+		cancel()
+		if err == nil && sum.Finished != "" {
+			c.logf("%s: compact before sleep: turn %s %s %s", name, res.TurnID, sum.Finished, sum.Error)
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(c.timing.Poll):
+		}
+	}
+	c.logf("%s: compact before sleep: turn %s still running after %s; staying awake", name, res.TurnID, compactTimeout)
+	return true
+}
+
+// contextTokens estimates a Turn's context as its input per model call: the harness reports the Turn's sum.
+func contextTokens(t api.Turn) int64 {
+	if t.Tokens == nil {
+		return 0
+	}
+	var u struct {
+		NumTurns int64 `json:"numTurns"`
+	}
+	_ = json.Unmarshal(t.Usage, &u)
+	calls := max(u.NumTurns, 1)
+	return (t.Tokens.Input + t.Tokens.CacheRead + t.Tokens.CacheWrite) / calls
+}
+
+// stillIdle asks computerd itself: no Turn, no background work, no continuation owed.
+func (c *Controller) stillIdle(ctx context.Context, name string) bool {
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	st, err := c.client(name).Status(sctx)
+	cancel()
+	return err == nil && st.ActiveTurn == "" && st.Phase == "ready" && st.Continuation == "" && (st.Background == nil || st.Background.Tasks == 0)
 }
 
 type wakeVerdict struct {

@@ -141,6 +141,8 @@ Agent computer fields (all optional except a harness, image and credential, whic
   maxWakesPerHour: 6}}. sleepAfterIdle is off or 1s to 7d (e.g. 5s, 15m, 2h, 1d); maxWakesPerHour 1-60. Default:
   never sleeps. Asleep (by sleepAfterIdle or a plain `sleep`), only a Message whose via is listed wakes it (no
   wildcard); `sleep --hold` keeps it asleep until `wake`, whatever is sent (status: "auto-wake suppressed").
+  compactBeforeSleep: {minTokens: 100000} (claude-code only, 1000-1000000): an automatic sleep first runs /compact
+  when the last Turn's context reached minTokens, so a wake after the prompt cache expired re-sends a summary.
 - security: {seccomp: ./profiles/x.json}: a Docker-format seccomp profile, relative to fleet.yaml, replacing
   Docker's default for that agent computer only; `a12s up` reads the file and sends the profile itself. From the SDK
   or the HTTP API, `seccomp` is the profile's JSON object. Set it only when the image's software needs blocked

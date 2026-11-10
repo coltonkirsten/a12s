@@ -97,7 +97,7 @@ agent_computers:
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Only the owner sets it: a prefix token can't. Default: Docker's default profile. |
 | `attach` | `{name: {host, readOnly, keep}}`: folders on this machine mounted into the home at `/home/agent/<name>`. See [Attached folders](#attached-folders). Only the owner sets it, never in `defaults`. |
-| `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |
+| `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}, compactBeforeSleep: {minTokens}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |
 | `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
 | `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
 

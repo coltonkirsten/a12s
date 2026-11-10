@@ -82,6 +82,13 @@ type Power struct {
 	// SleepAfterIdle is "off" or a duration from 1s to 7d ("5s", "15m", "2h", "1d").
 	SleepAfterIdle *string        `yaml:"sleepAfterIdle,omitempty" json:"sleepAfterIdle,omitempty"`
 	WakeOnMessage  *WakeOnMessage `yaml:"wakeOnMessage,omitempty" json:"wakeOnMessage,omitempty"`
+	// CompactBeforeSleep summarizes a long claude-code conversation before an auto-sleep.
+	CompactBeforeSleep *CompactBeforeSleep `yaml:"compactBeforeSleep,omitempty" json:"compactBeforeSleep,omitempty"`
+}
+
+// CompactBeforeSleep: the conversation is compacted when its last Turn's context reached MinTokens.
+type CompactBeforeSleep struct {
+	MinTokens int64 `yaml:"minTokens" json:"minTokens"`
 }
 
 // WakeOnMessage lists the principals whose pending Messages may wake the

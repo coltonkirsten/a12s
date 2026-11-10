@@ -43,9 +43,14 @@ class InboxSpec(TypedDict, total=False):
 WakeOnMessageSpec = TypedDict("WakeOnMessageSpec", {"from": list[str], "maxWakesPerHour": int}, total=False)
 
 
+class CompactBeforeSleepSpec(TypedDict):
+    minTokens: int
+
+
 class PowerSpec(TypedDict, total=False):
     sleepAfterIdle: str
     wakeOnMessage: WakeOnMessageSpec
+    compactBeforeSleep: CompactBeforeSleepSpec
 
 
 class UseSpec(TypedDict, total=False):

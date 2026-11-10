@@ -235,3 +235,30 @@ func TestFailedWakePauses(t *testing.T) {
 		t.Fatalf("wakes %d", h.events("scout", "power.auto_wake"))
 	}
 }
+
+// A conversation over the threshold is compacted before the auto-sleep, and one compaction is enough.
+func TestCompactBeforeSleep(t *testing.T) {
+	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
+	h.cds.get("scout").set(func(f *fakeComputerd) { f.autoFinish = true })
+	long := api.Turn{AgentComputer: "scout", ID: "t_long", Status: api.TurnCompleted, Usage: []byte(`{"numTurns":2}`), Tokens: &api.Tokens{Input: 10, CacheRead: 250_000, CacheWrite: 50_000}, FinishedAt: time.Now()}
+	if err := h.c.inbox.SaveTurn(context.Background(), long); err != nil {
+		t.Fatal(err)
+	}
+	h.up(labFleet(t, func(f *fleet.Fleet) {
+		c := f.Computers["scout"]
+		idle := "1m"
+		c.Power = fleet.Power{SleepAfterIdle: &idle, WakeOnMessage: &fleet.WakeOnMessage{From: []string{"local"}}, CompactBeforeSleep: &fleet.CompactBeforeSleep{MinTokens: 100_000}}
+		f.Computers["scout"] = c
+	}), false)
+	h.waitPhase("scout", api.PhaseAsleep)
+	reqs := h.cds.get("scout").requestsSnapshot()
+	if len(reqs) != 1 || reqs[0].Prompt != "/compact" || reqs[0].Session != api.SessionCurrent || h.events("scout", "power.compact") != 1 {
+		t.Fatalf("no compaction before sleep: %+v", reqs)
+	}
+	m := h.send("scout", "after the compaction")
+	h.waitMessage("scout", m.ID, api.MsgDelivered)
+	h.waitPhase("scout", api.PhaseAsleep)
+	if n := h.events("scout", "power.compact"); n != 1 {
+		t.Fatalf("compacted %d times; the last turn was small", n)
+	}
+}
