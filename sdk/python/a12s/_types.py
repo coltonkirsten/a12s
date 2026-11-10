@@ -353,6 +353,13 @@ class FleetResponse:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CredentialSource:
+    """Where the Controller reads a credential's value. Exactly one field is set."""
+
+    gcp_secret: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CredentialInfo:
     """A credential's name, whether it has a value, and who uses it. Values are never read back."""
 
@@ -360,6 +367,9 @@ class CredentialInfo:
     set: bool
     used_by: list[str] | None = None
     updated_at: str | None = None
+    source: CredentialSource | None = None
+    source_version: str | None = None
+    source_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

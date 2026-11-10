@@ -159,6 +159,9 @@ func exportFiles(spec *fleet.Spec, dir string) (map[string][]byte, error) {
 	if len(spec.Services) > 0 {
 		_ = add("services", spec.Services)
 	}
+	if len(spec.Credentials) > 0 {
+		_ = add("credentials", spec.Credentials)
+	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)

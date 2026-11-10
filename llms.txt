@@ -72,6 +72,11 @@ form of an OpenAI API key, `{"auth_mode":"apikey","OPENAI_API_KEY":"sk-…"}` (C
   computers using it get it at once. From code: `fleet.credentials.set(name, value)`. Before or after `a12s up`
   both work: what names a credential with no value yet is created with a warning and waits in Provisioning
   (`waiting` in its status), then starts once it is set.
+- Or the Controller reads a value itself: the Fleet's top-level `credentials: {anthropic: {gcpSecret:
+  projects/<project>/secrets/<name>}}` (Google Secret Manager, latest version, read with the Controller VM's own
+  service account; it needs secretAccessor on that secret). Read every minute: add a version to rotate; disable or
+  destroy the latest to withdraw it (users stop and wait). Such a credential can't be set by hand (409).
+  `GET /v1/credentials` shows `source`, `sourceVersion` and `sourceError`, never a value.
 - The Controller keeps values in its state volume (credentials.json, 0600) across restarts of Docker or the
   Controller; `a12s down` removes them. No API call returns a value. A bad or expired credential fails the Turn
   (turn.finished status failed, error "Failed to authenticate: …"): set it again.

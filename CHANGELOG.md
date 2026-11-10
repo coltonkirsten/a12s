@@ -4,6 +4,15 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: a Fleet can name where the Controller reads a credential, so nobody pastes it: the top-level
+  `credentials: {anthropic: {gcpSecret: projects/<project>/secrets/<name>}}` reads Google Secret Manager's latest
+  version with the Controller VM's own service account (no key), every minute. Adding a version rotates it for every
+  agent computer and Service that uses it; disabling or destroying the latest version withdraws it and stops them
+  until a new one is added. `GET /v1/credentials` gains `source`, `sourceVersion` and `sourceError`; such a
+  credential can't be set by hand (`409 conflict`). Running agent computers and Services whose credential loses its
+  value now stop and wait in Provisioning instead of keeping the old one
+  ([Credentials: From a secret manager](docs/credentials.md#from-a-secret-manager)).
+
 - Added: every background task (a Claude Code background shell or sub-agent, a Codex background terminal or
   sub-agent) has a time limit, 2 hours by default. The agent can give a task up to 24 hours from now with the new
   `background_tasks` system tool, which also lists its tasks. At the limit computerd stops that task alone, journals

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ func TestExportRoundTrips(t *testing.T) {
 			"sec":   json.RawMessage(`{"security":{"seccomp":{"defaultAction":"SCMP_ACT_ALLOW"}}}`),
 			"att":   json.RawMessage(`{"attach":{"project":{"host":` + mustJSON(app) + `,"keep":["node_modules"]},"docs":{"host":` + mustJSON(docs) + `,"readOnly":true}}}`),
 		},
+		Credentials: map[string]fleet.CredentialSource{"openai": {GCPSecret: "projects/p-123456/secrets/openai"}},
 	}
 	files, err := exportFiles(live, dir)
 	if err != nil {
@@ -59,6 +61,9 @@ func TestExportRoundTrips(t *testing.T) {
 	}
 	want, _ := live.Resolve()
 	have, _ := got.Resolve()
+	if !maps.Equal(have.Credentials, live.Credentials) {
+		t.Errorf("credentials: live %v, file %v", live.Credentials, have.Credentials)
+	}
 	for _, name := range live.Names() {
 		w, h := fleet.SpecOf(want.Computers[name]), fleet.SpecOf(have.Computers[name])
 		if fleet.Canonical(w) != fleet.Canonical(h) {

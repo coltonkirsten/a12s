@@ -16,6 +16,7 @@ var (
 	nameRE       = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 	versionRE    = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
 	credentialRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	gcpSecretRE  = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]{1,20})/secrets/[A-Za-z0-9_-]{1,255}$`)
 	mountRE      = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 	hostRE       = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
@@ -63,6 +64,15 @@ func (f *Fleet) Validate() error {
 		errs = append(errs, f.validateGrants(field, c.Grants)...)
 	}
 	errs = append(errs, f.validateServices()...)
+	for _, name := range sortedKeys(f.Credentials) {
+		field := "credentials." + name
+		if !credentialRE.MatchString(name) {
+			bad(field, "a credential name is lowercase letters, digits, - and _, starting with a letter")
+		}
+		if src := f.Credentials[name]; !gcpSecretRE.MatchString(src.GCPSecret) {
+			bad(field+".gcpSecret", "%q must be a Secret Manager secret, projects/<project id>/secrets/<name> (no /versions: the Controller reads the latest)", src.GCPSecret)
+		}
+	}
 	return errors.Join(errs...)
 }
 

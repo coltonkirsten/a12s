@@ -21,6 +21,7 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/computerd"
+	"github.com/coltonkirsten/a12s/internal/credsource"
 	"github.com/coltonkirsten/a12s/internal/driver"
 	"github.com/coltonkirsten/a12s/internal/driver/docker"
 	"github.com/coltonkirsten/a12s/internal/driver/gce"
@@ -108,6 +109,7 @@ type Timing struct {
 	HealthPoll     time.Duration
 	HealthStartup  time.Duration
 	HealthInterval time.Duration
+	SourcePoll     time.Duration // re-reading credential sources
 }
 
 var defaultTiming = Timing{
@@ -120,6 +122,7 @@ var defaultTiming = Timing{
 	ReadBack:       10 * time.Second,
 	PowerTick:      time.Second,
 	HealthPoll:     time.Second,
+	SourcePoll:     time.Minute,
 }
 
 type computerdClient interface {
@@ -173,11 +176,13 @@ type Controller struct {
 	creds api.Credentials // persisted by setCredsLocked
 	// credTimes is when each credential's value last changed.
 	credTimes map[string]time.Time
-	rt        map[string]*runtime
-	locks     map[string]*sync.Mutex // per Computer or Service, see specMu
-	clients   map[string]computerdClient
-	drains    map[string]*drainState
-	srt       map[string]*serviceRuntime
+	// sourced is what the last read of each credential source found.
+	sourced map[string]sourceRead
+	rt      map[string]*runtime
+	locks   map[string]*sync.Mutex // per Computer or Service, see specMu
+	clients map[string]computerdClient
+	drains  map[string]*drainState
+	srt     map[string]*serviceRuntime
 	// auditSubs are followers of a Service's audit lines (service logs -f).
 	auditSubs map[string][]chan string
 	// revoked are principals whose certificate was withdrawn (fail closed
@@ -186,6 +191,9 @@ type Controller struct {
 	// openTurns are Turns being folded for the history, by "<agent computer>/<turn>".
 	openTurns map[string]*openTurn
 	hub       *hub
+	secrets   credsource.Resolver
+	// sourceKick asks for an immediate read of the credential sources, after a write changed them.
+	sourceKick chan struct{}
 	// inboxBcast is closed and replaced on every inbox change (Message streams).
 	inboxBcast chan struct{}
 	// inboxDirty are the agent computers whose inbox.changed is due.
@@ -209,25 +217,28 @@ func New(cfg Config, drv driver.Driver, ca *CA) (*Controller, error) {
 		return nil, err
 	}
 	c := &Controller{
-		inbox:     store,
-		inboxKick: make(chan struct{}, 1),
-		cfg:       cfg,
-		drv:       drv,
-		ca:        ca,
-		timing:    defaultTiming,
-		now:       time.Now,
-		logger:    log.New(os.Stderr, "a12s controller: ", log.LstdFlags),
-		ctx:       context.Background(),
-		state:     st,
-		creds:     api.Credentials{},
-		rt:        map[string]*runtime{},
-		locks:     map[string]*sync.Mutex{},
-		clients:   map[string]computerdClient{},
-		srt:       map[string]*serviceRuntime{},
-		auditSubs: map[string][]chan string{},
-		revoked:   map[string]bool{},
-		openTurns: map[string]*openTurn{},
-		hub:       newHub(),
+		inbox:      store,
+		inboxKick:  make(chan struct{}, 1),
+		cfg:        cfg,
+		drv:        drv,
+		ca:         ca,
+		timing:     defaultTiming,
+		now:        time.Now,
+		logger:     log.New(os.Stderr, "a12s controller: ", log.LstdFlags),
+		ctx:        context.Background(),
+		state:      st,
+		creds:      api.Credentials{},
+		rt:         map[string]*runtime{},
+		locks:      map[string]*sync.Mutex{},
+		clients:    map[string]computerdClient{},
+		srt:        map[string]*serviceRuntime{},
+		auditSubs:  map[string][]chan string{},
+		revoked:    map[string]bool{},
+		openTurns:  map[string]*openTurn{},
+		hub:        newHub(),
+		secrets:    credsource.NewGCP(),
+		sourceKick: make(chan struct{}, 1),
+		sourced:    map[string]sourceRead{},
 	}
 	if err := c.loadCreds(); err != nil {
 		store.Close()
@@ -327,6 +338,7 @@ func (c *Controller) Start(ctx context.Context) {
 	c.spawn(func() { c.watch(ctx) })
 	c.spawn(func() { c.expiryLoop(ctx) })
 	c.spawn(func() { c.powerLoop(ctx) })
+	c.spawn(func() { c.sourceLoop(ctx) })
 	// Taken here, before Start returns, and released by the resume pass: an
 	// apply, or a power request or delivery for a Computer, that arrives first waits for the resume of what it
 	// touches instead of the resume re-converging after it. Each Computer's lock goes as soon as it is resumed.

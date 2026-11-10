@@ -16,12 +16,13 @@ var errEmptyDocument = errors.New("empty document")
 // rawFleet keeps defaults and agent computers as YAML nodes, so each decodes strictly on its own and scalars keep
 // their exact text ("1.10" stays a string, not the float 1.1).
 type rawFleet struct {
-	APIVersion     string               `yaml:"apiVersion"`
-	Kind           string               `yaml:"kind"`
-	Metadata       Metadata             `yaml:"metadata"`
-	Defaults       yaml.Node            `yaml:"defaults"`
-	AgentComputers map[string]yaml.Node `yaml:"agent_computers"`
-	Services       map[string]yaml.Node `yaml:"services"`
+	APIVersion     string                      `yaml:"apiVersion"`
+	Kind           string                      `yaml:"kind"`
+	Metadata       Metadata                    `yaml:"metadata"`
+	Defaults       yaml.Node                   `yaml:"defaults"`
+	AgentComputers map[string]yaml.Node        `yaml:"agent_computers"`
+	Services       map[string]yaml.Node        `yaml:"services"`
+	Credentials    map[string]CredentialSource `yaml:"credentials"`
 }
 
 func Load(path string) (*Fleet, error) {
@@ -84,6 +85,7 @@ func DecodeSpec(data []byte) (*Spec, error) {
 		Kind:           raw.Kind,
 		Metadata:       raw.Metadata,
 		AgentComputers: map[string]json.RawMessage{},
+		Credentials:    raw.Credentials,
 	}
 	nodes := raw.AgentComputers
 	var errs []error

@@ -81,6 +81,11 @@ func (c *Controller) credInfoLocked(name string, users []string) api.CredentialI
 	if t, ok := c.credTimes[name]; ok && info.Set {
 		info.UpdatedAt = &t
 	}
+	if src, ok := c.sourcedLocked(name); ok {
+		info.Source = &src
+		read := c.sourced[name]
+		info.SourceVersion, info.SourceError = read.version, read.err
+	}
 	return info
 }
 
@@ -110,6 +115,9 @@ func (c *Controller) handleCredentials(w http.ResponseWriter, r *http.Request) {
 		names[n] = true
 	}
 	if f := c.state.Fleet; f != nil {
+		for n := range f.Credentials {
+			names[n] = true
+		}
 		for _, comp := range f.Computers {
 			for _, n := range comp.Credentials {
 				names[n] = true
@@ -152,6 +160,11 @@ func (c *Controller) handlePutCredential(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	c.mu.Lock()
+	if src, ok := c.sourcedLocked(name); ok {
+		c.mu.Unlock()
+		fail(w, sourcedError(name, src))
+		return
+	}
 	err := c.setCredsLocked(api.Credentials{name: []byte(req.Value)})
 	users := c.credentialUsersLocked(name)
 	info := c.credInfoLocked(name, users)
@@ -186,6 +199,10 @@ func (c *Controller) handleDeleteCredential(w http.ResponseWriter, r *http.Reque
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if src, ok := c.sourcedLocked(name); ok {
+		fail(w, sourcedError(name, src))
+		return
+	}
 	if _, ok := c.creds[name]; !ok {
 		fail(w, notFound("credential", name))
 		return

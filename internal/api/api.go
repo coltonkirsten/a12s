@@ -35,6 +35,12 @@ type CredentialInfo struct {
 	UsedBy []string `json:"usedBy,omitempty"`
 	// UpdatedAt is when the value last changed; absent if unknown.
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
+	// Source is where the Controller reads the value, from the Fleet's credentials.
+	Source *fleet.CredentialSource `json:"source,omitempty"`
+	// SourceVersion is the source's version the value came from.
+	SourceVersion string `json:"sourceVersion,omitempty"`
+	// SourceError is why the last read of the source failed. The value in use stays, unless the source has none.
+	SourceError string `json:"sourceError,omitempty"`
 }
 
 type CredentialsResponse struct {

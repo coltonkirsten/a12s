@@ -511,6 +511,11 @@ export const fleetResponse: T.FleetResponse = {
           "size": "1"
         }
       }
+    },
+    "credentials": {
+      "k": {
+        "gcpSecret": "gcpSecret"
+      }
     }
   }
 };
@@ -657,7 +662,12 @@ export const credentialsResponse: T.CredentialsResponse = {
       "usedBy": [
         "usedBy"
       ],
-      "updatedAt": "2026-10-12T12:00:00Z"
+      "updatedAt": "2026-10-12T12:00:00Z",
+      "source": {
+        "gcpSecret": "gcpSecret"
+      },
+      "sourceVersion": "sourceVersion",
+      "sourceError": "sourceError"
     }
   ]
 };

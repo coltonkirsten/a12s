@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/coltonkirsten/a12s/internal/api"
+	"github.com/coltonkirsten/a12s/internal/fleet"
 )
 
 const (
@@ -46,6 +47,7 @@ func (c *Controller) inject(ctx context.Context, name string, withCert bool) err
 	for _, cred := range comp.Credentials {
 		material[cred] = c.creds[cred]
 	}
+	sources := c.sourcesLocked()
 	missing := missingCredentials(comp.Credentials, material)
 	var err error
 	if ok && rec != nil && len(missing) == 0 {
@@ -62,7 +64,7 @@ func (c *Controller) inject(ctx context.Context, name string, withCert bool) err
 	case !ok || rec == nil:
 		return fmt.Errorf("inject %s: not in the Fleet", name)
 	case len(missing) > 0:
-		return &credentialsMissing{credentialWait(missing)}
+		return &credentialsMissing{credentialWait(missing, sources)}
 	case err != nil:
 		return err
 	}
@@ -121,10 +123,14 @@ type credentialsMissing struct{ waiting *api.Waiting }
 
 func (e *credentialsMissing) Error() string { return e.waiting.String() }
 
-// credentialWait says how to set each missing credential.
-func credentialWait(missing []string) *api.Waiting {
+// credentialWait says how to set each missing credential: by hand, or in the source the Fleet reads it from.
+func credentialWait(missing []string, sources map[string]fleet.CredentialSource) *api.Waiting {
 	var fixes []string
 	for _, n := range missing {
+		if src, ok := sources[n]; ok {
+			fixes = append(fixes, "add an enabled version to "+src.GCPSecret)
+			continue
+		}
 		fixes = append(fixes, "a12s creds set "+n)
 	}
 	return &api.Waiting{Credentials: slices.Clone(missing), Fix: strings.Join(fixes, "; ")}
