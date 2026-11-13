@@ -540,6 +540,8 @@ export class ClaudeMapper {
           durationMs: m.duration_ms,
           numTurns: m.num_turns,
           ...(m.usage.speed ? { speed: m.usage.speed } : {}),
+          // The only count that includes sub-agents: by model, the session's running total (like costUsd), not this Turn's.
+          ...(m.modelUsage && Object.keys(m.modelUsage).length ? { modelUsage: m.modelUsage } : {}),
         };
         const fastMode = m.fast_mode_state
           ? { state: m.fast_mode_state, ...(m.fast_mode_disabled_reason ? { disabledReason: m.fast_mode_disabled_reason } : {}) }
