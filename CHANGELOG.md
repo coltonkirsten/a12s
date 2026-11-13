@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: Claude Code's `turn.finished` `usage` carries `modelUsage`, the CLI's tokens and cost by model id with
+  sub-agents included (the other counts and `tokens` cover the agent's own calls only). It is the session's running
+  total, like `costUsd`: difference consecutive Turns for one Turn's share ([Events](docs/concepts.md)).
+
 ## v0.10.0 (2026-11-12)
 
 Background work grows up: every background task has a time limit, a process the agent detaches (`nohup`, `setsid`)

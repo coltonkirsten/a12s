@@ -85,6 +85,17 @@ test('claude: a result without fast mode fields has no fastMode', async () => {
   assert.ok(!('speed' in (fin.usage ?? {})));
 });
 
+test('claude: the result reports usage by model, sub-agents included; none when the CLI gives none', async () => {
+  const byModel = {
+    'claude-opus-5-5': { inputTokens: 4, outputTokens: 164, cacheReadInputTokens: 37823, cacheCreationInputTokens: 11812, webSearchRequests: 0, costUSD: 0.12, contextWindow: 200000, maxOutputTokens: 64000 },
+    'claude-sonnet-5-5': { inputTokens: 2, outputTokens: 5, cacheReadInputTokens: 17292, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0.04, contextWindow: 200000, maxOutputTokens: 64000 },
+  };
+  const withModels = setup('normal', undefined, { FAKE_MODEL_USAGE: JSON.stringify(byModel) });
+  assert.deepEqual(finished(await collect((await withModels.adapter.startTurn(withModels.input)).events)).usage?.modelUsage, byModel);
+  const without = setup('normal');
+  assert.ok(!('modelUsage' in (finished(await collect((await without.adapter.startTurn(without.input)).events)).usage ?? {})));
+});
+
 test('claude: denials become permission events once each', async () => {
   const { adapter, input } = setup('deny');
   const evs = await collect((await adapter.startTurn(input)).events);

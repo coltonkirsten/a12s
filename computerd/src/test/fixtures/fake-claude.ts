@@ -30,7 +30,8 @@ const result = (subtype: string, isError: boolean, text: string) =>
     type: 'result', subtype, is_error: isError, result: text, errors: isError ? ['interrupted'] : [], stop_reason: 'end_turn',
     usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...(process.env.FAKE_FAST ? { speed: 'fast' } : {}) },
     ...(process.env.FAKE_FAST === 'on' ? { fast_mode_state: 'on' } : process.env.FAKE_FAST ? { fast_mode_state: 'off', fast_mode_disabled_reason: process.env.FAKE_FAST } : {}),
-    total_cost_usd: 0.001, duration_ms: 5, duration_api_ms: 4, num_turns: 1, modelUsage: {},
+    total_cost_usd: 0.001, duration_ms: 5, duration_api_ms: 4, num_turns: 1,
+    modelUsage: process.env.FAKE_MODEL_USAGE ? JSON.parse(process.env.FAKE_MODEL_USAGE) : {},
     permission_denials: mode === 'deny' ? [{ tool_name: 'Bash', tool_use_id: 'toolu_2', tool_input: {} }] : [],
   });
 // wrong-session: the init frame names another session, as if the resume had silently started fresh.
