@@ -4,6 +4,17 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.10.0 (2026-11-12)
+
+Background work grows up: every background task has a time limit, a process the agent detaches (`nohup`, `setsid`)
+counts as background work and reports back when it exits, and a staged config change or `a12s stop` no longer stalls
+the inbox behind it. A Fleet can read its credential from GCP Secret Manager, an automatic sleep can `/compact` a
+long conversation first, apps get a terminal and files on every driver, and GCE agent VMs keep only the images they run.
+
+Upgrading: install the new release, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.10.0` under new
+tags (computerd changed, and admission wants the CLI's minor version), and `a12s up`. On GCE, re-run
+`hack/gce/bootstrap.sh` first (snapshot permissions for `a12sController`). Every new field is optional.
+
 - Added: a process the agent detaches from the harness (`nohup … &`, `setsid`, a forking daemon) is background work
   like `run_in_background`: it keeps the agent computer awake, has the same time limit (`background_tasks` extends
   it, id `process-<pid>`), ends with the session, and when it exits the agent gets a Turn whose prompt carries
