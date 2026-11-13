@@ -18,7 +18,7 @@ const tools: { name: string; description: string; inputSchema: Record<string, un
   {
     name: 'background_tasks',
     description:
-      'List your background tasks (background shells and sub-agents) with when each started and when its time limit ends. ' +
+      'List your background tasks (background shells, sub-agents, and processes you detached with nohup, setsid or &) with when each started and when its time limit ends. ' +
       'a12s stops a background task at its time limit, 2 hours unless you ask for more, and tells you in your inbox. ' +
       'When you start work that needs longer, call this with its id (the id the harness gave it) and hours: it may then ' +
       'run that many hours from now, up to 24. Call again to extend.',

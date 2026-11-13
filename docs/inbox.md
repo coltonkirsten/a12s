@@ -147,7 +147,7 @@ agent_computers:
 | `compactBeforeSleep.minTokens` | never compacts | `1000` to `1000000`; `claude-code` harness only |
 
 - **Idle** means `Ready`, with no Turn running, no [background work](concepts.md#background-work) (`background` in
-  status: Claude Code sub-agents and background shells, Codex background terminals), no work owed, nothing pending
+  status: Claude Code sub-agents and background shells, Codex background terminals, processes the agent detached), no work owed, nothing pending
   (or the inbox held), and no `a12s shell` attached. Other processes the agent started don't count; sleep ends them,
   and the background work too.
 - **The Controller decides; the sender gains nothing.** No request field asks for a wake. A pending Message wakes the

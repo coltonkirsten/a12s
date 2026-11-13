@@ -85,7 +85,10 @@ automatically. The conversation survives, so "continue" works.
 
 The harness runs as one long-lived process per session, across Turns. Work the agent starts in the background keeps
 running after the Turn that started it ends: a Claude Code sub-agent or Bash command run with `run_in_background`, or
-a Codex sub-agent or command still running when its Turn ends (a background terminal). Each one is journaled as `task.started`
+a Codex sub-agent or command still running when its Turn ends (a background terminal), and any process the agent
+detached from the harness (`nohup … &`, `setsid`, a daemon that forks): computerd marks every harness process through
+its environment, so a marked process that has left the harness's process tree is the session's work too, kind
+`process`, one task per detached process and everything it starts. Each one is journaled as `task.started`
 and `task.finished`, and status shows them as `background: {tasks: N, items}` while any run: each item has the
 task's `id`, `kind`, `description`, `startedAt` and `deadline`. `a12s status` shows the count, the oldest task's age
 and the time until the next one is stopped.
@@ -96,15 +99,20 @@ and the time until the next one is stopped.
   Claude Code starts it by itself. Codex never tells the thread that spawned a sub-agent what it produced, so
   computerd starts the Turn in the same thread with a prompt that carries each result:
   `<background-result kind="agent" agent="…" status="…">` with the sub-agent's final message, or `kind="shell"` with
-  the command, its exit code and the end of its output. Either way it is journaled like any Turn, with
+  the command, its exit code and the end of its output. For a detached process computerd starts that Turn for either
+  harness, at the next moment no Turn runs: `<background-result kind="process" command="…" pid="…" output="…">` with
+  the last 2000 characters of the file its stdout went to (redirect it to a file to get this; the exit code is not
+  visible, since the process is no longer the harness's child). Either way it is journaled like any Turn, with
   `turn.started` `{reason: "background"}` and no Messages (Codex: `prompt` is that prompt), so `a12s logs`, the event
   streams and `turns()` show it. The agent computer is `Busy` while it runs; Messages that arrive meanwhile wait for
-  its end. A sub-agent that finishes within the Turn that spawned it is not background work.
+  its end. A sub-agent that finishes within the Turn that spawned it is not background work, nor is a detached process
+  that exits within the Turn in which it was found.
 - **Every background task has a time limit.** It runs for at most 2 hours, unless the agent gives it more with the
   `background_tasks` [system tool](#system-tools): up to 24 hours from the moment it asks, as often as it likes. At
   the limit computerd stops that one task (Claude Code stops it in the live session; Codex terminates the background
   terminal or interrupts the sub-agent) and journals its `task.finished` with `status: "stopped"` and `timeLimit`, the
-  limit in seconds. The rest of the session runs on. The agent then gets a Message in its inbox, from `a12s` (via
+  limit in seconds. A detached process gets SIGTERM, with its whole tree, and SIGKILL 5 seconds later. The rest of the
+  session runs on. The agent then gets a Message in its inbox, from `a12s` (via
   `a12s`): `Your background task "…" (kind, id …) was stopped after 2h, its time limit.` It decides whether to start
   it again. A task still running 30 seconds after its stop (a harness that couldn't stop it alone) ends with the
   whole session, as with `a12s stop`, once no Turn runs, so a forgotten loop can't keep the agent computer awake or a
@@ -164,7 +172,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |
 | `inbox.discarded` | A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included |
-| `task.started`, `task.finished` | `{id, kind, description, toolUseId?, status?, summary?, result?, timeLimit?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`; Codex `agent`, `shell`); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns. Claude Code only: `toolUseId` is the `id` of the tool call that started the task (on both events); `task.finished` has the CLI's `summary` when it gave one and, for a sub-agent, `result`: its last text, cut at 2000 characters. `timeLimit` (seconds) is on a `task.finished` when a12s stopped the task at its [time limit](#background-work) |
+| `task.started`, `task.finished` | `{id, kind, description, toolUseId?, status?, summary?, result?, timeLimit?}`: [background work](#background-work) started or ended. `kind` is the harness's own (`local_agent`, `local_bash`; Codex `agent`, `shell`), or `process` for a detached process (`id` `process-<pid>`, `description` its command line, `result` on its end the last 2000 characters of its output file); `status` is `completed`, `failed`, `stopped`, or `killed` when the session ended while it ran. Inside the Turn they happen in, or with no `turn` between Turns. Claude Code only: `toolUseId` is the `id` of the tool call that started the task (on both events); `task.finished` has the CLI's `summary` when it gave one and, for a sub-agent, `result`: its last text, cut at 2000 characters. `timeLimit` (seconds) is on a `task.finished` when a12s stopped the task at its [time limit](#background-work) |
 
 The fleet-wide stream (`GET /v1/events`) adds the events the Controller makes: `fleet.changed`
 `{version, by, names}` when a write changes the Fleet, `agent_computer.phase` `{phase, error?, waiting?}` when an agent
@@ -181,7 +189,8 @@ computerd gives the agent a small MCP server, `a12s`, for managing its own envir
 - `restart_harness`: restart the harness when the current Turn ends, resume the same session and continue. Use it
   after writing new skills or MCP config to the home drive.
 - `background_tasks` (optionally `id` and `hours`): list the session's background tasks with when each started and
-  when its time limit ends; with `id` (the one the harness gave the task, e.g. Claude Code's background shell id) and
+  when its time limit ends; with `id` (the one the harness gave the task, e.g. Claude Code's background shell id, or
+  `process-<pid>` for a detached process) and
   `hours` (more than 0, at most 24), let that task run `hours` from now.
 - `send` (`computer`, `body`, and optionally `fresh`, `expires`, `replaceKey`): put a Message in another agent
   computer's inbox. Present only when the agent computer has `grants.send`, and only for those agent computers. It returns a receipt, not

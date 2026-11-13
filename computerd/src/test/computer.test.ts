@@ -4,14 +4,15 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Computer, HttpError, type TaskLimits } from '../computer.js';
 import type { Config } from '../config.js';
+import type { Proc, ProcessTable } from '../detached.js';
 import { Journal } from '../journal.js';
 import { testConfig, until } from './helpers.js';
 import { StubAdapter } from './stub-adapter.js';
 
-function setup(cfg: Config = testConfig(), limits?: TaskLimits) {
+function setup(cfg: Config = testConfig(), limits?: TaskLimits, processes: ProcessTable | null = null) {
   const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
   const adapter = new StubAdapter();
-  const computer = new Computer(cfg, journal, adapter, {}, 2_000, limits);
+  const computer = new Computer(cfg, journal, adapter, {}, 2_000, limits, processes, 20);
   const types = (turn?: string) => journal.after(0, turn ?? null, 1000).map((e) => e.type);
   const finished = (turn: string) => journal.turnInfo(turn)?.finished;
   return { cfg, journal, adapter, computer, types, finished };
@@ -519,4 +520,119 @@ test('time limit: a task that outlives its stop ends the session once no turn ru
   await until(() => finished(t.turnId) === 'completed');
   await until(() => adapter.restarts === 1);
   assert.deepEqual(taskEnds(journal), [{ id: 'stuck', kind: 'local_agent', description: 'stuck', status: 'stopped', timeLimit: 1 }]);
+});
+
+/** A process table the test edits: the harness is computerd's child; what it detached hangs off pid 1. */
+class FakeProcesses implements ProcessTable {
+  readonly procs: Proc[] = [{ pid: 100, ppid: process.pid, start: '1', marked: true, command: 'claude', output: null }];
+  readonly signals: [number, string][] = [];
+  list(): Proc[] {
+    return [...this.procs];
+  }
+  kill(pid: number, signal: NodeJS.Signals): void {
+    this.signals.push([pid, signal]);
+    this.exit(pid);
+  }
+  detach(pid: number, command: string, output: string | null = null): void {
+    this.procs.push({ pid, ppid: 1, start: String(pid), marked: true, command, output });
+  }
+  exit(pid: number): void {
+    const i = this.procs.findIndex((p) => p.pid === pid);
+    if (i >= 0) this.procs.splice(i, 1);
+  }
+}
+
+const turnStarts = (journal: Journal) => journal.after(0, null, 1000).filter((e) => e.type === 'turn.started').map((e) => e.data);
+const background = (computer: Computer) => computer.status().background as { tasks: number; items: { id: string; kind: string }[] };
+
+test('detached: a nohup process holds the computer awake and its exit starts a turn with its output', async () => {
+  const cfg = testConfig();
+  const procs = new FakeProcesses();
+  const { journal, adapter, computer, finished } = setup(cfg, undefined, procs);
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'train the model' });
+  const out = join(cfg.agentHome, 'nohup.out');
+  writeFileSync(out, 'epoch 1\nepoch 2\nsaved model.pt\n');
+  procs.detach(4242, 'python train.py', out);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  await until(() => background(computer).tasks === 1);
+  assert.deepEqual(background(computer).items.map((i) => [i.id, i.kind]), [['process-4242', 'process']]);
+  assert.equal(computer.status().phase, 'ready', 'Messages are still delivered');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(adapter.inputs.length, 1, 'no turn while it runs');
+
+  procs.exit(4242);
+  await until(() => adapter.inputs.length === 2);
+  const prompt = adapter.inputs[1]!.prompt;
+  assert.match(prompt, /<background-result kind="process" command="python train.py" pid="4242" output="[^"]*nohup.out">\nepoch 1\nepoch 2\nsaved model.pt\n<\/background-result>/);
+  assert.equal(adapter.inputs[1]!.sessionId, t.sessionId, 'in the same session');
+  const started = turnStarts(journal)[1]!;
+  assert.equal(started.reason, 'background');
+  assert.equal(started.requestId, undefined);
+  const end = taskEnds(journal).find((d) => d.id === 'process-4242');
+  assert.equal(end?.status, 'completed');
+  assert.match(String(end?.result), /saved model.pt/);
+  assert.equal(background(computer).tasks, 0);
+  assert.equal(computer.status().phase, 'busy');
+  adapter.finish();
+  await until(() => computer.status().phase === 'ready');
+  await computer.shutdown(100);
+});
+
+test('detached: the time limit kills the process tree and the inbox, not a turn, reports it', async () => {
+  const procs = new FakeProcesses();
+  const { journal, adapter, computer, finished } = setup(testConfig(), { defaultMs: 150, maxMs: 3600_000, graceMs: 5_000 }, procs);
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  procs.detach(500, 'node server.js');
+  procs.procs.push({ pid: 501, ppid: 500, start: '501', marked: false, command: 'worker', output: null });
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  await until(() => taskEnds(journal).length === 1);
+  assert.deepEqual(taskEnds(journal), [{ id: 'process-500', kind: 'process', description: 'node server.js', status: 'stopped', timeLimit: 1 }]);
+  assert.deepEqual(procs.signals.map(([pid, sig]) => `${pid}:${sig}`).sort(), ['500:SIGTERM', '501:SIGTERM']);
+  assert.equal(background(computer).tasks, 0);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(adapter.inputs.length, 1, 'no report turn: the time-limit Message tells the agent');
+  assert.equal(adapter.restarts, 0, 'the session runs on');
+  await computer.shutdown(100);
+});
+
+test('detached: work from an earlier turn is reported once; ended in its own turn or with the session, never', async () => {
+  const procs = new FakeProcesses();
+  const { journal, adapter, computer, finished } = setup(testConfig(), undefined, procs);
+  await computer.start();
+  const t1 = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  procs.detach(10, 'quick');
+  await until(() => background(computer).tasks === 1);
+  procs.exit(10);
+  await until(() => background(computer).tasks === 0);
+  procs.detach(11, 'long job');
+  adapter.finish();
+  await until(() => finished(t1.turnId) === 'completed');
+  await until(() => background(computer).tasks === 1);
+  procs.exit(11);
+  await until(() => adapter.inputs.length === 2);
+  assert.doesNotMatch(adapter.inputs[1]!.prompt, /quick/, 'ended inside the turn that started it');
+  assert.match(adapter.inputs[1]!.prompt, /long job/);
+  adapter.finish();
+  await until(() => computer.status().phase === 'ready');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(adapter.inputs.length, 2, 'reported once');
+
+  // The pid comes back as another process: a new task, and a stop ends it with the session, unreported.
+  procs.detach(11, 'dev server');
+  await until(() => background(computer).tasks === 1);
+  computer.stopAll();
+  await until(() => background(computer).tasks === 0);
+  assert.deepEqual(procs.signals, [[11, 'SIGTERM']]);
+  assert.equal(taskEnds(journal).at(-1)?.status, 'killed');
+  const t3 = await computer.submitTurn({ requestId: 'r3', session: 'current', prompt: 'y' });
+  adapter.finish();
+  await until(() => finished(t3.turnId) === 'completed');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(adapter.inputs.length, 3, 'no report for the killed process');
+  assert.equal(background(computer).tasks, 0);
+  await computer.shutdown(100);
 });

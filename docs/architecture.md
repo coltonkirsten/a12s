@@ -153,6 +153,12 @@ address, which VPC anti-spoofing makes the VM's own. See [GCE driver](drivers/gc
   nothing is counted, since no late completion is guaranteed. Stop and a new thread restart the
   app-server, which ends them. Every server request is answered: approvals are granted (approval
   policy `never`, `danger-full-access`), user input and elicitation are declined.
+- **Detached processes, either harness:** the harness's environment carries `A12S_HARNESS=<token>`, a random value
+  per computerd run, and every process it starts inherits it. Every 2 s computerd reads `/proc`: a marked process
+  whose parent is neither marked nor computerd (orphans reparent to the container's init) is a detached task, and the
+  processes below it, including any that later reparent, stay members until all have exited. Its stdout target, when
+  a regular file, gives the end of its output. Ending the session kills the members (SIGTERM, SIGKILL after 5 s),
+  then, once the harness has exited, any marked process its exit orphaned.
 - Both get the `a12s` system tools MCP server; each used Service's MCP port is registered as `a12s-<svc>` through a
   stdio-to-HTTP bridge.
 

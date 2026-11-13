@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: a process the agent detaches from the harness (`nohup … &`, `setsid`, a forking daemon) is background work
+  like `run_in_background`: it keeps the agent computer awake, has the same time limit (`background_tasks` extends
+  it, id `process-<pid>`), ends with the session, and when it exits the agent gets a Turn whose prompt carries
+  `<background-result kind="process">` with the end of its output file. Before, the agent computer looked idle, slept,
+  and the process died unreported ([Background work](docs/concepts.md#background-work)).
+
 - Added: `power.compactBeforeSleep: {minTokens: N}` (claude-code only). Before an automatic sleep, the Controller
   runs `/compact` in the session when the last Turn's context reached N tokens, then sleeps. The summary is written
   while the one-hour prompt cache is still warm, so a wake after that hour re-sends the summary instead of the whole

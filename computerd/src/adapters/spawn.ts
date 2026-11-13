@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AGENT_GID, AGENT_UID, type Config } from '../config.js';
+import { MARK, MARK_VAR } from '../detached.js';
 import type { McpServer } from './adapter.js';
 
 export interface HarnessDeps {
@@ -22,6 +23,7 @@ export function harnessEnv(deps: HarnessDeps): Record<string, string> {
     LANG: process.env.LANG ?? 'C.UTF-8',
     CLAUDE_CONFIG_DIR: cfg.claudeConfigDir,
     CODEX_HOME: cfg.codexHome,
+    [MARK_VAR]: MARK,
   };
   if (!cfg.isRoot && process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;
   if (cfg.proxy) {

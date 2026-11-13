@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type TaskEvent, type ToolEvent, type TurnStatus } from './adapters/adapter.js';
 import type { Config, HarnessKind } from './config.js';
 import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
+import { Detached, detachedPrompt, LinuxProcesses, tailOf, type DetachedTask, type ProcessTable } from './detached.js';
 import type { Journal } from './journal.js';
 
 export interface SessionRecord {
@@ -76,6 +77,9 @@ export interface BackgroundTask {
   deadline: string;
 }
 
+/** How long a detached process has between SIGTERM and SIGKILL. */
+const KILL_AFTER_MS = 5_000;
+
 const CONTINUE_PROMPT = 'a12s restarted your harness at your request and resumed this session. Continue the task you were working on.';
 const PRECHECK_TIMEOUT_MS = 60_000;
 const RECLAIM_DEBOUNCE_MS = 200;
@@ -111,6 +115,10 @@ export class Computer {
   private readonly endedEarly = new Set<string>();
   /** A task outlived its stop: the session restarts at the next moment no turn runs. */
   private forceStop = false;
+  private readonly detached: Detached | null;
+  /** Detached work that ended after the turn that started it, waiting for the turn that reports it. */
+  private detachedEnded: { task: DetachedTask; tail: string | null }[] = [];
+  private scanTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly cfg: Config,
@@ -119,7 +127,10 @@ export class Computer {
     private readonly mcpServers: Record<string, McpServer>,
     private readonly credentialPollMs = 2_000,
     private readonly limits: TaskLimits = TASK_LIMITS,
+    processes: ProcessTable | null = LinuxProcesses.available() ? new LinuxProcesses() : null,
+    private readonly scanMs = 2_000,
   ) {
+    this.detached = processes ? new Detached(processes) : null;
     adapter.listen({
       backgroundTurn: (run) => this.beginBackgroundTurn(run),
       taskEvent: (ev) => this.journal.append(ev.type, this.clockTask(ev), { session: this.session?.sessionId ?? null }),
@@ -176,6 +187,10 @@ export class Computer {
     this.credentialTimer = setInterval(() => void this.applyCredentials(), this.credentialPollMs);
     this.credentialTimer.unref();
     this.watchCredentialFiles();
+    if (this.detached) {
+      this.scanTimer = setInterval(() => this.scanDetached(), this.scanMs);
+      this.scanTimer.unref();
+    }
   }
 
   status(): Record<string, unknown> {
@@ -183,7 +198,7 @@ export class Computer {
       phase: this.phase,
       session: this.session?.sessionId ?? null,
       activeTurn: this.running?.turnId ?? null,
-      background: { tasks: this.adapter.backgroundTasks(), items: this.backgroundList() },
+      background: { tasks: this.backgroundCount(), items: this.backgroundList() },
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
       credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
@@ -223,7 +238,8 @@ export class Computer {
     return reply;
   }
 
-  private async beginTurn(req: TurnRequest, hash: string): Promise<TurnReply> {
+  /** `background`: a turn computerd starts by itself to report detached work that ended; it has no request. */
+  private async beginTurn(req: TurnRequest, hash: string, background = false): Promise<TurnReply> {
     const turnId = `t_${randomBytes(8).toString('hex')}`;
     let resolveDone!: () => void;
     const done = new Promise<void>((r) => (resolveDone = r));
@@ -239,7 +255,7 @@ export class Computer {
       resumed: wanted !== null,
       prompt: req.prompt,
       cwd,
-      requestId: req.requestId,
+      ...(background ? { reason: 'background' } : { requestId: req.requestId }),
     };
     if (req.inbox) started.inbox = req.inbox;
     if (req.continuation) started.continuation = req.requestId;
@@ -257,13 +273,14 @@ export class Computer {
       // Rotated credentials must not stay in a long-lived harness, but restarting it would end background work:
       // with some running, the rotation waits for the idle boundary.
       // A background turn may have started during the awaits above; a restart would kill it.
-      const quiet = this.adapter.backgroundTasks() === 0 && !this.background;
+      const quiet = this.backgroundCount() === 0 && !this.background;
       if (this.wire(turnId) && generation !== this.ackedGeneration && quiet) {
         await this.adapter.restart();
         this.ackedGeneration = generation;
       }
       // A stop may have landed during the awaits above: then nothing reaches the harness.
       if (active.stopRequested) throw new Error('stopped before dispatch');
+      if (wanted !== (previous?.sessionId ?? null)) this.endDetached(); // leaving a session ends its background work
       run = await this.adapter.startTurn({
         prompt: req.prompt,
         sessionId: wanted,
@@ -299,7 +316,7 @@ export class Computer {
     this.sessionDamaged = null;
     if (wanted === null) this.resumePending = false;
     active.started = true;
-    if (active.stopRequested) void this.adapter.stop();
+    if (active.stopRequested) void this.stopSession();
     void this.pump(active, sessionId, wanted !== null, run.events, req);
     return { turnId, sessionId };
   }
@@ -407,7 +424,10 @@ export class Computer {
     if (this.active || this.background) return;
     if (this.forceStop) void this.forceStopSession();
     else if (this.restartRequested) void this.restartHarness(active.turnId, status);
-    else void this.applyCredentials();
+    else {
+      this.reportDetached();
+      void this.applyCredentials();
+    }
   }
 
   private endTurn(active: ActiveTurn): void {
@@ -464,7 +484,7 @@ export class Computer {
       this.forceStop = true;
       if (!this.running) void this.forceStopSession();
     };
-    this.adapter.stopTask(id).then(
+    this.stopTask(id).then(
       (running) => {
         if (!running) {
           if (this.clocks.get(id) === clock) this.clocks.delete(id);
@@ -485,12 +505,72 @@ export class Computer {
     this.forceStop = false;
     this.restarting = true;
     try {
-      await this.adapter.restart();
+      await this.restartSession();
     } catch (err) {
       this.journal.append('diagnostic', { message: `ending the session after a task outlived its time limit failed: ${(err as Error).message}` });
     } finally {
       this.restarting = false;
     }
+  }
+
+  private backgroundCount(): number {
+    return this.adapter.backgroundTasks() + (this.detached?.size ?? 0);
+  }
+
+  private stopTask(id: string): Promise<boolean> {
+    if (this.detached?.has(id)) return Promise.resolve(this.detached.stop(id, KILL_AFTER_MS));
+    return this.adapter.stopTask(id);
+  }
+
+  /** Stops the turn and ends the session, with the harness's background work and the detached processes. */
+  private async stopSession(): Promise<void> {
+    this.endDetached();
+    await this.adapter.stop();
+    this.detached?.sweep(KILL_AFTER_MS);
+  }
+
+  private async restartSession(): Promise<void> {
+    this.endDetached();
+    await this.adapter.restart();
+    this.detached?.sweep(KILL_AFTER_MS);
+  }
+
+  /** Detached processes appear and end on their own; computerd finds them by rescanning the process table. */
+  private scanDetached(): void {
+    if (!this.detached || this.base !== 'ready') return;
+    const turn = this.running?.turnId ?? null;
+    const scope = { turn, session: this.session?.sessionId ?? null };
+    const { started, ended } = this.detached.scan(turn);
+    for (const t of started) {
+      this.journal.append('task.started', this.clockTask({ type: 'task.started', data: { id: t.id, kind: 'process', description: t.command } }), scope);
+    }
+    for (const t of ended) {
+      const tail = t.output ? tailOf(t.output) : null;
+      const finished = { id: t.id, kind: 'process', description: t.command, status: 'completed' as const, ...(tail ? { result: tail } : {}) };
+      const data = this.clockTask({ type: 'task.finished', data: finished });
+      this.journal.append('task.finished', data, scope);
+      // Stopped at its limit: the inbox says so instead. Ended inside the turn that started it: that turn saw it.
+      if (data.timeLimit === undefined && (t.turn === null || t.turn !== turn)) this.detachedEnded.push({ task: t, tail });
+    }
+    this.reportDetached();
+  }
+
+  /** At an idle boundary, a turn of the agent's own tells it which detached processes exited and what they wrote. */
+  private reportDetached(): void {
+    if (!this.detachedEnded.length || this.base !== 'ready' || this.running || this.restarting || this.forceStop || this.restartRequested || !this.session) return;
+    const ended = this.detachedEnded;
+    this.detachedEnded = [];
+    void this.beginTurn({ requestId: `bg_${randomBytes(8).toString('hex')}`, session: 'current', prompt: detachedPrompt(ended) }, '', true);
+  }
+
+  /** The session ends: its detached processes are killed with it and journaled `killed`, never reported. */
+  private endDetached(): void {
+    if (!this.detached) return;
+    const scope = { turn: this.running?.turnId ?? null, session: this.session?.sessionId ?? null };
+    for (const t of this.detached.killAll(KILL_AFTER_MS)) {
+      this.journal.append('task.finished', this.clockTask({ type: 'task.finished', data: { id: t.id, kind: 'process', description: t.command, status: 'killed' } }), scope);
+    }
+    this.detachedEnded = [];
   }
 
   backgroundList(): BackgroundTask[] {
@@ -517,7 +597,7 @@ export class Computer {
     if (a) {
       if (!a.stopRequested) {
         a.stopRequested = true;
-        void this.adapter.stop(); // also cancels a turn the adapter is still starting
+        void this.stopSession(); // also cancels a turn the adapter is still starting
       }
       return { turnId, status: 'stopping' };
     }
@@ -534,8 +614,8 @@ export class Computer {
       t.stopRequested = true;
       turns.push(t.turnId);
     }
-    const background = this.adapter.backgroundTasks();
-    void this.adapter.stop();
+    const background = this.backgroundCount();
+    void this.stopSession();
     return { turns, background };
   }
 
@@ -568,7 +648,7 @@ export class Computer {
     try {
       const generation = credentialGeneration(this.cfg);
       const wired = this.wire(null);
-      await this.adapter.restart();
+      await this.restartSession();
       if (wired) this.ackedGeneration = generation;
       if (session) {
         const reason = await this.precheck(session);
@@ -597,7 +677,7 @@ export class Computer {
   private async applyCredentials(): Promise<void> {
     const generation = credentialGeneration(this.cfg);
     if (generation === this.ackedGeneration || generation === this.failedGeneration) return;
-    if (this.base !== 'ready' || this.running || this.restarting || this.adapter.backgroundTasks() > 0) return;
+    if (this.base !== 'ready' || this.running || this.restarting || this.backgroundCount() > 0) return;
     this.restarting = true;
     try {
       if (!this.wire(null)) {
@@ -620,6 +700,7 @@ export class Computer {
     if (this.base === 'stopping') return;
     this.base = 'stopping';
     if (this.credentialTimer) clearInterval(this.credentialTimer);
+    if (this.scanTimer) clearInterval(this.scanTimer);
     for (const w of this.watchers) w.close();
     if (this.reclaimTimer) clearTimeout(this.reclaimTimer);
     this.lifecycle('stopping');
@@ -630,6 +711,7 @@ export class Computer {
       await Promise.race([Promise.all(running.map((t) => t.done)), timeout]);
     }
     await this.adapter.close();
+    this.endDetached();
     this.wire(null);
   }
 
