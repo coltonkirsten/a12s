@@ -287,29 +287,29 @@ func fakeClient(t *testing.T, f *fakeEngine) *client.Client {
 
 const gb1 = int64(1) << 30
 
-// silicoVM is an agent VM like the 2026-10-27 Silico ones: a disk with room for about two toolbox images, running
+// agentVM is an agent VM whose disk has room for about two toolbox images, running
 // generation 2 on toolbox:2 with toolbox:1 still left from generation 1, and the Controller holding toolbox:3.
-func silicoVM(t *testing.T, capacity int64) (*vmGuest, *fakeEngine, driver.ComputerSpec) {
+func agentVM(t *testing.T, capacity int64) (*vmGuest, *fakeEngine, driver.ComputerSpec) {
 	t.Helper()
 	ctrl := newFakeEngine(100 * gb1)
-	ctrl.images["sha256:tb3"] = &fakeImage{size: 2 * gb1, tags: []string{"silico-toolbox:3"}}
+	ctrl.images["sha256:tb3"] = &fakeImage{size: 2 * gb1, tags: []string{"toolbox:3"}}
 	ctrl.images["sha256:bundle"] = &fakeImage{size: gb1 / 4, tags: []string{"a12s/bundle-codex:1.0.0"}}
 	vm := newFakeEngine(capacity)
 	vm.images["sha256:vm-tb1"] = &fakeImage{size: 2 * gb1, tags: []string{"a12s.local/image:tb1"}}
 	vm.images["sha256:vm-tb2"] = &fakeImage{size: 2 * gb1, tags: []string{"a12s.local/image:tb2"}}
 	vm.images["sha256:vm-bundle"] = &fakeImage{size: gb1 / 4, tags: []string{"a12s.local/image:bundle"}}
-	vm.containers["old"] = &fakeContainer{id: "old", name: "a12s-silico-helix", image: "sha256:vm-tb2",
+	vm.containers["old"] = &fakeContainer{id: "old", name: "a12s-lab-builder", image: "sha256:vm-tb2",
 		labels: map[string]string{engine.LabelGeneration: "2"}}
-	vm.volumes[BundleVolume("silico")] = map[string]string{engine.LabelFleet: "silico", labelBundle: "sha256:bundle"}
+	vm.volumes[BundleVolume("lab")] = map[string]string{engine.LabelFleet: "lab", labelBundle: "sha256:bundle"}
 	g := &vmGuest{
-		e:   &Engines{Fleet: "silico", Local: engine.New(fakeClient(t, ctrl), "silico")},
-		vm:  VM{Name: "a12s-silico-silico-helix", Computer: "helix"},
-		eng: engine.New(fakeClient(t, vm), "silico"),
+		e:   &Engines{Fleet: "lab", Local: engine.New(fakeClient(t, ctrl), "lab")},
+		vm:  VM{Name: "a12s-lab-lab-builder", Computer: "builder"},
+		eng: engine.New(fakeClient(t, vm), "lab"),
 	}
 	spec := driver.ComputerSpec{
-		Name: "helix", Generation: 3, Image: "silico-toolbox:3", Tier: "slim",
+		Name: "builder", Generation: 3, Image: "toolbox:3", Tier: "slim",
 		Bundle:    driver.BundleRef{Kind: "codex", Version: "1.0.0", Image: "sha256:bundle"},
-		HomeDrive: driver.HomeDriveID("helix"),
+		HomeDrive: driver.HomeDriveID("builder"),
 	}
 	return g, vm, spec
 }
@@ -317,14 +317,14 @@ func silicoVM(t *testing.T, capacity int64) (*vmGuest, *fakeEngine, driver.Compu
 // Switching a VM to a new image leaves only the images its Computer runs: the old generation's image and any older
 // one go, so a disk that held two images takes the next one.
 func TestMaterializeLeavesOnlyTheImagesItRuns(t *testing.T) {
-	g, vm, spec := silicoVM(t, 7*gb1) // 6.25 GB used: toolbox:3 doesn't fit unless the old images go
+	g, vm, spec := agentVM(t, 7*gb1) // 6.25 GB used: toolbox:3 doesn't fit unless the old images go
 	if err := g.Materialize(context.Background(), spec); err != nil {
 		t.Fatalf("Materialize = %v", err)
 	}
 	if got, want := vm.imageIDs(), []string{"sha256:vm-bundle", "sha256:vm-tb3"}; !slices.Equal(got, want) {
 		t.Fatalf("images on the VM = %v, want %v", got, want)
 	}
-	if c := vm.containerLocked("a12s-silico-helix"); c == nil || c.image != "sha256:vm-tb3" || c.labels[engine.LabelGeneration] != "3" {
+	if c := vm.containerLocked("a12s-lab-builder"); c == nil || c.image != "sha256:vm-tb3" || c.labels[engine.LabelGeneration] != "3" {
 		t.Fatalf("container = %+v", c)
 	}
 }
@@ -332,7 +332,7 @@ func TestMaterializeLeavesOnlyTheImagesItRuns(t *testing.T) {
 // When even an empty disk can't take the image, Materialize says so before loading anything, with the bytes free
 // and needed, instead of failing half-way through a load.
 func TestMaterializeFailsClearlyWhenTheImageCantFit(t *testing.T) {
-	g, vm, spec := silicoVM(t, 4*gb1) // empty but the bundle, 3.75 GB free: the load needs 4 GB
+	g, vm, spec := agentVM(t, 4*gb1) // empty but the bundle, 3.75 GB free: the load needs 4 GB
 	err := g.Materialize(context.Background(), spec)
 	var noRoom *NoRoomError
 	if !errors.As(err, &noRoom) {
@@ -341,7 +341,7 @@ func TestMaterializeFailsClearlyWhenTheImageCantFit(t *testing.T) {
 	if noRoom.Needed != 4*gb1 || noRoom.Free != 4*gb1-gb1/4 {
 		t.Fatalf("free %d needed %d", noRoom.Free, noRoom.Needed)
 	}
-	for _, want := range []string{"silico-toolbox:3", fmt.Sprint(noRoom.Free), fmt.Sprint(noRoom.Needed), "a12s-silico-silico-helix"} {
+	for _, want := range []string{"toolbox:3", fmt.Sprint(noRoom.Free), fmt.Sprint(noRoom.Needed), "a12s-lab-lab-builder"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
@@ -353,14 +353,14 @@ func TestMaterializeFailsClearlyWhenTheImageCantFit(t *testing.T) {
 
 // A wake of a generation that already runs clears images an earlier switch left behind.
 func TestMaterializePrunesOnAWakeOfTheSameGeneration(t *testing.T) {
-	g, vm, spec := silicoVM(t, 20*gb1)
-	spec.Generation, spec.Image = 2, "silico-toolbox:2"
+	g, vm, spec := agentVM(t, 20*gb1)
+	spec.Generation, spec.Image = 2, "toolbox:2"
 	g.e.Local = engine.New(fakeClient(t, func() *fakeEngine {
 		c := newFakeEngine(100 * gb1)
-		c.images["sha256:tb2"] = &fakeImage{size: 2 * gb1, tags: []string{"silico-toolbox:2"}}
+		c.images["sha256:tb2"] = &fakeImage{size: 2 * gb1, tags: []string{"toolbox:2"}}
 		c.images["sha256:bundle"] = &fakeImage{size: gb1 / 4}
 		return c
-	}()), "silico")
+	}()), "lab")
 	if err := g.Materialize(context.Background(), spec); err != nil {
 		t.Fatalf("Materialize = %v", err)
 	}

@@ -201,7 +201,7 @@ func TestCredentialsPaused(t *testing.T) {
 }
 
 // A one-off retryable wake failure (GCE INTERNAL_ERROR on start) is retried,
-// not left in Error with auto-wake paused (silico-ribo, 2026-10-30).
+// not left in Error with auto-wake paused.
 func TestFailedWakeRetries(t *testing.T) {
 	h := startHarnessScaled(t, t.TempDir(), nil, powerScale)
 	h.up(powerFleet(t, 6), false)
