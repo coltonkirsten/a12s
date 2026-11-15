@@ -5,6 +5,13 @@ a12s itself.
 
 Most code here is written and reviewed by agents. These rules apply to every change.
 
+## Standalone
+
+a12s is a standalone product. Code, tests, docs, examples, CHANGELOG, release notes, commit messages, PR and issue
+titles and bodies never name a customer or a downstream product, its agents or its repos. Use generic examples
+instead (`lab`, `example-fleet`, "an app on Cloud Run", "agent VMs"). The motivating context from a user stays in
+that user's repo; state the a12s problem and fix here on their own terms.
+
 ## Comments
 
 1. No comments that restate what the code does. Name things well instead.
