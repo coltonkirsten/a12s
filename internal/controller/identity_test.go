@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"strings"
 	"testing"
 
@@ -139,7 +138,9 @@ func TestMTLSGrantsAndRegistry(t *testing.T) {
 func TestProxyInternalNames(t *testing.T) {
 	h := newHarness(t)
 	f := withServices(t, h.d, func(f *fleet.Fleet) {
-		f.Services["db"] = fleet.Service{Image: "a12s/svc-test:0.1"}
+		f.Services["db"] = fleet.Service{Image: "a12s/svc-test:0.1", Manifest: &fleet.ServiceManifest{
+			Ports: map[string]fleet.ServicePort{"http": {Port: 8080}, "pg": {Port: 5432, Protocol: fleet.ProtocolTCP}},
+		}}
 		s := f.Computers["scout"]
 		s.Uses = []fleet.Use{{Name: "db"}}
 		f.Computers["scout"] = s
@@ -151,12 +152,19 @@ func TestProxyInternalNames(t *testing.T) {
 	if env := strings.Join(h.d.get("scout").spec.Env("lab"), " "); !strings.Contains(env, `"env":"A12S_SERVICE_DB_HTTP"`) {
 		t.Fatalf("scout env lacks its wiring: %s", env)
 	}
-	target, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, false)
-	if reason != "" || target != netip.MustParseAddrPort("10.213.200.2:8080") {
+	target, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, true)
+	if reason != "" || target != "10.213.200.2:8080" {
 		t.Fatalf("scout -> db: %v %d %s", target, status, reason)
 	}
-	if _, _, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, true); reason != "" {
-		t.Fatalf("plain http to an http port: %s", reason)
+	if target, _, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 5432, false); reason != "" || target != "10.213.200.2:5432" {
+		t.Fatalf("a tunnel to a tcp port: %v %s", target, reason)
+	}
+	// A tunnel's client writes its own headers, so an http port, where a Service trusts the caller header, takes none.
+	if _, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, false); status != http.StatusForbidden || !strings.Contains(reason, "a tunnel can't carry the "+CallerHeader+" header") {
+		t.Fatalf("a tunnel to an http port: %d %s", status, reason)
+	}
+	if _, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 5432, true); status != http.StatusForbidden || reason != "db:5432 is not an http port scout uses" {
+		t.Fatalf("plain http to a tcp port: %d %s", status, reason)
 	}
 	if _, status, reason := h.c.internalTarget(ctx, "reviewer", "db.a12s", 8080, false); status != http.StatusForbidden || reason != "reviewer cannot reach db: agent_computers.reviewer.uses does not list db" {
 		t.Fatalf("reviewer -> db: %d %s", status, reason)
@@ -170,7 +178,7 @@ func TestProxyInternalNames(t *testing.T) {
 	if err := h.c.SetServicePower(ctx, "db", api.ServicePowerRequest{State: api.PowerAsleep}); err != nil {
 		t.Fatal(err)
 	}
-	if _, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, false); status != http.StatusServiceUnavailable || reason != "db is Asleep" {
+	if _, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, true); status != http.StatusServiceUnavailable || reason != "db is Asleep" {
 		t.Fatalf("asleep: %d %s", status, reason)
 	}
 }

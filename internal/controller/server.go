@@ -640,6 +640,10 @@ func (c *Controller) handleServiceShell(w http.ResponseWriter, r *http.Request) 
 		fail(w, errorf(http.StatusNotFound, api.ErrNotFound, "no service %q in the Fleet", name))
 		return
 	}
+	if c.isExternal(name) {
+		fail(w, notRun(name, "container to open a shell in", "open a shell where it runs"))
+		return
+	}
 	if p := c.servicePhase(name); p != api.PhaseReady && p != api.PhaseUnhealthy && p != api.PhaseStarting {
 		fail(w, errorf(http.StatusServiceUnavailable, api.ErrAsleep, "service %s is %s", name, p))
 		return

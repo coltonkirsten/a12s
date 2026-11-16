@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"net/http"
@@ -40,6 +41,8 @@ type ServiceRecord struct {
 // substrate: its egress policy.
 type ServiceActive struct {
 	Allow []string `json:"allow,omitempty"`
+	// External is the host an external Service is dialed at.
+	External string `json:"external,omitempty"`
 	// Send and Uses are what it may do; Ports what it may be reached on.
 	Send  []string                     `json:"send,omitempty"`
 	Uses  []driver.Endpoint            `json:"uses,omitempty"`
@@ -190,6 +193,10 @@ func (c *Controller) resolveServices(ctx context.Context, f *fleet.Fleet, pins *
 	}
 	for _, name := range f.ServiceNames() {
 		s := f.Services[name]
+		if s.External != nil {
+			out[name] = s.Manifest
+			continue
+		}
 		key := fleet.ServiceKey(name, s.Image)
 		id, err := ensurePinned(ctx, s.Image, pins.Services[key], c.drv.EnsureImage)
 		if err != nil {
@@ -303,6 +310,9 @@ func (c *Controller) buildServiceSpec(name string) (driver.ServiceSpec, string, 
 func (c *Controller) activeServiceLocked(name string) ServiceActive {
 	s := c.state.Fleet.Services[name]
 	a := ServiceActive{Allow: slices.Clone(s.Egress.Allow), Send: slices.Clone(s.Grants.Send), Uses: c.endpointsLocked(s.Uses)}
+	if s.External != nil {
+		a.External = s.External.Host
+	}
 	if m := c.state.Manifests[name]; m != nil {
 		a.Ports = maps.Clone(m.Ports)
 	}
@@ -352,6 +362,9 @@ func (c *Controller) convergeServices(ctx context.Context, names []string, held 
 
 // convergeService restarts a changed Service at once: a Service has no idle boundary.
 func (c *Controller) convergeService(ctx context.Context, name string, obs driver.ComputerState, exists bool) (result, error) {
+	if c.isExternal(name) {
+		return c.convergeExternal(ctx, name, exists)
+	}
 	spec, hash, err := c.buildServiceSpec(name)
 	if err != nil {
 		return unchanged, c.failService(name, err)
@@ -378,6 +391,50 @@ func (c *Controller) convergeService(ctx context.Context, name string, obs drive
 		return unchanged, c.ensureServicePower(ctx, name, running, desired)
 	}
 	return restaged, c.restageService(ctx, name, spec, hash, obs, exists, desired)
+}
+
+// convergeExternal keeps only a record and a health check for a Service a12s does not run. A container left from
+// when it was not external goes first.
+func (c *Controller) convergeExternal(ctx context.Context, name string, exists bool) (result, error) {
+	if exists {
+		err := c.removeServiceContainer(ctx, name)
+		c.setServiceTransition(name, false)
+		if err != nil {
+			return unchanged, c.failService(name, err)
+		}
+	}
+	c.mu.Lock()
+	s, m := c.state.Fleet.Services[name], c.state.Manifests[name]
+	b, err := json.Marshal(struct {
+		External *fleet.External
+		Manifest *fleet.ServiceManifest
+	}{s.External, m})
+	if err != nil {
+		c.mu.Unlock()
+		return unchanged, err
+	}
+	sum := sha256.Sum256(b)
+	hash := hex.EncodeToString(sum[:])
+	rec := c.state.Services[name]
+	phase := c.srtLocked(name).phase
+	same := !exists && rec.SpecHash == hash && (phase == api.PhaseReady || phase == api.PhaseUnhealthy)
+	rec.SpecHash, rec.Active = hash, c.activeServiceLocked(name)
+	err = c.saveLocked()
+	c.mu.Unlock()
+	if err != nil || same {
+		return unchanged, err
+	}
+	c.auditf(name, "external at %s", s.External.Host)
+	if m.Health == nil {
+		c.stopHealth(name)
+		c.setServicePhase(name, api.PhaseReady, nil)
+		c.auditf(name, "Ready (no health check)")
+		return restaged, nil
+	}
+	c.setServicePhase(name, api.PhaseStarting, nil)
+	c.waitHealthy(ctx, name)
+	c.watchHealth(name)
+	return restaged, nil
 }
 
 func (c *Controller) serviceStateSizeLocked(name string) fleet.Bytes {
@@ -615,7 +672,7 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 	if h := m.Health.HTTP; h != nil {
 		tr := &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return c.drv.DialService(ctx, name, h.Port)
+				return c.dialService(ctx, name, h.Port)
 			},
 			DisableKeepAlives: true,
 		}
@@ -650,6 +707,29 @@ func (c *Controller) checkHealth(ctx context.Context, name string) error {
 		return fmt.Errorf("health: exit %d: %s", code, out)
 	}
 	return nil
+}
+
+func (c *Controller) dialService(ctx context.Context, name string, port int) (net.Conn, error) {
+	c.mu.Lock()
+	var host string
+	if rec := c.state.Services[name]; rec != nil {
+		host = rec.Active.External
+	}
+	c.mu.Unlock()
+	if host == "" {
+		return c.drv.DialService(ctx, name, port)
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// serviceStopped is false for an external Service: whether it answers is its health check's to say.
+func (c *Controller) serviceStopped(ctx context.Context, name string) bool {
+	if c.isExternal(name) {
+		return false
+	}
+	st, ok, err := c.observeService(ctx, name)
+	return err == nil && (!ok || !st.Running)
 }
 
 func unwrapNet(err error) error {
@@ -720,7 +800,7 @@ func (c *Controller) waitHealthy(ctx context.Context, name string) {
 			c.recordHealth(name, nil)
 			return
 		}
-		if st, ok, oerr := c.observeService(ctx, name); oerr == nil && (!ok || !st.Running) {
+		if c.serviceStopped(ctx, name) {
 			return // it exited: the watch restarts it
 		}
 		if time.Now().After(deadline) {
@@ -763,7 +843,7 @@ func (c *Controller) watchHealth(name string) {
 				}
 			}
 			first = false
-			if st, ok, err := c.observeService(ctx, name); err == nil && (!ok || !st.Running) {
+			if c.serviceStopped(ctx, name) {
 				return
 			}
 			c.recordHealth(name, c.checkHealth(ctx, name))
@@ -828,6 +908,9 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 	if !inFleet {
 		return errorf(http.StatusNotFound, api.ErrNotFound, "no service %q in the Fleet", name)
 	}
+	if c.isExternal(name) {
+		return notRun(name, "power", "start and stop it where it runs")
+	}
 	switch req.State {
 	case api.PowerAsleep:
 		return c.sleepService(ctx, name)
@@ -855,14 +938,7 @@ func (c *Controller) SetServicePower(ctx context.Context, name string, req api.S
 // Its state drive stays (an orphan until `a12s drive rm`). The caller holds specMu.
 func (c *Controller) removeService(ctx context.Context, name string) error {
 	defer c.lockComputer(name)()
-	c.setServiceTransition(name, true)
-	c.stopHealth(name)
-	c.unregisterCert(KindService, name)
-	err := c.drv.RemoveService(ctx, name)
-	if err == nil {
-		err = c.confirmService(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
-	}
-	if err != nil {
+	if err := c.removeServiceContainer(ctx, name); err != nil {
 		c.setServiceTransition(name, false)
 		return err
 	}
@@ -870,13 +946,24 @@ func (c *Controller) removeService(ctx context.Context, name string) error {
 	delete(c.state.Services, name)
 	delete(c.state.Manifests, name)
 	delete(c.srt, name)
-	err = c.saveLocked()
+	err := c.saveLocked()
 	c.mu.Unlock()
 	if c.inbox != nil {
 		_ = c.inbox.ForgetService(ctx, name)
 	}
 	c.auditf(name, "removed from the Fleet (state drive kept)")
 	return err
+}
+
+// removeServiceContainer leaves the Service in transition, so its container's death is expected.
+func (c *Controller) removeServiceContainer(ctx context.Context, name string) error {
+	c.setServiceTransition(name, true)
+	c.stopHealth(name)
+	c.unregisterCert(KindService, name)
+	if err := c.drv.RemoveService(ctx, name); err != nil {
+		return err
+	}
+	return c.confirmService(ctx, name, "removal", func(_ driver.ComputerState, exists bool) bool { return !exists })
 }
 
 func (c *Controller) unexpectedService(ev driver.Event) bool {
@@ -929,14 +1016,18 @@ func (c *Controller) serviceStatus(name string) api.ServiceStatus {
 	s := f.Services[name]
 	out := api.ServiceStatus{Name: name, Image: s.Image, Send: s.Grants.Send, Uses: fleet.UseNames(s.Uses)}
 	out.Spec, _ = json.Marshal(s)
-	if c.state.Pins != nil {
+	if s.External != nil {
+		out.External = s.External.Host
+	} else if c.state.Pins != nil {
 		out.Pin = c.state.Pins.Services[fleet.ServiceKey(name, s.Image)]
 	}
 	if rec := c.state.Services[name]; rec != nil {
 		out.Generation, out.Restarts = rec.Generation, rec.Restarts
-		out.EgressMode = api.EgressEnforced
-		if slices.Contains(rec.Active.Allow, fleet.AllowAll) {
-			out.EgressMode = api.EgressAllowAll
+		if s.External == nil {
+			out.EgressMode = api.EgressEnforced
+			if slices.Contains(rec.Active.Allow, fleet.AllowAll) {
+				out.EgressMode = api.EgressAllowAll
+			}
 		}
 	}
 	for _, other := range f.ComputerNames() {
@@ -992,6 +1083,25 @@ func (c *Controller) isService(name string) bool {
 	return c.state.Fleet != nil && c.state.Fleet.HasService(name)
 }
 
+func (c *Controller) isExternal(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.state.Fleet != nil && c.state.Fleet.Services[name].External != nil
+}
+
+// notRun refuses what needs the container an external Service doesn't have.
+func notRun(name, what, fix string) error {
+	return &httpError{status: http.StatusBadRequest, body: api.Error{Code: api.ErrInvalid,
+		Message: fmt.Sprintf("service %s is external: a12s does not run it, so it has no %s", name, what), Fix: fix}}
+}
+
+func (c *Controller) containerOutput(ctx context.Context, name string, follow bool, tail int) (io.ReadCloser, error) {
+	if c.isExternal(name) {
+		return nil, errors.New(name + " is external; a12s does not run it")
+	}
+	return c.drv.ServiceLogs(ctx, name, follow, tail)
+}
+
 func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow bool, tail int, w func(string) error) error {
 	var sub chan string
 	if follow {
@@ -1016,7 +1126,7 @@ func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow b
 			}
 		}
 	}
-	rc, err := c.drv.ServiceLogs(ctx, name, follow, tail)
+	rc, err := c.containerOutput(ctx, name, follow, tail)
 	if err != nil {
 		if !follow {
 			return w(fmt.Sprintf("[a12s] no container output: %v\n", err))

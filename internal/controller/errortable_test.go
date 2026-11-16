@@ -46,6 +46,15 @@ func TestErrorTable(t *testing.T) {
 		{"grant to a Service", func() string {
 			return parse(head + "    grants: { send: [db] }\nservices:\n  db:\n    image: x/y:1\n")
 		}},
+		{"an external Service with an image", func() string {
+			return parse(head + "services:\n  tools:\n    image: x/y:1\n    external: { host: host.docker.internal }\n    manifest: { ports: { api: { port: 7400 } } }\n")
+		}},
+		{"an external Service with a tcp port", func() string {
+			return parse(head + "services:\n  tools:\n    external: { host: host.docker.internal }\n    manifest: { ports: { db: { port: 5432, protocol: tcp } } }\n")
+		}},
+		{"an external Service without ports", func() string {
+			return parse(head + "services:\n  tools:\n    external: { host: host.docker.internal }\n")
+		}},
 		{"no manifest in the image", func() string {
 			return fleet.ValidateService("db", fleet.Service{Image: "x/y"}, nil, "x/y", nil).Error()
 		}},

@@ -45,7 +45,7 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `PUT /v1/agent-computers/{c}/files` | `?path=…`, the file's bytes → `204`: replace it as the agent user (owner or prefix) |
 | `POST /v1/agent-computers/{c}/power` | `{"state": "asleep"\|"awake"}` |
 | `POST /v1/agent-computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
-| `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written |
+| `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written; an [external](services.md#external-services) one has `external` (its host) and no `pin` |
 | `PUT`, `PATCH`, `DELETE /v1/services/{s}` | create or replace, change, remove a Service, like an agent computer (owner or prefix) |
 | `POST /v1/tokens`, `GET /v1/tokens`, `DELETE /v1/tokens/{name}` | [scoped tokens](#tokens) (owner only) |
 | `GET /v1/credentials` | → `{credentials: [{name, set, usedBy, updatedAt?}]}`: every credential the Fleet names or the Controller stores, never a value (owner; a prefix token sees names inside its prefix) |
@@ -68,8 +68,8 @@ started it by itself.
   start with the prefix it may call every route the owner can, except the whole-Fleet ones (`GET`/`PUT /v1/fleet`),
   drives and tokens. What its agent computers and Services send to and use (`grants.send`, `uses`, those from
   `defaults` included) must be inside the prefix too; its specs may name any credential.
-  It can't add, change or drop an agent computer's own `security.seccomp` or `attach`, or change the `image` of one
-  with `attach` (`403 forbidden`): only the owner does.
+  It can't add, change or drop an agent computer's own `security.seccomp` or `attach`, change the `image` of one
+  with `attach`, or create, change or remove an external Service (`external`) (`403 forbidden`): only the owner does.
   `GET /v1/status`, `/v1/agent-computers`, `/v1/services` and `/v1/credentials` list only names inside it, and its
   status and write responses carry no Fleet-wide warnings. Anything outside is `403 out_of_prefix`; the whole-Fleet
   routes, drives and tokens are `403 forbidden`. See [Security: Tokens](security.md#tokens).

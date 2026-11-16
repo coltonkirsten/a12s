@@ -357,6 +357,17 @@ agent_computers:
   service.json, Dockerfile): https://github.com/coltonkirsten/a12s-cookbook/tree/main/examples/go-service
 - Build the image before `a12s up` (a12s doesn't build it); `a12s service logs <svc> -f` shows its output. No
   Service needed for a plain schedule: host cron running `a12s -F ~/proj/fleet.yaml send lead "…" --replace daily`.
+- Caller: every plain-HTTP request the proxy forwards to a Service (http://<svc>.a12s:<port>/…) carries
+  `A12s-Caller: <agent computer or Service name>`; the proxy removes any copy the caller sent, so the Service can
+  trust it. CONNECT to an http port is refused (a tunnel could forge it); tcp ports are tunneled and carry none.
+- External Service: an app a12s doesn't run (your web app on the host offering agents HTTP and MCP tools). Owner
+  only (a prefix token gets 403 forbidden); Docker driver. Agent computers that `uses:` it call
+  http://tools.a12s:7400/… (plain HTTP only; CONNECT is refused) and the proxy dials host.docker.internal:7400 with
+  `A12s-Caller` set, so the app knows which agent is calling without giving each a secret:
+  `tools: { external: { host: host.docker.internal }, manifest: { ports: { api: { port: 7400, mcp: { path: /mcp }
+  } }, health: { http: { port: 7400, path: /healthz } } } }`. Health is optional (none: Ready at once). It takes no
+  image, config, credentials, egress, grants or uses; sleep, wake and shell refuse it. On Linux the app listens on
+  0.0.0.0 or the Docker bridge address.
 
 ## Browser (gateway)
 
@@ -394,8 +405,8 @@ A page with a send box and live events: https://github.com/coltonkirsten/a12s-co
 - Tokens (owner only): POST /v1/tokens {"name", "prefix"} or {"name", "actions", "computers": [names] or ["*"]}
   → {…, secret} (shown once). A prefix token may do what the owner can on agent computers, Services and credentials
   whose names start with its prefix; their grants.send and uses (defaults included: override a default grant outside
-  it) must stay inside it, else 403 out_of_prefix. /v1/fleet, drives, tokens, security.seccomp and attach are 403
-  forbidden.
+  it) must stay inside it, else 403 out_of_prefix. /v1/fleet, drives, tokens, security.seccomp, attach and external
+  Services are 403 forbidden.
   Reads list only its names.
 - Error codes an app branches on: not_found (404), exists, in_use, busy (409), no_grant, forbidden, out_of_prefix
   (403), version_mismatch (412), inbox_full (429), asleep (503).

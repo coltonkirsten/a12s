@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -13,7 +14,8 @@ import (
 // A prefix token is the owner inside its prefix and nobody outside it: it sees, writes and uses only agent
 // computers, Services and credentials whose names start with the prefix, and what those point at (grants and uses)
 // must start with it too. Credentials are the exception on the way in: its specs may name any. It never sets
-// a seccomp profile or an attached host folder: both widen the sandbox, which is the owner's call alone.
+// a seccomp profile or an attached host folder: both widen the sandbox, which is the owner's call alone. For the same
+// reason it never writes an external Service: that points agents at an address outside the Fleet.
 
 func (k caller) prefix() string {
 	if k.token == nil {
@@ -88,6 +90,11 @@ func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts
 				Message: k.principal + " may not change " + name + "'s image: it has an attached host folder, and only the owner picks what runs as root next to it",
 				Fix:     "leave image as it is, or use the owner token"}}
 		}
+		if was, is := specService(before, name), specService(after, name); (was.External != nil || is.External != nil) && !reflect.DeepEqual(was, is) {
+			return &httpError{status: http.StatusForbidden, body: api.Error{Code: api.ErrForbidden,
+				Message: k.principal + " may not create, change or remove the external Service " + name + ": only the owner points agents outside the Fleet",
+				Fix:     "use the owner token"}}
+		}
 		var send []string
 		var uses []fleet.Use
 		if comp, ok := f.Computers[name]; ok {
@@ -108,6 +115,13 @@ func checkScope(k caller, f *fleet.Fleet, before, after *fleet.Spec, o writeOpts
 		}
 	}
 	return nil
+}
+
+func specService(s *fleet.Spec, name string) fleet.Service {
+	if s == nil {
+		return fleet.Service{}
+	}
+	return s.Services[name]
 }
 
 // ownSeccomp identifies the security.seccomp an agent computer sets itself, not through defaults; "" when none.

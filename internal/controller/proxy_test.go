@@ -227,3 +227,54 @@ func TestProxyRefusesZonedLiterals(t *testing.T) {
 		c.Close()
 	}
 }
+
+// The proxy names the caller on every plain-HTTP request to a Service, whatever copy of the header the caller sent.
+func TestProxyStampsTheCaller(t *testing.T) {
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got []string
+		for k, vs := range r.Header {
+			if strings.EqualFold(strings.ReplaceAll(k, "_", "-"), CallerHeader) {
+				got = append(got, k+"="+strings.Join(vs, ","))
+			}
+		}
+		fmt.Fprint(w, strings.Join(got, ";"))
+	}))
+	defer svc.Close()
+	var caller string
+	p := &Proxy{
+		Identify: func(_, _ netip.Addr) (string, bool) { return caller, true },
+		Dial:     (&net.Dialer{}).DialContext,
+		Internal: func(context.Context, string, string, int, bool) (string, int, string) {
+			return svc.Listener.Addr().String(), 0, ""
+		},
+	}
+	srv := httptest.NewServer(p)
+	defer srv.Close()
+	proxyURL, _ := url.Parse(srv.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	for _, tc := range []struct {
+		caller string
+		forged map[string]string
+	}{
+		{"scout", nil},
+		{"scout", map[string]string{"A12s-Caller": "reviewer"}},
+		{"scout", map[string]string{"a12s-caller": "reviewer", "A12S-CALLER": "lead"}},
+		{"scout", map[string]string{"A12s_Caller": "reviewer"}},
+		{"clock", map[string]string{"A12s-Caller": "scout"}},
+	} {
+		caller = tc.caller
+		req, _ := http.NewRequest("GET", "http://tools.a12s:7400/x", nil)
+		for k, v := range tc.forged {
+			req.Header[k] = []string{v} // raw keys, so no canonical form hides a variant
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if want := "A12s-Caller=" + tc.caller; string(body) != want {
+			t.Errorf("%s forging %v: the Service saw %q, want %q", tc.caller, tc.forged, body, want)
+		}
+	}
+}

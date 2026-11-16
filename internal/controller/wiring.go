@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/coltonkirsten/a12s/internal/api"
@@ -70,38 +72,41 @@ func (c *Controller) reachOf(name string) (reach, bool) {
 	return reach{}, false
 }
 
-func (c *Controller) servicePort(name string, port int) (fleet.ServicePort, bool) {
+// servicePort reports whether the Service's active generation declares port with that protocol, and the host it is
+// dialed at when the Service is external.
+func (c *Controller) servicePort(name string, port int, protocol string) (external string, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.state.Services[name]
 	if s == nil {
-		return fleet.ServicePort{}, false
+		return "", false
 	}
 	for _, p := range s.Active.Ports {
-		if p.Port == port {
-			return p, true
+		if p.Port == port && p.Proto() == protocol {
+			return s.Active.External, true
 		}
 	}
-	return fleet.ServicePort{}, false
+	return "", false
 }
 
 // internalTarget is a separate, mandatory check that never consults egress policy: a Service is
-// reachable only on a port both active generations agree on, at its observed address on its own network.
-func (c *Controller) internalTarget(ctx context.Context, caller, host string, port int, plain bool) (netip.AddrPort, int, string) {
+// reachable only on a port both active generations agree on, at its observed address on its own network or, when
+// external, at its host. It returns the host:port to dial.
+func (c *Controller) internalTarget(ctx context.Context, caller, host string, port int, plain bool) (string, int, string) {
 	name := strings.TrimSuffix(host, ".a12s")
 	rc, ok := c.reachOf(caller)
 	if !ok {
-		return netip.AddrPort{}, http.StatusForbidden, "unknown caller"
+		return "", http.StatusForbidden, "unknown caller"
 	}
 	if strings.Contains(name, ".") || name == "" {
-		return netip.AddrPort{}, http.StatusForbidden, host + " is not a Service name"
+		return "", http.StatusForbidden, host + " is not a Service name"
 	}
-	usesIt, usesPort := false, false
+	usesIt, protocol := false, ""
 	for _, e := range rc.uses {
 		if e.Service == name {
 			usesIt = true
-			if e.Number == port && (!plain || e.Protocol == fleet.ProtocolHTTP) {
-				usesPort = true
+			if e.Number == port {
+				protocol = e.Protocol
 			}
 		}
 	}
@@ -109,26 +114,32 @@ func (c *Controller) internalTarget(ctx context.Context, caller, host string, po
 	if rc.service {
 		kind = "services"
 	}
+	// An http port is never tunneled: the Service would read whatever caller header the tunnel's client wrote.
 	switch {
 	case !usesIt:
-		return netip.AddrPort{}, http.StatusForbidden, fmt.Sprintf("%s cannot reach %s: %s.%s.uses does not list %s", caller, name, kind, caller, name)
-	case !usesPort:
-		if plain {
-			return netip.AddrPort{}, http.StatusForbidden, fmt.Sprintf("%s:%d is not an http port %s uses", name, port, caller)
-		}
-		return netip.AddrPort{}, http.StatusForbidden, fmt.Sprintf("%s:%d is not a declared port of %s", name, port, name)
+		return "", http.StatusForbidden, fmt.Sprintf("%s cannot reach %s: %s.%s.uses does not list %s", caller, name, kind, caller, name)
+	case plain && protocol != fleet.ProtocolHTTP:
+		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not an http port %s uses", name, port, caller)
+	case protocol == "":
+		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not a declared port of %s", name, port, name)
+	case !plain && protocol == fleet.ProtocolHTTP:
+		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is an http port and a tunnel can't carry the %s header  fix: use plain http://%s.a12s:%d, or declare the port with protocol tcp", name, port, CallerHeader, name, port)
 	}
-	if _, ok := c.servicePort(name, port); !ok {
-		return netip.AddrPort{}, http.StatusForbidden, fmt.Sprintf("%s:%d is not a declared port of %s", name, port, name)
+	external, ok := c.servicePort(name, port, protocol)
+	if !ok {
+		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not a declared port of %s", name, port, name)
 	}
 	if ph := c.servicePhase(name); ph != api.PhaseReady {
-		return netip.AddrPort{}, http.StatusServiceUnavailable, fmt.Sprintf("%s is %s", name, ph)
+		return "", http.StatusServiceUnavailable, fmt.Sprintf("%s is %s", name, ph)
+	}
+	if external != "" {
+		return net.JoinHostPort(external, strconv.Itoa(port)), 0, ""
 	}
 	addr, err := c.serviceAddr(ctx, name)
 	if err != nil {
-		return netip.AddrPort{}, http.StatusServiceUnavailable, fmt.Sprintf("%s has no address: %v", name, err)
+		return "", http.StatusServiceUnavailable, fmt.Sprintf("%s has no address: %v", name, err)
 	}
-	return netip.AddrPortFrom(addr, uint16(port)), 0, ""
+	return netip.AddrPortFrom(addr, uint16(port)).String(), 0, ""
 }
 
 // serviceAddr is a running Service's address on its own network, read from

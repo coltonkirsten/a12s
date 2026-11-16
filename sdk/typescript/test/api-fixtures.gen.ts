@@ -162,6 +162,7 @@ export const statusResponse: T.StatusResponse = {
       },
       "image": "image",
       "pin": "pin",
+      "external": "external",
       "generation": 1,
       "restarts": 1,
       "health": "health",
@@ -364,6 +365,7 @@ export const putFleetResponse: T.PutFleetResponse = {
     },
     "image": "image",
     "pin": "pin",
+    "external": "external",
     "generation": 1,
     "restarts": 1,
     "health": "health",
@@ -439,6 +441,9 @@ export const fleetResponse: T.FleetResponse = {
     "services": {
       "k": {
         "image": "image",
+        "external": {
+          "host": "host"
+        },
         "manifest": {
           "a12s": 1,
           "name": "name",
@@ -1019,6 +1024,7 @@ export const servicesResponse: { services: T.ServiceStatus[] } = {
       },
       "image": "image",
       "pin": "pin",
+      "external": "external",
       "generation": 1,
       "restarts": 1,
       "health": "health",

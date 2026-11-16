@@ -15,7 +15,8 @@ import (
 // Service inherits nothing from defaults: the image (or inline) manifest fills
 // what the file doesn't say.
 type Service struct {
-	Image    string           `yaml:"image" json:"image"`
+	Image    string           `yaml:"image,omitempty" json:"image,omitempty"`
+	External *External        `yaml:"external,omitempty" json:"external,omitempty"`
 	Manifest *ServiceManifest `yaml:"manifest,omitempty" json:"manifest,omitempty"`
 	// Config must be non-secret; it lands in /run/a12s/config/config.json and
 	// its "env" map is exported into the Service's environment by a12s-init.
@@ -26,6 +27,12 @@ type Service struct {
 	Uses        []Use          `yaml:"uses,omitempty" json:"uses,omitempty"`
 	Resources   Resources      `yaml:"resources,omitempty" json:"resources,omitzero"`
 	State       ServiceState   `yaml:"state,omitempty" json:"state,omitzero"`
+}
+
+// External is a Service a12s does not run: the proxy dials Host, as the Controller resolves it, on each port
+// in the inline manifest.
+type External struct {
+	Host string `yaml:"host" json:"host"`
 }
 
 type ServiceEgress struct {
@@ -177,8 +184,10 @@ func (f *Fleet) validateServices() []error {
 			bad(field, "rename one of them", "%s is already an agent computer; agent computers and Services share one <name>.a12s namespace", name)
 		}
 		switch {
+		case s.External != nil:
+			errs = append(errs, validateExternal(field, s)...)
 		case s.Image == "":
-			bad(field+".image", "set an image reference", "required")
+			bad(field+".image", "set an image reference, or external: {host} for a Service a12s does not run", "required")
 		case s.Image == TierSlim:
 			bad(field+".image", "use the Service's own image reference", "%q is the agent computer base image; a Service runs its own image", s.Image)
 		default:
@@ -208,6 +217,54 @@ func (f *Fleet) validateServices() []error {
 		}
 	}
 	return errs
+}
+
+// validateExternal refuses what only a container a12s runs can use, and any port the proxy can't stamp with the
+// caller: it reaches an external Service over plain HTTP only.
+func validateExternal(field string, s Service) []error {
+	var errs []error
+	if host := s.External.Host; !hostRE.MatchString(host) {
+		errs = append(errs, fmt.Errorf("%s.external.host: %q must be a lowercase host name or IPv4 address  fix: drop the scheme and port; ports go in %s.manifest.ports", field, host, field))
+	}
+	for _, sub := range externalConflicts(s) {
+		errs = append(errs, fmt.Errorf("%s.%s: an external Service runs outside the Fleet; a12s gives it no container, files, certificate or egress  fix: remove it", field, sub))
+	}
+	if s.Manifest == nil || len(s.Manifest.Ports) == 0 {
+		return append(errs, fmt.Errorf("%s.manifest.ports: required for an external Service  fix: declare the http ports agent computers call, e.g. manifest: {ports: {api: {port: 7400}}}", field))
+	}
+	for _, pn := range sortedKeys(s.Manifest.Ports) {
+		if s.Manifest.Ports[pn].Proto() != ProtocolHTTP {
+			errs = append(errs, fmt.Errorf("%s.manifest.ports.%s.protocol: an external Service is reached over plain HTTP only, where the proxy names the caller  fix: use protocol http", field, pn))
+		}
+	}
+	return errs
+}
+
+// externalConflicts names the fields set on an external Service that only a container a12s runs can use.
+func externalConflicts(s Service) []string {
+	var out []string
+	add := func(set bool, field string) {
+		if set {
+			out = append(out, field)
+		}
+	}
+	add(s.Image != "", "image")
+	add(len(s.Config) > 0, "config")
+	add(len(s.Credentials) > 0, "credentials")
+	add(len(s.Egress.Allow) > 0, "egress")
+	add(len(s.Grants.Send) > 0, "grants.send")
+	add(len(s.Uses) > 0, "uses")
+	add(s.Resources != Resources{}, "resources")
+	add(s.State != ServiceState{}, "state")
+	if m := s.Manifest; m != nil {
+		add(m.User != nil, "manifest.user")
+		add(m.Health != nil && len(m.Health.Exec) > 0, "manifest.health.exec")
+		add(len(m.Credentials) > 0, "manifest.credentials")
+		add(m.State != nil, "manifest.state")
+		add(len(m.Tmpfs) > 0, "manifest.tmpfs")
+		add(m.Resources != nil, "manifest.resources")
+	}
+	return out
 }
 
 func (f *Fleet) validateGrants(field string, g Grants) []error {

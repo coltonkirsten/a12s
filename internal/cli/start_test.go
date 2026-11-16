@@ -35,6 +35,9 @@ func TestControllerCreateOptions(t *testing.T) {
 	if mounts["/var/lib/a12s"] != n.Volume || mounts["/var/lib/a12s-data"] != n.Data || string(hc.NetworkMode) != n.Network {
 		t.Errorf("mounts %v network %s", mounts, hc.NetworkMode)
 	}
+	if !slices.Contains(hc.ExtraHosts, "host.docker.internal:host-gateway") {
+		t.Errorf("extra hosts %v: an external Service on the Docker host is unreachable on Linux", hc.ExtraHosts)
+	}
 }
 
 // A new Controller container keeps the port controller.json had while it is free, so clients keep working.

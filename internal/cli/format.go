@@ -199,9 +199,16 @@ func WriteServices(w io.Writer, services []api.ServiceStatus) {
 		if s.EgressMode == api.EgressAllowAll {
 			ph += `  EGRESS ALLOW "*"`
 		}
-		rows = append(rows, []string{s.Name, ph, s.Image, pin, fmt.Sprint(s.Restarts), dash(s.Send), dash(s.UsedBy)})
+		rows = append(rows, []string{s.Name, ph, serviceImage(s), pin, fmt.Sprint(s.Restarts), dash(s.Send), dash(s.UsedBy)})
 	}
 	writeTable(w, rows)
+}
+
+func serviceImage(s api.ServiceStatus) string {
+	if s.External != "" {
+		return "external " + s.External
+	}
+	return s.Image
 }
 
 func ShortImage(id string) string {
@@ -572,7 +579,7 @@ func WriteServiceDetail(w io.Writer, s api.ServiceStatus) {
 	rows := [][]string{
 		{"service", s.Name},
 		{"phase", string(s.Phase)},
-		{"image", s.Image},
+		{"image", serviceImage(s)},
 		{"pin", s.Pin},
 		{"generation", fmt.Sprint(s.Generation)},
 		{"restarts", fmt.Sprint(s.Restarts)},
