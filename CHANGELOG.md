@@ -4,6 +4,18 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.11.0 (2026-11-16)
+
+Services learn who is calling and can live outside a12s: the egress proxy stamps `A12s-Caller` on every plain-HTTP
+request to a Service, and an external Service names an app a12s doesn't run, such as a web app on the host. Claude
+Code Turns report tokens and cost by model and any refusals, and the session returns to the configured model after a
+refusal fallback.
+
+Upgrading: install the new release, rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.11.0` under new
+tags (computerd changed, and admission wants the CLI's minor version), and `a12s up`. A Service client that sent
+`CONNECT` to a Service's `http` port must call `http://<svc>.a12s:<port>` instead, or declare the port
+`protocol: tcp`. Every new field is optional.
+
 - Added: Claude Code's `turn.finished` `usage` carries `modelUsage`, the CLI's tokens and cost by model id with
   sub-agents included (the other counts and `tokens` cover the agent's own calls only). It is the session's running
   total, like `costUsd`: difference consecutive Turns for one Turn's share ([Events](docs/concepts.md)).
