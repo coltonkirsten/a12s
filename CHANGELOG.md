@@ -7,6 +7,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - Added: Claude Code's `turn.finished` `usage` carries `modelUsage`, the CLI's tokens and cost by model id with
   sub-agents included (the other counts and `tokens` cover the agent's own calls only). It is the session's running
   total, like `costUsd`: difference consecutive Turns for one Turn's share ([Events](docs/concepts.md)).
+- Added: Claude Code's `turn.finished` carries `models`, the model ids that answered the agent in the Turn, and
+  `refusals`, each response a model refused with its category and fallback model ([Events](docs/concepts.md)).
+- Fixed: after a refusal fallback, the Claude Code CLI kept the session on the fallback model for every later Turn.
+  computerd now sets the configured model back when the Turn ends.
 
 ## v0.10.0 (2026-11-12)
 

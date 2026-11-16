@@ -406,7 +406,22 @@ export interface TurnFinishedData {
   tokens?: TokenUsage;
   /** Claude Code's fast mode for the Turn, when the CLI reported it. `usage.speed` says how the Turn ran. */
   fastMode?: FastMode;
+  /** Claude Code: the model ids that answered the agent's own calls in the Turn, in order. */
+  models?: string[];
+  /** Claude Code: each response a model refused, and the model that re-ran it when there was a fallback. */
+  refusals?: Refusal[];
   error?: string;
+}
+
+/**
+ * `scope` "session": the agent's own response fell back, and a12s sets the configured model back when the Turn ends.
+ * "local": one sub-agent's response did.
+ */
+export interface Refusal {
+  model: string;
+  category: string | null;
+  fallbackModel?: string;
+  scope?: "session" | "local";
 }
 
 /** `state` is "on", "off" or "cooldown"; `disabledReason` (e.g. "extra_usage_disabled") says why it is not on. */

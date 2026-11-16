@@ -4,11 +4,14 @@
 //   `bg <ms>`    launches a background task that ends after <ms>, and then starts a turn by itself
 //   `slow <ms>`  the turn takes <ms> before its result
 //   `crash`      the process dies mid-turn, after receipt
+//   `refuse`     the model refuses and the CLI re-runs the turn on a fallback model it keeps for the session, as the
+//                real CLI does; `refuse local` falls back for one sub-agent only, `refuse none` has no fallback
 // FAKE_SELF_MS keeps a self-started turn open that long before its result. FAKE_ORPHAN makes a resumed process
 // report a task the previous one left behind, in a turn without a model call, as the real CLI does. FAKE_DONE_FILE
 // gets a line for each prompt turn that ran to completion. FAKE_NO_LEVEL leaves out background_tasks_changed, like an
 // older CLI; FAKE_LOST_END leaves out a finished task's notification, so only the live set says it ended. FAKE_FAST
-// makes each result report fast mode as the CLI does with --settings '{"fastMode":true}'.
+// makes each result report fast mode as the CLI does with --settings '{"fastMode":true}'. FAKE_CONTROL_FILE gets a
+// line for each control request.
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -23,6 +26,8 @@ const flag = (name: string) => {
 };
 const sessionId = flag('--resume') ?? flag('--session-id') ?? 'no-session';
 const lifecycle = mode !== 'no-lifecycle';
+const configuredModel = flag('--model') ?? 'fake-model';
+let model = configuredModel;
 let n = 0;
 const out = (m: Record<string, unknown>) => process.stdout.write(`${JSON.stringify({ uuid: `u${n++}`, session_id: sessionId, ...m })}\n`);
 const result = (subtype: string, isError: boolean, text: string) =>
@@ -81,7 +86,7 @@ function selfTurn(task: string): void {
   running = { uuid: null, end: () => finishTurn('error_during_execution', true, '') };
   init();
   text(`task ${task} finished`);
-  out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: `task ${task} finished` }] } });
+  out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'text', text: `task ${task} finished` }] } });
   const done = () => running?.uuid === null && finishTurn('success', false, `task ${task} finished`);
   if (process.env.FAKE_SELF_MS) setTimeout(done, Number(process.env.FAKE_SELF_MS));
   else done();
@@ -103,7 +108,7 @@ function promptTurn(m: Prompt): void {
   const bg = /^bg (\d+)$/.exec(body);
   if (bg) {
     const id = `task_${++taskSeq}`;
-    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${id}`, name: 'Agent', input: { run_in_background: true } }] } });
+    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'tool_use', id: `toolu_${id}`, name: 'Agent', input: { run_in_background: true } }] } });
     out({ type: 'system', subtype: 'task_started', task_id: id, tool_use_id: `toolu_${id}`, description: `sleep ${bg[1]}`, task_type: 'local_agent', is_backgrounded: true });
     out({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_${id}`, content: 'Async agent launched', is_error: false }] } });
     tasks.set(
@@ -128,7 +133,7 @@ function promptTurn(m: Prompt): void {
   }
   if (body === 'subagent') {
     // A foreground sub-agent: its own tool calls stream inside the turn, marked with the Agent call's id.
-    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { prompt: 'look' } }] } });
+    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { prompt: 'look' } }] } });
     out({ type: 'system', subtype: 'task_started', task_id: 'task_fg', tool_use_id: 'toolu_agent', description: 'look', task_type: 'local_agent' });
     out({ type: 'assistant', parent_tool_use_id: 'toolu_agent', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_inner', name: 'Read', input: { file_path: '/x' } }] } });
     out({ type: 'stream_event', parent_tool_use_id: 'toolu_agent', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'sub-agent text' } } });
@@ -137,6 +142,25 @@ function promptTurn(m: Prompt): void {
     out({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_agent', content: 'found x', is_error: false }] } });
     text('done');
     return finishTurn('success', false, 'done');
+  }
+  const refuse = /^refuse ?(local|none)?$/.exec(body);
+  if (refuse) {
+    const category = 'example-category';
+    if (refuse[1] === 'none') {
+      out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'refused' }] } });
+      out({ type: 'system', subtype: 'model_refusal_no_fallback', original_model: model, request_id: null, api_refusal_category: category, content: 'refused' });
+      return finishTurn('success', false, 'refused');
+    }
+    if (refuse[1] === 'local') {
+      out({ type: 'assistant', parent_tool_use_id: 'toolu_agent', message: { role: 'assistant', model: 'fake-fallback', content: [{ type: 'text', text: 'sub' }] } });
+      out({ type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'local', original_model: model, fallback_model: 'fake-fallback', request_id: null, api_refusal_category: category, content: 'fell back' });
+    } else {
+      out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'text', text: 'partial' }] } });
+      out({ type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'session', original_model: model, fallback_model: 'fake-fallback', request_id: null, api_refusal_category: category, content: 'fell back' });
+      model = 'fake-fallback';
+    }
+    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'text', text: 'answer' }] } });
+    return finishTurn('success', false, 'answer');
   }
   const slow = /^slow (\d+)$/.exec(body);
   if (slow) {
@@ -155,15 +179,17 @@ function promptTurn(m: Prompt): void {
     }
   }
   for (const t of ['po', 'ng']) text(t);
-  out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } }] } });
+  out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } }] } });
   out({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'hi', is_error: false }] } });
   if (mode === 'deny') out({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'toolu_3', decision_reason_type: 'mode' });
   finishTurn();
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {
-  const m = JSON.parse(line) as { type: string; request_id?: string; request?: { subtype: string }; uuid?: string; message?: { content?: unknown } };
+  const m = JSON.parse(line) as { type: string; request_id?: string; request?: { subtype: string; model?: string }; uuid?: string; message?: { content?: unknown } };
   if (m.type === 'control_request') {
+    if (process.env.FAKE_CONTROL_FILE) appendFileSync(process.env.FAKE_CONTROL_FILE, `${JSON.stringify(m.request)}\n`);
+    if (m.request?.subtype === 'set_model') model = m.request.model ?? configuredModel;
     process.stdout.write(`${JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response: {} } })}\n`);
     // An interrupt ends the running turn; background tasks keep running.
     if (m.request?.subtype === 'interrupt' && running && mode !== 'ignore-term') running.end();

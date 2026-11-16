@@ -9,6 +9,7 @@ import {
   Tail,
   type Adapter,
   type AdapterEvent,
+  type Refusal,
   type RunningTurn,
   type SessionListener,
   type TaskData,
@@ -45,6 +46,12 @@ interface Live {
   input: EventQueue<SDKUserMessage>;
   sessionId: string;
   cwd: string;
+  /** The configured model, which a session-wide refusal fallback replaces until it is set again. */
+  model: string | null;
+  /** A refusal fallback swapped the session's model; set back when the turn ends. */
+  fellBack: boolean;
+  /** Setting the model back failed; reported in the next turn. */
+  modelError: string | null;
   resuming: boolean;
   stderr: Tail;
   /** The first init passed the session check; later turns' inits are not re-checked. */
@@ -146,6 +153,9 @@ export class ClaudeAdapter implements Adapter {
       input: new EventQueue(),
       sessionId,
       cwd: input.cwd,
+      model: input.model,
+      fellBack: false,
+      modelError: null,
       resuming: input.sessionId !== null,
       stderr: new Tail(),
       initSeen: false,
@@ -236,6 +246,10 @@ export class ClaudeAdapter implements Adapter {
     if (m.type === 'system') {
       if (m.subtype === 'task_started' || m.subtype === 'task_updated' || m.subtype === 'task_notification') return this.task(live, m);
       if (m.subtype === 'background_tasks_changed') return this.level(live, m);
+      if (m.subtype === 'model_refusal_fallback' && m.scope !== 'local') {
+        live.fellBack = true;
+        if (!live.current) this.restoreModel(live);
+      }
       if (m.subtype === 'init' && !live.current) {
         // A CLI without lifecycle frames starts a pushed prompt at the next init; one with them announced it already.
         if (live.pending && !live.lifecycle) this.open(live, live.pending);
@@ -274,6 +288,7 @@ export class ClaudeAdapter implements Adapter {
         turn.out.push(ev);
         continue;
       }
+      this.restoreModel(live);
       if (live.resumeFailed && turn.uuid) Object.assign(ev.data, { status: 'failed', error: live.resumeFailed });
       else if (live.ending) ev.data.status = 'interrupted';
       else if (ev.data.status === 'failed') turn.out.push({ type: 'diagnostic', data: { message: 'claude: turn failed', stderr: live.stderr.toString() } });
@@ -284,6 +299,18 @@ export class ClaudeAdapter implements Adapter {
       live.foreground.clear();
       if (live.ending && !live.pending) this.closeInput(live);
     }
+  }
+
+  /**
+   * The CLI keeps a session on the fallback model after one refusal; every later Turn would run there too. The
+   * control request is written before any later prompt, so the next Turn starts on the configured model.
+   */
+  private restoreModel(live: Live): void {
+    if (!live.fellBack || live.ending) return;
+    live.fellBack = false;
+    live.query.setModel(live.model ?? undefined).catch((err: Error) => {
+      live.modelError = `claude: setting the model back after a refusal fallback failed: ${err.message}`;
+    });
   }
 
   /**
@@ -314,6 +341,10 @@ export class ClaudeAdapter implements Adapter {
     if (live.pending === turn) live.pending = null;
     turn.mapper = new ClaudeMapper(live.sessionId, live.resuming && !live.initSeen, turn.uuid, live.toolNames);
     live.current = turn;
+    if (live.modelError) {
+      turn.out.push({ type: 'diagnostic', data: { message: live.modelError } });
+      live.modelError = null;
+    }
     // A queued prompt survives the interrupt of the turn before it.
     if (live.ending) live.query.interrupt().catch(() => {});
   }
@@ -479,6 +510,8 @@ function blocks(content: unknown): Block[] {
 /** Maps SDK messages of one CLI turn onto a12s events. */
 export class ClaudeMapper {
   private readonly denied = new Set<string>();
+  private readonly models: string[] = [];
+  private readonly refusals: Refusal[] = [];
   /** The init record passed the session check; the user-message echo seen; turn.dispatched emitted. */
   private initOk = false;
   private echoed = false;
@@ -505,6 +538,10 @@ export class ClaudeMapper {
           this.initOk = true;
         } else if (m.subtype === 'init') {
           this.initOk = true;
+        } else if (m.subtype === 'model_refusal_fallback') {
+          this.refusals.push({ model: m.original_model, category: m.api_refusal_category ?? null, fallbackModel: m.fallback_model, scope: m.scope ?? 'session' });
+        } else if (m.subtype === 'model_refusal_no_fallback') {
+          this.refusals.push({ model: m.original_model, category: m.api_refusal_category ?? null });
         } else if (m.subtype === 'permission_denied') {
           this.denied.add(m.tool_use_id);
           out.push({ type: 'permission', data: { decision: 'deny', kind: 'tool', tool: m.tool_name, detail: { toolUseId: m.tool_use_id, reason: m.decision_reason_type } } });
@@ -517,9 +554,13 @@ export class ClaudeMapper {
         }
         break;
       }
-      case 'assistant':
+      case 'assistant': {
+        const model = (m.message as { model?: unknown }).model;
+        // The CLI labels messages it makes up itself, such as API error notices, with a non-model id.
+        if (!m.parent_tool_use_id && typeof model === 'string' && !model.startsWith('<') && !this.models.includes(model)) this.models.push(model);
         out.push(...toolEvents(m, this.toolNames));
         break;
+      }
       case 'user':
         if ((m as { isReplay?: boolean }).isReplay === true && m.parent_tool_use_id === null && this.prompt !== null && m.uuid === this.prompt) this.echoed = true;
         out.push(...toolEvents(m, this.toolNames));
@@ -547,7 +588,8 @@ export class ClaudeMapper {
           ? { state: m.fast_mode_state, ...(m.fast_mode_disabled_reason ? { disabledReason: m.fast_mode_disabled_reason } : {}) }
           : undefined;
         const error = ok ? undefined : m.subtype === 'success' ? m.result : m.errors.join('; ') || m.subtype;
-        out.push({ type: 'turn.finished', data: { status: ok ? 'completed' : 'failed', usage, ...(fastMode ? { fastMode } : {}), ...(error ? { error } : {}) } });
+        const served = { ...(this.models.length ? { models: [...this.models] } : {}), ...(this.refusals.length ? { refusals: [...this.refusals] } : {}) };
+        out.push({ type: 'turn.finished', data: { status: ok ? 'completed' : 'failed', usage, ...(fastMode ? { fastMode } : {}), ...served, ...(error ? { error } : {}) } });
         break;
       }
     }

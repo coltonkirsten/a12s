@@ -41,6 +41,14 @@ export type ToolEvent =
   | { type: 'tool.finished'; data: { id: string; name: string; isError: boolean; output?: unknown; parent?: string } };
 
 /** What an adapter yields; computerd journals each one under the turn. */
+/** A model ended a response with a refusal; `fallbackModel` re-ran it, for the session or (`local`) one sub-agent. */
+export interface Refusal {
+  model: string;
+  category: string | null;
+  fallbackModel?: string;
+  scope?: 'session' | 'local';
+}
+
 export type AdapterEvent =
   | { type: 'text.delta'; data: { text: string } }
   | ToolEvent
@@ -48,7 +56,7 @@ export type AdapterEvent =
   | { type: 'diagnostic'; data: { message: string; [k: string]: unknown } }
   | { type: 'session.changed'; data: { from: string | null; to: string } }
   | { type: 'resume.failed'; data: { sessionId: string; reason: string } }
-  | { type: 'turn.finished'; data: { status: TurnStatus; usage: Record<string, unknown> | null; fastMode?: { state: string; disabledReason?: string }; error?: string } }
+  | { type: 'turn.finished'; data: { status: TurnStatus; usage: Record<string, unknown> | null; fastMode?: { state: string; disabledReason?: string }; models?: string[]; refusals?: Refusal[]; error?: string } }
   /**
    * Evidence the harness received the prompt: Claude's echo of the user message after the init
    * record passed the session check, Codex's turn/start response. Emitted at most once, before any model output.
