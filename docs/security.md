@@ -110,7 +110,8 @@ Every agent computer's and Service's only route out is the Controller's validati
   policy; see [Services](services.md#grants-and-reachability).
 - On every plain-HTTP request it forwards to a Service the proxy sets `A12s-Caller` to the calling agent computer or
   Service, after removing any copy the caller sent, so a Service can tell callers apart without a secret per
-  caller. Tunnels (`CONNECT`) carry no such header ([Services: Caller](services.md#caller)).
+  caller. It refuses a tunnel (`CONNECT`) to an `http` port, where a caller could write the header itself; a `tcp`
+  port is tunneled and carries none ([Services: Caller](services.md#caller)).
 - An [external Service](services.md#external-services) is the one route to an address outside the Fleet that
   egress policy doesn't decide: the owner names its host, agent computers that `uses:` it reach only its declared
   ports, over plain HTTP, and the Controller dials it. Private addresses are allowed there, since the owner chose it.

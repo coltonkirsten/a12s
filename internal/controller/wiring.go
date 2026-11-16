@@ -72,9 +72,9 @@ func (c *Controller) reachOf(name string) (reach, bool) {
 	return reach{}, false
 }
 
-// servicePort reports whether port is a declared port of the Service's active generation, and the host it is
+// servicePort reports whether the Service's active generation declares port with that protocol, and the host it is
 // dialed at when the Service is external.
-func (c *Controller) servicePort(name string, port int) (external string, ok bool) {
+func (c *Controller) servicePort(name string, port int, protocol string) (external string, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.state.Services[name]
@@ -82,7 +82,7 @@ func (c *Controller) servicePort(name string, port int) (external string, ok boo
 		return "", false
 	}
 	for _, p := range s.Active.Ports {
-		if p.Port == port {
+		if p.Port == port && p.Proto() == protocol {
 			return s.Active.External, true
 		}
 	}
@@ -101,12 +101,12 @@ func (c *Controller) internalTarget(ctx context.Context, caller, host string, po
 	if strings.Contains(name, ".") || name == "" {
 		return "", http.StatusForbidden, host + " is not a Service name"
 	}
-	usesIt, usesPort := false, false
+	usesIt, protocol := false, ""
 	for _, e := range rc.uses {
 		if e.Service == name {
 			usesIt = true
-			if e.Number == port && (!plain || e.Protocol == fleet.ProtocolHTTP) {
-				usesPort = true
+			if e.Number == port {
+				protocol = e.Protocol
 			}
 		}
 	}
@@ -114,21 +114,20 @@ func (c *Controller) internalTarget(ctx context.Context, caller, host string, po
 	if rc.service {
 		kind = "services"
 	}
+	// An http port is never tunneled: the Service would read whatever caller header the tunnel's client wrote.
 	switch {
 	case !usesIt:
 		return "", http.StatusForbidden, fmt.Sprintf("%s cannot reach %s: %s.%s.uses does not list %s", caller, name, kind, caller, name)
-	case !usesPort:
-		if plain {
-			return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not an http port %s uses", name, port, caller)
-		}
+	case plain && protocol != fleet.ProtocolHTTP:
+		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not an http port %s uses", name, port, caller)
+	case protocol == "":
 		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not a declared port of %s", name, port, name)
+	case !plain && protocol == fleet.ProtocolHTTP:
+		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is an http port and a tunnel can't carry the %s header  fix: use plain http://%s.a12s:%d, or declare the port with protocol tcp", name, port, CallerHeader, name, port)
 	}
-	external, ok := c.servicePort(name, port)
-	switch {
-	case !ok:
+	external, ok := c.servicePort(name, port, protocol)
+	if !ok {
 		return "", http.StatusForbidden, fmt.Sprintf("%s:%d is not a declared port of %s", name, port, name)
-	case external != "" && !plain:
-		return "", http.StatusForbidden, fmt.Sprintf("%s is external and a tunnel can't carry the %s header  fix: use plain http://%s.a12s:%d", name, CallerHeader, name, port)
 	}
 	if ph := c.servicePhase(name); ph != api.PhaseReady {
 		return "", http.StatusServiceUnavailable, fmt.Sprintf("%s is %s", name, ph)

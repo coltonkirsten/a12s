@@ -14,6 +14,9 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 - Added: the egress proxy sets `A12s-Caller: <name>` on every plain-HTTP request it forwards to a Service, naming
   the calling agent computer or Service, and removes any copy the caller sent, so a Service can tell its callers
   apart without a secret per caller ([Services: Caller](docs/services.md#caller)).
+- Changed (breaking): the proxy refuses `CONNECT` to a Service's `http` port, where a tunnel's client could write
+  `A12s-Caller` itself. Call it over plain `http://<svc>.a12s:<port>`; a port that speaks anything else (TLS the
+  Service terminates, WebSocket) is declared `protocol: tcp`.
 - Added: external Services. `services.<name>.external: {host}` with an inline `manifest.ports` names an app a12s
   doesn't run, such as a web app on the host; agent computers that `uses:` it call it at
   `http://<name>.a12s:<port>` (plain HTTP, caller stamped), and its MCP ports become tools. Owner only; Docker

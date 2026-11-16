@@ -359,7 +359,7 @@ agent_computers:
   Service needed for a plain schedule: host cron running `a12s -F ~/proj/fleet.yaml send lead "…" --replace daily`.
 - Caller: every plain-HTTP request the proxy forwards to a Service (http://<svc>.a12s:<port>/…) carries
   `A12s-Caller: <agent computer or Service name>`; the proxy removes any copy the caller sent, so the Service can
-  trust it. Tunnels (CONNECT: TCP ports, HTTPS) carry none.
+  trust it. CONNECT to an http port is refused (a tunnel could forge it); tcp ports are tunneled and carry none.
 - External Service: an app a12s doesn't run (your web app on the host offering agents HTTP and MCP tools). Owner
   only (a prefix token gets 403 forbidden); Docker driver. Agent computers that `uses:` it call
   http://tools.a12s:7400/… (plain HTTP only; CONNECT is refused) and the proxy dials host.docker.internal:7400 with

@@ -84,8 +84,9 @@ Every Service image carries `/a12s/service.json`. A stock image can be described
 On every plain-HTTP request it forwards to a Service (`http://<svc>.a12s:<port>/…`), the proxy sets
 `A12s-Caller` to the name of the agent computer or Service that sent it, after removing every copy the
 caller sent (in any letter case, and spelled `A12s_Caller`). A Service can trust the header to tell callers apart
-without handing each one a secret: nothing inside the Fleet can set it. A tunnel (`CONNECT`, for TCP ports and
-HTTPS) carries bytes the proxy doesn't read, so it has no caller header.
+without handing each one a secret: nothing inside the Fleet can set it. The proxy refuses a tunnel (`CONNECT`) to
+an `http` port, so every request that port receives carries the caller. A `tcp` port is reached through a tunnel,
+whose bytes the proxy doesn't read: it has no caller header, and a Service never trusts one it reads there.
 
 ## External Services
 
@@ -108,7 +109,7 @@ agent_computers:
 
 - `external.host` is a host name or IPv4 address, without scheme or port; the inline `manifest.ports` say which
   ports agent computers call, all `http`. An `mcp` port becomes a tool, as for any Service.
-- Plain HTTP only: the proxy refuses `CONNECT` to an external Service, so every request carries the caller.
+- Plain HTTP only: its ports are all `http`, which the proxy never tunnels, so every request carries the caller.
 - `manifest.health.http` is checked against the external host; without it the Service is `Ready` as soon as it is
   admitted. An Unhealthy external Service is reported and the proxy refuses calls to it until it passes again.
 - a12s runs no container for it, so it takes only `external`, `manifest.ports` and `manifest.health.http`: `image`,
