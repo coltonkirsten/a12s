@@ -227,6 +227,8 @@ export interface ServiceStatus {
   waiting?: Waiting;
   image: string;
   pin?: string;
+  /** The host the proxy dials an external Service at; it has no image or pin then. */
+  external?: string;
   generation: number;
   restarts: number;
   health?: string;

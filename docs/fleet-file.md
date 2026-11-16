@@ -78,7 +78,7 @@ agent_computers:
 | `metadata.name` | The Fleet name, a DNS label. Docker resources are named `a12s-<fleet>-…`. |
 | `defaults` | Any agent computer field but `attach`, applied to every agent computer. |
 | `agent_computers` | Agent computers, by name (DNS labels). |
-| `services` | Services, by name. See [Services](services.md). |
+| `services` | Services, by name: a container a12s runs (`image`), or an app outside the Fleet (`external: {host}`). See [Services](services.md) and [External Services](services.md#external-services). |
 | `credentials` | Where the Controller reads a credential's value itself, by credential name: `{ anthropic: { gcpSecret: projects/<project>/secrets/<name> } }`. A credential listed here can't be set by hand. See [Credentials: From a secret manager](credentials.md#from-a-secret-manager). |
 
 ## Agent computer fields

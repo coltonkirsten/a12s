@@ -107,6 +107,19 @@ func TestServiceAdmissionErrors(t *testing.T) {
 		{"manifest user 0", "  clock2:\n    image: x/y:1\n    manifest: { user: 0 }\n", "services.clock2.manifest.user", "root"},
 		{"state over /tmp", "  clock2:\n    image: x/y:1\n    manifest: { state: { at: /tmp/x } }\n", "services.clock2.manifest.state.at", "/tmp"},
 		{"unknown field", "  clock2:\n    image: x/y:1\n    surprise: 1\n", "services.clock2", "surprise"},
+		{"external and image", "  tools:\n    external: { host: host.docker.internal }\n    image: x/y:1\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.image", "outside the Fleet"},
+		{"external with config", "  tools:\n    external: { host: host.docker.internal }\n    config: { a: 1 }\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.config", "outside the Fleet"},
+		{"external with credentials", "  tools:\n    external: { host: host.docker.internal }\n    credentials: [postgres]\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.credentials", "outside the Fleet"},
+		{"external with egress", "  tools:\n    external: { host: host.docker.internal }\n    egress: { allow: [api.example.com] }\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.egress", "outside the Fleet"},
+		{"external with grants", "  tools:\n    external: { host: host.docker.internal }\n    grants: { send: [scout] }\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.grants.send", "outside the Fleet"},
+		{"external with uses", "  tools:\n    external: { host: host.docker.internal }\n    uses: [pg]\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.uses", "outside the Fleet"},
+		{"external with state", "  tools:\n    external: { host: host.docker.internal }\n    state: { size: 1Gi }\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.state", "outside the Fleet"},
+		{"external manifest user", "  tools:\n    external: { host: host.docker.internal }\n    manifest: { user: 1000, ports: { api: { port: 7400 } } }\n", "services.tools.manifest.user", "outside the Fleet"},
+		{"external exec health", "  tools:\n    external: { host: host.docker.internal }\n    manifest: { health: { exec: [\"true\"] }, ports: { api: { port: 7400 } } }\n", "services.tools.manifest.health.exec", "outside the Fleet"},
+		{"external tcp port", "  tools:\n    external: { host: host.docker.internal }\n    manifest: { ports: { db: { port: 5432, protocol: tcp } } }\n", "services.tools.manifest.ports.db.protocol", "plain HTTP only"},
+		{"external without ports", "  tools:\n    external: { host: host.docker.internal }\n", "services.tools.manifest.ports", "required"},
+		{"external URL as host", "  tools:\n    external: { host: \"http://host.docker.internal:7400\" }\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.external.host", "http://host.docker.internal:7400"},
+		{"neither image nor external", "  tools:\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.image", "external"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +138,21 @@ func TestServiceAdmissionErrors(t *testing.T) {
 	doc = strings.Replace(svcFleet, "    uses: [db, { name: pg, mcp: false }]\n", "    uses: [db]\n    power: { wakeOnMessage: { from: [service:clock] } }\n", 1)
 	if _, err := Parse([]byte(doc)); err != nil {
 		t.Fatalf("service principal: %v", err)
+	}
+}
+
+func TestExternalService(t *testing.T) {
+	f, err := Parse([]byte(svcFleet + "  tools:\n    external: { host: host.docker.internal }\n    manifest: { ports: { api: { port: 7400, mcp: { path: /mcp } } }, health: { http: { port: 7400, path: /healthz } } }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := f.Services["tools"]
+	if tools.External.Host != "host.docker.internal" || tools.Image != "" || tools.Manifest.MCPPorts()[0] != "api" {
+		t.Fatalf("tools %+v", tools)
+	}
+	b, err := json.Marshal(tools)
+	if err != nil || strings.Contains(string(b), `"image"`) {
+		t.Fatalf("an external Service's JSON names no image: %s (%v)", b, err)
 	}
 }
 

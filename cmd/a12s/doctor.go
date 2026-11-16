@@ -112,6 +112,9 @@ func doctor(ctx context.Context, g *globals) []check {
 		}
 		for _, name := range f.ServiceNames() {
 			s := f.Services[name]
+			if s.External != nil {
+				continue
+			}
 			if have(s.Image) {
 				ok("service image %s", s.Image)
 			} else {

@@ -11,6 +11,16 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
   `refusals`, each response a model refused with its category and fallback model ([Events](docs/concepts.md)).
 - Fixed: after a refusal fallback, the Claude Code CLI kept the session on the fallback model for every later Turn.
   computerd now sets the configured model back when the Turn ends.
+- Added: the egress proxy sets `A12s-Caller: <name>` on every plain-HTTP request it forwards to a Service, naming
+  the calling agent computer or Service, and removes any copy the caller sent, so a Service can tell its callers
+  apart without a secret per caller ([Services: Caller](docs/services.md#caller)).
+- Added: external Services. `services.<name>.external: {host}` with an inline `manifest.ports` names an app a12s
+  doesn't run, such as a web app on the host; agent computers that `uses:` it call it at
+  `http://<name>.a12s:<port>` (plain HTTP, caller stamped), and its MCP ports become tools. Owner only; Docker
+  driver ([External Services](docs/services.md#external-services)).
+- Changed: the Docker driver's Controller container maps `host.docker.internal` to the Docker host, so an external
+  Service there works on Docker Engine for Linux too. It applies when the Controller container is next created
+  (a new release replaces it).
 
 ## v0.10.0 (2026-11-12)
 

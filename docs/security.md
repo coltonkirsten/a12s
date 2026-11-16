@@ -15,7 +15,9 @@ change.
 - The harness comes from a read-only bundle. A prompt injection can't patch the harness and keep the patch across a
   sleep.
 - Each agent computer and Service has its own isolated internal Docker network with isolated gateway mode. There is
-  no path to host services, to other agent computers or to the Controller's owner API. Containers publish no ports.
+  no direct path to host services, to other agent computers or to the Controller's owner API; the one way to an app
+  on the host is an [external Service](services.md#external-services) the owner declares, through the proxy.
+  Containers publish no ports.
 - Agent computers and Services run under Docker's default seccomp profile, unless the Fleet sets
   `security.seccomp` on an agent computer (below).
 
@@ -106,6 +108,12 @@ Every agent computer's and Service's only route out is the Controller's validati
   It's shown on every status line.
 - Services reach other Services only through `uses:`, checked by the proxy before and independently of egress
   policy; see [Services](services.md#grants-and-reachability).
+- On every plain-HTTP request it forwards to a Service the proxy sets `A12s-Caller` to the calling agent computer or
+  Service, after removing any copy the caller sent, so a Service can tell callers apart without a secret per
+  caller. Tunnels (`CONNECT`) carry no such header ([Services: Caller](services.md#caller)).
+- An [external Service](services.md#external-services) is the one route to an address outside the Fleet that
+  egress policy doesn't decide: the owner names its host, agent computers that `uses:` it reach only its declared
+  ports, over plain HTTP, and the Controller dials it. Private addresses are allowed there, since the owner chose it.
 
 ## Identity
 
@@ -143,6 +151,8 @@ Three kinds of bearer token call the owner API:
     set and remove only credentials whose names start with its prefix.
   - It can't set a seccomp profile (`security.seccomp`) or attach a host folder (`attach`): both widen the sandbox,
     so only the owner sets them. A write that adds, changes or drops either is `403 forbidden`.
+  - It can't create, change or remove an [external Service](services.md#external-services), which points agents at
+    an address outside the Fleet (`403 forbidden`); its agent computers may still `uses:` one in its prefix.
 - **A narrow token** (`a12s token create dash --actions status,events --agent-computers a,b`) may make only those
   actions (`send`, `inbox`, `status`, `events`, `power`, `stop`) on those agent computers (or `*`). It can't change the
   Fleet. Use it for read-only dashboards and webhooks; `a12s gateway` uses one.

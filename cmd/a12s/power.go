@@ -46,7 +46,9 @@ func power(g *globals, verb string, state api.Power, args []string) error {
 			names = append(names, cs.Name)
 		}
 		for _, ss := range st.Services {
-			services = append(services, ss.Name)
+			if ss.External == "" {
+				services = append(services, ss.Name)
+			}
 		}
 	} else {
 		if names, services, err = splitTargets(names, f.HasService, func(n string) bool { _, ok := f.Computers[n]; return ok }); err != nil {

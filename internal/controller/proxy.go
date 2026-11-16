@@ -17,6 +17,9 @@ import (
 
 const ProxyPort = 3128
 
+// CallerHeader names the agent computer or Service behind a plain-HTTP request the proxy forwards to a Service.
+const CallerHeader = "A12s-Caller"
+
 // Policy is the Fleet's egress.allow plus the bundle's signInHosts.
 type Policy struct {
 	Hosts map[string]bool
@@ -100,9 +103,9 @@ type Proxy struct {
 	Resolve  func(ctx context.Context, host string) ([]netip.Addr, error)
 	Dial     func(ctx context.Context, network, addr string) (net.Conn, error)
 	Denied   func(computer, host string, port int, reason string)
-	// Internal decides a <name>.a12s target before and independently of Policy. plain is an
-	// absolute-URI (non-TLS) request. Nil: .a12s names are denied.
-	Internal func(ctx context.Context, caller, host string, port int, plain bool) (netip.AddrPort, int, string)
+	// Internal decides a <name>.a12s target, the host:port to dial, before and independently of Policy. plain is
+	// an absolute-URI (non-TLS) request. Nil: .a12s names are denied.
+	Internal func(ctx context.Context, caller, host string, port int, plain bool) (string, int, string)
 }
 
 // IsInternal reports whether host is in the .a12s name space, which only
@@ -161,7 +164,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		upstream, err := p.Dial(r.Context(), "tcp", target.String())
+		upstream, err := p.Dial(r.Context(), "tcp", target)
 		if err != nil {
 			http.Error(w, "a12s egress: "+err.Error(), http.StatusBadGateway)
 			return
@@ -188,11 +191,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // internal decides a .a12s target; on refusal it has answered and journaled.
-func (p *Proxy) internal(w http.ResponseWriter, r *http.Request, caller, host string, port int, plain bool) (netip.AddrPort, bool) {
+func (p *Proxy) internal(w http.ResponseWriter, r *http.Request, caller, host string, port int, plain bool) (string, bool) {
 	host = normalizeHost(host)
 	if p.Internal == nil {
 		p.deny(w, caller, host, port, "no internal names on this proxy")
-		return netip.AddrPort{}, false
+		return "", false
 	}
 	target, status, reason := p.Internal(r.Context(), caller, host, port, plain)
 	if reason == "" {
@@ -205,12 +208,12 @@ func (p *Proxy) internal(w http.ResponseWriter, r *http.Request, caller, host st
 		status = http.StatusForbidden
 	}
 	http.Error(w, fmt.Sprintf("a12s egress: %s: %s", net.JoinHostPort(host, strconv.Itoa(port)), reason), status)
-	return netip.AddrPort{}, false
+	return "", false
 }
 
 // serveInternalHTTP forwards a plain-HTTP absolute-URI request to a .a12s
 // Service (the one plaintext the proxy carries; on the Docker driver both
-// legs stay on the host's bridges).
+// legs stay on the host's bridges), stamped with its caller.
 func (p *Proxy) serveInternalHTTP(w http.ResponseWriter, r *http.Request, caller, host string, port int) {
 	target, ok := p.internal(w, r, caller, host, port, true)
 	if !ok {
@@ -223,8 +226,9 @@ func (p *Proxy) serveInternalHTTP(w http.ResponseWriter, r *http.Request, caller
 	for _, h := range []string{"Proxy-Connection", "Proxy-Authorization", "Connection", "Keep-Alive", "Te", "Trailer", "Upgrade"} {
 		out.Header.Del(h)
 	}
+	stampCaller(out.Header, caller)
 	tr := &http.Transport{
-		DialContext:       func(ctx context.Context, _, _ string) (net.Conn, error) { return p.Dial(ctx, "tcp", target.String()) },
+		DialContext:       func(ctx context.Context, _, _ string) (net.Conn, error) { return p.Dial(ctx, "tcp", target) },
 		DisableKeepAlives: true,
 		Proxy:             nil,
 	}
@@ -255,6 +259,17 @@ func (p *Proxy) serveInternalHTTP(w http.ResponseWriter, r *http.Request, caller
 			return
 		}
 	}
+}
+
+// stampCaller drops every copy the client sent, in any case and with _ for -, since CGI-style servers read
+// A12s_Caller as the same header, so a caller can never name someone else.
+func stampCaller(h http.Header, caller string) {
+	for k := range h {
+		if strings.EqualFold(strings.ReplaceAll(k, "_", "-"), CallerHeader) {
+			delete(h, k)
+		}
+	}
+	h.Set(CallerHeader, caller)
 }
 
 func plainTarget(r *http.Request) (string, int, bool) {

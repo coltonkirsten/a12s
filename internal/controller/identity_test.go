@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"strings"
 	"testing"
 
@@ -152,7 +151,7 @@ func TestProxyInternalNames(t *testing.T) {
 		t.Fatalf("scout env lacks its wiring: %s", env)
 	}
 	target, status, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, false)
-	if reason != "" || target != netip.MustParseAddrPort("10.213.200.2:8080") {
+	if reason != "" || target != "10.213.200.2:8080" {
 		t.Fatalf("scout -> db: %v %d %s", target, status, reason)
 	}
 	if _, _, reason := h.c.internalTarget(ctx, "scout", "db.a12s", 8080, true); reason != "" {

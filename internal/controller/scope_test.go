@@ -143,6 +143,37 @@ func TestPrefixTokenCannotSetSeccomp(t *testing.T) {
 	}
 }
 
+// An external Service points agents at an address outside the Fleet, so only the owner creates, changes or removes
+// one; a prefix token and the gateway's token can't, even inside the prefix.
+func TestOnlyTheOwnerWritesAnExternalService(t *testing.T) {
+	h, biz := prefixHarness(t)
+	const tools = `{"external":{"host":"host.docker.internal"},"manifest":{"ports":{"api":{"port":7400}}}}`
+	wantExternalForbidden := func(what string, res *http.Response) {
+		t.Helper()
+		if e := apiError(t, res); res.StatusCode != http.StatusForbidden || e.Code != api.ErrForbidden || !strings.Contains(e.Message, "external") {
+			t.Errorf("%s = %d %s (%s), want 403 forbidden naming external", what, res.StatusCode, e.Code, e.Message)
+		}
+	}
+	wantExternalForbidden("create", biz("PUT", "/v1/services/biz-tools", tools))
+	wantExternalForbidden("dry-run create", biz("PUT", "/v1/services/biz-tools?dryRun=true", tools))
+	gw := decodeBody[api.Token](t, h.api("POST", "/v1/tokens", `{"name":"gateway-7012","actions":["status","events","send","inbox"],"computers":["*"]}`))
+	wantForbidden(t, "the gateway creates one", h.api("PUT", "/v1/services/biz-tools", tools, "Authorization", "Bearer "+gw.Secret))
+
+	if r := h.api("PUT", "/v1/services/biz-tools", tools); r.StatusCode != 200 {
+		t.Fatalf("owner creates biz-tools = %d %+v", r.StatusCode, apiError(t, r))
+	}
+	v := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Version
+	wantExternalForbidden("patch its ports", biz("PATCH", "/v1/services/biz-tools", `{"manifest":{"ports":{"ssh":{"port":22}}}}`))
+	wantExternalForbidden("turn it into a container", biz("PUT", "/v1/services/biz-tools", `{"image":"x/y:1"}`))
+	wantExternalForbidden("remove it", biz("DELETE", "/v1/services/biz-tools", ""))
+	if got := decodeBody[api.FleetResponse](t, h.api("GET", "/v1/fleet", "")).Version; got != v {
+		t.Fatalf("refused writes changed the Fleet: v%d -> v%d", v, got)
+	}
+	if r := biz("PUT", "/v1/agent-computers/biz-a", bizSpec+`,"uses":["biz-tools"]}`); r.StatusCode != 200 {
+		t.Fatalf("an agent computer of its own uses it = %d %+v", r.StatusCode, apiError(t, r))
+	}
+}
+
 // Defaults are merged into the token's agent computers, so they can't carry it outside either.
 func TestPrefixTokenCannotReachOutThroughDefaults(t *testing.T) {
 	h, biz := prefixHarness(t)

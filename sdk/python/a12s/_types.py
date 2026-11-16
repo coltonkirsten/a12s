@@ -148,6 +148,7 @@ class ServiceStatus:
     waiting: Waiting | None = None
     image: str
     pin: str | None = None
+    external: str | None = None
     generation: int
     restarts: int
     health: str | None = None

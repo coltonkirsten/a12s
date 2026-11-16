@@ -253,6 +253,9 @@ func ControllerCreateOptions(n ControllerNames, fleetName, image, token string, 
 				HostIP:   netip.MustParseAddr("127.0.0.1"),
 				HostPort: strconv.Itoa(hostPort),
 			}}},
+			// Docker Desktop resolves this name on its own; Docker Engine on Linux only with this entry. The proxy
+			// dials an external Service there.
+			ExtraHosts: []string{"host.docker.internal:host-gateway"},
 		},
 		NetworkingConfig: &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{n.Network: {}},

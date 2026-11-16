@@ -16,9 +16,11 @@ type ServiceStatus struct {
 	Phase   Phase    `json:"phase"`
 	Error   *Failure `json:"error,omitempty"`
 	Waiting *Waiting `json:"waiting,omitempty"`
-	// Image is the reference as written; Pin the image ID it runs.
+	// Image is the reference as written; Pin the image ID it runs. An external Service has neither, and External
+	// is the host the proxy dials it at.
 	Image      string `json:"image"`
 	Pin        string `json:"pin,omitempty"`
+	External   string `json:"external,omitempty"`
 	Generation int64  `json:"generation"`
 	Restarts   int    `json:"restarts"`
 	// Health is "ok", or why it failed.

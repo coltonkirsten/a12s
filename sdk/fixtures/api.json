@@ -253,6 +253,9 @@
       "services": {
         "k": {
           "image": "image",
+          "external": {
+            "host": "host"
+          },
           "manifest": {
             "a12s": 1,
             "name": "name",
@@ -658,6 +661,7 @@
       },
       "image": "image",
       "pin": "pin",
+      "external": "external",
       "generation": 1,
       "restarts": 1,
       "health": "health",
@@ -764,6 +768,7 @@
         },
         "image": "image",
         "pin": "pin",
+        "external": "external",
         "generation": 1,
         "restarts": 1,
         "health": "health",
@@ -960,6 +965,7 @@
         },
         "image": "image",
         "pin": "pin",
+        "external": "external",
         "generation": 1,
         "restarts": 1,
         "health": "health",
