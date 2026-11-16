@@ -1095,6 +1095,13 @@ func notRun(name, what, fix string) error {
 		Message: fmt.Sprintf("service %s is external: a12s does not run it, so it has no %s", name, what), Fix: fix}}
 }
 
+func (c *Controller) containerOutput(ctx context.Context, name string, follow bool, tail int) (io.ReadCloser, error) {
+	if c.isExternal(name) {
+		return nil, errors.New(name + " is external; a12s does not run it")
+	}
+	return c.drv.ServiceLogs(ctx, name, follow, tail)
+}
+
 func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow bool, tail int, w func(string) error) error {
 	var sub chan string
 	if follow {
@@ -1119,13 +1126,7 @@ func (c *Controller) writeServiceLogs(ctx context.Context, name string, follow b
 			}
 		}
 	}
-	var rc io.ReadCloser
-	var err error
-	if c.isExternal(name) {
-		err = errors.New(name + " is external; a12s does not run it")
-	} else {
-		rc, err = c.drv.ServiceLogs(ctx, name, follow, tail)
-	}
+	rc, err := c.containerOutput(ctx, name, follow, tail)
 	if err != nil {
 		if !follow {
 			return w(fmt.Sprintf("[a12s] no container output: %v\n", err))
