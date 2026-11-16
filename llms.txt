@@ -37,7 +37,9 @@ its own fleet.yaml, images, Services and app code.
   parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of
   the Agent call that started it; a background sub-agent's calls between Turns have no turn), turn.finished {status,
   usage (the harness's own; Claude Code's has speed: fast | standard), tokens?: {input (without cached), output,
-  cacheRead, cacheWrite}, fastMode?: {state: on | off | cooldown, disabledReason?} (Claude Code), error?},
+  cacheRead, cacheWrite}, fastMode?: {state: on | off | cooldown, disabledReason?} (Claude Code), models?: [model id] and refusals?: [{model,
+  category, fallbackModel?, scope?: session | local}] (Claude Code; a session fallback is undone at the Turn's end),
+  error?},
   egress.denied {host, port, reason}, task.started and task.finished {id, kind, description, toolUseId?, status?
   (completed | failed | stopped | killed), summary?, result?} (Claude Code: toolUseId is the tool call that started
   it, result a sub-agent's last text); fleet-wide only:

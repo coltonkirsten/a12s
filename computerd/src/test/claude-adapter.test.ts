@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type ToolEvent, type TurnInput } from '../adapters/adapter.js';
@@ -14,7 +14,8 @@ after(() => Promise.all(adapters.map((a) => a.close())));
 function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 }, env: Record<string, string> = {}, overrides: Partial<Config> = {}) {
   const cfg = testConfig(overrides);
   const argsFile = join(cfg.runDir, 'args.jsonl');
-  const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile, ...env }), mcpServers: {} }, fake, timing);
+  const controlFile = join(cfg.runDir, 'control.jsonl');
+  const adapter = new ClaudeAdapter({ cfg, credentialEnv: () => ({ FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile, FAKE_CONTROL_FILE: controlFile, ...env }), mcpServers: {} }, fake, timing);
   adapters.push(adapter);
   const background: RunningTurn[] = [];
   const tasks: (TaskEvent | ToolEvent)[] = [];
@@ -33,7 +34,8 @@ function setup(mode: string, timing = { termAfterMs: 10_000, killAfterMs: 5_000 
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, `${id}.jsonl`), '{"type":"user"}\n');
   };
-  return { cfg, adapter, input, args, spawns, transcript, background, tasks };
+  const controls = () => (existsSync(controlFile) ? readFileSync(controlFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { subtype: string; model?: string }) : []);
+  return { cfg, adapter, input, args, spawns, transcript, background, tasks, controls };
 }
 
 const types = (evs: AdapterEvent[]) => evs.map((e) => e.type);
@@ -94,6 +96,32 @@ test('claude: the result reports usage by model, sub-agents included; none when 
   assert.deepEqual(finished(await collect((await withModels.adapter.startTurn(withModels.input)).events)).usage?.modelUsage, byModel);
   const without = setup('normal');
   assert.ok(!('modelUsage' in (finished(await collect((await without.adapter.startTurn(without.input)).events)).usage ?? {})));
+});
+
+test('claude: the result names the models that served the agent; a session-wide refusal fallback is undone when the Turn ends', async () => {
+  const { adapter, input, controls } = setup('normal');
+  const configured = { ...input, model: 'claude-opus-5-5' };
+  const run = await adapter.startTurn({ ...configured, prompt: 'refuse' });
+  const fell = finished(await collect(run.events));
+  assert.deepEqual(fell.models, ['claude-opus-5-5', 'fake-fallback']);
+  assert.deepEqual(fell.refusals, [{ model: 'claude-opus-5-5', category: 'example-category', fallbackModel: 'fake-fallback', scope: 'session' }]);
+  await until(() => controls().some((c) => c.subtype === 'set_model'));
+  assert.deepEqual(controls().filter((c) => c.subtype === 'set_model'), [{ subtype: 'set_model', model: 'claude-opus-5-5' }]);
+  const next = finished(await collect((await adapter.startTurn({ ...configured, sessionId: run.sessionId })).events));
+  assert.deepEqual(next.models, ['claude-opus-5-5']);
+  assert.ok(!('refusals' in next));
+});
+
+test('claude: a sub-agent fallback or a refusal without one is recorded and leaves the model alone', async () => {
+  const { adapter, input, controls } = setup('normal');
+  const run = await adapter.startTurn({ ...input, prompt: 'refuse local' });
+  const local = finished(await collect(run.events));
+  assert.deepEqual(local.models, ['fake-model']);
+  assert.deepEqual(local.refusals, [{ model: 'fake-model', category: 'example-category', fallbackModel: 'fake-fallback', scope: 'local' }]);
+  const none = finished(await collect((await adapter.startTurn({ ...input, sessionId: run.sessionId, prompt: 'refuse none' })).events));
+  assert.ok(!('models' in none), 'a message the CLI made up itself names no model');
+  assert.deepEqual(none.refusals, [{ model: 'fake-model', category: 'example-category' }]);
+  assert.ok(!controls().some((c) => c.subtype === 'set_model'));
 });
 
 test('claude: denials become permission events once each', async () => {
