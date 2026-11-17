@@ -180,7 +180,7 @@ computer's phase changes, `inbox.changed` and `service.phase` ([API: Event strea
 
 The SDKs type these ([SDK](sdk.md)); `turns()` folds them into one record per Turn. The Controller keeps the last 200
 finished Turns of each agent computer in the same shape (`GET /v1/agent-computers/{c}/turns`), so a Turn that ended
-while nobody watched can still be read.
+while nobody watched can still be read. A Turn is in that history before its `turn.finished` reaches any event stream.
 
 ## System tools
 

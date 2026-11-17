@@ -248,7 +248,8 @@ func (c *Controller) handleStopAll(w http.ResponseWriter, r *http.Request) {
 // handleEvents proxies computerd's SSE stream, flushing every message. The
 // client resumes with Last-Event-ID; nothing is buffered here.
 func (c *Controller) handleEvents(w http.ResponseWriter, r *http.Request) {
-	cl, err := c.awake(r.PathValue("c"))
+	name := r.PathValue("c")
+	cl, err := c.awake(name)
 	if err != nil {
 		fail(w, err)
 		return
@@ -274,6 +275,11 @@ func (c *Controller) handleEvents(w http.ResponseWriter, r *http.Request) {
 			m, err := s.Next()
 			if err != nil {
 				return
+			}
+			// This stream and the Controller's own are separate connections to computerd: hold turn.finished
+			// back until the Controller has stored the Turn, so Turn history has it once a client sees it.
+			if ev, err := m.Decode(); m.Event == "" && err == nil && ev.Type == api.EventTurnFinished {
+				c.waitStored(r.Context(), name, ev.Seq)
 			}
 			select {
 			case msgs <- m:

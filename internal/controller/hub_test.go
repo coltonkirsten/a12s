@@ -3,9 +3,11 @@ package controller
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -135,5 +137,60 @@ func TestFleetEventsAndTurnHistory(t *testing.T) {
 		default:
 		}
 		break
+	}
+}
+
+// A Turn is in Turn history by the time turn.finished shows on either event stream, even while storing it is slow.
+func TestTurnStoredBeforeTurnFinished(t *testing.T) {
+	h := newHarness(t)
+	h.up(labFleet(t, nil), false)
+	fleetStream := sse(t, h, "/v1/events?agentComputers=scout", "test-token-0123456789", "")
+	until(t, fleetStream, "event: head")
+	if r := h.api("POST", "/v1/agent-computers/scout/inbox", `{"body":"hi"}`); r.StatusCode != 201 {
+		t.Fatalf("send = %d", r.StatusCode)
+	}
+	until(t, fleetStream, `"type":"turn.dispatched"`)
+	computerStream := sse(t, h, "/v1/agent-computers/scout/events", "test-token-0123456789", "")
+
+	// Another writer holds fleet.db's write lock, so storing the Turn waits for it.
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(h.dir, "fleet.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	h.cds.get("scout").finish(api.TurnCompleted)
+	quiet := time.After(300 * time.Millisecond)
+	for waiting := true; waiting; {
+		select {
+		case l := <-fleetStream:
+			if strings.Contains(l, `"type":"turn.finished"`) {
+				t.Fatal("turn.finished reached GET /v1/events before the Turn was stored")
+			}
+		case l := <-computerStream:
+			if strings.Contains(l, `"type":"turn.finished"`) {
+				t.Fatal("turn.finished reached the agent computer's events before the Turn was stored")
+			}
+		case <-quiet:
+			waiting = false
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, stream := range []<-chan string{fleetStream, computerStream} {
+		until(t, stream, `"type":"turn.finished"`)
+		if turns := decodeBody[api.TurnsResponse](t, h.api("GET", "/v1/agent-computers/scout/turns", "")).Turns; len(turns) != 1 || turns[0].Status != api.TurnCompleted {
+			t.Fatalf("turns right after turn.finished = %+v", turns)
+		}
 	}
 }
