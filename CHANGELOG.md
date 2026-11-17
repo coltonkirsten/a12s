@@ -4,6 +4,14 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.11.2 (2026-11-16)
+
+A patch release: a status `background` item names the tool call that started it.
+
+Upgrading: install the new release and `a12s up`; agent computers on `slim` move to `slim:0.11.2` at their next idle
+boundary. Rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.11.2` under new tags to get the new field
+(computerd changed); images built FROM `slim:0.11.0` or `slim:0.11.1` keep working without it.
+
 - Added: a status `background` item has `toolUseId` when its `task.started` had one (a Claude Code sub-agent or
   shell), so a client that connects after a task went to the background can attribute the sub-agent's tool calls
   (their `parent`) to it. TypeScript `BackgroundTask.toolUseId`, Python `BackgroundTask.tool_use_id`.
