@@ -1,4 +1,4 @@
-import { EventQueue, ResumeError, type Adapter, type AdapterEvent, type SessionListener, type TaskEvent, type TaskStatus, type TurnInput, type TurnStatus } from '../adapters/adapter.js';
+import { EventQueue, ResumeError, type Adapter, type AdapterEvent, type RunningTurn, type SessionListener, type TaskEvent, type TaskStatus, type TurnInput, type TurnStatus } from '../adapters/adapter.js';
 
 /** An in-memory harness: turns stay open until finish() or stop(). */
 export class StubAdapter implements Adapter {
@@ -97,6 +97,28 @@ export class StubAdapter implements Adapter {
     this.queue = null;
     q?.push({ type: 'turn.finished', data: { status, usage: null } });
     q?.end();
+  }
+
+  steers = true;
+  /** Prompts steer() was called with, each with how it settles. */
+  readonly steered: { prompt: string; resolve: (r: 'joined' | 'own') => void; reject: (err: Error) => void }[] = [];
+
+  /** `own` runs the prompt as a turn of its own (the running turn ended first), which receives it at once. */
+  steer(prompt: string): Promise<'joined' | RunningTurn> {
+    if (!this.queue && !this.bgQueue) return Promise.reject(new Error('no turn is running'));
+    return new Promise((resolve, reject) => {
+      this.steered.push({
+        prompt,
+        reject,
+        resolve: (r) => {
+          if (r === 'joined') return resolve('joined');
+          const q = new EventQueue<AdapterEvent>();
+          this.queue = q;
+          q.push({ type: 'turn.dispatched', data: {} });
+          resolve({ sessionId: this.lastSession ?? 's_none', events: q });
+        },
+      });
+    });
   }
 
   async stop(): Promise<void> {

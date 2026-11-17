@@ -652,3 +652,166 @@ test('detached: work from an earlier turn is reported once; ended in its own tur
   assert.equal(background(computer).tasks, 0);
   await computer.shutdown(100);
 });
+
+const batch = (id: string) => ({ batch: id, pendingAfter: 0, messages: [{ id: `m_${id}`, seq: 1, sender: 'local', via: 'local', createdAt: '2026-01-01T00:00:00Z', bytes: 1 }] });
+
+/** A Turn carrying an inbox Batch, received by the harness. */
+async function batchTurn(computer: Computer, journal: Journal, id = 'b_1') {
+  const t = await computer.submitTurn({ requestId: id, session: 'new', prompt: 'work', inbox: batch(id) });
+  await until(() => journal.turnSummary(t.turnId)?.dispatched === true);
+  return t;
+}
+
+test('inbox during a turn: joined Messages are journaled as turn.steered under that turn, once', async () => {
+  const { journal, adapter, computer, types, finished } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  assert.equal(computer.status().steerTurn, t.turnId);
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  assert.deepEqual(computer.deliverToTurn(t.turnId, req), { requestId: 'b_2', turnId: t.turnId, outcome: 'pending' });
+  assert.equal(computer.status().steerTurn, null, 'one delivery at a time');
+  assert.equal(computer.status().phase, 'busy');
+  assert.deepEqual(computer.deliverToTurn(t.turnId, req), { requestId: 'b_2', turnId: t.turnId, outcome: 'pending' }, 'a replay reads the record');
+  assert.equal(adapter.steered.length, 1, 'handed over once');
+  assert.equal(adapter.steered[0]?.prompt, 'more');
+  adapter.steered[0]?.resolve('joined');
+  await until(() => types(t.turnId).includes('turn.steered'));
+  const steered = journal.after(0, t.turnId, 100).find((e) => e.type === 'turn.steered');
+  assert.deepEqual(steered?.data, { requestId: 'b_2', inbox: batch('b_2') });
+  assert.equal(computer.deliverToTurn(t.turnId, req).outcome, 'joined');
+  assert.throws(() => computer.deliverToTurn(t.turnId, { ...req, prompt: 'other' }), (e: HttpError) => e.status === 409);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  assert.equal(computer.status().phase, 'ready');
+  assert.equal(computer.deliverToTurn(t.turnId, req).outcome, 'joined', 'still readable after the turn');
+});
+
+test('inbox during a turn: a turn that ends first runs the Messages as a turn of its own, after it is journaled finished', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  computer.deliverToTurn(t.turnId, { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') });
+  adapter.finish();
+  adapter.steered[0]?.resolve('own');
+  await until(() => computer.deliverToTurn(t.turnId, { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') }).outcome === 'started');
+  const reply = computer.deliverToTurn(t.turnId, { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') });
+  const own = reply.startedTurn!;
+  assert.ok(own && own !== t.turnId);
+  const all = journal.after(0, null, 1000);
+  const endOld = all.findIndex((e) => e.turn === t.turnId && e.type === 'turn.finished');
+  const startNew = all.findIndex((e) => e.turn === own && e.type === 'turn.started');
+  assert.ok(endOld >= 0 && endOld < startNew, 'the old turn is finished before the new one starts');
+  assert.deepEqual(all[startNew]?.data.inbox, batch('b_2'));
+  assert.equal(all[startNew]?.data.requestId, 'b_2');
+  await until(() => journal.turnSummary(own)?.dispatched === true);
+  assert.equal(journal.turnSummary(own)?.requestId, 'b_2');
+  assert.equal(computer.status().activeTurn, own);
+  adapter.finish();
+  await until(() => finished(own) === 'completed');
+  assert.equal(computer.status().phase, 'ready');
+});
+
+test('inbox during a turn: refused unless the named turn is running, received, and carries Messages', async () => {
+  const { adapter, computer, finished } = setup();
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  assert.throws(() => computer.deliverToTurn('t_x', req), (e: HttpError) => e.status === 503);
+  await computer.start();
+  assert.throws(() => computer.deliverToTurn('t_x', req), (e: HttpError) => e.status === 409);
+  // A turn started without an inbox (a client's own prompt) takes no Messages.
+  const plain = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'compact' });
+  assert.equal(computer.status().steerTurn, null);
+  assert.throws(() => computer.deliverToTurn(plain.turnId, req), (e: HttpError) => e.status === 409);
+  adapter.finish();
+  await until(() => finished(plain.turnId) === 'completed');
+  // Not yet received by the harness.
+  adapter.autoDispatch = false;
+  const t = await computer.submitTurn({ requestId: 'b_1', session: 'current', prompt: 'work', inbox: batch('b_1') });
+  assert.equal(computer.status().steerTurn, null);
+  assert.throws(() => computer.deliverToTurn(t.turnId, req), (e: HttpError) => e.status === 409);
+  adapter.dispatch();
+  await until(() => computer.status().steerTurn === t.turnId);
+  // A harness that cannot steer offers no turn.
+  adapter.steers = false;
+  assert.equal(computer.status().steerTurn, null);
+  adapter.steers = true;
+  computer.stopTurn(t.turnId);
+  assert.equal(computer.status().steerTurn, null, 'not a stopping turn');
+  await until(() => finished(t.turnId) === 'interrupted');
+  // lookupOnly refuses an unknown request for good.
+  assert.throws(() => computer.deliverToTurn(t.turnId, { ...req, requestId: 'b_9', lookupOnly: true }), (e: HttpError) => e.status === 404);
+  assert.throws(() => computer.deliverToTurn(t.turnId, { ...req, requestId: 'b_9' }), (e: HttpError) => e.status === 404);
+  // A Turn's own requestId is not a delivery.
+  assert.throws(() => computer.deliverToTurn(t.turnId, { ...req, requestId: 'b_1' }), (e: HttpError) => e.status === 409);
+});
+
+test('inbox during a turn: a harness that loses the Messages records missed, and the idle-boundary work resumes', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  computer.deliverToTurn(t.turnId, req);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  assert.equal(computer.status().phase, 'busy', 'the delivery may still become a turn');
+  assert.equal(await status(computer.submitTurn({ requestId: 'r9', session: 'current', prompt: 'x' })), 409);
+  adapter.steered[0]?.reject(new Error('the session ended'));
+  await until(() => computer.status().phase === 'ready');
+  assert.deepEqual(computer.deliverToTurn(t.turnId, req), { requestId: 'b_2', turnId: t.turnId, outcome: 'missed', reason: 'the session ended' });
+});
+
+test('inbox during a turn: a stop before the harness runs the Messages as a turn of their own makes them missed', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  computer.deliverToTurn(t.turnId, req);
+  computer.stopTurn(t.turnId);
+  await until(() => finished(t.turnId) === 'interrupted');
+  adapter.steered[0]?.resolve('own');
+  await until(() => computer.deliverToTurn(t.turnId, req).outcome === 'missed');
+  assert.equal(journal.findRequest('b_2'), undefined, 'no turn was started');
+});
+
+test('inbox during a turn: a computerd restart after acceptance makes the request missed, never handed over again', async () => {
+  const { cfg, journal, computer } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  computer.deliverToTurn(t.turnId, req);
+  const again = new Computer(cfg, journal, new StubAdapter(), {});
+  await again.start();
+  const r = again.deliverToTurn(t.turnId, req);
+  assert.equal(r.outcome, 'missed');
+  assert.match(r.reason ?? '', /restarted/);
+});
+
+test('inbox during a turn: a turn the harness started by itself takes Messages', async () => {
+  const { adapter, computer } = setup();
+  await computer.start();
+  adapter.backgroundTurn();
+  await until(() => computer.status().steerTurn !== null);
+  const bg = computer.status().steerTurn as string;
+  computer.deliverToTurn(bg, { requestId: 'b_1', prompt: 'more', inbox: batch('b_1') });
+  adapter.steered[0]?.resolve('joined');
+  await until(() => computer.deliverToTurn(bg, { requestId: 'b_1', prompt: 'more', inbox: batch('b_1') }).outcome === 'joined');
+  adapter.finishBackground();
+});
+
+test('inbox during a turn: Messages the harness folds into a turn it started by itself after the target ended join that turn', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  computer.deliverToTurn(t.turnId, req);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  adapter.backgroundTurn();
+  await until(() => computer.status().activeTurn !== null);
+  const bg = computer.status().activeTurn as string;
+  adapter.steered[0]?.resolve('joined');
+  await until(() => computer.deliverToTurn(t.turnId, req).outcome === 'joined');
+  assert.equal(computer.deliverToTurn(t.turnId, req).turnId, bg);
+  assert.ok(journal.after(0, bg, 100).some((e) => e.type === 'turn.steered'));
+  adapter.finishBackground();
+  await until(() => computer.status().phase === 'ready');
+});

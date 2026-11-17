@@ -348,3 +348,82 @@ test('claude: without the live task set (an older CLI) start and end events coun
   await until(() => background.length === 1);
   assert.equal(adapter.backgroundTasks(), 0);
 });
+
+/** Waits until the turn has reported receipt, so a steer finds it running. */
+async function runningTurn(adapter: ClaudeAdapter, input: TurnInput) {
+  const run = await adapter.startTurn(input);
+  const evs: AdapterEvent[] = [];
+  const done = (async () => {
+    for await (const ev of run.events) evs.push(ev);
+  })();
+  await until(() => evs.some((e) => e.type === 'turn.dispatched'));
+  return { run, evs, done };
+}
+
+test('claude: a steered prompt joins the running turn at its next tool boundary', async () => {
+  const { adapter, input } = setup('normal');
+  const { evs, done } = await runningTurn(adapter, { ...input, prompt: 'tool 300' });
+  const joined = await adapter.steer('also this');
+  assert.equal(joined, 'joined');
+  assert.ok(!evs.some((e) => e.type === 'turn.finished'), 'joined before the turn ended');
+  await done;
+  assert.equal(text(evs), 'heard also this');
+  assert.equal(finished(evs).status, 'completed');
+  // The session is idle again: the next turn starts normally.
+  assert.equal(finished(await collect((await adapter.startTurn(input)).events)).status, 'completed');
+});
+
+test('claude: two prompts steered at once join the same turn', async () => {
+  const { adapter, input } = setup('normal');
+  const { evs, done } = await runningTurn(adapter, { ...input, prompt: 'tool 300' });
+  assert.deepEqual(await Promise.all([adapter.steer('one'), adapter.steer('two')]), ['joined', 'joined']);
+  await done;
+  assert.equal(text(evs), 'heard one + two');
+});
+
+test('claude: a prompt steered into a turn that ends first runs as a turn of its own', async () => {
+  const { adapter, input } = setup('normal');
+  const { evs, done } = await runningTurn(adapter, { ...input, prompt: 'slow 200' });
+  const own = await adapter.steer('reply with pong');
+  await done;
+  assert.equal(finished(evs).status, 'completed');
+  assert.notEqual(own, 'joined');
+  const run = own as RunningTurn;
+  const ownEvs = await collect(run.events);
+  assert.equal(ownEvs[0]?.type, 'turn.dispatched', 'its echo is the receipt');
+  assert.equal(text(ownEvs), 'pong');
+  assert.equal(finished(ownEvs).status, 'completed');
+});
+
+test('claude: a steer is refused with no turn running and while one is still being handed over', async () => {
+  const { adapter, input } = setup('normal');
+  await assert.rejects(adapter.steer('x'), /no turn is running/);
+  await collect((await adapter.startTurn(input)).events);
+  await assert.rejects(adapter.steer('x'), /no turn is running/);
+  const { done } = await runningTurn(adapter, { ...input, prompt: 'tool 300' });
+  const steered = adapter.steer('y');
+  await assert.rejects(adapter.startTurn(input), /already running/);
+  assert.equal(await steered, 'joined');
+  await done;
+});
+
+test('claude: a steered prompt still queued when the session ends on purpose runs as a turn that is interrupted', async () => {
+  const { adapter, input } = setup('normal');
+  const { done } = await runningTurn(adapter, { ...input, prompt: 'tool 5000' });
+  const steered = adapter.steer('too late');
+  const restarted = adapter.restart();
+  await done;
+  const own = await steered;
+  assert.notEqual(own, 'joined');
+  assert.equal(finished(await collect((own as RunningTurn).events)).status, 'interrupted');
+  await restarted;
+});
+
+test('claude: the process dying before it takes a steered prompt in rejects it', async () => {
+  const { adapter, input } = setup('normal');
+  const { done } = await runningTurn(adapter, { ...input, prompt: 'tool 5000' });
+  const steered = adapter.steer('too late');
+  (adapter as unknown as { live: { child: { kill(s: string): void } } }).live.child.kill('SIGKILL');
+  await assert.rejects(steered, /session ended/);
+  await done;
+});

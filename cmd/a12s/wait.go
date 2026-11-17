@@ -76,11 +76,11 @@ func sendAndWait(g *globals, c *cli.Client, kind, name string, req api.EnqueueRe
 		}
 	}()
 
-	turn, err := f2.waitDelivered(ctx)
+	turn, steered, err := f2.waitDelivered(ctx)
 	if err != nil {
 		return err
 	}
-	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout) || sameFile(os.Stdout, os.Stderr), json: g.json}
+	tp := &turnPrinter{turn: turn, kind: kind, mine: res.ID, out: os.Stdout, errOut: os.Stderr, tty: isTerminal(os.Stdout) || sameFile(os.Stdout, os.Stderr), json: g.json, untilSteered: steered}
 	if g.json {
 		b, _ := json.Marshal(map[string]any{"message": res, "turn": turn})
 		fmt.Println(string(b))
@@ -158,14 +158,17 @@ func (p *waitFollow) wasInterrupted() bool {
 	return p.interrupted
 }
 
-func (p *waitFollow) waitDelivered(ctx context.Context) (string, error) {
+// waitDelivered returns the Turn that received the Message, and whether it joined that Turn while it ran.
+func (p *waitFollow) waitDelivered(ctx context.Context) (string, bool, error) {
 	var turn string
+	var steered bool
 	var end error
 	s := &cli.Stream{Client: p.c, Path: computerPath(p.name, "/inbox/"+url.PathEscape(p.id)+"/events")}
 	state := func(st, turnID string, data map[string]any) bool {
 		switch st {
 		case api.MsgDelivered:
 			turn = turnID
+			steered, _ = data["steered"].(bool)
 			p.mu.Lock()
 			p.turn = turn
 			intent := p.interrupted
@@ -247,9 +250,9 @@ func (p *waitFollow) waitDelivered(ctx context.Context) (string, error) {
 		return false, nil
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return turn, end
+	return turn, steered, end
 }
 
 type turnPrinter struct {
@@ -260,6 +263,8 @@ type turnPrinter struct {
 	json        bool // print each event as a JSON line instead
 	midLine     bool // stdout's last text did not end a line
 	status      string
+	// untilSteered skips the Turn's output from before the Message joined it.
+	untilSteered bool
 }
 
 func (p *turnPrinter) handle(e api.Event) (bool, error) {
@@ -278,6 +283,19 @@ func (p *turnPrinter) handle(e api.Event) (bool, error) {
 			p.status = d.Status
 			return true, nil
 		}
+		return false, nil
+	}
+	if e.Type == api.EventTurnSteered {
+		var d api.TurnSteeredData
+		_ = json.Unmarshal(e.Data, &d)
+		if line := cli.SteeredLine(p.turn, p.mine, d); line != "" {
+			p.untilSteered = false
+			p.endLine()
+			fmt.Fprintln(p.out, line)
+			return false, nil
+		}
+	}
+	if p.untilSteered && e.Type != api.EventTurnFinished {
 		return false, nil
 	}
 	switch e.Type {

@@ -165,6 +165,16 @@ export class CodexAdapter implements Adapter {
     }
   }
 
+  readonly steers = true;
+
+  /** turn/steer appends to the turn named by expectedTurnId and fails once it ended: Codex never queues the input. */
+  async steer(prompt: string): Promise<'joined'> {
+    const t = this.turn;
+    if (!t?.turnId || t.stopping) throw new Error('no turn is running');
+    await this.request('turn/steer', { threadId: t.threadId, input: [{ type: 'text', text: prompt, text_elements: [] }], expectedTurnId: t.turnId });
+    return 'joined';
+  }
+
   private async dispatch(input: TurnInput, start: { cancelled: boolean }): Promise<RunningTurn> {
     const otherThread = [...this.tasks.values()].some((t) => t.threadId !== input.sessionId);
     if (JSON.stringify(input.mcpServers) !== JSON.stringify(this.mcpServers) || otherThread) {

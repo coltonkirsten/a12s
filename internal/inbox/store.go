@@ -159,8 +159,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("fleet.db schema: %w", err)
 	}
-	for _, col := range []string{"prefix TEXT NOT NULL DEFAULT ''", "last_used_at INTEGER"} {
-		if err := addColumn(db, "tokens", col); err != nil {
+	for _, col := range []struct{ table, def string }{
+		{"tokens", "prefix TEXT NOT NULL DEFAULT ''"},
+		{"tokens", "last_used_at INTEGER"},
+		{"batches", "steer_turn TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := addColumn(db, col.table, col.def); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("fleet.db schema: %w", err)
 		}

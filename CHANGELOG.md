@@ -4,6 +4,18 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: `inbox.duringTurn: steer` on an agent computer (or in `defaults`) hands Messages sent while a Turn runs to
+  that Turn instead of holding them for the next one: the agent reads them when its running tool calls finish, and
+  the Turn continues. Default `wait` keeps today's behaviour. Claude Code and Codex (`turn/steer`). A `--fresh`
+  Message, and anything while `inbox resume --new` waits, still goes to the next Turn. If the Turn ends before the
+  harness reads them, Claude Code runs them as the next Turn and Codex leaves them pending for it; either way they are
+  delivered once. See [During a Turn](docs/inbox.md#during-a-turn). Needs the new computerd: custom images built FROM
+  an older slim deliver as before (`wait`) until rebuilt.
+- Added: event `turn.steered {requestId, inbox}` under the Turn that took the Messages in. A stored Turn lists them
+  after its own Messages with `steered: true` (TypeScript `TurnInboxMessage.steered`, Python
+  `TurnInboxMessage.steered`); their `delivered` event has `steered: true`. `a12s send --wait` prints `joined running
+  turn <id>` and follows that Turn from there.
+
 ## v0.11.2 (2026-11-16)
 
 A patch release: a status `background` item names the tool call that started it.

@@ -98,6 +98,7 @@ agent_computers:
 | `security.seccomp` | A seccomp profile in Docker's JSON format that replaces Docker's default profile for this agent computer. In the Fleet file it is a path relative to the file (absolute paths are refused) or the profile itself as a mapping; `a12s up` reads the file and sends the profile. In the SDK and the HTTP API it is the profile's JSON object. Only the seccomp filter changes; see [Security: Seccomp](security.md#seccomp). Only the owner sets it: a prefix token can't. Default: Docker's default profile. |
 | `attach` | `{name: {host, readOnly, keep}}`: folders on this machine mounted into the home at `/home/agent/<name>`. See [Attached folders](#attached-folders). Only the owner sets it, never in `defaults`. |
 | `power` | `{sleepAfterIdle, wakeOnMessage: {from, maxWakesPerHour}, compactBeforeSleep: {minTokens}}`; `sleepAfterIdle` is `off` or `1s` to `7d`. See [Power policy](inbox.md#power-policy). |
+| `inbox.duringTurn` | `wait` (default): a Message sent while a Turn runs waits for the next Turn. `steer`: it is handed to the running Turn. See [During a Turn](inbox.md#during-a-turn). Changing it restarts nothing. |
 | `uses` | Services this agent computer may reach: `[db]` or `[{name: db, mcp: false}]`. See [Services](services.md#grants-and-reachability). |
 | `grants.send` | Agent computers this one may enqueue to, through the `send` system tool. Each must exist in the Fleet. |
 

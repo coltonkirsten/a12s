@@ -421,6 +421,8 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 				_ = c.saveLocked()
 			}
 			c.mu.Unlock()
+			// A Turn may take Messages that wait (inbox.duringTurn: steer).
+			c.kick(name)
 		case api.EventTurnFinished:
 			// computerd may already run another Turn (one its harness started by itself, or one queued behind it).
 			if st, err := c.statusNow(name); err == nil {
@@ -437,7 +439,7 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			if ev.Turn != "" {
 				c.spawn(func() { c.afterTurn(name, ev.Turn) })
 			}
-		case api.EventTurnDispatched, api.EventHarnessRestarted:
+		case api.EventTurnDispatched, api.EventHarnessRestarted, api.EventTurnSteered:
 			c.kick(name)
 		case api.EventTaskStarted, api.EventTaskFinished:
 			if ev.Type == api.EventTaskFinished {

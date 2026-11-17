@@ -60,6 +60,8 @@ interface Live {
   lifecycle: boolean;
   /** Pushed, not yet started by the CLI. */
   pending: CliTurn | null;
+  /** Prompts pushed into a running turn, by uuid, until the CLI takes them in or runs them as a turn. */
+  steers: Map<string, { turn: CliTurn; resolve: (r: 'joined' | RunningTurn) => void; reject: (err: Error) => void }>;
   current: CliTurn | null;
   /** Background tasks journaled as started and not yet as finished. */
   tasks: Map<string, Task>;
@@ -115,8 +117,43 @@ export class ClaudeAdapter implements Adapter {
     return true;
   }
 
+  readonly steers = true;
+
+  /**
+   * Without a priority the CLI reads the prompt as soon as the running turn's tool calls finish, echoing it and
+   * announcing it `started` before that turn's result; when the turn ends first, `started` follows the result and
+   * the prompt opens a turn of its own.
+   */
+  steer(prompt: string): Promise<'joined' | RunningTurn> {
+    const live = this.live;
+    if (!live || live.ending || !live.lifecycle || live.pending || !live.current?.announced) return Promise.reject(new Error('no turn is running'));
+    const uuid = randomUUID();
+    const turn = live.current;
+    return new Promise((resolve, reject) => {
+      live.steers.set(uuid, { turn, resolve, reject });
+      live.input.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null, uuid });
+    });
+  }
+
+  private steered(live: Live, uuid: string): void {
+    const steer = live.steers.get(uuid);
+    if (!steer) return;
+    live.steers.delete(uuid);
+    const current = live.current;
+    if (current === steer.turn || current?.announced) return steer.resolve('joined');
+    if (current) {
+      // A turn the CLI started by itself after the steered one ended, not yet a Turn: the prompt makes it one.
+      current.announced = true;
+      current.out.push({ type: 'turn.dispatched', data: {} });
+      return steer.resolve({ sessionId: live.sessionId, events: current.out });
+    }
+    const turn: CliTurn = { uuid, out: new EventQueue(), mapper: null, announced: true };
+    this.open(live, turn);
+    steer.resolve({ sessionId: live.sessionId, events: turn.out });
+  }
+
   async startTurn(input: TurnInput): Promise<RunningTurn> {
-    const busy = this.live && (this.live.pending || this.live.current?.uuid);
+    const busy = this.live && (this.live.pending || this.live.current?.uuid || this.live.steers.size);
     if (this.starting || busy) throw new Error('a turn is already running');
     const start = { cancelled: false };
     this.starting = start;
@@ -161,6 +198,7 @@ export class ClaudeAdapter implements Adapter {
       initSeen: false,
       lifecycle: false,
       pending: null,
+      steers: new Map(),
       current: null,
       tasks: new Map(),
       foreground: new Map(),
@@ -233,6 +271,8 @@ export class ClaudeAdapter implements Adapter {
       turn.out.end();
     }
     live.current = live.pending = null;
+    for (const steer of live.steers.values()) steer.reject(new Error('the session ended before the harness took the prompt in'));
+    live.steers.clear();
     exited();
   }
 
@@ -240,6 +280,12 @@ export class ClaudeAdapter implements Adapter {
     const frame = m as unknown as { type: string; subtype?: string; command_uuid?: string; state?: string };
     if (frame.type === 'command_lifecycle') {
       live.lifecycle = true;
+      if (frame.state === 'started' && frame.command_uuid && live.steers.has(frame.command_uuid)) return this.steered(live, frame.command_uuid);
+      const cancelled = frame.state === 'cancelled' && frame.command_uuid ? live.steers.get(frame.command_uuid) : undefined;
+      if (cancelled) {
+        live.steers.delete(frame.command_uuid!);
+        cancelled.reject(new Error('the harness cancelled the prompt'));
+      }
       if (frame.state === 'started' && live.pending && live.pending.uuid === frame.command_uuid) this.open(live, live.pending);
       return;
     }
@@ -256,6 +302,8 @@ export class ClaudeAdapter implements Adapter {
         else this.open(live, { uuid: null, out: new EventQueue(), mapper: null, announced: false });
       }
     }
+    // The echo of a steered prompt arrives just before its `started` frame.
+    if (m.type === 'user' && (m as { isReplay?: boolean }).isReplay === true && m.uuid && live.current && live.steers.has(m.uuid)) this.steered(live, m.uuid);
     this.subagent(live, m);
     const turn = live.current;
     if (!turn?.mapper) {
@@ -274,7 +322,7 @@ export class ClaudeAdapter implements Adapter {
       // On resume the CLI reports tasks the previous process left behind and closes that turn without a model call.
       if (!events.some((ev) => ev.type === 'turn.finished')) return;
       live.current = null;
-      if (live.ending && !live.pending) this.closeInput(live);
+      if (live.ending && !live.pending && !live.steers.size) this.closeInput(live);
       return;
     }
     for (const ev of events) {
@@ -297,7 +345,7 @@ export class ClaudeAdapter implements Adapter {
       live.current = null;
       // A foreground task that has not moved to the background by the turn's end never will.
       live.foreground.clear();
-      if (live.ending && !live.pending) this.closeInput(live);
+      if (live.ending && !live.pending && !live.steers.size) this.closeInput(live);
     }
   }
 
@@ -425,7 +473,7 @@ export class ClaudeAdapter implements Adapter {
   private end(live: Live): void {
     if (live.ending) return;
     live.ending = true;
-    if (!live.current && !live.pending) return this.closeInput(live);
+    if (!live.current && !live.pending && !live.steers.size) return this.closeInput(live);
     live.query.interrupt().catch(() => {});
     live.timers.push(
       setTimeout(() => {

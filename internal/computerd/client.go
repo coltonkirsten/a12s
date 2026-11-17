@@ -85,6 +85,14 @@ func (c *Client) StartTurn(ctx context.Context, req api.TurnRequest) (api.TurnRe
 	return res, err
 }
 
+// DeliverToTurn is POST /v1/turns/{id}/inbox. It answers once computerd has durably accepted the request, before
+// the harness takes the Batch in; a replay with the same requestId returns the outcome.
+func (c *Client) DeliverToTurn(ctx context.Context, turnID string, req api.TurnInboxRequest) (api.TurnInboxReply, error) {
+	var res api.TurnInboxReply
+	err := c.do(ctx, http.MethodPost, "/v1/turns/"+url.PathEscape(turnID)+"/inbox", req, &res)
+	return res, err
+}
+
 // TurnSummary is GET /v1/turns/{id}: dispatch and finish evidence for
 // settling a Batch.
 func (c *Client) TurnSummary(ctx context.Context, turnID string) (api.TurnSummary, error) {

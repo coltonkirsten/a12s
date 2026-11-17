@@ -117,6 +117,33 @@ func TestTurnPrinter(t *testing.T) {
 	}
 }
 
+// A Message that joined a running Turn: the printer says so and shows the Turn's output from that point.
+func TestTurnPrinterSteered(t *testing.T) {
+	var out, errOut bytes.Buffer
+	p := &turnPrinter{turn: "t_41", kind: "claude-code", mine: "m_2", out: &out, errOut: &errOut, untilSteered: true}
+	ev := func(typ api.EventType, data string) api.Event {
+		return api.Event{Turn: "t_41", Type: typ, Data: json.RawMessage(data)}
+	}
+	for _, e := range []api.Event{
+		ev(api.EventTurnStarted, `{"harness":{"kind":"claude-code","version":"2.1.280"},"resumed":true,"prompt":"p","cwd":"/home/agent"}`),
+		ev(api.EventTextDelta, `{"text":"Before you wrote. "}`),
+		ev(api.EventTurnSteered, `{"requestId":"b_1","inbox":{"batch":"b_0","messages":[{"id":"m_9","sender":"cron:x"}]}}`),
+		ev(api.EventTurnSteered, `{"requestId":"b_2","inbox":{"batch":"b_2","messages":[{"id":"m_2","sender":"local"},{"id":"m_3","sender":"colton"}]}}`),
+		ev(api.EventTextDelta, `{"text":"Checked the logs too.\n"}`),
+	} {
+		if stop, _ := p.handle(e); stop {
+			t.Fatal("stopped early")
+		}
+	}
+	if stop, _ := p.handle(ev(api.EventTurnFinished, `{"status":"completed"}`)); !stop {
+		t.Fatal("turn.finished did not stop")
+	}
+	want := "joined running turn t_41 (batch of 2: yours + colton)\nChecked the logs too.\nturn t_41 completed\n"
+	if out.String() != want {
+		t.Errorf("stdout %q, want %q", out.String(), want)
+	}
+}
+
 // TestSendWaitEndToEnd runs `a12s send --wait` against a fake Controller that drops
 // the event stream mid-turn: the output has every delta exactly once.
 func TestSendWaitEndToEnd(t *testing.T) {

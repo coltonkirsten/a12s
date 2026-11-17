@@ -774,6 +774,9 @@ class TurnBuilder {
         t.startedAt = ev.ts;
         t.reason = ev.data.reason;
         return undefined;
+      case "turn.steered":
+        t.messages = [...t.messages, ...(ev.data.inbox?.messages ?? []).map((m) => ({ ...m, steered: true }))];
+        return undefined;
       case "tool.started":
         t.afterTool = true;
         t.tools.set(ev.data.id, { id: ev.data.id, name: ev.data.name, input: ev.data.input, isError: false });

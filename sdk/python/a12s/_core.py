@@ -6,7 +6,7 @@ import json
 import warnings
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator, Sequence
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.parse import quote, urlencode
@@ -233,6 +233,11 @@ class TurnBuilder:
             t.messages = [from_json(TurnInboxMessage, m) for m in messages] if isinstance(messages, list) else []
             t.started_at = ev.ts or None
             t.reason = data.get("reason") or None
+        elif ev.type == "turn.steered":
+            inbox = data.get("inbox")
+            messages = inbox.get("messages") if isinstance(inbox, dict) else None
+            if isinstance(messages, list):
+                t.messages = t.messages + [replace(from_json(TurnInboxMessage, m), steered=True) for m in messages]
         elif ev.type == "tool.started":
             t.after_tool = True
             tid = str(data.get("id", len(t.tools)))

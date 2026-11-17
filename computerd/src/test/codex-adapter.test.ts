@@ -236,3 +236,31 @@ test('codex: stopTask terminates one background terminal or interrupts one sub-a
   assert.deepEqual(init?.params.capabilities, { experimentalApi: true });
   await adapter.close();
 });
+
+test('codex: turn/steer hands a prompt to the active turn; with no turn, or a stopping one, it is refused', async () => {
+  const { adapter, input, log } = setup('hang');
+  await assert.rejects(adapter.steer('x'), /no turn is running/);
+  const run = await adapter.startTurn(input);
+  const evs: AdapterEvent[] = [];
+  const done = (async () => {
+    for await (const ev of run.events) evs.push(ev);
+  })();
+  assert.equal(await adapter.steer('also this'), 'joined');
+  const steer = log().find((m) => m.method === 'turn/steer');
+  const start = log().find((m) => m.method === 'turn/start');
+  assert.equal(steer?.params.threadId, 'thr_1');
+  assert.deepEqual(steer?.params.input, [{ type: 'text', text: 'also this', text_elements: [] }]);
+  assert.ok(steer?.params.expectedTurnId?.startsWith('turn_'));
+  assert.notEqual(start, undefined);
+  await adapter.stop();
+  await assert.rejects(adapter.steer('late'), /no turn is running/);
+  await done;
+  assert.equal(finished(evs).status, 'interrupted');
+});
+
+test('codex: a steer the app-server refuses rejects', async () => {
+  const { adapter, input } = setup('hang');
+  await adapter.startTurn(input);
+  (adapter as unknown as { turn: { turnId: string } }).turn.turnId = 'turn_gone';
+  await assert.rejects(adapter.steer('x'), /no active turn to steer/);
+});

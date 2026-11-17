@@ -43,11 +43,14 @@ CREATE INDEX IF NOT EXISTS messages_journal ON messages (computer, journaled) WH
 type Batch struct {
 	ID       string
 	Computer string
-	Request  api.TurnRequest
-	Claimed  time.Time
-	NotAfter *time.Time // the deadline fence; nil without expiring Messages
-	Turn     string
-	State    string
+	// SteerTurn is the running Turn the Batch was claimed for (inbox.duringTurn: steer), and once it joined a running
+	// Turn, that Turn; empty for a Batch that starts a Turn.
+	SteerTurn string
+	Request   api.TurnRequest
+	Claimed   time.Time
+	NotAfter  *time.Time // the deadline fence; nil without expiring Messages
+	Turn      string
+	State     string
 	// Override marks the one-shot session override, which Deliver consumes.
 	Override bool
 }
@@ -59,7 +62,7 @@ func scanBatch(r scanner) (*Batch, error) {
 	var req string
 	var claimed int64
 	var notAfter sql.NullInt64
-	if err := r.Scan(&b.ID, &b.Computer, &req, &claimed, &notAfter, &b.Override, &b.Turn, &b.State); err != nil {
+	if err := r.Scan(&b.ID, &b.Computer, &req, &claimed, &notAfter, &b.Override, &b.Turn, &b.State, &b.SteerTurn); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(req), &b.Request); err != nil {
@@ -73,7 +76,10 @@ func scanBatch(r scanner) (*Batch, error) {
 	return &b, nil
 }
 
-const batchCols = `id, computer, request, claimed_at, not_after, override, turn, state`
+const batchCols = `id, computer, request, claimed_at, not_after, override, turn, state, steer_turn`
+
+// Steered says whether the Batch joined a Turn that was already running.
+func (b *Batch) Steered() bool { return b.SteerTurn != "" && b.Turn == b.SteerTurn }
 
 func (s *Store) OpenBatches(ctx context.Context, computer string) ([]*Batch, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+batchCols+` FROM batches WHERE computer = ? AND state IN ('claimed', 'accepted') ORDER BY claimed_at, id`, computer)
@@ -92,8 +98,9 @@ func (s *Store) OpenBatches(ctx context.Context, computer string) ([]*Batch, err
 	return out, rows.Err()
 }
 
+// BatchByTurn is the Batch a Turn started with, never one that joined it.
 func (s *Store) BatchByTurn(ctx context.Context, turn string) (*Batch, error) {
-	b, err := scanBatch(s.db.QueryRowContext(ctx, `SELECT `+batchCols+` FROM batches WHERE turn = ?`, turn))
+	b, err := scanBatch(s.db.QueryRowContext(ctx, `SELECT `+batchCols+` FROM batches WHERE turn = ? AND turn != steer_turn`, turn))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -108,7 +115,7 @@ func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
 	return b, err
 }
 
-func buildRequest(computer, id, session string, now time.Time, msgs []*api.Message, pendingAfter int) (api.TurnRequest, *time.Time) {
+func buildRequest(computer, id, session, intro string, now time.Time, msgs []*api.Message, pendingAfter int) (api.TurnRequest, *time.Time) {
 	var bms []BatchMessage
 	inbox := &api.TurnInbox{Batch: id, PendingAfter: pendingAfter}
 	var earliest *time.Time
@@ -126,12 +133,15 @@ func buildRequest(computer, id, session string, now time.Time, msgs []*api.Messa
 			earliest = &t
 		}
 	}
-	return api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, now, bms), Inbox: inbox}, earliest
+	return api.TurnRequest{RequestID: id, Session: session, Prompt: RenderBatch(computer, id, intro, now, bms), Inbox: inbox}, earliest
 }
 
 // claimTx expires due Messages before the snapshot so an expired one is never
-// delivered. At most one Batch per Computer is open at a time.
-func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, string, error) {
+// delivered. At most one Batch per Computer is open at a time. With steerTurn
+// the Batch is for that running Turn: nothing is claimed while a session
+// override waits, and a fresh Message, which needs a new session, waits for the
+// next Turn with everything behind it.
+func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time, steerTurn string) (*Batch, string, error) {
 	if _, err := expireTx(tx, computer, now); err != nil {
 		return nil, "", err
 	}
@@ -169,6 +179,9 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	if len(all) == 0 {
 		return nil, "", nil
 	}
+	if steerTurn != "" && (ib.override != "" || all[0].Fresh) {
+		return nil, "", nil
+	}
 	// A fresh Message starts a new session, so it may only lead a Batch.
 	n := 1
 	for n < len(all) && !all[n].Fresh {
@@ -181,8 +194,12 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	if msgs[0].Fresh || override {
 		session = api.SessionNew
 	}
-	req, earliest := buildRequest(computer, id, session, now, msgs, len(all)-n)
-	b := &Batch{ID: id, Computer: computer, Request: req, Claimed: now, State: BatchClaimed, Override: override}
+	intro := Intro
+	if steerTurn != "" {
+		intro = SteerIntro
+	}
+	req, earliest := buildRequest(computer, id, session, intro, now, msgs, len(all)-n)
+	b := &Batch{ID: id, Computer: computer, SteerTurn: steerTurn, Request: req, Claimed: now, State: BatchClaimed, Override: override}
 	var notAfter any
 	if earliest != nil {
 		fence := now.Add(FenceGrace)
@@ -195,8 +212,8 @@ func (s *Store) claimTx(tx *sql.Tx, computer string, now time.Time) (*Batch, str
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err := tx.Exec(`INSERT INTO batches (id, computer, request, claimed_at, not_after, override, state) VALUES (?, ?, ?, ?, ?, ?, 'claimed')`,
-		id, computer, string(reqJSON), ms(now), notAfter, override); err != nil {
+	if _, err := tx.Exec(`INSERT INTO batches (id, computer, request, claimed_at, not_after, override, state, steer_turn) VALUES (?, ?, ?, ?, ?, ?, 'claimed', ?)`,
+		id, computer, string(reqJSON), ms(now), notAfter, override, steerTurn); err != nil {
 		return nil, "", err
 	}
 	for _, m := range msgs {
@@ -214,7 +231,21 @@ func (s *Store) Claim(ctx context.Context, computer string) (*Batch, error) {
 	var b *Batch
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		var err error
-		b, _, err = s.claimTx(tx, computer, s.now())
+		b, _, err = s.claimTx(tx, computer, s.now(), "")
+		return err
+	})
+	if err == nil && b != nil {
+		s.changed(computer)
+	}
+	return b, err
+}
+
+// ClaimSteer claims a Batch for the running Turn turn.
+func (s *Store) ClaimSteer(ctx context.Context, computer, turn string) (*Batch, error) {
+	var b *Batch
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		b, _, err = s.claimTx(tx, computer, s.now(), turn)
 		return err
 	})
 	if err == nil && b != nil {
@@ -226,7 +257,7 @@ func (s *Store) Claim(ctx context.Context, computer string) (*Batch, error) {
 // ClaimNow runs inside the enqueue transaction so a now-or-never Message is
 // either in this Batch or refused, never left queued.
 func (t *Tx) ClaimNow(m api.Message) (*Batch, *Error) {
-	b, reason, err := t.s.claimTx(t.tx, m.Computer, t.at)
+	b, reason, err := t.s.claimTx(t.tx, m.Computer, t.at, "")
 	if err != nil {
 		return nil, &Error{Status: 500, Code: api.ErrInternal, Message: err.Error()}
 	}
@@ -263,7 +294,13 @@ func (s *Store) Deliver(ctx context.Context, batch, turn, hold, diagnostic strin
 			return nil
 		}
 		now := s.now()
-		if _, err := tx.Exec(`UPDATE batches SET state = 'delivered', turn = ?, settled_at = ? WHERE id = ?`, turn, ms(now), batch); err != nil {
+		// A Batch claimed for a running Turn and never accepted as a Turn of its own joined one.
+		joined := b.SteerTurn != "" && b.State == BatchClaimed
+		steerTurn := b.SteerTurn
+		if joined {
+			steerTurn = turn
+		}
+		if _, err := tx.Exec(`UPDATE batches SET state = 'delivered', turn = ?, steer_turn = ?, settled_at = ? WHERE id = ?`, turn, steerTurn, ms(now), batch); err != nil {
 			return err
 		}
 		ids, err := batchRows(tx, batch)
@@ -274,7 +311,11 @@ func (s *Store) Deliver(ctx context.Context, batch, turn, hold, diagnostic strin
 			if _, err := tx.Exec(`UPDATE messages SET state = 'delivered', turn = ?, ended_at = ?, end_reason = 'delivered' WHERE id = ? AND state = 'claimed'`, turn, ms(now), id); err != nil {
 				return err
 			}
-			if err := event(tx, b.Computer, id, "delivered", now, "controller", map[string]any{"turn": turn, "batch": batch}); err != nil {
+			data := map[string]any{"turn": turn, "batch": batch}
+			if joined {
+				data["steered"] = true
+			}
+			if err := event(tx, b.Computer, id, "delivered", now, "controller", data); err != nil {
 				return err
 			}
 		}

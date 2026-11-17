@@ -27,6 +27,18 @@ interface EventRow {
 
 type Listener = (event: EventEnvelope) => void;
 
+/** `pending` until the harness took the Messages in (`joined`), ran them as a turn (`started`), or never got them (`missed`). */
+export type InboxOutcome = 'pending' | 'joined' | 'started' | 'missed';
+
+export interface InboxRecord {
+  requestId: string;
+  turnId: string;
+  bodyHash: string;
+  outcome: InboxOutcome;
+  startedTurn?: string;
+  reason?: string;
+}
+
 /** Append-only event journal. computerd is its only reader and writer. */
 export class Journal {
   private readonly db: DatabaseSync;
@@ -44,6 +56,9 @@ export class Journal {
       CREATE TABLE IF NOT EXISTS refused (request_id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS inbox_journaled (message_id TEXT PRIMARY KEY, seq INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
+      CREATE TABLE IF NOT EXISTS inbox_requests (
+        request_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL, body_hash TEXT NOT NULL, outcome TEXT NOT NULL,
+        started_turn TEXT, reason TEXT);
     `);
   }
 
@@ -80,6 +95,64 @@ export class Journal {
       this.db.exec('ROLLBACK');
       throw err;
     }
+  }
+
+  /** Records a request to deliver Messages into a running turn, before the harness is handed them. */
+  acceptInbox(requestId: string, turnId: string, bodyHash: string): void {
+    this.db.prepare("INSERT INTO inbox_requests (request_id, turn_id, body_hash, outcome) VALUES (?, ?, ?, 'pending')").run(requestId, turnId, bodyHash);
+  }
+
+  findInbox(requestId: string): InboxRecord | undefined {
+    const row = this.db.prepare('SELECT request_id, turn_id, body_hash, outcome, started_turn, reason FROM inbox_requests WHERE request_id = ?').get(requestId) as
+      | { request_id: string; turn_id: string; body_hash: string; outcome: InboxOutcome; started_turn: string | null; reason: string | null }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      requestId: row.request_id,
+      turnId: row.turn_id,
+      bodyHash: row.body_hash,
+      outcome: row.outcome,
+      ...(row.started_turn ? { startedTurn: row.started_turn } : {}),
+      ...(row.reason ? { reason: row.reason } : {}),
+    };
+  }
+
+  /** The harness took the Messages into the running turn `turnId`: the outcome and turn.steered commit together. */
+  joinInbox(requestId: string, turnId: string, data: Record<string, unknown>, session: string | null): EventEnvelope {
+    return this.settleInbox(requestId, "outcome = 'joined', turn_id = ?", [turnId], () => this.insert('turn.steered', data, { turn: turnId, session }));
+  }
+
+  /** The running turn ended first and the harness ran the Messages as a turn of its own. */
+  startInboxTurn(requestId: string, turnId: string, started: Record<string, unknown>, session: string | null): EventEnvelope {
+    const hash = this.findInbox(requestId)?.bodyHash ?? '';
+    return this.settleInbox(requestId, "outcome = 'started', started_turn = ?", [turnId], () => {
+      this.db.prepare('INSERT INTO turns (request_id, turn_id, body_hash) VALUES (?, ?, ?)').run(requestId, turnId, hash);
+      return this.insert('turn.started', started, { turn: turnId, session });
+    });
+  }
+
+  missInbox(requestId: string, reason: string): void {
+    this.db.prepare("UPDATE inbox_requests SET outcome = 'missed', reason = ? WHERE request_id = ? AND outcome = 'pending'").run(reason, requestId);
+  }
+
+  /** Requests whose outcome a crash left open: the harness that held them is gone. */
+  missPendingInbox(reason: string): void {
+    this.db.prepare("UPDATE inbox_requests SET outcome = 'missed', reason = ? WHERE outcome = 'pending'").run(reason);
+  }
+
+  private settleInbox(requestId: string, set: string, args: string[], write: () => EventEnvelope): EventEnvelope {
+    this.db.exec('BEGIN IMMEDIATE');
+    let event: EventEnvelope;
+    try {
+      this.db.prepare(`UPDATE inbox_requests SET ${set} WHERE request_id = ?`).run(...args, requestId);
+      event = write();
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    this.publish(event);
+    return event;
   }
 
   findRequest(requestId: string): { turnId: string; bodyHash: string } | undefined {

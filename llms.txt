@@ -22,7 +22,9 @@ its own fleet.yaml, images, Services and app code.
   first starts at once), so count results across Turns, never expect them in one.
 - Turn: one run of the agent that delivers every pending Message; ends completed | failed | interrupted. When
   background work ends, the agent gets a Turn by itself: turn.started {reason: "background"}, no Messages (Codex:
-  computerd starts it, its prompt carries each <background-result>).
+  computerd starts it, its prompt carries each <background-result>). Messages sent while a Turn runs wait for the
+  next Turn, unless the agent computer has inbox: {duringTurn: steer}: then they join the running Turn
+  (turn.steered).
 - Session: the agent's conversation. Turns continue it; a Message with fresh=true starts a new one. The harness
   process lives across Turns, so background work (a sub-agent or Bash run with run_in_background; a Codex sub-agent
   or command still running at the Turn's end; any process the agent detached with nohup, setsid or a fork, kind
@@ -34,7 +36,8 @@ its own fleet.yaml, images, Services and app code.
   hours ≤ 24}); task.finished then has status stopped and timeLimit (seconds), and the agent gets an inbox
   Message via "a12s" saying so.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
-  turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input,
+  turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, turn.steered {requestId, inbox: {batch, messages}}
+  (Messages that joined the running Turn), text.delta {text}, tool.started {id, name, input,
   parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of
   the Agent call that started it; a background sub-agent's calls between Turns have no turn), turn.finished {status,
   usage (the harness's own; Claude Code's has speed: fast | standard), tokens?: {input (without cached), output,
@@ -142,6 +145,11 @@ Agent computer fields (all optional except a harness, image and credential, whic
   `allow: ["*"]` (quote it: a bare * is YAML alias syntax and fails to parse).
 - grants: {send: [agent computers]}. uses: [services] (reach a Service's ports; an MCP port becomes a tool).
   resources: {cpu: 2, memory: 4Gi}. A Message body is at most 64 KiB.
+- inbox: {duringTurn: wait | steer} (default wait). steer: Messages sent while a Turn runs are handed to that Turn
+  (the agent reads them when its running tool calls finish, and its Turn continues), not held for the next one; a
+  fresh=true Message still waits for the next Turn. Claude Code and Codex. The Message's turn is the Turn that took
+  it; in a finished Turn's messages it has steered: true. A Turn that ends before the harness reads them: Claude Code
+  runs them as the next Turn, Codex leaves them pending for it.
 - power: {sleepAfterIdle: 15m, wakeOnMessage: {from: [local, service:clock, computer:lead, token:web],
   maxWakesPerHour: 6}}. sleepAfterIdle is off or 1s to 7d (e.g. 5s, 15m, 2h, 1d); maxWakesPerHour 1-60. Default:
   never sleeps. Asleep (by sleepAfterIdle or a plain `sleep`), only a Message whose via is listed wakes it (no
@@ -175,7 +183,8 @@ Give each agent computer one owner: the file or your code.
   in Message bodies: the agent treats bodies as untrusted data from the sender.
 - Each Turn's prompt lists the delivered Messages, oldest first, each as
   `<msg-… n="1" id="m_…" from="<sender>" via="<via>" at="…">body</msg-…>`, so instructions can say "when a message
-  via computer:coder arrives, …".
+  via computer:coder arrives, …". With inbox.duringTurn: steer, Messages can also arrive mid-Turn in the same
+  frames, introduced by "These messages arrived while you were working, oldest first. Your turn continues."
 - With grants.send it has the tool `mcp__a12s__send`. It never waits for an answer: a reply arrives later as a new
   Message (via computer:<name>) in a new Turn. The session continues between Turns, so it remembers what it sent.
 - Home is /home/agent (the home drive, kept across sleep and restarts). The root filesystem is read-only; the

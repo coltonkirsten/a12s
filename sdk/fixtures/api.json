@@ -1116,7 +1116,8 @@
           "createdAt": "2026-10-12T12:00:00Z",
           "bytes": 1,
           "key": "key",
-          "superseded": 1
+          "superseded": 1,
+          "steered": true
         }
       ]
     },
@@ -1131,6 +1132,43 @@
     "resumed": true,
     "prompt": "prompt",
     "cwd": "cwd"
+  },
+  "turnSteeredData": {
+    "requestId": "requestId",
+    "inbox": {
+      "batch": "batch",
+      "pendingAfter": 1,
+      "messages": [
+        {
+          "id": "id",
+          "seq": 1,
+          "sender": "sender",
+          "via": "via",
+          "createdAt": "2026-10-12T12:00:00Z",
+          "bytes": 1,
+          "key": "key",
+          "superseded": 1,
+          "steered": true
+        }
+      ]
+    }
+  },
+  "turnSteeredDataMinimal": {
+    "requestId": "requestId",
+    "inbox": {
+      "batch": "batch",
+      "pendingAfter": 1,
+      "messages": [
+        {
+          "id": "id",
+          "seq": 1,
+          "sender": "sender",
+          "via": "via",
+          "createdAt": "2026-10-12T12:00:00Z",
+          "bytes": 1
+        }
+      ]
+    }
   },
   "turnsResponse": {
     "turns": [
@@ -1151,7 +1189,8 @@
             "createdAt": "2026-10-12T12:00:00Z",
             "bytes": 1,
             "key": "key",
-            "superseded": 1
+            "superseded": 1,
+            "steered": true
           }
         ],
         "tools": [

@@ -250,6 +250,14 @@ func (c *Controller) foldTurn(name string, ev api.Event) {
 		o.t.Reason = d.Reason
 		ts := ev.TS
 		o.t.StartedAt = &ts
+	case api.EventTurnSteered:
+		var d api.TurnSteeredData
+		if json.Unmarshal(ev.Data, &d) == nil {
+			for _, m := range d.Inbox.Messages {
+				m.Steered = true
+				o.t.Messages = append(o.t.Messages, m)
+			}
+		}
 	case api.EventToolStarted:
 		var d struct {
 			ID    string          `json:"id"`

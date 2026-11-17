@@ -114,9 +114,24 @@ test('POST /v1/turns, ?turn= replays only that turn, diagnostics and status', as
     let t = '';
     res.on('data', (d) => (t += d)).on('end', () => resolve(JSON.parse(t)));
   }));
-  assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'background', 'continuation', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session']);
+  assert.deepEqual(Object.keys(st).sort(), ['activeTurn', 'background', 'continuation', 'credentialGeneration', 'harness', 'phase', 'resumePending', 'session', 'steerTurn']);
   assert.equal(st.phase, 'ready');
   assert.equal((await post(`/v1/turns/${turnId}/stop`, {})).body.status, 'completed');
+});
+
+test('POST /v1/turns/{turn}/inbox: a Batch for the running turn, validated, refused once that turn is gone', async () => {
+  const inbox = { batch: 'b_2', pendingAfter: 0, messages: [] };
+  const t = (await post('/v1/turns', { requestId: 'b_1', session: 'new', prompt: 'work', inbox: { ...inbox, batch: 'b_1' } })).body.turnId as string;
+  await until(() => journal.turnSummary(t)?.dispatched === true);
+  assert.equal((await post(`/v1/turns/${t}/inbox`, { requestId: 'b_2', prompt: 'more' })).status, 400);
+  const ok = await post(`/v1/turns/${t}/inbox`, { requestId: 'b_2', prompt: 'more', inbox });
+  assert.deepEqual([ok.status, ok.body], [200, { requestId: 'b_2', turnId: t, outcome: 'pending' }]);
+  adapter.steered.at(-1)?.resolve('joined');
+  await until(() => journal.findInbox('b_2')?.outcome === 'joined');
+  adapter.finish();
+  await until(() => journal.turnInfo(t)?.finished === 'completed');
+  assert.equal((await post(`/v1/turns/${t}/inbox`, { requestId: 'b_3', prompt: 'late', inbox })).status, 409);
+  assert.equal((await post(`/v1/turns/${t}/inbox`, { requestId: 'b_2', prompt: 'more', inbox })).body.outcome, 'joined');
 });
 
 /** A response whose socket is always full: every write needs a drain, delivered on the next tick. */
