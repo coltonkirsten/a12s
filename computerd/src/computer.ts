@@ -67,6 +67,7 @@ interface TaskClock {
   deadline: number;
   timer: NodeJS.Timeout | null;
   expired: boolean;
+  toolUseId?: string;
 }
 
 export interface BackgroundTask {
@@ -75,6 +76,7 @@ export interface BackgroundTask {
   description: string;
   startedAt: string;
   deadline: string;
+  toolUseId?: string;
 }
 
 /** How long a detached process has between SIGTERM and SIGKILL. */
@@ -445,7 +447,7 @@ export class Computer {
     if (ev.type === 'task.started') {
       if (this.endedEarly.delete(ev.data.id)) return ev.data;
       const now = Date.now();
-      const clock: TaskClock = { kind: ev.data.kind, description: ev.data.description, startedAt: now, deadline: now + this.limits.defaultMs, timer: null, expired: false };
+      const clock: TaskClock = { kind: ev.data.kind, description: ev.data.description, startedAt: now, deadline: now + this.limits.defaultMs, timer: null, expired: false, ...(ev.data.toolUseId ? { toolUseId: ev.data.toolUseId } : {}) };
       const previous = this.clocks.get(ev.data.id)?.timer;
       if (previous) clearTimeout(previous);
       this.clocks.set(ev.data.id, clock);
@@ -574,7 +576,7 @@ export class Computer {
   }
 
   backgroundList(): BackgroundTask[] {
-    return [...this.clocks].map(([id, c]) => ({ id, kind: c.kind, description: c.description, startedAt: new Date(c.startedAt).toISOString(), deadline: new Date(c.deadline).toISOString() }));
+    return [...this.clocks].map(([id, c]) => ({ id, kind: c.kind, description: c.description, startedAt: new Date(c.startedAt).toISOString(), deadline: new Date(c.deadline).toISOString(), ...(c.toolUseId ? { toolUseId: c.toolUseId } : {}) }));
   }
 
   /** The background_tasks tool: lists the tasks, and with `id` and `hours` gives that task `hours` from now. */

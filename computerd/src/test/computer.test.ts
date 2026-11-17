@@ -580,6 +580,22 @@ test('detached: a nohup process holds the computer awake and its exit starts a t
   await computer.shutdown(100);
 });
 
+test('status: a background sub-agent item carries the tool call that launched it, a detached process item has none', async () => {
+  const procs = new FakeProcesses();
+  const { adapter, computer, finished } = setup(testConfig(), undefined, procs);
+  await computer.start();
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'x' });
+  adapter.task('task_1', true, 'completed', 'toolu_1');
+  procs.detach(4242, 'python train.py');
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  await until(() => background(computer).tasks === 2);
+  const items = (computer.status().background as { items: { id: string; toolUseId?: string }[] }).items;
+  assert.deepEqual(items.map((i) => [i.id, i.toolUseId]), [['task_1', 'toolu_1'], ['process-4242', undefined]]);
+  assert.ok(!('toolUseId' in items[1]!));
+  await computer.shutdown(100);
+});
+
 test('detached: the time limit kills the process tree and the inbox, not a turn, reports it', async () => {
   const procs = new FakeProcesses();
   const { journal, adapter, computer, finished } = setup(testConfig(), { defaultMs: 150, maxMs: 3600_000, graceMs: 5_000 }, procs);

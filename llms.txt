@@ -28,10 +28,11 @@ its own fleet.yaml, images, Services and app code.
   or command still running at the Turn's end; any process the agent detached with nohup, setsid or a fork, kind
   process) outlives its Turn. When a detached process exits, computerd starts the Turn: its prompt carries
   <background-result kind="process" command pid output> with the end of the file its stdout went to.
-  status shows it as background {tasks, items: [{id, kind, description, startedAt, deadline}]}; the agent computer
-  stays Ready (Messages run at once) but never idle. Each background task is stopped at its time limit, 2h unless the
-  agent extends it (a12s MCP tool background_tasks {id, hours ≤ 24}); task.finished then has status stopped and
-  timeLimit (seconds), and the agent gets an inbox Message via "a12s" saying so.
+  status shows it as background {tasks, items: [{id, kind, description, startedAt, deadline, toolUseId?}]}
+  (toolUseId as on its task.started); the agent computer stays Ready (Messages run at once) but never idle. Each
+  background task is stopped at its time limit, 2h unless the agent extends it (a12s MCP tool background_tasks {id,
+  hours ≤ 24}); task.finished then has status stopped and timeLimit (seconds), and the agent gets an inbox
+  Message via "a12s" saying so.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
   turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, text.delta {text}, tool.started {id, name, input,
   parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of

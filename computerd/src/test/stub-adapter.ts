@@ -41,9 +41,9 @@ export class StubAdapter implements Adapter {
   }
 
   /** Background work starts (inside the open turn if any) or ends. */
-  task(id: string, running: boolean, status: TaskStatus = 'completed'): void {
+  task(id: string, running: boolean, status: TaskStatus = 'completed', toolUseId?: string): void {
     const ev: TaskEvent = running
-      ? { type: 'task.started', data: { id, kind: 'local_agent', description: id } }
+      ? { type: 'task.started', data: { id, kind: 'local_agent', description: id, ...(toolUseId ? { toolUseId } : {}) } }
       : { type: 'task.finished', data: { id, kind: 'local_agent', description: id, status } };
     if (running) this.tasks.add(id);
     else this.tasks.delete(id);

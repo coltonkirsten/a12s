@@ -90,7 +90,8 @@ export const statusResponse: T.StatusResponse = {
             "kind": "kind",
             "description": "description",
             "startedAt": "2026-10-12T12:00:00Z",
-            "deadline": "2026-10-12T12:00:00Z"
+            "deadline": "2026-10-12T12:00:00Z",
+            "toolUseId": "toolUseId"
           }
         ]
       }
@@ -344,7 +345,8 @@ export const putFleetResponse: T.PutFleetResponse = {
             "kind": "kind",
             "description": "description",
             "startedAt": "2026-10-12T12:00:00Z",
-            "deadline": "2026-10-12T12:00:00Z"
+            "deadline": "2026-10-12T12:00:00Z",
+            "toolUseId": "toolUseId"
           }
         ]
       }
@@ -630,7 +632,8 @@ export const agentComputersResponse: T.AgentComputersResponse = {
               "kind": "kind",
               "description": "description",
               "startedAt": "2026-10-12T12:00:00Z",
-              "deadline": "2026-10-12T12:00:00Z"
+              "deadline": "2026-10-12T12:00:00Z",
+              "toolUseId": "toolUseId"
             }
           ]
         }
