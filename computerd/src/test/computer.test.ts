@@ -759,6 +759,22 @@ test('inbox during a turn: a harness that loses the Messages records missed, and
   assert.deepEqual(computer.deliverToTurn(t.turnId, req), { requestId: 'b_2', turnId: t.turnId, outcome: 'missed', reason: 'the session ended' });
 });
 
+test('inbox during a turn: a turn whose harness refused the Messages is not offered more', async () => {
+  const { journal, adapter, computer, finished } = setup();
+  await computer.start();
+  const t = await batchTurn(computer, journal);
+  const req = { requestId: 'b_2', prompt: 'more', inbox: batch('b_2') };
+  computer.deliverToTurn(t.turnId, req);
+  adapter.steered[0]?.reject(new Error('the turn cannot be steered'));
+  await until(() => computer.deliverToTurn(t.turnId, req).outcome === 'missed');
+  assert.equal(computer.status().activeTurn, t.turnId);
+  assert.equal(computer.status().steerTurn, null);
+  assert.throws(() => computer.deliverToTurn(t.turnId, { requestId: 'b_3', prompt: 'more', inbox: batch('b_3') }), (e: HttpError) => e.status === 409);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  await computer.shutdown(100);
+});
+
 test('inbox during a turn: a stop before the harness runs the Messages as a turn of their own makes them missed', async () => {
   const { journal, adapter, computer, finished } = setup();
   await computer.start();

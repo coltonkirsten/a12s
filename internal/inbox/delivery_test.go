@@ -315,7 +315,7 @@ func TestClaimSteer(t *testing.T) {
 		t.Fatal("a second Batch while one is open")
 	}
 	got, _ := s.GetBatch(ctx, b.ID)
-	if got.SteerTurn != "t_run" || got.Steered() {
+	if got.SteerTurn != "t_run" || got.Turn != "" {
 		t.Fatalf("stored %+v", got)
 	}
 	if err := s.Deliver(ctx, b.ID, "t_run", "", ""); err != nil {
@@ -379,7 +379,7 @@ func TestClaimSteerOwnTurnAndFence(t *testing.T) {
 	if err := s.Deliver(ctx, b.ID, "t_own", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if bt, _ := s.BatchByTurn(ctx, "t_own"); bt == nil || bt.ID != b.ID || bt.Steered() {
+	if bt, _ := s.BatchByTurn(ctx, "t_own"); bt == nil || bt.ID != b.ID || bt.SteerTurn != "t_run" {
 		t.Fatalf("own turn batch %+v", bt)
 	}
 }

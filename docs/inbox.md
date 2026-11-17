@@ -53,7 +53,10 @@ agent_computers:
   handed over while the inbox is held.
 - If the Turn ends before the harness reads the Batch (it was only writing text, or its last tool call had just
   finished), Claude Code runs the Batch as a Turn of its own, right after; Codex refuses it, and it goes back to
-  pending for the next Turn without counting as a failed attempt. Either way it is delivered once.
+  pending for the next Turn without counting as a failed attempt. Either way it is delivered once. A Turn that did
+  not take a Batch it was handed is not offered another: what is pending waits for the next Turn.
+- An [expiry window](#message-options) is met when the Batch is handed to the Turn. The agent reads it when its
+  running tool calls finish, which can be after the window closed.
 - `turn.steered {requestId, inbox}` is journaled under the running Turn when the harness took the Batch in. Each
   Message's `turn` is the Turn that received it, its `delivered` event has `steered: true`, and the stored Turn
   (`a12s turns`, `turns()` in the SDKs) lists it with `steered: true` after the Messages the Turn started with.
@@ -62,7 +65,6 @@ agent_computers:
 - Both harnesses steer: Claude Code reads the Batch at the Turn's next tool boundary; Codex takes it through its
   app-server's `turn/steer`.
 - The setting is the receiver's: no request field asks for it. Changing it restarts nothing.
-
 
 ## What the agent sees
 

@@ -78,9 +78,6 @@ func scanBatch(r scanner) (*Batch, error) {
 
 const batchCols = `id, computer, request, claimed_at, not_after, override, turn, state, steer_turn`
 
-// Steered says whether the Batch joined a Turn that was already running.
-func (b *Batch) Steered() bool { return b.SteerTurn != "" && b.Turn == b.SteerTurn }
-
 func (s *Store) OpenBatches(ctx context.Context, computer string) ([]*Batch, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+batchCols+` FROM batches WHERE computer = ? AND state IN ('claimed', 'accepted') ORDER BY claimed_at, id`, computer)
 	if err != nil {

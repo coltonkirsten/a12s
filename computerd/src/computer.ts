@@ -557,6 +557,8 @@ export class Computer {
 
   private missed(d: Delivery, reason: string): void {
     this.journal.missInbox(d.requestId, reason);
+    // A turn still running after a miss would be offered the same Messages again and again, until it ends.
+    d.target.takesMessages = false;
     if (this.delivering === d) this.delivering = null;
     this.atIdle();
   }
