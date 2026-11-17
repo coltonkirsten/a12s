@@ -126,9 +126,10 @@ address, which VPC anti-spoofing makes the VM's own. See [GCE driver](drivers/gc
 | `POST /v1/turns` | `{requestId, session: current\|new\|<id>, prompt, cwd, inbox?}` → `{turnId, sessionId}` once durably accepted. One Turn at a time (`409` when busy). A repeated `requestId` with the same body returns the original Turn. |
 | `GET /v1/events` | One SSE stream per agent computer; `Last-Event-ID` and `?turn=`. An expired cursor gets an explicit `gap`. |
 | `GET /v1/turns/{id}` | A Turn's summary: dispatched, resume failed, finished, error. |
+| `POST /v1/turns/{id}/inbox` | `{requestId, prompt, inbox, lookupOnly?}` → `{requestId, turnId, outcome, startedTurn?, reason?}` once durably accepted: a Batch for the running Turn ([`inbox.duringTurn: steer`](inbox.md#during-a-turn)). `outcome` is `pending` until the harness took it into a running Turn (`joined`, journaled as `turn.steered` under `turnId`: that Turn, or one the harness started by itself right after it ended), ran it as `startedTurn` because the Turn ended first (`started`), or never received it (`missed`, with `reason`). A replay with the same `requestId` returns the outcome; `409` when `{id}` is not a running Turn that can take Messages. |
 | `POST /v1/turns/{id}/stop` | Idempotent stop; it also ends the session's background work. |
 | `POST /v1/stop` | Stops whatever Turn runs and the session's background work. |
-| `GET /v1/status` | Phase, session, active Turn, background task count, harness version, credential generation, owed continuation. |
+| `GET /v1/status` | Phase, session, active Turn, the Turn that can take a Batch now (`steerTurn`), background task count, harness version, credential generation, owed continuation. |
 | `POST /v1/diagnostics`, `POST /v1/journal/inbox` | The Controller journals diagnostics and ended Messages. |
 | `POST /v1/continuation/cancel` | Drop an owed `restart_harness` continuation (used by `inbox resume --new`). |
 

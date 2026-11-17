@@ -11,6 +11,12 @@ const (
 	InboxCeilMaxBytes       = 1 << 20
 )
 
+// InboxWait keeps a Message sent during a Turn for the next one; InboxSteer hands it to the running Turn.
+const (
+	InboxWait  = "wait"
+	InboxSteer = "steer"
+)
+
 const (
 	SourceComputer = "computer"
 	SourceDefaults = "defaults"
@@ -22,6 +28,7 @@ type InboxSettings struct {
 	MaxMessagesSource string
 	MaxBytes          int64
 	MaxBytesSource    string
+	DuringTurn        string
 }
 
 // ResolveInbox reports a value equal to the default's as from defaults, since
@@ -29,7 +36,10 @@ type InboxSettings struct {
 func (f *Fleet) ResolveInbox(name string) InboxSettings {
 	c := f.Computers[name].Inbox
 	d := f.Defaults.Inbox
-	s := InboxSettings{MaxMessages: InboxDefaultMaxMessages, MaxMessagesSource: SourceBuiltin, MaxBytes: InboxDefaultMaxBytes, MaxBytesSource: SourceBuiltin}
+	s := InboxSettings{MaxMessages: InboxDefaultMaxMessages, MaxMessagesSource: SourceBuiltin, MaxBytes: InboxDefaultMaxBytes, MaxBytesSource: SourceBuiltin, DuringTurn: InboxWait}
+	if c.DuringTurn != nil {
+		s.DuringTurn = *c.DuringTurn
+	}
 	if c.MaxMessages != nil {
 		s.MaxMessages, s.MaxMessagesSource = *c.MaxMessages, SourceComputer
 		if d.MaxMessages != nil && *d.MaxMessages == *c.MaxMessages {
@@ -54,6 +64,9 @@ func validateInbox(field string, in Inbox) []error {
 	}
 	if in.MaxMessages != nil && (*in.MaxMessages < InboxMinMaxMessages || *in.MaxMessages > InboxCeilMaxMessages) {
 		bad("maxMessages", "set 1 to 2000", "%d is out of range", *in.MaxMessages)
+	}
+	if in.DuringTurn != nil && *in.DuringTurn != InboxWait && *in.DuringTurn != InboxSteer {
+		bad("duringTurn", "set wait or steer", "%q is not a choice", *in.DuringTurn)
 	}
 	if in.MaxBytes != nil {
 		b, err := ParseBytes(*in.MaxBytes)

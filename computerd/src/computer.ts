@@ -5,7 +5,7 @@ import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type Runn
 import type { Config, HarnessKind } from './config.js';
 import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import { Detached, detachedPrompt, LinuxProcesses, tailOf, type DetachedTask, type ProcessTable } from './detached.js';
-import type { Journal } from './journal.js';
+import type { InboxOutcome, InboxRecord, Journal } from './journal.js';
 
 export interface SessionRecord {
   sessionId: string;
@@ -31,6 +31,26 @@ export interface TurnReply {
   sessionId: string | null;
 }
 
+/** POST /v1/turns/{turn}/inbox: Messages for the running turn. Idempotent by requestId. */
+export interface TurnInboxRequest {
+  requestId: string;
+  prompt: string;
+  inbox: Record<string, unknown>;
+  /** Recovery replay: return the outcome if this requestId is known, else refuse it for good. */
+  lookupOnly?: boolean;
+}
+
+export interface TurnInboxReply {
+  requestId: string;
+  /** The turn the request named; with `joined`, the turn that took the Messages in. */
+  turnId: string;
+  outcome: InboxOutcome;
+  /** With `started`: the turn the harness ran the Messages in. */
+  startedTurn?: string;
+  /** With `missed`: why the harness never received them. */
+  reason?: string;
+}
+
 export type Phase = 'starting' | 'ready' | 'busy' | 'stopping';
 
 export class HttpError extends Error {
@@ -42,9 +62,19 @@ export class HttpError extends Error {
   }
 }
 
+interface Delivery {
+  requestId: string;
+  target: ActiveTurn;
+  req: TurnInboxRequest;
+}
+
 interface ActiveTurn {
   turnId: string;
   started: boolean;
+  /** The harness received the turn's prompt. */
+  dispatched: boolean;
+  /** Messages may join it: it carries an inbox Batch, or the harness started it by itself. */
+  takesMessages: boolean;
   stopRequested: boolean;
   done: Promise<void>;
   resolveDone: () => void;
@@ -98,6 +128,10 @@ export class Computer {
   private resumePending = false;
   private active: ActiveTurn | null = null;
   private background: ActiveTurn | null = null;
+  /** Messages handed to the running turn, until the harness took them in, ran them as a turn, or lost them. */
+  private delivering: Delivery | null = null;
+  /** The last turn to end and how, for the idle-boundary work a delivery's outcome defers. */
+  private lastEnded: { turnId: string; status: TurnStatus } | null = null;
   private restarting = false;
   private restartRequested = false;
   private readonly inflight = new Map<string, { hash: string; reply: Promise<TurnReply> }>();
@@ -141,7 +175,12 @@ export class Computer {
 
   get phase(): Phase {
     if (this.base !== 'ready') return this.base;
-    return this.active || this.background || this.restarting ? 'busy' : 'ready';
+    return this.active || this.background || this.delivering || this.restarting ? 'busy' : 'ready';
+  }
+
+  /** No turn runs and none is about to: a delivery whose turn ended may still become one. */
+  private get idle(): boolean {
+    return !this.active && !this.background && !this.delivering;
   }
 
   /** The turn the harness is running: one it started by itself runs first, ahead of a requested one queued behind it. */
@@ -157,6 +196,7 @@ export class Computer {
   async start(): Promise<void> {
     this.lifecycle('starting');
     // Never redispatch: a turn accepted before a crash ends interrupted, and "continue" is the human's call.
+    this.journal.missPendingInbox('computerd restarted before the harness took the messages in');
     for (const t of this.journal.unfinishedTurns()) {
       this.journal.append('turn.finished', { status: 'interrupted', usage: null, error: 'computerd restarted' }, { turn: t.turnId, session: t.session });
     }
@@ -200,6 +240,7 @@ export class Computer {
       phase: this.phase,
       session: this.session?.sessionId ?? null,
       activeTurn: this.running?.turnId ?? null,
+      steerTurn: this.steerTarget()?.turnId ?? null,
       background: { tasks: this.backgroundCount(), items: this.backgroundList() },
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version, model: this.cfg.harness.model },
       credentialGeneration: this.ackedGeneration,
@@ -234,7 +275,7 @@ export class Computer {
     if (req.continuation && this.owedContinuation?.id !== req.requestId) {
       return Promise.reject(new HttpError(409, `no continuation ${req.requestId} is owed`));
     }
-    if (this.active || this.background || this.restarting) return Promise.reject(new HttpError(409, 'computer is busy'));
+    if (!this.idle || this.restarting) return Promise.reject(new HttpError(409, 'computer is busy'));
     const reply = this.beginTurn(body, hash).finally(() => this.inflight.delete(req.requestId));
     this.inflight.set(req.requestId, { hash, reply });
     return reply;
@@ -245,7 +286,7 @@ export class Computer {
     const turnId = `t_${randomBytes(8).toString('hex')}`;
     let resolveDone!: () => void;
     const done = new Promise<void>((r) => (resolveDone = r));
-    const active: ActiveTurn = { turnId, started: false, stopRequested: false, done, resolveDone };
+    const active: ActiveTurn = { turnId, started: false, dispatched: false, takesMessages: !!req.inbox || background, stopRequested: false, done, resolveDone };
     this.active = active;
 
     const previous = this.session;
@@ -328,7 +369,7 @@ export class Computer {
     const turnId = `t_${randomBytes(8).toString('hex')}`;
     let resolveDone!: () => void;
     const done = new Promise<void>((r) => (resolveDone = r));
-    const active: ActiveTurn = { turnId, started: true, stopRequested: false, done, resolveDone };
+    const active: ActiveTurn = { turnId, started: true, dispatched: true, takesMessages: true, stopRequested: false, done, resolveDone };
     this.background = active;
     const started = {
       harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version },
@@ -389,7 +430,7 @@ export class Computer {
         if (status) break;
         if (ev.type === 'turn.dispatched') {
           if (dispatched) continue;
-          dispatched = true;
+          dispatched = active.dispatched = true;
           // The owed flag clears in the same append as the continuation's receipt.
           const cont = req.continuation && this.owedContinuation?.id === req.requestId ? req.requestId : null;
           if (cont) this.owedContinuation = null;
@@ -423,13 +464,103 @@ export class Computer {
     }
     if (resumed && status === 'completed') this.resumePending = false;
     this.endTurn(active);
-    if (this.active || this.background) return;
+    this.lastEnded = { turnId: active.turnId, status };
+    this.atIdle();
+  }
+
+  /** The work that waits for no turn to run: a forced stop, a requested restart, reports, rotated credentials. */
+  private atIdle(): void {
+    if (!this.idle) return;
     if (this.forceStop) void this.forceStopSession();
-    else if (this.restartRequested) void this.restartHarness(active.turnId, status);
+    else if (this.restartRequested) void this.restartHarness(this.lastEnded?.turnId ?? null, this.lastEnded?.status ?? 'interrupted');
     else {
       this.reportDetached();
       void this.applyCredentials();
     }
+  }
+
+  /** The turn Messages can join now: none while one is being handed over, or while a requested turn waits. */
+  private steerTarget(): ActiveTurn | null {
+    if (!this.adapter.steers || this.base !== 'ready' || this.restarting || this.delivering) return null;
+    if (this.active && this.background) return null;
+    const t = this.running;
+    return t && t.started && t.dispatched && t.takesMessages && !t.stopRequested ? t : null;
+  }
+
+  /**
+   * POST /v1/turns/{turn}/inbox. Answers once the request is journaled, before the harness takes the Messages in;
+   * a replay with the same requestId reads the outcome and never hands them over twice.
+   */
+  deliverToTurn(turnId: string, req: TurnInboxRequest): TurnInboxReply {
+    const hash = createHash('sha256').update(JSON.stringify([turnId, req.prompt, req.inbox])).digest('hex');
+    const prior = this.journal.findInbox(req.requestId);
+    if (prior) {
+      if (prior.bodyHash !== hash) throw new HttpError(409, 'requestId was already used with a different body');
+      return inboxReply(prior);
+    }
+    if (this.journal.isRefused(req.requestId)) throw new HttpError(404, 'unknown_request: this requestId was refused by a lookup-only replay');
+    if (this.journal.findRequest(req.requestId) || this.inflight.has(req.requestId)) throw new HttpError(409, 'requestId was already used with a different body');
+    if (req.lookupOnly) {
+      this.journal.refuse(req.requestId);
+      throw new HttpError(404, 'unknown_request: no delivery was accepted for this requestId');
+    }
+    if (this.base !== 'ready') throw new HttpError(503, `computer is ${this.base}`);
+    const target = this.steerTarget();
+    if (!target || target.turnId !== turnId) throw new HttpError(409, `turn ${turnId} cannot take messages now`);
+    // Durable acceptance first: a replay after a crash reads this record and never hands the Messages over again.
+    this.journal.acceptInbox(req.requestId, turnId, hash);
+    const delivering: Delivery = { requestId: req.requestId, target, req };
+    this.delivering = delivering;
+    this.adapter
+      .steer(req.prompt)
+      .then(
+        (r) => this.delivered(delivering, r),
+        (err: Error) => this.missed(delivering, err.message),
+      )
+      .catch((err: Error) => this.journal.append('diagnostic', { message: `delivering ${req.requestId} into turn ${turnId} failed: ${err.message}` }, { turn: turnId }));
+    return { requestId: req.requestId, turnId, outcome: 'pending' };
+  }
+
+  private async delivered(d: Delivery, r: 'joined' | RunningTurn): Promise<void> {
+    const session = this.session?.sessionId ?? null;
+    if (r === 'joined') {
+      // The target, or a turn the harness started by itself after it ended, which then runs ahead of it.
+      const turn = this.background && this.background !== d.target ? this.background : d.target;
+      this.journal.joinInbox(d.requestId, turn.turnId, { requestId: d.requestId, inbox: d.req.inbox }, session);
+      this.delivering = null;
+      return this.atIdle();
+    }
+    // The turn ended first. Begin the new one only once the old one is journaled as finished.
+    await d.target.done;
+    if (d.target.stopRequested || this.base !== 'ready') {
+      void collectQuietly(r.events);
+      return this.missed(d, 'the turn was stopped before the harness took the messages in');
+    }
+    const turnId = `t_${randomBytes(8).toString('hex')}`;
+    let resolveDone!: () => void;
+    const done = new Promise<void>((res) => (resolveDone = res));
+    const active: ActiveTurn = { turnId, started: true, dispatched: false, takesMessages: true, stopRequested: false, done, resolveDone };
+    this.active = active;
+    this.delivering = null;
+    const started = {
+      harness: { kind: this.cfg.harness.kind, version: this.cfg.harness.version },
+      model: this.cfg.harness.model,
+      resumed: true,
+      prompt: d.req.prompt,
+      cwd: this.session?.cwd ?? this.cfg.agentHome,
+      requestId: d.requestId,
+      inbox: d.req.inbox,
+    };
+    this.journal.startInboxTurn(d.requestId, turnId, started, r.sessionId);
+    void this.pump(active, r.sessionId, false, r.events, { requestId: d.requestId, session: 'current', prompt: d.req.prompt });
+  }
+
+  private missed(d: Delivery, reason: string): void {
+    this.journal.missInbox(d.requestId, reason);
+    // A turn still running after a miss would be offered the same Messages again and again, until it ends.
+    d.target.takesMessages = false;
+    if (this.delivering === d) this.delivering = null;
+    this.atIdle();
   }
 
   private endTurn(active: ActiveTurn): void {
@@ -484,7 +615,7 @@ export class Computer {
     const force = () => {
       if (this.clocks.get(id) !== clock) return;
       this.forceStop = true;
-      if (!this.running) void this.forceStopSession();
+      if (this.idle) void this.forceStopSession();
     };
     this.stopTask(id).then(
       (running) => {
@@ -503,7 +634,7 @@ export class Computer {
   }
 
   private async forceStopSession(): Promise<void> {
-    if (!this.forceStop || this.running || this.restarting) return;
+    if (!this.forceStop || !this.idle || this.restarting) return;
     this.forceStop = false;
     this.restarting = true;
     try {
@@ -559,7 +690,7 @@ export class Computer {
 
   /** At an idle boundary, a turn of the agent's own tells it which detached processes exited and what they wrote. */
   private reportDetached(): void {
-    if (!this.detachedEnded.length || this.base !== 'ready' || this.running || this.restarting || this.forceStop || this.restartRequested || !this.session) return;
+    if (!this.detachedEnded.length || this.base !== 'ready' || !this.idle || this.restarting || this.forceStop || this.restartRequested || !this.session) return;
     const ended = this.detachedEnded;
     this.detachedEnded = [];
     void this.beginTurn({ requestId: `bg_${randomBytes(8).toString('hex')}`, session: 'current', prompt: detachedPrompt(ended) }, '', true);
@@ -634,7 +765,7 @@ export class Computer {
 
   /** restart_harness: after the current turn ends, restart, resume the session, and continue. */
   requestRestart(): string {
-    if (this.running) {
+    if (!this.idle) {
       this.restartRequested = true;
       return 'The harness will restart when this turn ends, resume this session, and continue with a new turn.';
     }
@@ -679,7 +810,7 @@ export class Computer {
   private async applyCredentials(): Promise<void> {
     const generation = credentialGeneration(this.cfg);
     if (generation === this.ackedGeneration || generation === this.failedGeneration) return;
-    if (this.base !== 'ready' || this.running || this.restarting || this.backgroundCount() > 0) return;
+    if (this.base !== 'ready' || !this.idle || this.restarting || this.backgroundCount() > 0) return;
     this.restarting = true;
     try {
       if (!this.wire(null)) {
@@ -803,6 +934,15 @@ export function ulid(now = Date.now()): string {
   let r = '';
   for (let i = 0; i < 16; i++) r += CROCKFORD[(rnd[i] ?? 0) % 32];
   return t + r;
+}
+
+function inboxReply(r: InboxRecord): TurnInboxReply {
+  return { requestId: r.requestId, turnId: r.turnId, outcome: r.outcome, ...(r.startedTurn ? { startedTurn: r.startedTurn } : {}), ...(r.reason ? { reason: r.reason } : {}) };
+}
+
+/** Drains a turn's events nobody journals. */
+async function collectQuietly(events: AsyncIterable<unknown>): Promise<void> {
+  for await (const _ of events);
 }
 
 /** Distinguishes "never had a session" (no file) from a record that exists but cannot be trusted. */

@@ -87,6 +87,14 @@ export interface Adapter {
    * Rejects with ResumeError if an existing session cannot be reopened.
    */
   startTurn(input: TurnInput): Promise<RunningTurn>;
+  /** The harness can take a prompt into a running turn. */
+  readonly steers: boolean;
+  /**
+   * Hands a prompt to the running turn. Resolves `joined` once the harness took it into the turn running then (the
+   * one it was handed to, or a turn the harness started by itself after that one ended), or a RunningTurn when the
+   * harness ran the prompt as a turn of its own. Rejects when no turn runs or the session ends before either.
+   */
+  steer(prompt: string): Promise<'joined' | RunningTurn>;
   /**
    * Interrupts the running turn, whose stream then ends with turn.finished `interrupted`, and ends the live
    * session with its background work. Idempotent.

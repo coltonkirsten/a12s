@@ -36,6 +36,7 @@ func TestInboxValidation(t *testing.T) {
 		{Inbox{MaxBytes: p("lots")}, "maxBytes", "lots"},
 		{Inbox{MaxMessages: p(int64(0))}, "maxMessages", "0"},
 		{Inbox{MaxMessages: p(int64(2001))}, "maxMessages", "2001"},
+		{Inbox{DuringTurn: p("interrupt")}, "duringTurn", "interrupt"},
 	} {
 		_, err := validateWith(t, func(f *Fleet) {
 			b := f.Computers["builder"]
@@ -54,6 +55,36 @@ func TestInboxValidation(t *testing.T) {
 	}
 	if w := ok.InboxWarnings(); len(w) != 1 || !strings.HasPrefix(w[0], "builder.inbox.maxBytes") {
 		t.Fatalf("warnings %v", w)
+	}
+}
+
+func TestInboxDuringTurnResolves(t *testing.T) {
+	f, err := Parse([]byte(`apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: lab }
+defaults:
+  harness: { kind: claude-code, version: 2.1.280 }
+  image: slim
+  inbox: { duringTurn: steer }
+agent_computers:
+  a: {}
+  b: { inbox: { duringTurn: wait } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.ResolveInbox("a").DuringTurn; got != InboxSteer {
+		t.Errorf("a: %q, want steer from defaults", got)
+	}
+	if got := f.ResolveInbox("b").DuringTurn; got != InboxWait {
+		t.Errorf("b: %q, want its own wait", got)
+	}
+	f.Defaults.Inbox, f.Computers["a"] = Inbox{}, Computer{}
+	if got := f.ResolveInbox("a").DuringTurn; got != InboxWait {
+		t.Errorf("unset: %q, want wait", got)
 	}
 }
 

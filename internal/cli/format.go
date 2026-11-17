@@ -359,6 +359,28 @@ func BatchStartedLine(turn, kind, mine string, d api.TurnStartedData) string {
 		fmt.Sprintf("batch of %d: yours + %s", len(d.Inbox.Messages), strings.Join(others, ", ")), 1)
 }
 
+// SteeredLine says the caller's Message joined a running Turn; "" when the Batch does not carry it.
+func SteeredLine(turn, mine string, d api.TurnSteeredData) string {
+	var others []string
+	seen, found := map[string]bool{}, false
+	for _, m := range d.Inbox.Messages {
+		if m.ID == mine {
+			found = true
+		} else if !seen[m.Sender] {
+			seen[m.Sender] = true
+			others = append(others, m.Sender)
+		}
+	}
+	if !found {
+		return ""
+	}
+	line := "joined running turn " + turn
+	if len(others) > 0 {
+		line += fmt.Sprintf(" (batch of %d: yours + %s)", len(d.Inbox.Messages), strings.Join(others, ", "))
+	}
+	return line
+}
+
 func TurnFinishedLine(turn string, d api.TurnFinishedData) string {
 	s := fmt.Sprintf("turn %s %s", turn, d.Status)
 	if d.Error != "" {
@@ -397,6 +419,11 @@ func EventLine(e api.Event) string {
 	case api.EventResumeFailed:
 		if r := str("reason"); r != "" {
 			return "[resume.failed] " + r
+		}
+	case api.EventTurnSteered:
+		var d api.TurnSteeredData
+		if json.Unmarshal(e.Data, &d) == nil {
+			return fmt.Sprintf("[turn.steered] batch %s: %d messages joined the turn", d.Inbox.Batch, len(d.Inbox.Messages))
 		}
 	case api.EventTaskStarted:
 		return fmt.Sprintf("[task] %s %s started", str("kind"), str("description"))

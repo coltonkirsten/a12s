@@ -43,6 +43,8 @@ const (
 	EventEgressDenied          EventType = "egress.denied"
 	EventTaskStarted           EventType = "task.started"
 	EventTaskFinished          EventType = "task.finished"
+	// EventTurnSteered: the harness took a Batch into the running Turn (inbox.duringTurn: steer).
+	EventTurnSteered EventType = "turn.steered"
 
 	// Made by the Controller, on GET /v1/events only.
 	EventFleetChanged EventType = "fleet.changed"
@@ -149,6 +151,12 @@ type TurnInbox struct {
 	Messages     []TurnInboxMsg `json:"messages"`
 }
 
+// TurnSteeredData is the Batch a running Turn took in; Messages are listed as in turn.started.
+type TurnSteeredData struct {
+	RequestID string    `json:"requestId"`
+	Inbox     TurnInbox `json:"inbox"`
+}
+
 type TurnInboxMsg struct {
 	ID         string    `json:"id"`
 	Seq        int64     `json:"seq"`
@@ -158,6 +166,8 @@ type TurnInboxMsg struct {
 	Bytes      int64     `json:"bytes"`
 	Key        string    `json:"key,omitempty"`
 	Superseded *int64    `json:"superseded,omitempty"`
+	// Steered is set in a stored Turn on a Message that joined it while it ran.
+	Steered bool `json:"steered,omitempty"`
 }
 
 type TurnSummary struct {
@@ -258,7 +268,36 @@ type ComputerdStatus struct {
 	// idle boundary.
 	Continuation string      `json:"continuation,omitempty"`
 	Background   *Background `json:"background,omitempty"`
+	// SteerTurn is the running Turn that can take a Batch now; empty when none can, or the harness cannot.
+	SteerTurn string `json:"steerTurn,omitempty"`
 }
+
+// TurnInboxRequest is computerd's POST /v1/turns/{turn}/inbox: a Batch for the running Turn.
+type TurnInboxRequest struct {
+	RequestID string     `json:"requestId"`
+	Prompt    string     `json:"prompt"`
+	Inbox     *TurnInbox `json:"inbox"`
+	// LookupOnly returns a known request's outcome or refuses the requestId, never handing anything over.
+	LookupOnly bool `json:"lookupOnly,omitempty"`
+}
+
+// TurnInboxReply: Outcome is InboxPending until the harness took the Batch into TurnID (InboxJoined: the Turn the
+// request named, or one the harness started by itself after it ended), ran it as StartedTurn (InboxStarted), or
+// never received it (InboxMissed, with Reason).
+type TurnInboxReply struct {
+	RequestID   string `json:"requestId"`
+	TurnID      string `json:"turnId"`
+	Outcome     string `json:"outcome"`
+	StartedTurn string `json:"startedTurn,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+const (
+	InboxPending = "pending"
+	InboxJoined  = "joined"
+	InboxStarted = "started"
+	InboxMissed  = "missed"
+)
 
 // StopResponse is POST /v1/agent-computers/{c}/stop: the Turns it stopped and how many background tasks it ended.
 type StopResponse struct {

@@ -519,6 +519,95 @@ type fakeComputerd struct {
 	// restarting reports busy with no Turn, as computerd does while it restarts the harness
 	// (a credential generation applied at an idle boundary); its end emits no event.
 	restarting bool
+	// steers offers the running, received Turn for Batches; deliveries are the in-turn requests by
+	// requestId, delivering the one the harness has not settled yet, and deliveryReqs each new request.
+	steers       bool
+	deliveries   map[string]*api.TurnInboxReply
+	delivering   string
+	deliveryReqs []api.TurnInboxRequest
+}
+
+func (f *fakeComputerd) DeliverToTurn(_ context.Context, turn string, req api.TurnInboxRequest) (api.TurnInboxReply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.up {
+		return api.TurnInboxReply{}, errDown
+	}
+	if r, ok := f.deliveries[req.RequestID]; ok {
+		return *r, nil
+	}
+	f.deliveryReqs = append(f.deliveryReqs, req)
+	if f.refused[req.RequestID] {
+		return api.TurnInboxReply{}, &computerd.Error{Status: 404, Message: "unknown_request"}
+	}
+	if req.LookupOnly {
+		if f.refused == nil {
+			f.refused = map[string]bool{}
+		}
+		f.refused[req.RequestID] = true
+		return api.TurnInboxReply{}, &computerd.Error{Status: 404, Message: "unknown_request"}
+	}
+	if turn != f.steerTurnLocked() {
+		return api.TurnInboxReply{}, &computerd.Error{Status: 409, Message: "turn " + turn + " cannot take messages now"}
+	}
+	if f.deliveries == nil {
+		f.deliveries = map[string]*api.TurnInboxReply{}
+	}
+	r := &api.TurnInboxReply{RequestID: req.RequestID, TurnID: turn, Outcome: api.InboxPending}
+	f.deliveries[req.RequestID] = r
+	f.delivering = req.RequestID
+	return *r, nil
+}
+
+func (f *fakeComputerd) steerTurnLocked() string {
+	if !f.steers || f.delivering != "" || f.active == "" || !f.dispatched[f.active] {
+		return ""
+	}
+	return f.active
+}
+
+// steerOutcome settles the open in-turn delivery as the harness would: joined (turn.steered under the running
+// Turn), started (the Turn ended first and the Batch runs as a new Turn, received at once) or missed.
+func (f *fakeComputerd) steerOutcome(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.deliveries[f.delivering]
+	if r == nil {
+		return
+	}
+	f.delivering = ""
+	req := f.deliveryReqs[len(f.deliveryReqs)-1]
+	for _, q := range f.deliveryReqs {
+		if q.RequestID == r.RequestID {
+			req = q
+		}
+	}
+	r.Outcome = outcome
+	switch outcome {
+	case api.InboxJoined:
+		f.emitLocked(api.EventTurnSteered, r.TurnID, api.TurnSteeredData{RequestID: r.RequestID, Inbox: *req.Inbox})
+	case api.InboxStarted:
+		if f.active == r.TurnID {
+			f.active = ""
+			f.finished[r.TurnID] = api.TurnCompleted
+			f.emitLocked(api.EventTurnFinished, r.TurnID, api.TurnFinishedData{Status: api.TurnCompleted})
+		}
+		f.turns++
+		f.active = fmt.Sprintf("t_%d", f.turns)
+		r.StartedTurn = f.active
+		f.requests[r.RequestID] = f.active
+		f.emitLocked(api.EventTurnStarted, f.active, api.TurnStartedData{RequestID: r.RequestID, Inbox: req.Inbox})
+		f.dispatched[f.active] = true
+		f.emitLocked(api.EventTurnDispatched, f.active, map[string]any{})
+	case api.InboxMissed:
+		r.Reason = "the session ended"
+	}
+}
+
+func (f *fakeComputerd) deliveryReqsSnapshot() []api.TurnInboxRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]api.TurnInboxRequest(nil), f.deliveryReqs...)
 }
 
 func (f *fakeComputerd) JournalInbox(_ context.Context, records any) ([]string, error) {
@@ -610,7 +699,10 @@ func (f *fakeComputerd) Status(context.Context) (api.ComputerdStatus, error) {
 	if f.active != "" || f.restarting {
 		phase = "busy"
 	}
-	st := api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation}
+	if f.delivering != "" {
+		phase = "busy"
+	}
+	st := api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation, SteerTurn: f.steerTurnLocked()}
 	st.Background = &api.Background{Tasks: f.background}
 	return st, nil
 }

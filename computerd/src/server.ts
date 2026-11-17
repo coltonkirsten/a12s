@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { TLSSocket } from 'node:tls';
-import { HttpError, type Computer, type TurnRequest } from './computer.js';
+import { HttpError, type Computer, type TurnInboxRequest, type TurnRequest } from './computer.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { SendReply, SendRequest } from './send.js';
 
@@ -62,6 +62,11 @@ export function parseTurnRequest(body: Record<string, unknown>): TurnRequest {
   return req;
 }
 
+export function parseTurnInboxRequest(body: Record<string, unknown>): TurnInboxRequest {
+  if (typeof body.inbox !== 'object' || body.inbox === null || Array.isArray(body.inbox)) throw new HttpError(400, 'inbox must be an object');
+  return { requestId: str(body, 'requestId'), prompt: str(body, 'prompt'), inbox: body.inbox as Record<string, unknown>, ...(body.lookupOnly === true ? { lookupOnly: true } : {}) };
+}
+
 function wrap(fn: (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void> | void): Handler {
   return (req, res) => {
     const url = new URL(req.url ?? '/', 'http://computerd');
@@ -98,6 +103,8 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
       if (!s) throw new HttpError(404, 'unknown turn');
       return send(res, 200, s);
     }
+    const inbox = /^\/v1\/turns\/([^/]+)\/inbox$/.exec(path);
+    if (inbox && method === 'POST') return send(res, 200, computer.deliverToTurn(decodeURIComponent(inbox[1] ?? ''), parseTurnInboxRequest(await readJson(req))));
     const stop = /^\/v1\/turns\/([^/]+)\/stop$/.exec(path);
     if (stop && method === 'POST') return send(res, 200, computer.stopTurn(decodeURIComponent(stop[1] ?? '')));
     if (path === '/v1/stop' && method === 'POST') return send(res, 200, computer.stopAll());

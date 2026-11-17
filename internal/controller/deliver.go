@@ -11,6 +11,7 @@ import (
 
 	"github.com/coltonkirsten/a12s/internal/api"
 	"github.com/coltonkirsten/a12s/internal/computerd"
+	"github.com/coltonkirsten/a12s/internal/fleet"
 	"github.com/coltonkirsten/a12s/internal/inbox"
 )
 
@@ -94,8 +95,10 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 	ctx := c.ctx
 	c.mu.Lock()
 	known := c.state.Fleet != nil
+	steer := false
 	if known {
 		_, known = c.state.Fleet.Computers[name]
+		steer = known && c.state.Fleet.ResolveInbox(name).DuringTurn == fleet.InboxSteer
 	}
 	c.mu.Unlock()
 	if !known {
@@ -133,6 +136,8 @@ func (c *Controller) drainOnce(name string) (retry bool) {
 		return false
 	case reason == "unreachable":
 		return true
+	case reason == "busy" && steer && st.SteerTurn != "":
+		return c.steerOnce(ctx, name, st.SteerTurn) || retry
 	case reason == "busy" && st.ActiveTurn == "":
 		// Busy with no Turn (a harness restart) ends without an event: look again.
 		return true
@@ -200,6 +205,88 @@ func (c *Controller) deliverable(ctx context.Context, name string) (string, api.
 		return "continuation", st
 	}
 	return "", st
+}
+
+// steerOnce hands the next Batch to the running Turn. The claim never takes a fresh Message, and none while a
+// session override waits: those need the idle boundary.
+func (c *Controller) steerOnce(ctx context.Context, name, turn string) (retry bool) {
+	b, err := c.inbox.ClaimSteer(ctx, name, turn)
+	if err != nil {
+		c.logf("%s: claim for turn %s: %v", name, turn, err)
+		return true
+	}
+	if b == nil {
+		return false
+	}
+	c.logf("%s: claimed %s (%d messages) for running turn %s", name, b.ID, len(b.Request.Inbox.Messages), turn)
+	c.mu.Lock()
+	rt := c.rtLocked(name)
+	c.mu.Unlock()
+	rt.admit.Lock()
+	defer rt.admit.Unlock()
+	c.mu.Lock()
+	closed := rt.closed
+	c.mu.Unlock()
+	if closed {
+		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "not_ready"})
+		return false
+	}
+	if held, _, err := c.inbox.Held(ctx, name); err != nil || held {
+		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "held"})
+		return false
+	}
+	_, retry = c.settleSteer(ctx, name, b)
+	return retry
+}
+
+// settleSteer POSTs a Batch claimed for a running Turn, or replays the POST, and settles it from the outcome:
+// joined is delivered in that Turn; a Turn of its own settles like any Batch's; a Batch the harness never received
+// goes back to pending without counting an attempt, since its Messages did nothing wrong. Pending waits.
+func (c *Controller) settleSteer(ctx context.Context, name string, b *inbox.Batch) (done, retry bool) {
+	req := api.TurnInboxRequest{RequestID: b.ID, Prompt: b.Request.Prompt, Inbox: b.Request.Inbox, LookupOnly: b.FencePassed(time.Now())}
+	pctx, cancel := context.WithTimeout(ctx, postTimeout)
+	res, err := c.client(name).DeliverToTurn(pctx, b.SteerTurn, req)
+	cancel()
+	var ce *computerd.Error
+	switch {
+	case err == nil:
+	case errors.As(err, &ce) && ce.Status == http.StatusConflict && !strings.Contains(ce.Message, "requestId"):
+		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "turn_ended"})
+		return true, false
+	case errors.As(err, &ce) && (ce.Status == http.StatusServiceUnavailable || ce.Status == http.StatusNotFound):
+		reason := "not_ready"
+		if ce.Status == http.StatusNotFound {
+			reason = "refused"
+		}
+		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: reason})
+		return true, false
+	default:
+		c.logf("%s: POST %s into turn %s: %v (settling later)", name, b.ID, b.SteerTurn, err)
+		return false, true
+	}
+	switch res.Outcome {
+	case api.InboxJoined:
+		if err := c.inbox.Deliver(ctx, b.ID, res.TurnID, "", ""); err != nil {
+			c.logf("%s: deliver %s: %v", name, b.ID, err)
+			return false, true
+		}
+		c.logf("%s: %s joined running turn %s", name, b.ID, res.TurnID)
+		return true, false
+	case api.InboxStarted:
+		if err := c.inbox.Accept(ctx, b.ID, res.StartedTurn); err != nil {
+			c.logf("%s: accept %s: %v", name, b.ID, err)
+			return false, true
+		}
+		b.Turn, b.State = res.StartedTurn, inbox.BatchAccepted
+		c.logf("%s: turn %s ended first; %s runs as turn %s", name, b.SteerTurn, b.ID, res.StartedTurn)
+		return c.settleBatch(ctx, name, b)
+	case api.InboxMissed:
+		c.logf("%s: %s not received by turn %s: %s", name, b.ID, b.SteerTurn, res.Reason)
+		c.returnBatch(ctx, name, b, inbox.ReturnOptions{Reason: "turn_ended"})
+		return true, false
+	}
+	// The harness takes the Batch in at the Turn's next tool boundary, or runs it once the Turn ends.
+	return false, true
 }
 
 type postOutcome int
@@ -335,6 +422,9 @@ var oversizedRE = regexp.MustCompile(`(?i)prompt is too long|too many tokens|con
 // first (lookup-only once its fence passed).
 func (c *Controller) settleBatch(ctx context.Context, name string, b *inbox.Batch) (done, retry bool) {
 	cl := c.client(name)
+	if b.SteerTurn != "" && b.Turn == "" {
+		return c.settleSteer(ctx, name, b)
+	}
 	if b.Turn == "" {
 		req := b.Request
 		if b.FencePassed(time.Now()) {

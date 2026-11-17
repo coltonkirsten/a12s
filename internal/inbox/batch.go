@@ -22,6 +22,9 @@ them. A newer one in the series may already be waiting.`
 
 const Intro = "These messages arrived while you were busy or asleep, oldest first."
 
+// SteerIntro opens a Batch handed to a running Turn.
+const SteerIntro = "These messages arrived while you were working, oldest first. Your turn continues."
+
 type BatchMessage struct {
 	Frame
 	Seq   int64
@@ -51,14 +54,14 @@ func newNonce(texts []string) string {
 	}
 }
 
-func Render(computer, batch string, at time.Time, msgs []BatchMessage, nonce string) string {
+func Render(computer, batch, intro string, at time.Time, msgs []BatchMessage, nonce string) string {
 	var b strings.Builder
 	noun := "messages"
 	if len(msgs) == 1 {
 		noun = "message"
 	}
 	fmt.Fprintf(&b, "[a12s inbox · %s · batch %s · %d %s · %s]\n\n", computer, batch, len(msgs), noun, RenderTime(at))
-	b.WriteString(Intro)
+	b.WriteString(intro)
 	b.WriteString("\n\n")
 	b.WriteString(SafetyBlock)
 	b.WriteString("\n\n")
@@ -69,7 +72,7 @@ func Render(computer, batch string, at time.Time, msgs []BatchMessage, nonce str
 	return b.String()
 }
 
-func RenderBatch(computer, batch string, at time.Time, msgs []BatchMessage) string {
+func RenderBatch(computer, batch, intro string, at time.Time, msgs []BatchMessage) string {
 	var texts []string
 	for _, m := range msgs {
 		texts = append(texts, m.Body)
@@ -77,5 +80,5 @@ func RenderBatch(computer, batch string, at time.Time, msgs []BatchMessage) stri
 			texts = append(texts, k, v)
 		}
 	}
-	return Render(computer, batch, at, msgs, newNonce(texts))
+	return Render(computer, batch, intro, at, msgs, newNonce(texts))
 }

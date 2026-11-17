@@ -103,6 +103,8 @@ type Inbox struct {
 	MaxMessages *int64 `yaml:"maxMessages,omitempty" json:"maxMessages,omitempty"`
 	// MaxBytes is a size as written ("320Ki"); validated at admission.
 	MaxBytes *string `yaml:"maxBytes,omitempty" json:"maxBytes,omitempty"`
+	// DuringTurn is InboxWait or InboxSteer: what a Message sent while a Turn runs does.
+	DuringTurn *string `yaml:"duringTurn,omitempty" json:"duringTurn,omitempty"`
 }
 
 func (c Computer) Tier() string {

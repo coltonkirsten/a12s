@@ -99,6 +99,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       send({ id: m.id, result: {} });
       return stop();
     }
+    case 'turn/steer':
+      // Like the app-server: input joins only the active turn named by expectedTurnId; otherwise the request fails.
+      if (!current || m.params?.expectedTurnId !== current.turnId) return send({ id: m.id, error: { code: -32600, message: 'no active turn to steer' } });
+      return send({ id: m.id, result: { turnId: current.turnId } });
     case 'turn/interrupt':
       send({ id: m.id, result: {} });
       if (children.has(String(m.params?.threadId))) return children.get(String(m.params?.threadId))!();

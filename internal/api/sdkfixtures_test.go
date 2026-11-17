@@ -48,6 +48,7 @@ func TestSDKFixtures(t *testing.T) {
 		{"event", "EventEnvelope", Event{}},
 		{"turnStartedData", "TurnStartedData", TurnStartedData{}},
 		{"turnFinishedData", "TurnFinishedData", TurnFinishedData{}},
+		{"turnSteeredData", "TurnSteeredData", TurnSteeredData{}},
 		{"textDeltaData", "TextDeltaEvent[\"data\"]", TextDeltaData{}},
 		{"diagnosticData", "DiagnosticData", DiagnosticData{}},
 		{"resumeFailedData", "ResumeFailedData", ResumeFailedData{}},

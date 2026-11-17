@@ -259,6 +259,8 @@ class TurnInboxMessage:
     bytes: int
     key: str | None = None
     superseded: int | None = None
+    steered: bool = False
+    """In a finished Turn: the Message joined the Turn while it ran (``inbox.duringTurn: steer``)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

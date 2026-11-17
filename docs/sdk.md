@@ -148,7 +148,9 @@ print(r.status, r.text)
 `wait()` waits until a Turn delivers the Message, follows that Turn and returns when it ends; if the agent computer
 is busy, the Message waits its turn. The result is a [Turn](#turns) plus `message`. `onEvent` (`on_event`) gets that
 Turn's events as they happen. `wait()` is keyed on the Message, so it can't miss the Turn: call it right away or
-later, even after the Turn ended.
+later, even after the Turn ended. On an agent computer with [`inbox.duringTurn: steer`](inbox.md#during-a-turn)
+the Message can join a Turn that is already running: `wait()` then returns that whole Turn, from its start, and the
+Turn's `messages` list yours with `steered: true`.
 
 ```ts
 const m = await analyst.send("Summarize the open issues.");   // m.id, m.state

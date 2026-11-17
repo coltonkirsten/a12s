@@ -174,9 +174,11 @@ func TestRenderIntroAndSafety(t *testing.T) {
 // The 4 KiB preamble reserve covers the worst-case header, intro, safety
 // block and end line.
 func TestPreambleReserveBound(t *testing.T) {
-	pre := Render("abcdefghijklmnopqrstuvwxyzabcdefghijklmn", "b_"+strings.Repeat("Z", 26), time.Now(), nil, strings.Repeat("0", NonceLen))
-	if n := JSONLen(pre); n > PreambleReserve {
-		t.Fatalf("preamble %d > %d", n, PreambleReserve)
+	for _, intro := range []string{Intro, SteerIntro} {
+		pre := Render("abcdefghijklmnopqrstuvwxyzabcdefghijklmn", "b_"+strings.Repeat("Z", 26), intro, time.Now(), nil, strings.Repeat("0", NonceLen))
+		if n := JSONLen(pre); n > PreambleReserve {
+			t.Fatalf("preamble %d > %d", n, PreambleReserve)
+		}
 	}
 }
 
@@ -228,7 +230,7 @@ func TestNonceAvoidsBodies(t *testing.T) {
 	}
 	clash1, clash2 := strings.Repeat("01", 8), strings.Repeat("02", 8)
 	msgs := []BatchMessage{{Frame: Frame{ID: "m_1", Sender: "x", Via: "local", Body: "a " + clash1 + " b", Metadata: map[string]string{"k": clash2}}}}
-	p := RenderBatch("c", "b_1", time.Now(), msgs)
+	p := RenderBatch("c", "b_1", Intro, time.Now(), msgs)
 	if !strings.Contains(p, "</msg-"+strings.Repeat("03", 8)) || len(draws) != 0 {
 		t.Fatal(p)
 	}
@@ -257,7 +259,7 @@ func TestTwoThousandMessagesFit(t *testing.T) {
 		m.ReplaceKey, m.Seq = key(n), int64(n+1)
 		msgs[n] = &m
 	}
-	req, _ := buildRequest("builder", "b_"+NewULID(time.Now()), api.SessionCurrent, time.Now(), msgs, 0)
+	req, _ := buildRequest("builder", "b_"+NewULID(time.Now()), api.SessionCurrent, Intro, time.Now(), msgs, 0)
 	data, _ := api.MarshalWire(req)
 	if len(req.Inbox.Messages) != 2000 || JSONLen(req.Prompt) > lim.MaxBytes.Value || len(data) > 2<<20 {
 		t.Fatalf("%d messages, render %d, request %d", len(req.Inbox.Messages), JSONLen(req.Prompt), len(data))
@@ -282,5 +284,102 @@ func TestReturnNeverReplacesWithOverdue(t *testing.T) {
 	m, _ := s.Get(context.Background(), "builder", bb.Message.ID, "", false)
 	if m.State != api.MsgExpired {
 		t.Fatalf("b is %s", m.State)
+	}
+}
+
+func claimSteer(t *testing.T, s *Store, computer, turn string) *Batch {
+	t.Helper()
+	b, err := s.ClaimSteer(context.Background(), computer, turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// A Batch for a running Turn stops before a fresh Message, renders with its own intro, and settles into that Turn.
+func TestClaimSteer(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t, nil)
+	var all []string
+	for _, f := range []bool{false, false, true, false} {
+		all = append(all, enq(t, s, "builder", "local", api.EnqueueRequest{Body: "x", Fresh: f}).Message.ID)
+	}
+	b := claimSteer(t, s, "builder", "t_run")
+	if strings.Join(ids(b), ",") != strings.Join(all[:2], ",") || b.SteerTurn != "t_run" || b.Request.Inbox.PendingAfter != 2 {
+		t.Fatalf("steer batch %v %+v", ids(b), b)
+	}
+	if !strings.Contains(b.Request.Prompt, "Z]\n\n"+SteerIntro+"\n\n"+SafetyBlock) || strings.Contains(b.Request.Prompt, Intro) {
+		t.Fatalf("intro:\n%s", b.Request.Prompt)
+	}
+	if again := claimSteer(t, s, "builder", "t_run"); again != nil {
+		t.Fatal("a second Batch while one is open")
+	}
+	got, _ := s.GetBatch(ctx, b.ID)
+	if got.SteerTurn != "t_run" || got.Turn != "" {
+		t.Fatalf("stored %+v", got)
+	}
+	if err := s.Deliver(ctx, b.ID, "t_run", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := s.Get(ctx, "builder", all[1], "", false)
+	if m.State != api.MsgDelivered || m.Turn != "t_run" {
+		t.Fatalf("delivered row %+v", m)
+	}
+	evs, _ := s.MessageEvents(ctx, "builder", all[1], 0)
+	if last := evs[len(evs)-1]; last.Type != "delivered" || !strings.Contains(string(last.Data), `"steered":true`) {
+		t.Fatalf("delivered event %+v", last)
+	}
+	if bt, _ := s.BatchByTurn(ctx, "t_run"); bt != nil {
+		t.Fatalf("a Batch that joined a Turn is not the Batch it started with: %+v", bt)
+	}
+	// A fresh Message at the head waits for the idle boundary, and so does everything behind it.
+	if b := claimSteer(t, s, "builder", "t_run"); b != nil {
+		t.Fatalf("claimed %v with a fresh Message at the head", ids(b))
+	}
+	if b := claim(t, s, "builder"); strings.Join(ids(b), ",") != strings.Join(all[2:], ",") || b.Request.Session != api.SessionNew || strings.Contains(b.Request.Prompt, SteerIntro) {
+		t.Fatalf("next Turn's batch %v", ids(b))
+	}
+}
+
+func TestClaimSteerWaitsForOverrideAndHold(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t, nil)
+	enq(t, s, "builder", "local", api.EnqueueRequest{Body: "a"})
+	_ = s.Resume(ctx, "builder", true, "local")
+	if b := claimSteer(t, s, "builder", "t_run"); b != nil {
+		t.Fatal("claimed into a running Turn while a new session waits")
+	}
+	if b := claim(t, s, "builder"); b == nil || b.Request.Session != api.SessionNew {
+		t.Fatal("the override goes to the next Turn")
+	}
+	s2, _ := newStore(t, nil)
+	enq(t, s2, "builder", "local", api.EnqueueRequest{Body: "a"})
+	_ = s2.Hold(ctx, "builder", api.HoldOperator, "", "local")
+	if b := claimSteer(t, s2, "builder", "t_run"); b != nil {
+		t.Fatal("claimed from a held inbox")
+	}
+}
+
+// An own Turn's Batch is found by BatchByTurn; a Message that expires inside the Batch fences it.
+func TestClaimSteerOwnTurnAndFence(t *testing.T) {
+	ctx := context.Background()
+	s, c := newStore(t, nil)
+	enq(t, s, "builder", "local", api.EnqueueRequest{Body: "a", Expires: i64(60)})
+	b := claimSteer(t, s, "builder", "t_run")
+	if b.NotAfter == nil || b.FencePassed(c.now()) {
+		t.Fatalf("fence %+v", b.NotAfter)
+	}
+	c.add(2 * time.Minute)
+	if !b.FencePassed(c.now()) {
+		t.Fatal("fence not passed")
+	}
+	if err := s.Accept(ctx, b.ID, "t_own"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Deliver(ctx, b.ID, "t_own", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if bt, _ := s.BatchByTurn(ctx, "t_own"); bt == nil || bt.ID != b.ID || bt.SteerTurn != "t_run" {
+		t.Fatalf("own turn batch %+v", bt)
 	}
 }

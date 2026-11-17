@@ -16,9 +16,10 @@ a12s inbox builder                                      # list pending Messages,
 2. Anyone with API access, or a Service or agent computer holding `grants.send`, can enqueue. Bodies are untrusted data.
 3. When no Turn is running, the Controller drains **all** pending Messages, in order, into **one** Turn, also while
    [background work](concepts.md#background-work) runs, and also while a [config change](concepts.md#config-changes)
-   is staged behind that background work. Messages that arrive during a Turn wait for the next one, including during
-   a Turn the harness started by itself when background work ended. At a true idle boundary (no Turn, no background
-   work) a staged change applies first, then the inbox drains on the new generation.
+   is staged behind that background work. Messages that arrive during a Turn wait for the next one (including a Turn
+   the harness started by itself when background work ended), unless the agent computer has
+   [`inbox.duringTurn: steer`](#during-a-turn): then they join the running Turn. At a true idle boundary (no Turn, no
+   background work) a staged change applies first, then the inbox drains on the new generation.
 4. A Batch continues the current session by default. A Message sent with `--fresh` starts a new
    session; it begins a new Batch, so it never drags another sender's Message out of the conversation it was written
    for.
@@ -30,6 +31,40 @@ a12s inbox builder                                      # list pending Messages,
 `a12s send --wait` is enqueue-and-stream: it waits in line if the agent computer is busy (`queued: builder is busy with turn
 t_41 (2 messages ahead)`), and its Turn may carry other senders' Messages too. Ctrl-C withdraws the Message while it
 is pending and stops its Turn once delivered; a second Ctrl-C stops waiting.
+
+## During a Turn
+
+By default (`inbox.duringTurn: wait`) a Message sent while a Turn runs waits for that Turn to end, however long it
+runs. With `inbox.duringTurn: steer` in the [Fleet file](fleet-file.md), the Controller hands it to the running
+Turn instead, so you, a Service or another agent computer can correct work in flight without `a12s stop`:
+
+```yaml
+agent_computers:
+  builder:
+    inbox: { duringTurn: steer }
+```
+
+- What is pending goes to the running Turn as one Batch, in order, rendered like any other with its own intro line
+  (below). The agent reads it when the tool calls it is running finish, and the Turn continues. The Turn takes one
+  Batch at a time; Messages that arrive meanwhile follow in the next.
+- A Message joins a Turn only once the harness has received that Turn's own Batch, and only a Turn that carries an
+  inbox Batch or that the harness started by itself. A `--fresh` Message needs a new session: it, and everything
+  behind it, waits for the next Turn. So does everything while `a12s inbox resume --new` waits, and nothing is
+  handed over while the inbox is held.
+- If the Turn ends before the harness reads the Batch (it was only writing text, or its last tool call had just
+  finished), Claude Code runs the Batch as a Turn of its own, right after; Codex refuses it, and it goes back to
+  pending for the next Turn without counting as a failed attempt. Either way it is delivered once. A Turn that did
+  not take a Batch it was handed is not offered another: what is pending waits for the next Turn.
+- An [expiry window](#message-options) is met when the Batch is handed to the Turn. The agent reads it when its
+  running tool calls finish, which can be after the window closed.
+- `turn.steered {requestId, inbox}` is journaled under the running Turn when the harness took the Batch in. Each
+  Message's `turn` is the Turn that received it, its `delivered` event has `steered: true`, and the stored Turn
+  (`a12s turns`, `turns()` in the SDKs) lists it with `steered: true` after the Messages the Turn started with.
+- `a12s send --wait` follows whichever Turn received the Message; when it joined a running one it prints
+  `joined running turn t_41` and that Turn's output from there on.
+- Both harnesses steer: Claude Code reads the Batch at the Turn's next tool boundary; Codex takes it through its
+  app-server's `turn/steer`.
+- The setting is the receiver's: no request field asks for it. Changing it restarts nothing.
 
 ## What the agent sees
 
@@ -59,7 +94,8 @@ Run the nightly dependency audit.
   writes itself, such as [a background task stopped at its time limit](concepts.md#background-work), `local`, `token:<name>`,
   `service:<name>`, `computer:<name>`) and the only field an agent should trust.
 - The **intro** line and the **safety block** after it are fixed in the binary; nothing in the Fleet, API or CLI can
-  remove or edit them.
+  remove or edit them. A Batch handed to a running Turn ([During a Turn](#during-a-turn)) has this intro instead:
+  `These messages arrived while you were working, oldest first. Your turn continues.`
 
 ## Message options
 

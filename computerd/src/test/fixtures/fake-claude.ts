@@ -3,6 +3,9 @@
 // like the real CLI in streaming-input mode. Mode comes from FAKE_MODE; a prompt can steer one turn:
 //   `bg <ms>`    launches a background task that ends after <ms>, and then starts a turn by itself
 //   `slow <ms>`  the turn takes <ms> before its result
+//   `tool <ms>`  a tool call that takes <ms>; at its end the turn takes in the prompts pushed without a priority
+//                meanwhile (echo, then command_lifecycle started) and answers them before its result, as the
+//                real CLI does; a turn that ends without a tool boundary leaves them to start turns of their own
 //   `crash`      the process dies mid-turn, after receipt
 //   `refuse`     the model refuses and the CLI re-runs the turn on a fallback model it keeps for the session, as the
 //                real CLI does; `refuse local` falls back for one sub-agent only, `refuse none` has no fallback
@@ -48,10 +51,11 @@ const command = (uuid: string, state: string) => lifecycle && out({ type: 'comma
 interface Prompt {
   uuid: string;
   message: { content?: unknown };
+  priority?: string;
 }
 type Work = { kind: 'prompt'; prompt: Prompt } | { kind: 'notification'; task: string };
 const queue: Work[] = [];
-let running: { uuid: string | null; end: () => void } | null = null;
+let running: { uuid: string | null; end: () => void; folded: string[] } | null = null;
 let eof = false;
 const tasks = new Map<string, NodeJS.Timeout>();
 let taskSeq = 0;
@@ -75,6 +79,7 @@ function next(): void {
 function finishTurn(subtype = 'success', isError = false, reply = 'pong'): void {
   const r = running;
   running = null;
+  for (const u of r?.folded ?? []) command(u, isError ? 'cancelled' : 'completed');
   result(subtype, isError, reply);
   if (r?.uuid) command(r.uuid, isError ? 'cancelled' : 'completed');
   if (r?.uuid && !isError && process.env.FAKE_DONE_FILE) appendFileSync(process.env.FAKE_DONE_FILE, `${r.uuid}\n`);
@@ -83,7 +88,7 @@ function finishTurn(subtype = 'success', isError = false, reply = 'pong'): void 
 
 /** The CLI starts a turn by itself after a background task's notification: init, no prompt, no echo. */
 function selfTurn(task: string): void {
-  running = { uuid: null, end: () => finishTurn('error_during_execution', true, '') };
+  running = { uuid: null, end: () => finishTurn('error_during_execution', true, ''), folded: [] };
   init();
   text(`task ${task} finished`);
   out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'text', text: `task ${task} finished` }] } });
@@ -94,7 +99,7 @@ function selfTurn(task: string): void {
 
 function promptTurn(m: Prompt): void {
   const body = typeof m.message?.content === 'string' ? m.message.content : '';
-  running = { uuid: m.uuid, end: () => finishTurn('error_during_execution', true, '') };
+  running = { uuid: m.uuid, end: () => finishTurn('error_during_execution', true, ''), folded: [] };
   command(m.uuid, 'started');
   // --replay-user-messages: the CLI echoes the user message it took in (the receipt behind turn.dispatched).
   const replay = () => {
@@ -162,6 +167,25 @@ function promptTurn(m: Prompt): void {
     out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'text', text: 'answer' }] } });
     return finishTurn('success', false, 'answer');
   }
+  const tool = /^tool (\d+)$/.exec(body);
+  if (tool) {
+    out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'tool_use', id: 'toolu_long', name: 'Bash', input: { command: 'sleep' } }] } });
+    const turn = running;
+    return void setTimeout(() => {
+      if (running !== turn || !turn) return;
+      out({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_long', content: 'slept', is_error: false }] } });
+      const fold = queue.filter((w): w is { kind: 'prompt'; prompt: Prompt } => w.kind === 'prompt' && w.prompt.priority !== 'later');
+      for (const w of fold) {
+        queue.splice(queue.indexOf(w), 1);
+        out({ type: 'user', isReplay: true, uuid: w.prompt.uuid, parent_tool_use_id: null, message: w.prompt.message });
+        command(w.prompt.uuid, 'started');
+        turn.folded.push(w.prompt.uuid);
+      }
+      const heard = fold.map((w) => (typeof w.prompt.message.content === 'string' ? w.prompt.message.content : '')).join(' + ');
+      text(heard ? `heard ${heard}` : 'done');
+      finishTurn('success', false, heard ? `heard ${heard}` : 'done');
+    }, Number(tool[1]));
+  }
   const slow = /^slow (\d+)$/.exec(body);
   if (slow) {
     text('slow');
@@ -186,7 +210,7 @@ function promptTurn(m: Prompt): void {
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {
-  const m = JSON.parse(line) as { type: string; request_id?: string; request?: { subtype: string; model?: string }; uuid?: string; message?: { content?: unknown } };
+  const m = JSON.parse(line) as { type: string; request_id?: string; request?: { subtype: string; model?: string }; uuid?: string; message?: { content?: unknown }; priority?: string };
   if (m.type === 'control_request') {
     if (process.env.FAKE_CONTROL_FILE) appendFileSync(process.env.FAKE_CONTROL_FILE, `${JSON.stringify(m.request)}\n`);
     if (m.request?.subtype === 'set_model') model = m.request.model ?? configuredModel;
@@ -196,7 +220,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     return;
   }
   if (m.type !== 'user') return;
-  const prompt = { uuid: m.uuid ?? `p${n}`, message: m.message ?? {} };
+  const prompt: Prompt = { uuid: m.uuid ?? `p${n}`, message: m.message ?? {}, ...(m.priority ? { priority: m.priority } : {}) };
   if (process.env.FAKE_ORPHAN && flag('--resume') && n === 0) {
     out({ type: 'system', subtype: 'task_notification', task_id: 'orphan', status: 'stopped', output_file: '', summary: 'did not finish before the previous session ended' });
     init();

@@ -3,7 +3,8 @@
 # engine with hack/gate/fleet.yaml. Usage:
 #   hack/exit-gate-enhancements.sh <workdir> <logfile> [sections...]
 # Needs: bin/a12s, a12s/{controller,slim}:dev, the claude-code 2.1.280 bundle, hack/gate/services.sh, and
-# ~/.a12s/anthropic (a setup-token or OAuth access token). Sections: setup inbox services amendment teardown.
+# ~/.a12s/anthropic (a setup-token or OAuth access token). Sections: setup inbox services amendment teardown, and
+# steer (its own Fleet, gate-steer, which it removes again: needs no other section).
 set -uo pipefail
 W=${1:?workdir}; LOG=${2:?logfile}; shift 2
 SECTIONS=${*:-setup inbox services amendment}
@@ -278,6 +279,68 @@ if [[ " $SECTIONS " == *" cli "* ]]; then
     check "19 --json parses: a12s $cmd" json_ok a $cmd
   done
   check "19 logs --json is JSON lines" eval 'a logs builder --json | head -50 | python3 -c "import json,sys; [json.loads(l) for l in sys.stdin]"'
+fi
+
+if [[ " $SECTIONS " == *" steer "* ]]; then
+  log "## 24 inbox.duringTurn: steer (its own Fleet: gate-steer)"
+  mkdir -p "$W/steer"; pushd "$W/steer" >/dev/null
+  cat > fleet.yaml <<'YAML'
+apiVersion: a12s.ai/v1alpha1
+kind: Fleet
+metadata: { name: gate-steer }
+defaults:
+  harness: { kind: claude-code, version: 2.1.280, model: claude-haiku-4-5 }
+  image: slim
+  credentials: [anthropic]
+  egress: { allow: [api.anthropic.com] }
+agent_computers:
+  steerer:
+    inbox: { duringTurn: steer }
+YAML
+  a creds set anthropic < ~/.a12s/anthropic && run a up && wait_phase steerer Ready 180
+  turn_of() { a inbox steerer --all --json | python3 -c "import json,sys; print(next((m.get('turn','') for m in json.load(sys.stdin)['messages'] if m['id']=='$1'), ''))"; }
+  # Each Turn and turn.steered that carried the Message, in journal order, and the text of the Turn that took it.
+  carried() { a logs steerer --json | python3 -c "
+import json,sys
+id='$1'; seen=[]; text={}
+for l in sys.stdin:
+    e=json.loads(l); d=e.get('data') or {}
+    if e['type'] in ('turn.started','turn.steered') and any(m['id']==id for m in (d.get('inbox') or {}).get('messages',[])):
+        seen.append((e['type'], e['turn']))
+    if e['type']=='text.delta': text[e['turn']]=text.get(e['turn'],'')+d.get('text','')
+    if e['type']=='turn.finished' and seen and e['turn']==seen[-1][1]: seen.append(('turn.finished', e['turn']))
+print(json.dumps({'seen': seen, 'text': text.get(seen[0][1], '') if seen else ''}))"; }
+
+  log "## 24a a Message sent during a 60 s Bash call is acted on before that Turn ends"
+  a send --wait steerer "Use your Bash tool to run exactly this command: python3 -c 'import time; time.sleep(60)'. Then reply in one sentence." > /tmp/gate24a 2>&1 &
+  waiter=$!
+  for _ in $(seq 1 60); do a logs steerer --json 2>/dev/null | grep -q '"tool.started"' && break; sleep 1; done
+  sleep 5
+  id24=$(send_id steerer "When your command has finished, end your reply with the word PERSIMMON." --from operator)
+  wait "$waiter"; cat /tmp/gate24a >> "$LOG"
+  idle steerer 120
+  out24=$(carried "$id24"); log "carried: $out24"
+  check "24a joined the running Turn, before it ended, and was acted on" python3 -c "
+import json,sys; d=json.loads(sys.argv[1]); s=d['seen']
+sys.exit(0 if [t for t,_ in s]==['turn.steered','turn.finished'] and 'PERSIMMON' in d['text'].upper() else 1)" "$out24"
+  t24=$(python3 -c 'import json,sys; s=json.loads(sys.argv[1])["seen"]; print(s[0][1] if s else "none")' "$out24")
+  check "24a its turn is the Turn it joined" eval "[ \"\$(turn_of $id24)\" = $t24 ]"
+
+  log "## 24b one sent at the Turn's last moment is delivered exactly once"
+  # A Turn that only writes text has no tool boundary: the Message misses it and runs as the next Turn.
+  a send steerer "Without using any tool, write the numbers from one to three hundred in words, one per line." >/dev/null
+  for _ in $(seq 1 80); do a logs steerer --json 2>/dev/null | tail -1 | grep -q '"text.delta"' && break; sleep 0.25; done
+  id24b=$(send_id steerer "Reply with the single word FIG.")
+  idle steerer 180; sleep 3; idle steerer 120
+  out24b=$(carried "$id24b"); log "carried: $out24b"
+  check "24b delivered once, in one Turn or one steer" python3 -c "
+import json,sys; s=json.loads(sys.argv[1])['seen']
+sys.exit(0 if len([1 for t,_ in s if t!='turn.finished'])==1 else 1)" "$out24b"
+  check "24b delivered" eval "[ \"\$(msg_state steerer $id24b)\" = delivered ]"
+
+  run a down --purge --yes
+  rm -rf ~/.a12s/gate-steer
+  popd >/dev/null
 fi
 
 if [[ " $SECTIONS " == *" teardown "* ]]; then

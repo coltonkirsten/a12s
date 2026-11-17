@@ -343,7 +343,7 @@ export interface EventEnvelope {
 
 type Ev<T extends string, D> = Omit<EventEnvelope, "type" | "data"> & { type: T; data: D };
 
-/** One Message a Turn carries, as listed in its `turn.started` event. */
+/** One Message a Turn carries, as listed in its `turn.started` or `turn.steered` event. */
 export interface TurnInboxMessage {
   id: string;
   seq: number;
@@ -355,12 +355,20 @@ export interface TurnInboxMessage {
   bytes: number;
   key?: string;
   superseded?: number;
+  /** In a finished Turn: the Message joined the Turn while it ran (`inbox.duringTurn: steer`). */
+  steered?: boolean;
 }
 
 export interface TurnInbox {
   batch: string;
   pendingAfter: number;
   messages: TurnInboxMessage[];
+}
+
+export interface TurnSteeredData {
+  requestId: string;
+  /** The Messages that joined the Turn. */
+  inbox: TurnInbox;
 }
 
 export interface TurnStartedData {
@@ -515,6 +523,8 @@ export interface GapData {
 
 export type TurnStartedEvent = Ev<"turn.started", TurnStartedData>;
 export type TurnDispatchedEvent = Ev<"turn.dispatched", Record<string, never>>;
+/** The harness took a Batch into the running Turn (`inbox.duringTurn: steer`). */
+export type TurnSteeredEvent = Ev<"turn.steered", TurnSteeredData>;
 export type TextDeltaEvent = Ev<"text.delta", { text: string }>;
 export type ToolStartedEvent = Ev<"tool.started", ToolStartedData>;
 export type ToolFinishedEvent = Ev<"tool.finished", ToolFinishedData>;
@@ -547,6 +557,7 @@ export type GapEvent = Ev<"gap", GapData>;
 export type A12sEvent =
   | TurnStartedEvent
   | TurnDispatchedEvent
+  | TurnSteeredEvent
   | TextDeltaEvent
   | ToolStartedEvent
   | ToolFinishedEvent

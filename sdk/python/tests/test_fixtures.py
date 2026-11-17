@@ -42,6 +42,7 @@ PARSED: dict[str, tuple[type, Callable[[Any], Any]]] = {
     "token": (Token, lambda f: f),
     "event": (Event, lambda f: f),
     "turnStartedData": (TurnInboxMessage, lambda f: f["inbox"]["messages"][0] if "inbox" in f else None),
+    "turnSteeredData": (TurnInboxMessage, lambda f: f["inbox"]["messages"][0] if f["inbox"]["messages"] else None),
     "fleetResponse": (FleetResponse, lambda f: f),
     "agentComputersResponse": (AgentComputersResponse, lambda f: f),
     "credentialsResponse": (CredentialsResponse, lambda f: f),
@@ -129,15 +130,19 @@ def test_turn_builder_folds_the_turn_event_data() -> None:
         def e(type: str, data: Any, ts: str) -> Event:
             return Event(v=1, agent_computer="c", session="s", turn="t", seq=1, ts=ts, type=type, data=data)
 
+        steered = FIXTURES["turnSteeredData" + suffix]
         b = TurnBuilder()
         assert b.add(e("turn.started", started, "t0")) is None
+        assert b.add(e("turn.steered", steered, "t1")) is None
         assert b.add(e("text.delta", delta, "t1")) is None
         turn = b.add(e("turn.finished", finished, "t2"))
         assert turn is not None
         assert (turn.status, turn.text, turn.usage, turn.error) == ("completed", "text", {}, finished.get("error"))
         assert (turn.started_at, turn.finished_at) == ("t0", "t2")
         assert turn.reason == started.get("reason")
-        assert [m.id for m in turn.messages] == [m["id"] for m in started.get("inbox", {}).get("messages", [])]
+        joined = [m["id"] for m in steered["inbox"]["messages"]]
+        assert [m.id for m in turn.messages] == [m["id"] for m in started.get("inbox", {}).get("messages", [])] + joined
+        assert all(m.steered for m in turn.messages[len(turn.messages) - len(joined) :])
 
 
 def recorder(routes: dict[str, Any]) -> tuple[httpx.MockTransport, list[Any]]:

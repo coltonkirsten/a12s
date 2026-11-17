@@ -164,6 +164,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 |---|---|
 | `turn.started` | `{harness, model, resumed, prompt, cwd, inbox: {batch, messages: [{id, sender, via, …}]}}`: the Messages this Turn delivers. A Turn the harness started by itself has `reason: "background"` and no `inbox` |
 | `turn.dispatched` | `{}`: the harness has received the prompt |
+| `turn.steered` | `{requestId, inbox: {batch, pendingAfter, messages: [{id, sender, via, …}]}}`: the harness took these Messages into the running Turn, which continues ([`inbox.duringTurn: steer`](inbox.md#during-a-turn)) |
 | `text.delta` | `{text}`: streamed text from the agent |
 | `tool.started` | `{id, name, input, parent?}`. MCP tools are named `mcp__<server>__<tool>`, e.g. `mcp__a12s__send`. Claude Code only: a sub-agent's call has `parent`, the `id` of the `Agent` call that started the sub-agent; the agent's own calls have none. A background sub-agent's calls between Turns are journaled with no `turn` |
 | `tool.finished` | `{id, name, isError, output, parent?}`, `parent` as on `tool.started` |

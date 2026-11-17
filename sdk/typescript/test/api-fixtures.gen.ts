@@ -708,7 +708,8 @@ export const turnsResponse: T.TurnsResponse = {
           "createdAt": "2026-10-12T12:00:00Z",
           "bytes": 1,
           "key": "key",
-          "superseded": 1
+          "superseded": 1,
+          "steered": true
         }
       ],
       "tools": [
@@ -1149,7 +1150,8 @@ export const turnStartedData: T.TurnStartedData = {
         "createdAt": "2026-10-12T12:00:00Z",
         "bytes": 1,
         "key": "key",
-        "superseded": 1
+        "superseded": 1,
+        "steered": true
       }
     ]
   },
@@ -1182,6 +1184,45 @@ export const turnFinishedData: T.TurnFinishedData = {
 export const turnFinishedDataMinimal: T.TurnFinishedData = {
   "status": "completed",
   "usage": {}
+};
+
+export const turnSteeredData: T.TurnSteeredData = {
+  "requestId": "requestId",
+  "inbox": {
+    "batch": "batch",
+    "pendingAfter": 1,
+    "messages": [
+      {
+        "id": "id",
+        "seq": 1,
+        "sender": "sender",
+        "via": "via",
+        "createdAt": "2026-10-12T12:00:00Z",
+        "bytes": 1,
+        "key": "key",
+        "superseded": 1,
+        "steered": true
+      }
+    ]
+  }
+};
+
+export const turnSteeredDataMinimal: T.TurnSteeredData = {
+  "requestId": "requestId",
+  "inbox": {
+    "batch": "batch",
+    "pendingAfter": 1,
+    "messages": [
+      {
+        "id": "id",
+        "seq": 1,
+        "sender": "sender",
+        "via": "via",
+        "createdAt": "2026-10-12T12:00:00Z",
+        "bytes": 1
+      }
+    ]
+  }
 };
 
 export const textDeltaData: T.TextDeltaEvent["data"] = {
