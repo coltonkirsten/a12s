@@ -4,6 +4,15 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.12.0 (2026-11-16)
+
+A minor release: `inbox.duringTurn: steer` hands Messages sent while a Turn runs to that Turn. The default, `wait`,
+is unchanged.
+
+Upgrading: install the new release and `a12s up`; agent computers on `slim` move to `slim:0.12.0` at their next idle
+boundary. Rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.12.0` under new tags to use `steer`
+(computerd changed); images built FROM an older `slim` keep working and deliver as with `wait`.
+
 - Added: `inbox.duringTurn: steer` on an agent computer (or in `defaults`) hands Messages sent while a Turn runs to
   that Turn instead of holding them for the next one: the agent reads them when its running tool calls finish, and
   the Turn continues. Default `wait` keeps today's behaviour. Claude Code and Codex (`turn/steer`). A `--fresh`
