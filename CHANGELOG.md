@@ -4,6 +4,14 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.11.1 (2026-11-16)
+
+A patch release of the Controller: a finished Turn is in Turn history before its `turn.finished` reaches any event
+stream.
+
+Upgrading: install the new release; the next `a12s up` replaces the Controller and the agent computers keep running.
+Images built FROM `slim:0.11.0` keep working (computerd did not change).
+
 - Fixed: a client that read an agent computer's Turn history (`GET /v1/agent-computers/{c}/turns`, `turns({limit})`)
   right after seeing `turn.finished` could miss that Turn, which the Controller stored just after publishing the
   event. A finished Turn is now in the history before its `turn.finished` reaches any event stream.
