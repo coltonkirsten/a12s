@@ -292,4 +292,6 @@ type BackgroundTask struct {
 	StartedAt   time.Time `json:"startedAt"`
 	// Deadline is 2 hours after StartedAt unless the agent asked for more with its background_tasks tool.
 	Deadline time.Time `json:"deadline"`
+	// ToolUseID is the tool call that started the task, as on its task.started; a detached process has none.
+	ToolUseID string `json:"toolUseId,omitempty"`
 }

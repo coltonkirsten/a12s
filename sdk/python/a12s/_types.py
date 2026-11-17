@@ -95,6 +95,8 @@ class BackgroundTask:
     started_at: str
     deadline: str
     """When a12s stops it: 2 hours after it started unless the agent asked for more."""
+    tool_use_id: str | None = None
+    """The tool call that started the task, as on its task.started; a detached process has none."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

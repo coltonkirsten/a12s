@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: a status `background` item has `toolUseId` when its `task.started` had one (a Claude Code sub-agent or
+  shell), so a client that connects after a task went to the background can attribute the sub-agent's tool calls
+  (their `parent`) to it. TypeScript `BackgroundTask.toolUseId`, Python `BackgroundTask.tool_use_id`.
+
 ## v0.11.1 (2026-11-16)
 
 A patch release of the Controller: a finished Turn is in Turn history before its `turn.finished` reaches any event

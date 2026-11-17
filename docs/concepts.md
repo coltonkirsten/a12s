@@ -90,8 +90,9 @@ detached from the harness (`nohup … &`, `setsid`, a daemon that forks): comput
 its environment, so a marked process that has left the harness's process tree is the session's work too, kind
 `process`, one task per detached process and everything it starts. Each one is journaled as `task.started`
 and `task.finished`, and status shows them as `background: {tasks: N, items}` while any run: each item has the
-task's `id`, `kind`, `description`, `startedAt` and `deadline`. `a12s status` shows the count, the oldest task's age
-and the time until the next one is stopped.
+task's `id`, `kind`, `description`, `startedAt` and `deadline`, and `toolUseId` when its `task.started` had one, so a
+client that connects while a sub-agent runs can attribute the sub-agent's tool calls (their `parent`) to it.
+`a12s status` shows the count, the oldest task's age and the time until the next one is stopped.
 
 - **The agent stays responsive.** While only background work runs, the agent computer is `Ready`: a Message is
   delivered at once, as a new Turn in the same session.

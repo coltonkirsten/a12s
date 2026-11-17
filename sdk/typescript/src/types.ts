@@ -205,6 +205,8 @@ export interface BackgroundTask {
   description: string;
   startedAt: string;
   deadline: string;
+  /** The tool call that started the task, as on its `task.started`; a detached process has none. */
+  toolUseId?: string;
 }
 
 export interface DriveRow {

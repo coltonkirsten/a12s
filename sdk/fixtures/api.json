@@ -90,7 +90,8 @@
                 "kind": "kind",
                 "description": "description",
                 "startedAt": "2026-10-12T12:00:00Z",
-                "deadline": "2026-10-12T12:00:00Z"
+                "deadline": "2026-10-12T12:00:00Z",
+                "toolUseId": "toolUseId"
               }
             ]
           }
@@ -640,7 +641,8 @@
               "kind": "kind",
               "description": "description",
               "startedAt": "2026-10-12T12:00:00Z",
-              "deadline": "2026-10-12T12:00:00Z"
+              "deadline": "2026-10-12T12:00:00Z",
+              "toolUseId": "toolUseId"
             }
           ]
         }
@@ -893,7 +895,8 @@
               "kind": "kind",
               "description": "description",
               "startedAt": "2026-10-12T12:00:00Z",
-              "deadline": "2026-10-12T12:00:00Z"
+              "deadline": "2026-10-12T12:00:00Z",
+              "toolUseId": "toolUseId"
             }
           ]
         }
