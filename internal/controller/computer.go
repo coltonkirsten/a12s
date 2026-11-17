@@ -33,6 +33,10 @@ type runtime struct {
 	cancelEvents context.CancelFunc
 	lastEventID  string
 	credsHash    string
+	// storedSeq is the journal seq of the last event the Controller folded into Turn history; storedCh, made
+	// by a waiter, is closed when it moves.
+	storedSeq int64
+	storedCh  chan struct{}
 	// admit is held from a prompt's admission check until computerd accepts it; closed (guarded
 	// by Controller.mu) stops admission while the Controller stops or restages the Computer.
 	admit  sync.Mutex
@@ -401,8 +405,10 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			c.rtLocked(name).lastEventID = m.ID
 			c.mu.Unlock()
 		}
-		c.hub.publish(hubEvent{name: name, data: eventData(name, m.Data)})
+		// Clients read Turn history once they see turn.finished: store the Turn before the event is published.
 		c.foldTurn(name, ev)
+		c.markStored(name, ev.Seq)
+		c.hub.publish(hubEvent{name: name, data: eventData(name, m.Data)})
 		switch ev.Type {
 		case api.EventTurnStarted:
 			c.mu.Lock()

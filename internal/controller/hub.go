@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -330,4 +331,46 @@ func (c *Controller) handleTurns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.TurnsResponse{Turns: turns})
+}
+
+// storedWait bounds how long a proxied event stream holds back a turn.finished the Controller's own stream has not
+// stored yet, as while that stream reconnects.
+const storedWait = 5 * time.Second
+
+func (c *Controller) markStored(name string, seq int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.rtLocked(name)
+	r.storedSeq = seq
+	if r.storedCh != nil {
+		close(r.storedCh)
+		r.storedCh = nil
+	}
+}
+
+// waitStored returns once the Controller has stored everything up to journal event seq in Turn history, after
+// storedWait, or when ctx ends.
+func (c *Controller) waitStored(ctx context.Context, name string, seq int64) {
+	deadline := time.NewTimer(storedWait)
+	defer deadline.Stop()
+	for {
+		c.mu.Lock()
+		r := c.rtLocked(name)
+		if r.storedSeq >= seq {
+			c.mu.Unlock()
+			return
+		}
+		if r.storedCh == nil {
+			r.storedCh = make(chan struct{})
+		}
+		moved := r.storedCh
+		c.mu.Unlock()
+		select {
+		case <-moved:
+		case <-deadline.C:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
 }

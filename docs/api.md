@@ -36,7 +36,7 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `GET /v1/agent-computers/{c}/inbox/{id}/events` | SSE: a `snapshot`, then the Message's state changes (`claimed`, `delivered` with its `turn`, …) |
 | `GET /v1/events` | SSE: every agent computer's events and the Fleet's own on one connection (below); `?agentComputers=a,b` filters |
 | `GET /v1/agent-computers/{c}/events` | SSE: the agent computer's journal (below) |
-| `GET /v1/agent-computers/{c}/turns` | `?limit=20` (1 to 200) → `{turns: [Turn]}`: its last finished Turns, newest first |
+| `GET /v1/agent-computers/{c}/turns` | `?limit=20` (1 to 200) → `{turns: [Turn]}`: its last finished Turns, newest first; a Turn is here before its `turn.finished` reaches any event stream |
 | `POST /v1/agent-computers/{c}/turns/{turn}/stop` | `{}` → interrupt the Turn and end the session's background work |
 | `POST /v1/agent-computers/{c}/stop` | `{}` → `{turns, background}`: interrupt whatever Turn runs and end the session's background work; what it stopped |
 | `GET /v1/agent-computers/{c}/terminal` | `?rows=24&cols=80`, `Upgrade: a12s-terminal` → `101`, then the TTY's bytes both ways ([below](#terminal-and-files); owner or prefix) |
