@@ -42,14 +42,16 @@ const types = (evs: AdapterEvent[]) => evs.map((e) => e.type);
 const text = (evs: AdapterEvent[]) => evs.map((e) => (e.type === 'text.delta' ? e.data.text : '')).join('');
 const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
 
-test('claude: maps deltas, tools and the result; passes the pinned flags', async () => {
+test('claude: maps thinking, deltas, composing, tools and the result; passes the pinned flags', async () => {
   const { adapter, input, args } = setup('normal');
   const run = await adapter.startTurn(input);
   const evs = await collect(run.events);
-  assert.deepEqual(types(evs), ['turn.dispatched', 'text.delta', 'text.delta', 'tool.started', 'tool.finished', 'turn.finished']);
+  // The sub-agent's composing call is not the agent's own, so it maps to nothing.
+  assert.deepEqual(types(evs), ['turn.dispatched', 'thinking', 'text.delta', 'text.delta', 'tool.composing', 'tool.started', 'tool.finished', 'turn.finished']);
   assert.equal(evs.filter((e) => e.type === 'text.delta').map((e) => (e.data as { text: string }).text).join(''), 'pong');
-  assert.deepEqual(evs[3]?.data, { id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } });
-  assert.deepEqual(evs[4]?.data, { id: 'toolu_1', name: 'Bash', isError: false, output: 'hi' });
+  assert.deepEqual(evs[4]?.data, { id: 'toolu_1', name: 'Bash' });
+  assert.deepEqual(evs[5]?.data, { id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } });
+  assert.deepEqual(evs[6]?.data, { id: 'toolu_1', name: 'Bash', isError: false, output: 'hi' });
   const fin = evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>;
   assert.equal(fin.data.status, 'completed');
   assert.equal(fin.data.usage?.outputTokens, 2);
@@ -323,7 +325,7 @@ test('claude: a crash mid-turn fails the turn and kills its tasks; the next turn
 test('claude: a CLI without lifecycle frames still delimits turns by init and result', async () => {
   const { adapter, input } = setup('no-lifecycle');
   const first = await adapter.startTurn(input);
-  assert.deepEqual(types(await collect(first.events)), ['turn.dispatched', 'text.delta', 'text.delta', 'tool.started', 'tool.finished', 'turn.finished']);
+  assert.deepEqual(types(await collect(first.events)), ['turn.dispatched', 'thinking', 'text.delta', 'text.delta', 'tool.composing', 'tool.started', 'tool.finished', 'turn.finished']);
   const second = await adapter.startTurn({ ...input, sessionId: first.sessionId });
   assert.equal(finished(await collect(second.events)).status, 'completed');
 });

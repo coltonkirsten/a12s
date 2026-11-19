@@ -49,8 +49,15 @@ export interface Refusal {
   scope?: 'session' | 'local';
 }
 
+/**
+ * Claude Code only, the agent's own model output: `tool.composing` when the model starts writing a tool call, before
+ * its input is complete; `thinking` when it starts a thinking block.
+ */
+type StreamEvent = { type: 'tool.composing'; data: { id: string; name: string } } | { type: 'thinking'; data: Record<string, never> };
+
 export type AdapterEvent =
   | { type: 'text.delta'; data: { text: string } }
+  | StreamEvent
   | ToolEvent
   | { type: 'permission'; data: { decision: 'allow' | 'deny'; kind: string; tool?: string; detail?: unknown } }
   | { type: 'diagnostic'; data: { message: string; [k: string]: unknown } }

@@ -37,7 +37,8 @@ its own fleet.yaml, images, Services and app code.
   Message via "a12s" saying so.
 - Event: journal entry, {v, agentComputer, session, turn, seq, ts, type, data}. The types an app uses:
   turn.started {inbox: {messages: [{id, sender, via, …}]}, …}, turn.steered {requestId, inbox: {batch, messages}}
-  (Messages that joined the running Turn), text.delta {text}, tool.started {id, name, input,
+  (Messages that joined the running Turn), text.delta {text}, thinking {} and tool.composing {id, name} (Claude
+  Code, the agent's own output: a thinking block or a tool call started; tool.started follows), tool.started {id, name, input,
   parent?}, tool.finished {id, name, isError, output, parent?} (parent: on a Claude Code sub-agent's call, the id of
   the Agent call that started it; a background sub-agent's calls between Turns have no turn), turn.finished {status,
   usage (the harness's own; Claude Code's has speed: fast | standard), tokens?: {input (without cached), output,
