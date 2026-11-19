@@ -4,6 +4,15 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.12.1 (2026-11-19)
+
+A patch release: Claude Code agent computers journal `thinking` and `tool.composing`, so an app can show what an
+agent is doing between its text and its tool calls.
+
+Upgrading: install the new release and `a12s up`; agent computers on `slim` move to `slim:0.12.1` at their next idle
+boundary. Rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.12.1` under new tags to get the new events
+(computerd changed); images built FROM an older `slim` keep working without them.
+
 - Added: events `thinking {}` and `tool.composing {id, name}` (Claude Code), journaled when the model starts a
   thinking block or starts writing a tool call of the agent's own, so an app can show what an agent is doing between
   `text.delta` and `tool.started`. TypeScript `ThinkingEvent`, `ToolComposingEvent`. Needs the new computerd.
