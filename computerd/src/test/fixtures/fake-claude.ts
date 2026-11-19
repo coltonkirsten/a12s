@@ -202,7 +202,11 @@ function promptTurn(m: Prompt): void {
       return void setTimeout(() => finishTurn(), Number(process.env.FAKE_HOLD_MS));
     }
   }
+  const start = (parent: string | null, block: Record<string, unknown>) => out({ type: 'stream_event', parent_tool_use_id: parent, event: { type: 'content_block_start', index: 0, content_block: block } });
+  start(null, { type: 'thinking', thinking: '' });
   for (const t of ['po', 'ng']) text(t);
+  start('toolu_agent', { type: 'tool_use', id: 'toolu_sub', name: 'Read', input: {} });
+  start(null, { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: {} });
   out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', model, content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } }] } });
   out({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'hi', is_error: false }] } });
   if (mode === 'deny') out({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'toolu_3', decision_reason_type: 'mode' });

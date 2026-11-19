@@ -4,6 +4,10 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: events `thinking {}` and `tool.composing {id, name}` (Claude Code), journaled when the model starts a
+  thinking block or starts writing a tool call of the agent's own, so an app can show what an agent is doing between
+  `text.delta` and `tool.started`. TypeScript `ThinkingEvent`, `ToolComposingEvent`. Needs the new computerd.
+
 ## v0.12.0 (2026-11-16)
 
 A minor release: `inbox.duringTurn: steer` hands Messages sent while a Turn runs to that Turn. The default, `wait`,

@@ -596,10 +596,16 @@ export class ClaudeMapper {
         }
         break;
       case 'stream_event': {
-        const e = m.event as { type: string; delta?: { type: string; text?: string } };
-        if (m.parent_tool_use_id === null && e.type === 'content_block_delta' && e.delta?.type === 'text_delta' && e.delta.text) {
+        const e = m.event as { type: string; delta?: { type: string; text?: string }; content_block?: { type: string; id?: unknown; name?: unknown } };
+        if (m.parent_tool_use_id !== null) break;
+        if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta' && e.delta.text) {
           out.push({ type: 'text.delta', data: { text: e.delta.text } });
         }
+        const block = e.type === 'content_block_start' ? e.content_block : undefined;
+        if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') {
+          out.push({ type: 'tool.composing', data: { id: block.id, name: block.name } });
+        }
+        if (block?.type === 'thinking' || block?.type === 'redacted_thinking') out.push({ type: 'thinking', data: {} });
         break;
       }
       case 'assistant': {

@@ -526,6 +526,10 @@ export type TurnDispatchedEvent = Ev<"turn.dispatched", Record<string, never>>;
 /** The harness took a Batch into the running Turn (`inbox.duringTurn: steer`). */
 export type TurnSteeredEvent = Ev<"turn.steered", TurnSteeredData>;
 export type TextDeltaEvent = Ev<"text.delta", { text: string }>;
+/** Claude Code only: the model started writing a tool call of the agent's own; its tool.started, with the same `id`, follows once the input is complete. */
+export type ToolComposingEvent = Ev<"tool.composing", { id: string; name: string }>;
+/** Claude Code only: the model started a thinking block of the agent's own. */
+export type ThinkingEvent = Ev<"thinking", Record<string, never>>;
 export type ToolStartedEvent = Ev<"tool.started", ToolStartedData>;
 export type ToolFinishedEvent = Ev<"tool.finished", ToolFinishedData>;
 export type PermissionEvent = Ev<"permission", { decision: "allow" | "deny"; kind: string; tool?: string; detail?: unknown }>;
@@ -559,6 +563,8 @@ export type A12sEvent =
   | TurnDispatchedEvent
   | TurnSteeredEvent
   | TextDeltaEvent
+  | ToolComposingEvent
+  | ThinkingEvent
   | ToolStartedEvent
   | ToolFinishedEvent
   | PermissionEvent
