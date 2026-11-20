@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { TLSSocket } from 'node:tls';
 import { HttpError, type Computer, type TurnInboxRequest, type TurnRequest } from './computer.js';
+import { isDiskFull } from './disk.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { SendReply, SendRequest } from './send.js';
 
@@ -67,14 +68,16 @@ export function parseTurnInboxRequest(body: Record<string, unknown>): TurnInboxR
   return { requestId: str(body, 'requestId'), prompt: str(body, 'prompt'), inbox: body.inbox as Record<string, unknown>, ...(body.lookupOnly === true ? { lookupOnly: true } : {}) };
 }
 
-function wrap(fn: (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void> | void): Handler {
+function wrap(computer: Computer, fn: (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void> | void): Handler {
   return (req, res) => {
     const url = new URL(req.url ?? '/', 'http://computerd');
     Promise.resolve()
       .then(() => fn(req, res, url))
       .catch((err: unknown) => {
+        if (isDiskFull(err)) computer.enterDiskFull();
         if (res.headersSent) return void res.destroy();
         if (err instanceof HttpError) send(res, err.status, { error: err.message });
+        else if (isDiskFull(err)) send(res, 507, { error: `home disk full: ${(err as Error).message}` });
         else send(res, 500, { error: (err as Error).message });
       });
   };
@@ -91,7 +94,7 @@ export function controllerOnly(handler: Handler): Handler {
 
 /** The Controller-facing API, served over mTLS. */
 export function apiHandler(computer: Computer, journal: Journal): Handler {
-  return wrap(async (req, res, url) => {
+  return wrap(computer, async (req, res, url) => {
     const path = url.pathname;
     const method = req.method ?? 'GET';
     if (path === '/v1/turns' && method === 'POST') {
@@ -144,6 +147,7 @@ export function apiHandler(computer: Computer, journal: Journal): Handler {
  * point, then the stream goes live; a cursor the journal does not know gets `event: gap` and the stream goes live
  * from the head. Without a cursor, `?turn=` streams replay that turn from its start; unfiltered streams start live.
  * When the replay is complete, `event: head` carries `{seq}`: everything up to that journal seq has been sent.
+ * `event: status` says the status changed with nothing journaled (a full disk): read GET /v1/status again.
  * Writes honour backpressure; a consumer that stays undrained for more than `maxQueued` live events is
  * disconnected and resumes with Last-Event-ID.
  */
@@ -191,10 +195,12 @@ export function streamEvents(
     if (queue.length > maxQueued) return void res.destroy();
     if (!busy) void flush();
   });
+  const unwatch = journal.onStatusChange(() => void res.write('event: status\ndata: {}\n\n'));
   const keepalive = setInterval(() => res.write(': keepalive\n\n'), KEEPALIVE_MS);
   const close = () => {
     closed = true;
     unsubscribe();
+    unwatch();
     clearInterval(keepalive);
   };
   req.on('close', close);
@@ -220,7 +226,7 @@ export function streamEvents(
 
 /** System tools endpoints on the local unix socket (the agent's MCP server calls these). */
 export function localHandler(computer: Computer, sendTo: ((req: SendRequest) => Promise<SendReply>) | null = null): Handler {
-  return wrap(async (req, res, url) => {
+  return wrap(computer, async (req, res, url) => {
     if (req.method !== 'POST') throw new HttpError(405, 'POST only');
     if (url.pathname === '/v1/system/restart_harness') return send(res, 200, { message: computer.requestRestart() });
     if (url.pathname === '/v1/system/background_tasks') {

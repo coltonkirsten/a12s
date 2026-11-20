@@ -43,6 +43,7 @@ export interface InboxRecord {
 export class Journal {
   private readonly db: DatabaseSync;
   private readonly listeners = new Set<Listener>();
+  private readonly statusListeners = new Set<() => void>();
 
   constructor(path: string, private readonly computer: string) {
     this.db = new DatabaseSync(path);
@@ -266,6 +267,12 @@ export class Journal {
     };
   }
 
+  /** The level of the newest disk.usage event: the crossing the agent was last told about. */
+  lastDiskLevel(): 'high' | 'normal' {
+    const row = this.db.prepare("SELECT data FROM events WHERE type = 'disk.usage' ORDER BY seq DESC LIMIT 1").get() as { data: string } | undefined;
+    return row && (JSON.parse(row.data) as { level?: string }).level === 'high' ? 'high' : 'normal';
+  }
+
   lastSeq(): number {
     const row = this.db.prepare('SELECT MAX(seq) AS m FROM events').get() as { m: number | null };
     return row.m ?? 0;
@@ -292,6 +299,16 @@ export class Journal {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Status changed with nothing journaled (a full disk can't be): event streams tell their readers to look. */
+  statusChanged(): void {
+    for (const l of this.statusListeners) l();
+  }
+
+  onStatusChange(listener: () => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
   }
 
   close(): void {

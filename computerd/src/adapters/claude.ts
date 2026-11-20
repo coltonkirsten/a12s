@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { BASE_INSTRUCTIONS } from '../instructions.js';
 import { query, type Options, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
@@ -222,6 +223,7 @@ export class ClaudeAdapter implements Adapter {
         return child;
       },
       cwd: input.cwd,
+      systemPrompt: BASE_INSTRUCTIONS,
       env: { ...harnessEnv(this.deps), CLAUDE_AGENT_SDK_CLIENT_APP: 'a12s-computerd/0.1.0' },
       ...(input.model ? { model: input.model } : {}),
       ...(Object.keys(this.deps.cfg.harnessSettings).length ? { settings: this.deps.cfg.harnessSettings } : {}),

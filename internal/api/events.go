@@ -45,6 +45,8 @@ const (
 	EventTaskFinished          EventType = "task.finished"
 	// EventTurnSteered: the harness took a Batch into the running Turn (inbox.duringTurn: steer).
 	EventTurnSteered EventType = "turn.steered"
+	// EventDiskUsage: home drive use crossed 90% upwards (level high) or fell back under 80% (level normal).
+	EventDiskUsage EventType = "disk.usage"
 
 	// Made by the Controller, on GET /v1/events only.
 	EventFleetChanged EventType = "fleet.changed"
@@ -54,6 +56,22 @@ const (
 	// EventServicePhase has no agentComputer: the Service is named in its data.
 	EventServicePhase EventType = "service.phase"
 )
+
+const (
+	DiskHigh   = "high"
+	DiskNormal = "normal"
+)
+
+// DiskUsage is the home drive as the agent sees it; space reserved for root counts in neither.
+type DiskUsage struct {
+	UsedBytes  int64 `json:"usedBytes"`
+	TotalBytes int64 `json:"totalBytes"`
+}
+
+type DiskUsageData struct {
+	Level string `json:"level"`
+	DiskUsage
+}
 
 // EgressDeniedData: the egress proxy refused a connection.
 type EgressDeniedData struct {
@@ -93,6 +111,10 @@ const SSEGap = "gap"
 // SSEHead is sent once after the journal replay: everything up to
 // HeadData.Seq has been sent, and what follows is live.
 const SSEHead = "head"
+
+// SSEStatus tells the reader computerd's status changed in a way no journal event records (a full disk): read it
+// again.
+const SSEStatus = "status"
 
 type HeadData struct {
 	Seq int64 `json:"seq"`
@@ -270,7 +292,12 @@ type ComputerdStatus struct {
 	Background   *Background `json:"background,omitempty"`
 	// SteerTurn is the running Turn that can take a Batch now; empty when none can, or the harness cannot.
 	SteerTurn string `json:"steerTurn,omitempty"`
+	// Disk is nil when computerd can't read it.
+	Disk *DiskUsage `json:"disk,omitempty"`
 }
+
+// ComputerdDiskFull is computerd's phase while its journal can't be written for lack of space.
+const ComputerdDiskFull = "disk-full"
 
 // TurnInboxRequest is computerd's POST /v1/turns/{turn}/inbox: a Batch for the running Turn.
 type TurnInboxRequest struct {

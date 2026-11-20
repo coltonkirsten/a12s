@@ -292,3 +292,31 @@ func TestStageStopsAnIdleRunningVM(t *testing.T) {
 		t.Fatalf("instance %s, generation %s", in.Status, in.Labels[LabelGeneration])
 	}
 }
+
+// A VM made by an older a12s boots with this a12s's boot script: its metadata is brought up to date before it
+// starts, and items a12s doesn't own are kept.
+func TestWakeUpdatesBootMetadata(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.BootMetadata = BootMetadata(controllerIP, []byte("ca"), "shared") })
+	vmName := InstanceName("lab", "scout")
+	h.stageNew("scout")
+	h.fake.SetMetadataItem(vmName, "user-data", "#cloud-config\nold boot script\n")
+	h.fake.SetMetadataItem(vmName, "owner-note", "kept")
+	h.fake.Calls()
+	h.must(h.d.SetPower(h.ctx, "scout", driver.PowerAwake, 1))
+	if calls := h.fake.Calls(); !slices.Contains(calls, "instances.setMetadata "+vmName) {
+		t.Fatalf("wake calls = %v, want setMetadata", calls)
+	}
+	in, _ := h.fake.Instance(vmName)
+	if v, _ := in.Metadata.Get("user-data"); !strings.Contains(v, "tune2fs") {
+		t.Fatalf("user-data after wake = %q", v)
+	}
+	if v, _ := in.Metadata.Get("owner-note"); v != "kept" {
+		t.Fatalf("an item a12s doesn't own was dropped: %q", v)
+	}
+	h.must(h.d.SetPower(h.ctx, "scout", driver.PowerAsleep, 1))
+	h.fake.Calls()
+	h.must(h.d.SetPower(h.ctx, "scout", driver.PowerAwake, 1))
+	if calls := h.fake.Calls(); slices.Contains(calls, "instances.setMetadata "+vmName) {
+		t.Fatalf("up-to-date metadata was written again: %v", calls)
+	}
+}

@@ -4,6 +4,20 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: `resources.disk` on an agent computer (or in `defaults`) sizes its home drive on GCE, e.g. `disk: 30Gi`. A
+  drive only grows; a new size grows it without restarting the agent computer, and the filesystem takes it at the
+  next wake. A Service refuses it (its drive is `state.size`).
+- Added: every agent gets a12s's own standing instruction to keep a clean computer (Claude Code's system prompt,
+  Codex's developer instructions): keep what it uses, remove duplicate clones, finished worktrees and scratch, and
+  regenerable caches, without wiping everything after each task. Needs the new computerd.
+- Added: event `disk.usage {level, usedBytes, totalBytes}` when home drive use crosses 90% (`high`) or falls back under
+  80% (`normal`); at `high` the agent gets an inbox Message via `a12s` to clean up, once per crossing, and `a12s
+  status` warns. TypeScript `DiskUsageEvent`. Needs the new computerd.
+- Fixed: a full home drive no longer crash-loops computerd (exit 1). computerd stays up, stops the harness and runs
+  no Turns until its journal can be written again, then starts by itself; the agent computer shows `Error` "home
+  disk full…" meanwhile. On GCE, 128 MiB of each home drive is reserved for root so computerd keeps room for its
+  journal; a VM made by an older a12s gets the new boot script at its next wake.
+
 ## v0.12.1 (2026-11-19)
 
 A patch release: Claude Code agent computers journal `thinking` and `tool.composing`, so an app can show what an

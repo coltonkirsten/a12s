@@ -107,6 +107,8 @@ func TestServiceAdmissionErrors(t *testing.T) {
 		{"manifest user 0", "  clock2:\n    image: x/y:1\n    manifest: { user: 0 }\n", "services.clock2.manifest.user", "root"},
 		{"state over /tmp", "  clock2:\n    image: x/y:1\n    manifest: { state: { at: /tmp/x } }\n", "services.clock2.manifest.state.at", "/tmp"},
 		{"unknown field", "  clock2:\n    image: x/y:1\n    surprise: 1\n", "services.clock2", "surprise"},
+		{"disk on a service", "  clock2:\n    image: x/y:1\n    resources: { disk: 5Gi }\n", "services.clock2.resources.disk", "state.size"},
+		{"disk in a manifest", "  clock2:\n    image: x/y:1\n    manifest: { resources: { disk: 5Gi } }\n", "services.clock2.manifest.resources.disk", "state.size"},
 		{"external and image", "  tools:\n    external: { host: host.docker.internal }\n    image: x/y:1\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.image", "outside the Fleet"},
 		{"external with config", "  tools:\n    external: { host: host.docker.internal }\n    config: { a: 1 }\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.config", "outside the Fleet"},
 		{"external with credentials", "  tools:\n    external: { host: host.docker.internal }\n    credentials: [postgres]\n    manifest: { ports: { api: { port: 7400 } } }\n", "services.tools.credentials", "outside the Fleet"},

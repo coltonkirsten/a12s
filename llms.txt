@@ -45,7 +45,7 @@ its own fleet.yaml, images, Services and app code.
   cacheRead, cacheWrite}, fastMode?: {state: on | off | cooldown, disabledReason?} (Claude Code), models?: [model id] and refusals?: [{model,
   category, fallbackModel?, scope?: session | local}] (Claude Code; a session fallback is undone at the Turn's end),
   error?},
-  egress.denied {host, port, reason}, task.started and task.finished {id, kind, description, toolUseId?, status?
+  egress.denied {host, port, reason}, disk.usage {level, usedBytes, totalBytes}, task.started and task.finished {id, kind, description, toolUseId?, status?
   (completed | failed | stopped | killed), summary?, result?} (Claude Code: toolUseId is the tool call that started
   it, result a sub-agent's last text); fleet-wide only:
   agent_computer.phase {phase, error?, waiting?}; SDK-made: gap (events lost; resync). Others: docs/api.md.
@@ -145,7 +145,12 @@ Agent computer fields (all optional except a harness, image and credential, whic
   own API and sign-in hosts are always added, so `allow: []` still lets Claude Code work. Allow everything public:
   `allow: ["*"]` (quote it: a bare * is YAML alias syntax and fails to parse).
 - grants: {send: [agent computers]}. uses: [services] (reach a Service's ports; an MCP port becomes a tool).
-  resources: {cpu: 2, memory: 4Gi}. A Message body is at most 64 KiB.
+  resources: {cpu: 2, memory: 4Gi, disk: 30Gi} (disk: the home drive's size on GCE; it only grows, the filesystem
+  at the next wake). A Message body is at most 64 KiB.
+- Home disk: every agent gets a12s's own instruction to keep a clean computer. At 90% use computerd journals
+  disk.usage {level: high, usedBytes, totalBytes} and the agent gets an inbox Message via "a12s" to clean up, once per
+  crossing (re-armed under 80%, disk.usage level normal). A journal computerd can't write (disk full) is phase Error
+  with reason "home disk full…", not a crash; it recovers by itself once there is space.
 - inbox: {duringTurn: wait | steer} (default wait). steer: Messages sent while a Turn runs are handed to that Turn
   (the agent reads them when its running tool calls finish, and its Turn continues), not held for the next one; a
   fresh=true Message still waits for the next Turn. Claude Code and Codex. The Message's turn is the Turn that took

@@ -151,6 +151,8 @@ func (h Harness) BundleKey() string { return BundleKey(h.Kind, h.Version) }
 type Resources struct {
 	CPU    CPU   `yaml:"cpu,omitempty" json:"cpu,omitzero"`
 	Memory Bytes `yaml:"memory,omitempty" json:"memory,omitzero"`
+	// Disk is an agent computer's home drive size where the Driver enforces one. A drive only ever grows to it.
+	Disk Bytes `yaml:"disk,omitempty" json:"disk,omitzero"`
 }
 
 type Egress struct {

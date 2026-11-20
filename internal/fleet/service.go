@@ -195,6 +195,9 @@ func (f *Fleet) validateServices() []error {
 				bad(field+".image", "", "%q is not a valid image reference: %v", s.Image, err)
 			}
 		}
+		if s.Resources.Disk != 0 {
+			bad(field+".resources.disk", "set state.size instead", "a Service's drive is its state drive")
+		}
 		seen := map[string]bool{}
 		for _, cred := range s.Credentials {
 			if !credentialRE.MatchString(cred) {

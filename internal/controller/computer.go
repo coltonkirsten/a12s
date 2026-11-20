@@ -25,6 +25,8 @@ type runtime struct {
 	resumePending bool
 	// background is computerd's live background task count: work the harness runs between Turns.
 	background int
+	// disk is the home drive's use at computerd's last status.
+	disk *api.DiskUsage
 	// identity is the cloud principal the Driver last reported for it.
 	identity string
 	// transition is set while the Controller itself stops, stages or
@@ -274,6 +276,7 @@ func (c *Controller) recordStatus(name string, st api.ComputerdStatus) {
 func (c *Controller) recordStatusLocked(name string, st api.ComputerdStatus) {
 	r := c.rtLocked(name)
 	r.resumePending = st.ResumePending
+	r.disk = st.Disk
 	r.background = 0
 	if st.Background != nil {
 		r.background = st.Background.Tasks
@@ -306,6 +309,11 @@ func (c *Controller) observeStatus(name string, st api.ComputerdStatus) {
 	c.recordStatusLocked(name, st)
 	r := c.rtLocked(name)
 	if r.transition {
+		return
+	}
+	if st.Phase == api.ComputerdDiskFull {
+		c.setPhaseLocked(name, api.PhaseError, &api.Failure{Reason: diskFullReason(st.Disk), Retryable: true})
+		r.activeTurn = ""
 		return
 	}
 	phase := api.PhaseReady
@@ -387,6 +395,10 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 				r.lastEventID = strconv.FormatInt(*head.Seq, 10)
 			}
 			c.mu.Unlock()
+			continue
+		}
+		if m.Event == api.SSEStatus {
+			c.refresh(name)
 			continue
 		}
 		if m.Event != "" {
@@ -480,10 +492,20 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 			}
 			c.mu.Unlock()
 		case api.EventLifecycle:
-			if st, err := c.statusNow(name); err == nil {
-				c.recordStatus(name, st)
-			}
+			// computerd journals lifecycle ready when it starts again after a full disk.
+			c.refresh(name)
+		case api.EventDiskUsage:
+			c.reportDiskHigh(name, ev)
 		}
+	}
+}
+
+// refresh reads computerd's status into the phase, and does what a Ready agent computer is owed.
+func (c *Controller) refresh(name string) {
+	if st, err := c.statusNow(name); err == nil {
+		c.observeStatus(name, st)
+		c.maybeApplyStaged(name)
+		c.kick(name)
 	}
 }
 

@@ -34,7 +34,8 @@ export interface AgentComputerSpec {
   instructions?: string;
   /** File contents by path, written into the agent computer's home. */
   files?: Record<string, string>;
-  resources?: { cpu?: string | number; memory?: string | number };
+  /** `disk`: the home drive's size where the driver has one (GCE); it only ever grows. */
+  resources?: { cpu?: string | number; memory?: string | number; disk?: string | number };
   /** Credential names, added to the defaults' list; their values come from `a12s creds set` or the credentials API. */
   credentials?: string[];
   egress?: { allow?: string[] };
@@ -544,6 +545,8 @@ export type TurnRefusedEvent = Ev<"turn.refused", { requestId: string }>;
 /** A Message that ended without delivery (cleared, withdrawn, expired, replaced), body included. */
 export type InboxDiscardedEvent = Ev<"inbox.discarded", Record<string, unknown>>;
 export type EgressDeniedEvent = Ev<"egress.denied", EgressDeniedData>;
+/** Home drive use crossed 90% (`high`) or fell back under 80% (`normal`); a12s tells the agent at `high`. */
+export type DiskUsageEvent = Ev<"disk.usage", { level: "high" | "normal"; usedBytes: number; totalBytes: number }>;
 export type TaskStartedEvent = Ev<"task.started", TaskData>;
 export type TaskFinishedEvent = Ev<"task.finished", TaskData>;
 /** Made by the Controller, on the fleet-wide stream only. */
@@ -578,6 +581,7 @@ export type A12sEvent =
   | TurnRefusedEvent
   | InboxDiscardedEvent
   | EgressDeniedEvent
+  | DiskUsageEvent
   | TaskStartedEvent
   | TaskFinishedEvent
   | FleetChangedEvent

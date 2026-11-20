@@ -459,6 +459,11 @@ func (c *Controller) computerStatus(ctx context.Context, name string) (out api.C
 			if st.ResumePending {
 				cs.Warnings = append(cs.Warnings, "resume pending: the next prompt reopens the session")
 			}
+			if st.Phase == api.ComputerdDiskFull {
+				cs.Phase, cs.Error, cs.ActiveTurn = api.PhaseError, &api.Failure{Reason: diskFullReason(st.Disk), Retryable: true}, ""
+			} else if w := diskWarning(st.Disk); w != "" {
+				cs.Warnings = append(cs.Warnings, w)
+			}
 		}
 	}
 	return cs

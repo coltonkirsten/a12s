@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import { EventQueue, ResumeError, Tail, type Adapter, type AdapterEvent, type McpServer, type RunningTurn, type SessionListener, type TaskEvent, type TaskStatus, type TurnInput, type TurnStatus } from './adapter.js';
 import { harnessEnv, spawnAsAgent, terminate, type HarnessDeps } from './spawn.js';
 import type { StopTiming } from './claude.js';
+import { BASE_INSTRUCTIONS } from '../instructions.js';
 
 // Codex protocol payloads are large and evolving; the adapter reads only a few fields from them.
 type Json = Record<string, any>;
@@ -187,7 +188,7 @@ export class CodexAdapter implements Adapter {
     const policy = this.policy();
     let threadId: string;
     if (input.sessionId === null) {
-      const r = await this.request('thread/start', { cwd: input.cwd, ...(input.model ? { model: input.model } : {}), ...policy });
+      const r = await this.request('thread/start', { cwd: input.cwd, ...(input.model ? { model: input.model } : {}), developerInstructions: BASE_INSTRUCTIONS, ...policy });
       threadId = String(r.thread.id);
       this.loaded.add(threadId);
     } else {
@@ -266,7 +267,7 @@ export class CodexAdapter implements Adapter {
 
   private async resume(threadId: string, cwd: string | null, model: string | null): Promise<string | null> {
     try {
-      await this.request('thread/resume', { threadId, ...(cwd ? { cwd } : {}), ...(model ? { model } : {}), ...this.policy() });
+      await this.request('thread/resume', { threadId, ...(cwd ? { cwd } : {}), ...(model ? { model } : {}), developerInstructions: BASE_INSTRUCTIONS, ...this.policy() });
       this.loaded.add(threadId);
       return null;
     } catch (err) {

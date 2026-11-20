@@ -16,6 +16,7 @@ class HarnessSpec(TypedDict, total=False):
 class ResourcesSpec(TypedDict, total=False):
     cpu: Union[str, float]
     memory: str
+    disk: str
 
 
 class EgressSpec(TypedDict, total=False):

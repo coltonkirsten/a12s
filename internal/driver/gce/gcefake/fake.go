@@ -326,6 +326,29 @@ func (f *Fake) SetLabel(instance, key, value string) {
 	}
 }
 
+// SetMetadataItem changes one metadata item as a write outside a12s (or an older a12s) would.
+func (f *Fake) SetMetadataItem(instance, key, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	in := f.instances[instance]
+	if in == nil {
+		return
+	}
+	if in.Metadata == nil {
+		in.Metadata = &gceapi.Metadata{}
+	}
+	found := false
+	for i := range in.Metadata.Items {
+		if in.Metadata.Items[i].Key == key {
+			in.Metadata.Items[i].Value, found = value, true
+		}
+	}
+	if !found {
+		in.Metadata.Items = append(in.Metadata.Items, gceapi.MetadataItem{Key: key, Value: value})
+	}
+	in.Metadata.Fingerprint = f.fingerprint()
+}
+
 func (f *Fake) callName(r *http.Request) string {
 	m := zonalRE.FindStringSubmatch(r.URL.Path)
 	if m == nil {

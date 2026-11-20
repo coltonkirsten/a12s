@@ -19,6 +19,9 @@ var stockoutReasons = []string{"ZONE_RESOURCE_POOL_EXHAUSTED", "ZONE_RESOURCE_PO
 // only those, so the family is the driver's choice. A stopped VM can change shape. It never moves zones by itself,
 // since its home disk is zonal. Each wake starts from the first family, so a fallback lasts one wake.
 func (d *Driver) start(ctx context.Context, in *gceapi.Instance, spec driver.ComputerSpec) error {
+	if err := d.syncBootMetadata(ctx, in); err != nil {
+		return err
+	}
 	var tried []string
 	var last error
 	current := lastSegment(in.MachineType)
@@ -49,6 +52,38 @@ func (d *Driver) start(ctx context.Context, in *gceapi.Instance, spec driver.Com
 		last = errors.Join(last, ferr)
 	}
 	return fmt.Errorf("zone %s has no capacity for %s: %w", d.api.Zone, strings.Join(tried, ", "), last)
+}
+
+// syncBootMetadata gives a stopped VM this a12s's boot script before it boots: a VM made by an older a12s keeps the
+// metadata it was created with otherwise. Items a12s doesn't own stay as they are.
+func (d *Driver) syncBootMetadata(ctx context.Context, in *gceapi.Instance) error {
+	md := &gceapi.Metadata{}
+	if in.Metadata != nil {
+		md.Fingerprint = in.Metadata.Fingerprint
+	}
+	ours := map[string]bool{}
+	stale := false
+	for _, it := range d.cfg.BootMetadata {
+		ours[it.Key] = true
+		if v, ok := in.Metadata.Get(it.Key); !ok || v != it.Value {
+			stale = true
+		}
+	}
+	if !stale {
+		return nil
+	}
+	if in.Metadata != nil {
+		for _, it := range in.Metadata.Items {
+			if !ours[it.Key] {
+				md.Items = append(md.Items, it)
+			}
+		}
+	}
+	md.Items = append(md.Items, d.cfg.BootMetadata...)
+	if err := d.api.SetMetadata(ctx, in.Name, md); err != nil {
+		return fmt.Errorf("update boot metadata: %w", err)
+	}
+	return nil
 }
 
 // setFailure records why a Computer stopped on its own, or clears it ("").
