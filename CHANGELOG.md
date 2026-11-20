@@ -4,6 +4,16 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.13.0 (2026-11-20)
+
+A minor release about the home disk: every agent is told to keep a clean computer and is asked to clean up at 90%,
+a full home drive is a status instead of a crash loop, and `resources.disk` sizes the home drive on GCE.
+
+Upgrading: install the new release and `a12s up`; agent computers on `slim` move to `slim:0.13.0` at their next idle
+boundary. Rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.13.0` under new tags to get the instruction,
+the 90% warning and the full-disk handling (computerd changed); images built FROM an older `slim` keep working
+without them. On GCE, each agent VM picks up the new boot script (the root reserve) at its next wake.
+
 - Added: `resources.disk` on an agent computer (or in `defaults`) sizes its home drive on GCE, e.g. `disk: 30Gi`. A
   drive only grows; a new size grows it without restarting the agent computer, and the filesystem takes it at the
   next wake. A Service refuses it (its drive is `state.size`).
