@@ -452,7 +452,7 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 		c.rtLocked(name).identity = obs.Identity
 	}
 	c.mu.Unlock()
-	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name}); err != nil {
+	if _, err := c.drv.EnsureDrive(ctx, driver.DriveSpec{ID: spec.HomeDrive, Kind: driver.DriveHome, Computer: name, Size: c.homeSize(name)}); err != nil {
 		return unchanged, c.fail(name, err, true)
 	}
 	for _, a := range spec.Attach {
@@ -490,6 +490,17 @@ func (c *Controller) converge(ctx context.Context, name string, obs driver.Compu
 		}
 	}
 	return restaged, c.restage(ctx, name)
+}
+
+// homeSize is resources.disk: a size the home drive grows to, never shrinks from. It is not part of the spec hash, so
+// a new size changes the drive alone and never restarts the agent computer.
+func (c *Controller) homeSize(name string) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if f := c.state.Fleet; f != nil {
+		return int64(f.Computers[name].Resources.Disk)
+	}
+	return 0
 }
 
 func (c *Controller) stageLater(name, hash string, observed int64, why string) error {

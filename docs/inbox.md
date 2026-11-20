@@ -91,7 +91,7 @@ Run the nightly dependency audit.
 ```
 
 - `from` is the sender's own, unverified label. `via` is the authenticated principal (`a12s` for a Message a12s
-  writes itself, such as [a background task stopped at its time limit](concepts.md#background-work), `local`, `token:<name>`,
+  writes itself, such as [a background task stopped at its time limit](concepts.md#background-work) or [a home disk over 90%](concepts.md#home-disk), `local`, `token:<name>`,
   `service:<name>`, `computer:<name>`) and the only field an agent should trust.
 - The **intro** line and the **safety block** after it are fixed in the binary; nothing in the Fleet, API or CLI can
   remove or edit them. A Batch handed to a running Turn ([During a Turn](#during-a-turn)) has this intro instead:

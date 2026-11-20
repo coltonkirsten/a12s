@@ -485,7 +485,8 @@ export const fleetResponse: T.FleetResponse = {
           ],
           "resources": {
             "cpu": "1m",
-            "memory": "1"
+            "memory": "1",
+            "disk": "1"
           }
         },
         "config": {
@@ -512,7 +513,8 @@ export const fleetResponse: T.FleetResponse = {
         ],
         "resources": {
           "cpu": "1m",
-          "memory": "1"
+          "memory": "1",
+          "disk": "1"
         },
         "state": {
           "size": "1"

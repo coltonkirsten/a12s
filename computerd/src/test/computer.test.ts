@@ -6,6 +6,8 @@ import { Computer, HttpError, type TaskLimits } from '../computer.js';
 import type { Config } from '../config.js';
 import type { Proc, ProcessTable } from '../detached.js';
 import { Journal } from '../journal.js';
+import { isDiskFull, type DiskUsage } from '../disk.js';
+import type { DatabaseSync } from 'node:sqlite';
 import { testConfig, until } from './helpers.js';
 import { StubAdapter } from './stub-adapter.js';
 
@@ -830,4 +832,90 @@ test('inbox during a turn: Messages the harness folds into a turn it started by 
   assert.ok(journal.after(0, bg, 100).some((e) => e.type === 'turn.steered'));
   adapter.finishBackground();
   await until(() => computer.status().phase === 'ready');
+});
+
+function diskSetup(usage: { u: DiskUsage | null }) {
+  const cfg = testConfig();
+  const journal = new Journal(join(cfg.stateDir, 'journal.db'), cfg.computer);
+  const adapter = new StubAdapter();
+  const computer = new Computer(cfg, journal, adapter, {}, 2_000, undefined, null, 20, { usage: () => usage.u, pollMs: 3_600_000 });
+  const disk = () => journal.after(0, null, 1000).filter((e) => e.type === 'disk.usage').map((e) => e.data.level);
+  return { cfg, journal, adapter, computer, disk };
+}
+
+const gib = (used: number, total = 10) => ({ usedBytes: used * 2 ** 30, totalBytes: total * 2 ** 30 });
+
+/** Fills the journal's database to its page limit, as a full home drive does. */
+function fillJournal(journal: Journal): () => void {
+  const db = (journal as unknown as { db: DatabaseSync }).db;
+  const pages = (db.prepare('PRAGMA page_count').get() as { page_count: number }).page_count;
+  db.exec(`PRAGMA max_page_count = ${pages + 2}`);
+  for (const size of [4096, 512, 64, 1]) {
+    assert.throws(() => {
+      for (;;) journal.append('diagnostic', { message: 'x'.repeat(size) });
+    }, (err: unknown) => isDiskFull(err));
+  }
+  return () => db.exec('PRAGMA max_page_count = 1073741823');
+}
+
+test('disk: crossing 90% journals disk.usage once, under 80% re-arms it, and a restart remembers the level', async () => {
+  const usage = { u: gib(5) as DiskUsage | null };
+  const { cfg, journal, computer, disk } = diskSetup(usage);
+  await computer.start();
+  computer.checkDisk();
+  assert.deepEqual(disk(), []);
+  usage.u = gib(9.1);
+  computer.checkDisk();
+  usage.u = gib(9.6);
+  computer.checkDisk();
+  usage.u = gib(8.5);
+  computer.checkDisk();
+  assert.deepEqual(disk(), ['high'], 'once per crossing');
+  usage.u = gib(7.9);
+  computer.checkDisk();
+  usage.u = gib(9.2);
+  computer.checkDisk();
+  assert.deepEqual(disk(), ['high', 'normal', 'high']);
+  const last = journal.after(0, null, 1000).filter((e) => e.type === 'disk.usage').at(-1);
+  assert.deepEqual(last?.data, { level: 'high', ...gib(9.2) });
+  assert.deepEqual(computer.status().disk, gib(9.2));
+
+  const again = new Computer(cfg, journal, new StubAdapter(), {}, 2_000, undefined, null, 20, { usage: () => gib(9.5), pollMs: 3_600_000 });
+  await again.start();
+  again.checkDisk();
+  assert.deepEqual(disk(), ['high', 'normal', 'high'], 'a restart above 90% does not tell the agent again');
+  usage.u = null;
+  computer.checkDisk();
+  assert.equal(computer.status().disk, null);
+});
+
+test('disk full at wake: computerd stays up as disk-full, refuses turns with 507, and starts once space returns', async () => {
+  const { journal, computer } = diskSetup({ u: gib(10) });
+  const free = fillJournal(journal);
+  await assert.rejects(computer.start(), (err: unknown) => isDiskFull(err));
+  computer.enterDiskFull();
+  assert.equal(computer.status().phase, 'disk-full');
+  assert.equal(await status(computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'hi' })), 507);
+  computer.checkDisk();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(computer.status().phase, 'disk-full', 'still full: recovery waits');
+  free();
+  computer.checkDisk();
+  await until(() => computer.status().phase === 'ready');
+  assert.equal(await status(computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'hi' })), 200);
+});
+
+test('disk full mid-turn: the harness is stopped and the turn ends interrupted once space returns', async () => {
+  const { journal, adapter, computer } = diskSetup({ u: gib(10) });
+  await computer.start();
+  const { turnId } = await computer.submitTurn({ requestId: 'r1', session: 'new', prompt: 'hi' });
+  const free = fillJournal(journal);
+  adapter.task('task-1', true);
+  await until(() => computer.status().phase === 'disk-full');
+  await until(() => adapter.stops > 0);
+  assert.equal(await status(computer.submitTurn({ requestId: 'r2', session: 'current', prompt: 'again' })), 507);
+  free();
+  computer.checkDisk();
+  await until(() => computer.status().phase === 'ready');
+  assert.equal(journal.turnInfo(turnId)?.finished, 'interrupted');
 });

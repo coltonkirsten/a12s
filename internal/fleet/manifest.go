@@ -227,6 +227,9 @@ func (m *ServiceManifest) validatePartial(field string) []error {
 		}
 		errs = append(errs, errors.New(msg))
 	}
+	if m.Resources != nil && m.Resources.Disk != 0 {
+		bad("resources.disk", "set state.size instead", "a Service's drive is its state drive")
+	}
 	if m.User != nil && (m.User.UID <= 0 || m.User.GID < 0) {
 		bad("user", "run the image as a non-root uid", "%s: the image's process never runs as root", m.User)
 	}

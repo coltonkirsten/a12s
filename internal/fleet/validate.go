@@ -110,6 +110,9 @@ func (c Computer) validate(field string) []error {
 			bad("image", "%q is neither %s nor a valid image reference: %v", c.Image, TierSlim, err)
 		}
 	}
+	if c.Resources.Disk < 0 {
+		bad("resources.disk", "%s is negative", c.Resources.Disk)
+	}
 	if p := c.Security.Seccomp.Path; p != "" && (path.IsAbs(p) || strings.Contains(p, "\\")) {
 		bad("security.seccomp", "%q must be a path relative to the Fleet file", p)
 	}

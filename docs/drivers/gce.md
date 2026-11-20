@@ -14,8 +14,10 @@ laptop or a single host, the Docker driver stays simpler, faster to wake and che
 - **No Services** (`services:` is refused at admission) and **no `attach`** (there is no owner host to bind a folder
   from). `a12s shell` isn't available (it runs `docker exec` on the Controller's host); an app gets a shell through the
   API's [terminal](../api.md#terminal-and-files) instead, and reads and writes files through its files routes.
-- **Home drives have a hard size**: persistent disks, 10 GiB unless `resources` asks for more. They grow, never
-  shrink.
+- **Home drives have a hard size**: persistent disks, 10 GiB unless `resources.disk` asks for more. They grow, never
+  shrink; the filesystem takes a new size when the VM next boots (the agent computer's next wake). 128 MiB of each is
+  reserved for root, so an agent that fills its home leaves computerd room for its journal (see
+  [Home disk](../concepts.md#home-disk)).
 - **A removed agent computer's home is a snapshot** for 30 days, not a disk kept until `a12s drive rm`. See
   [Removed agent computers](#removed-agent-computers).
 - **Egress** is enforced by the VPC firewall plus rules inside each VM: an agent computer can reach only the

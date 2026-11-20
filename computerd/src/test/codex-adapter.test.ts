@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type TurnInput } from '../adapters/adapter.js';
 import { backgroundPrompt, CodexAdapter, mcpConfigArgs } from '../adapters/codex.js';
+import { BASE_INSTRUCTIONS } from '../instructions.js';
 import { collect, fixtures, testConfig, until } from './helpers.js';
 
 const fake = join(fixtures, 'fake-codex.js');
@@ -45,6 +46,7 @@ test('codex: handshake, thread/start, events, and a granted approval', async () 
   assert.equal(msgs[1]?.params.clientInfo.name, 'a12s');
   const start = msgs.find((m) => m.method === 'thread/start');
   assert.deepEqual([start?.params.approvalPolicy, start?.params.sandbox, start?.params.model], ['never', 'danger-full-access', 'gpt-x']);
+  assert.equal(start?.params.developerInstructions, BASE_INSTRUCTIONS);
   assert.deepEqual(msgs.find((m) => m.id === 'srv_1')?.result, { decision: 'accept' });
   await adapter.close();
 });

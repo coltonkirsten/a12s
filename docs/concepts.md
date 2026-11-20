@@ -128,6 +128,27 @@ client that connects while a sub-agent runs can attribute the sub-agent's tool c
   meanwhile, on the running generation. A harness that crashes fails the running Turn; the
   next Turn resumes the session in a new process.
 
+## Home disk
+
+The home drive is the agent's whole disk, and a full one stops it working. a12s keeps it in hand three ways:
+
+- **Every agent is told to keep a clean computer.** a12s gives the harness its own standing instructions (Claude
+  Code's system prompt, Codex's developer instructions), ahead of the Fleet's `instructions`: keep what it is still
+  using, remove what it no longer needs (duplicate repository clones, worktrees of finished work, finished scratch,
+  regenerable build output and package caches), and don't wipe everything after each task.
+- **At 90% the agent is told to clean up.** computerd journals `disk.usage {level: "high", usedBytes, totalBytes}`
+  when use crosses 90%, and the agent gets an inbox Message via `a12s` asking it to clean up, once per crossing:
+  use must fall back under 80% (`disk.usage {level: "normal"}`) before a new crossing tells it again. `a12s status`
+  warns while use is over 90%.
+- **A full disk is a status, not a crash.** On GCE, 128 MiB of the home drive is reserved for root, so the agent
+  filling its home leaves computerd room for its journal. If computerd still can't write its journal, it stays up,
+  stops the harness and runs no Turns; the agent computer shows `Error` with a reason that starts `home disk full`,
+  and Messages wait. Free space through the [terminal or files API](api.md#terminal-and-files), or raise
+  `resources.disk`; computerd finds a journal write succeeds again and starts as after a restart (a Turn the full
+  disk cut off ends `interrupted`).
+
+`resources.disk` sizes the home drive (GCE): see the [Fleet file](fleet-file.md).
+
 ## Data safety
 
 Removing an agent computer from the Fleet (from the file, or with `remove()`) stops it and keeps its drives and
@@ -172,6 +193,7 @@ Every event has the envelope `{v:1, agentComputer, session, turn, seq, ts, type,
 | `tool.finished` | `{id, name, isError, output, parent?}`, `parent` as on `tool.started` |
 | `turn.finished` | `{status: "completed" \| "failed" \| "interrupted", usage, tokens?, fastMode?, models?, refusals?, error?}`: `usage` is the harness's own (Claude Code's has `speed`, `"fast"` or `"standard"`, when the CLI reports it, and `modelUsage`, the CLI's tokens and `costUSD` by model id, sub-agents included: the session's running total, like `costUsd`, so difference consecutive Turns for one Turn's share; its other counts are the agent's own calls only); `tokens` is `{input, output, cacheRead, cacheWrite}` for every harness (`input` excludes cached input); `fastMode` is Claude Code's `{state: "on" \| "off" \| "cooldown", disabledReason?}` (e.g. `extra_usage_disabled`), when the CLI reports it; `models` is Claude Code's model ids that answered the agent's own calls in the Turn, in order; `refusals` is Claude Code's `[{model, category, fallbackModel?, scope?}]`, one per response a model refused (`category` is the API's, e.g. `cyber`, or null). With `fallbackModel` the CLI re-ran it on that model: `scope: "local"` for one sub-agent's response, `"session"` for the agent's own, after which the CLI would keep the session on the fallback model; computerd sets the configured model back when the Turn ends, so the next Turn starts on it again |
 | `egress.denied` | `{host, port, reason}`: the egress proxy refused a connection. Every Claude Code Turn has one or two, for telemetry hosts; they are harmless |
+| `disk.usage` | `{level: "high" \| "normal", usedBytes, totalBytes}`: home drive use crossed 90% upwards (`high`; the agent is told to clean up) or fell back under 80% (`normal`). See [Home disk](#home-disk) |
 | `diagnostic` | `{message, …}`: something an operator should see |
 | `permission` | `{decision, kind, tool}`: a permission decision, for audit |
 | `session.changed`, `resume.failed`, `lifecycle`, `harness.restarted` | Session and lifecycle changes |

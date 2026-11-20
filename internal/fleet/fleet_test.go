@@ -205,6 +205,8 @@ agent_computers:
 		{"resources", base + c + "    resources: { cpu: 0.5, memory: 512Mi }\n", ""},
 		{"bad memory", base + c + "    resources: { memory: 2GB }\n", "invalid size"},
 		{"bad cpu", base + c + "    resources: { cpu: lots }\n", "invalid cpu"},
+		{"home disk size", base + c + "    resources: { disk: 30Gi }\n", ""},
+		{"bad disk", base + c + "    resources: { disk: 30GB }\n", "invalid size"},
 		{"credentials", base + c + "    credentials: [openai, github]\n", ""},
 		{"duplicate credential", base + c + "    credentials: [openai, openai]\n", "listed twice"},
 		{"no fleet drives", base + "drives: { d: { access: exclusive } }\n" + c, "field drives not found"},

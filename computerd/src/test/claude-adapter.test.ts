@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { ResumeError, type AdapterEvent, type RunningTurn, type TaskEvent, type ToolEvent, type TurnInput } from '../adapters/adapter.js';
 import { ClaudeAdapter } from '../adapters/claude.js';
+import { BASE_INSTRUCTIONS } from '../instructions.js';
 import type { Config } from '../config.js';
 import { collect, fixtures, testConfig, until } from './helpers.js';
 
@@ -43,7 +44,7 @@ const text = (evs: AdapterEvent[]) => evs.map((e) => (e.type === 'text.delta' ? 
 const finished = (evs: AdapterEvent[]) => (evs.at(-1) as Extract<AdapterEvent, { type: 'turn.finished' }>).data;
 
 test('claude: maps thinking, deltas, composing, tools and the result; passes the pinned flags', async () => {
-  const { adapter, input, args } = setup('normal');
+  const { adapter, input, args, controls } = setup('normal');
   const run = await adapter.startTurn(input);
   const evs = await collect(run.events);
   // The sub-agent's composing call is not the agent's own, so it maps to nothing.
@@ -64,6 +65,8 @@ test('claude: maps thinking, deltas, composing, tools and the result; passes the
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'bypassPermissions');
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"a12s"'));
   assert.ok(a[a.indexOf('--mcp-config') + 1]?.includes('"alwaysLoad":true'), 'the system tools are never deferred');
+  const init = controls().find((c) => c.subtype === 'initialize') as { systemPrompt?: string[] } | undefined;
+  assert.deepEqual(init?.systemPrompt, [BASE_INSTRUCTIONS]);
 });
 
 test('claude: harness settings go to the CLI as --settings; the result reports speed and fast mode', async () => {

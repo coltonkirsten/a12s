@@ -33,8 +33,9 @@ type fakeDriver struct {
 	mu        sync.Mutex
 	computers map[string]*fakeContainer
 	drives    map[string]bool
-	// driveSpecs is how each drive was created.
+	// driveSpecs is how each drive was created; sizes is the last size each EnsureDrive asked for.
 	driveSpecs map[string]driver.DriveSpec
+	sizes      map[string]int64
 	images     map[string]string // ref -> ID
 	// computerImages overrides what InspectComputerImage reports for an image ID.
 	computerImages map[string]driver.ComputerImage
@@ -183,6 +184,10 @@ func (d *fakeDriver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 func (d *fakeDriver) EnsureDrive(_ context.Context, spec driver.DriveSpec) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.sizes == nil {
+		d.sizes = map[string]int64{}
+	}
+	d.sizes[spec.ID] = spec.Size
 	if d.drives[spec.ID] {
 		return false, nil
 	}
@@ -521,7 +526,10 @@ type fakeComputerd struct {
 	restarting bool
 	// steers offers the running, received Turn for Batches; deliveries are the in-turn requests by
 	// requestId, delivering the one the harness has not settled yet, and deliveryReqs each new request.
-	steers       bool
+	steers bool
+	// disk is the home drive use Status reports; diskFull reports computerd's disk-full phase.
+	disk         *api.DiskUsage
+	diskFull     bool
 	deliveries   map[string]*api.TurnInboxReply
 	delivering   string
 	deliveryReqs []api.TurnInboxRequest
@@ -702,7 +710,10 @@ func (f *fakeComputerd) Status(context.Context) (api.ComputerdStatus, error) {
 	if f.delivering != "" {
 		phase = "busy"
 	}
-	st := api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation, SteerTurn: f.steerTurnLocked()}
+	if f.diskFull {
+		phase = api.ComputerdDiskFull
+	}
+	st := api.ComputerdStatus{Phase: phase, Session: f.sessionLocked(), ActiveTurn: f.active, Harness: api.Harness{Kind: "fake"}, Continuation: f.continuation, SteerTurn: f.steerTurnLocked(), Disk: f.disk}
 	st.Background = &api.Background{Tasks: f.background}
 	return st, nil
 }
@@ -737,6 +748,33 @@ func (f *fakeComputerd) timeLimit(seconds int64) int64 {
 	f.background--
 	f.emitLocked(api.EventTaskFinished, "", api.TaskData{ID: "task", Kind: "local_bash", Description: "until [ -f /tmp/never ]", Status: api.TaskStopped, TimeLimit: seconds})
 	return f.seq
+}
+
+// diskUsage journals a disk.usage crossing as computerd does and returns its seq.
+func (f *fakeComputerd) diskUsage(level string, used, total int64) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.disk = &api.DiskUsage{UsedBytes: used, TotalBytes: total}
+	f.emitLocked(api.EventDiskUsage, "", api.DiskUsageData{Level: level, DiskUsage: *f.disk})
+	return f.seq
+}
+
+// fillDisk makes computerd's journal unwritable (or writable again) and signals it as computerd does: a status event,
+// then on recovery lifecycle ready.
+func (f *fakeComputerd) fillDisk(full bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.diskFull = full
+	if full {
+		for _, sub := range f.subs {
+			select {
+			case sub.ch <- "event: " + api.SSEStatus + "\ndata: {}\n\n":
+			case <-sub.done:
+			}
+		}
+		return
+	}
+	f.emitLocked(api.EventLifecycle, "", map[string]string{"phase": "ready"})
 }
 
 // selfTurn starts a Turn the harness started by itself, with no request behind it.

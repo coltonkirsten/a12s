@@ -5,6 +5,7 @@ import { ResumeError, type Adapter, type AdapterEvent, type McpServer, type Runn
 import type { Config, HarnessKind } from './config.js';
 import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } from './credentials.js';
 import { Detached, detachedPrompt, LinuxProcesses, tailOf, type DetachedTask, type ProcessTable } from './detached.js';
+import { homeDisk, isDiskFull, nextLevel, type DiskLevel, type DiskUsage } from './disk.js';
 import type { InboxOutcome, InboxRecord, Journal } from './journal.js';
 
 export interface SessionRecord {
@@ -51,7 +52,13 @@ export interface TurnInboxReply {
   reason?: string;
 }
 
-export type Phase = 'starting' | 'ready' | 'busy' | 'stopping';
+export type Phase = 'starting' | 'ready' | 'busy' | 'stopping' | 'disk-full';
+
+/** How computerd reads the home drive's use, and how often. */
+export interface DiskProbe {
+  usage: () => DiskUsage | null;
+  pollMs: number;
+}
 
 export class HttpError extends Error {
   constructor(
@@ -155,6 +162,11 @@ export class Computer {
   /** Detached work that ended after the turn that started it, waiting for the turn that reports it. */
   private detachedEnded: { task: DetachedTask; tail: string | null }[] = [];
   private scanTimer: NodeJS.Timeout | null = null;
+  /** A journal write failed for lack of space: admission is closed until a write succeeds again. */
+  private diskFull = false;
+  private diskLevel: DiskLevel = 'normal';
+  private diskTimer: NodeJS.Timeout | null = null;
+  private recovering = false;
 
   constructor(
     private readonly cfg: Config,
@@ -165,15 +177,17 @@ export class Computer {
     private readonly limits: TaskLimits = TASK_LIMITS,
     processes: ProcessTable | null = LinuxProcesses.available() ? new LinuxProcesses() : null,
     private readonly scanMs = 2_000,
+    private readonly disk: DiskProbe = { usage: () => homeDisk(cfg.homeRoot), pollMs: 15_000 },
   ) {
     this.detached = processes ? new Detached(processes) : null;
     adapter.listen({
-      backgroundTurn: (run) => this.beginBackgroundTurn(run),
-      taskEvent: (ev) => this.journal.append(ev.type, this.clockTask(ev), { session: this.session?.sessionId ?? null }),
+      backgroundTurn: (run) => this.journaling(() => this.beginBackgroundTurn(run)),
+      taskEvent: (ev) => this.journaling(() => this.journal.append(ev.type, this.clockTask(ev), { session: this.session?.sessionId ?? null })),
     });
   }
 
   get phase(): Phase {
+    if (this.diskFull) return 'disk-full';
     if (this.base !== 'ready') return this.base;
     return this.active || this.background || this.delivering || this.restarting ? 'busy' : 'ready';
   }
@@ -190,6 +204,10 @@ export class Computer {
 
   private get sessionPath(): string {
     return join(this.cfg.stateDir, 'session.json');
+  }
+
+  private closed(): HttpError {
+    return this.diskFull ? new HttpError(507, 'home disk full: computerd cannot write its journal') : new HttpError(503, `computer is ${this.base}`);
   }
 
   /** Wake: load the session record, precheck it where the harness allows, then open admission. */
@@ -224,14 +242,75 @@ export class Computer {
       if (reason) this.journal.append('resume.failed', { sessionId: this.session.sessionId, reason, at: 'wake' }, { session: this.session.sessionId });
     }
     if (wired) this.ackedGeneration = generation; // no harness process holds older credentials yet
-    this.base = 'ready';
+    this.diskLevel = this.journal.lastDiskLevel();
     this.lifecycle('ready');
+    this.base = 'ready';
+    this.diskFull = false;
+    if (this.credentialTimer) return; // started again after a full disk: the timers already run
     this.credentialTimer = setInterval(() => void this.applyCredentials(), this.credentialPollMs);
     this.credentialTimer.unref();
     this.watchCredentialFiles();
     if (this.detached) {
       this.scanTimer = setInterval(() => this.scanDetached(), this.scanMs);
       this.scanTimer.unref();
+    }
+    this.diskTimer = setInterval(() => this.checkDisk(), this.disk.pollMs);
+    this.diskTimer.unref();
+  }
+
+  /**
+   * The journal could not be written: no space left. computerd stays up and says so, stops the harness (it can't
+   * record what the harness does), and refuses turns until checkDisk finds a journal write succeeds again.
+   */
+  enterDiskFull(): void {
+    if (this.diskFull || this.base === 'stopping') return;
+    this.diskFull = true;
+    if (this.base === 'ready') {
+      this.base = 'starting';
+      this.stopAll();
+    }
+    this.journal.statusChanged();
+  }
+
+  /** A turn's journaling failed: a full disk is a state computerd waits out, anything else stays fatal. */
+  private readonly diskFullOr = (err: unknown): void => {
+    if (!isDiskFull(err)) throw err;
+    this.enterDiskFull();
+  };
+
+  /** Runs a write the harness's own callbacks make, so a full disk never throws into the adapter. */
+  private journaling(write: () => void): void {
+    try {
+      write();
+    } catch (err) {
+      this.diskFullOr(err);
+    }
+  }
+
+  /** Journals disk.usage when use crosses HIGH upwards, or back under NORMAL; recovers from a full disk. */
+  checkDisk(): void {
+    if (this.diskFull) return void this.recoverDisk();
+    const u = this.disk.usage();
+    if (!u || this.base !== 'ready') return;
+    const level = nextLevel(u, this.diskLevel);
+    if (level === this.diskLevel) return;
+    this.journal.append('disk.usage', { level, usedBytes: u.usedBytes, totalBytes: u.totalBytes }, { session: this.session?.sessionId ?? null });
+    this.diskLevel = level;
+  }
+
+  /** Runs the wake recovery again: turns cut off by the full disk end interrupted, as after a crash. */
+  private async recoverDisk(): Promise<void> {
+    if (this.recovering || this.base === 'stopping') return;
+    this.recovering = true;
+    try {
+      for (const t of [this.active, this.background]) t?.resolveDone();
+      this.active = this.background = null;
+      this.delivering = null;
+      await this.start();
+    } catch {
+      // still full: the next check tries again
+    } finally {
+      this.recovering = false;
     }
   }
 
@@ -246,6 +325,7 @@ export class Computer {
       credentialGeneration: this.ackedGeneration,
       resumePending: this.resumePending,
       continuation: this.owedContinuation?.id ?? null,
+      disk: this.disk.usage(),
     };
   }
 
@@ -271,7 +351,7 @@ export class Computer {
       this.journal.refuse(req.requestId);
       return Promise.reject(new HttpError(404, 'unknown_request: no turn was accepted for this requestId'));
     }
-    if (this.base !== 'ready') return Promise.reject(new HttpError(503, `computer is ${this.base}`));
+    if (this.base !== 'ready') return Promise.reject(this.closed());
     if (req.continuation && this.owedContinuation?.id !== req.requestId) {
       return Promise.reject(new HttpError(409, `no continuation ${req.requestId} is owed`));
     }
@@ -360,7 +440,7 @@ export class Computer {
     if (wanted === null) this.resumePending = false;
     active.started = true;
     if (active.stopRequested) void this.stopSession();
-    void this.pump(active, sessionId, wanted !== null, run.events, req);
+    this.pump(active, sessionId, wanted !== null, run.events, req).catch(this.diskFullOr);
     return { turnId, sessionId };
   }
 
@@ -380,7 +460,7 @@ export class Computer {
       reason: 'background',
     };
     this.journal.acceptTurn(turnId, turnId, '', started, run.sessionId);
-    void this.pump(active, run.sessionId, false, run.events, { requestId: turnId, session: 'current', prompt: '' });
+    this.pump(active, run.sessionId, false, run.events, { requestId: turnId, session: 'current', prompt: '' }).catch(this.diskFullOr);
   }
 
   /**
@@ -504,7 +584,7 @@ export class Computer {
       this.journal.refuse(req.requestId);
       throw new HttpError(404, 'unknown_request: no delivery was accepted for this requestId');
     }
-    if (this.base !== 'ready') throw new HttpError(503, `computer is ${this.base}`);
+    if (this.base !== 'ready') throw this.closed();
     const target = this.steerTarget();
     if (!target || target.turnId !== turnId) throw new HttpError(409, `turn ${turnId} cannot take messages now`);
     // Durable acceptance first: a replay after a crash reads this record and never hands the Messages over again.
@@ -552,7 +632,7 @@ export class Computer {
       inbox: d.req.inbox,
     };
     this.journal.startInboxTurn(d.requestId, turnId, started, r.sessionId);
-    void this.pump(active, r.sessionId, false, r.events, { requestId: d.requestId, session: 'current', prompt: d.req.prompt });
+    this.pump(active, r.sessionId, false, r.events, { requestId: d.requestId, session: 'current', prompt: d.req.prompt }).catch(this.diskFullOr);
   }
 
   private missed(d: Delivery, reason: string): void {
@@ -834,6 +914,7 @@ export class Computer {
     this.base = 'stopping';
     if (this.credentialTimer) clearInterval(this.credentialTimer);
     if (this.scanTimer) clearInterval(this.scanTimer);
+    if (this.diskTimer) clearInterval(this.diskTimer);
     for (const w of this.watchers) w.close();
     if (this.reclaimTimer) clearTimeout(this.reclaimTimer);
     this.lifecycle('stopping');

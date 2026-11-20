@@ -11,6 +11,7 @@ import { loadConfig, type Config } from './config.js';
 import { Computer } from './computer.js';
 import { credentialEnv } from './credentials.js';
 import { checkAttach, prepareDirs, prepareKeep } from './dirs.js';
+import { isDiskFull } from './disk.js';
 import { Journal } from './journal.js';
 import { sendToInbox, type TlsMaterial } from './send.js';
 import { apiHandler, controllerOnly, localHandler } from './server.js';
@@ -79,9 +80,32 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
-  await computer.start();
+  // A full home drive must not end computerd: it would only start again into the same full disk. It stays up,
+  // reports disk-full, and carries on once a journal write succeeds again.
+  const onError = (err: unknown) => {
+    if (!isDiskFull(err)) {
+      log(`fatal: ${(err as Error)?.stack ?? String(err)}`);
+      process.exit(1);
+    }
+    if (computer.phase !== 'disk-full') log(`home disk full: ${(err as Error).message}`);
+    computer.enterDiskFull();
+  };
+  process.on('uncaughtException', onError);
+  process.on('unhandledRejection', onError);
+
+  for (;;) {
+    try {
+      await computer.start();
+      break;
+    } catch (err) {
+      onError(err);
+      await new Promise((r) => setTimeout(r, DISK_RETRY_MS));
+    }
+  }
   log(`ready: ${JSON.stringify(computer.status())}`);
 }
+
+const DISK_RETRY_MS = 15_000;
 
 main().catch((err: Error) => {
   log(`fatal: ${err.stack ?? err.message}`);

@@ -25,6 +25,9 @@ fi
 mkdir -p "$HOME_DIR"
 mountpoint -q "$HOME_DIR" || mount -o nosuid,nodev "$HOME_DEV" "$HOME_DIR"
 resize2fs "$HOME_DEV" > /dev/null 2>&1 || true
+# 128 MiB only root can write: the agent (uid 1000) filling its home drive leaves computerd room for its journal.
+BLOCK=$(tune2fs -l "$HOME_DEV" 2> /dev/null | sed -n 's/^Block size: *//p') || true
+tune2fs -r $((128 * 1024 * 1024 / ${BLOCK:-4096})) "$HOME_DEV" > /dev/null 2>&1 || true
 
 # The firewall the VPC can't express: the metadata server (and its DNS) is always reachable from inside a VM, and a
 # container can reach its own host. The container may reach only the Controller's proxy and mTLS ports, plus the
