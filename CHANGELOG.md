@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.13.1 (2026-11-21)
+
+A patch release: a harness switch on GCE no longer loops an agent in Error when a stopped leftover container holds
+the bundle volume. Upgrading: install the new release and `a12s up` (or swap the Controller image); nothing else
+changes.
+
 - Fixed: on GCE, a stopped container left on an agent VM that still mounts the bundle volume (an orphaned older
   container, an extractor an interrupted switch left) no longer loops the agent in Error with `remove volume
   a12s-<fleet>-bundles: volume is in use` when its harness changes. The switch removes it; a running one is named in
