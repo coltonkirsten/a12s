@@ -121,7 +121,7 @@ agent_computers:
       You are lead. …
     grants: { send: [worker1] }
   worker1:
-    files: { .claude/skills/review/SKILL.md: "…" }   # more files for its home: .claude/skills, .mcp.json
+    skills: { review: { SKILL.md: "…" } }   # harness skills, in whichever harness runs
     grants: { send: [lead] }
 ```
 
@@ -133,9 +133,15 @@ Agent computer fields (all optional except a harness, image and credential, whic
   merges with defaults key by key; a change restages it). Start a new session after turning on fast mode.
 - image: `slim` or a custom image ref (see Custom images).
 - instructions: text written to its home as CLAUDE.md (claude-code) or AGENTS.md (codex): its standing role.
-- files: {path: text}: more text files for its home, by path relative to /home/agent (`.claude/skills/x/SKILL.md`,
-  `.mcp.json`, `bin/tool`). A file that starts with `#!` is executable. Instructions plus files: at most 1 MiB.
+- files: {path: text}: more text files for its home, by path relative to /home/agent (`.mcp.json`, `bin/tool`). A
+  file that starts with `#!` is executable. Instructions plus files: at most 1 MiB.
   No instructions or files is fine: `hello: {}` with defaults works.
+- skills: {name: {SKILL.md: text, other/path: text}}: harness skills (name: lowercase, digits, hyphens). SKILL.md
+  starts with frontmatter (`---`, `name: <name>`, `description: <when to use it>`, `---`). computerd writes them to
+  ~/.claude/skills (claude-code) or ~/.agents/skills (codex) before each Turn, so a harness switch keeps them;
+  defaults.skills is a shared set; at most 1 MiB per agent computer, apart from files. The agent saves skills of its
+  own with the `save_skill` / `delete_skill` system tools: kept by the Controller outside the Fleet (a12s up never
+  touches them), listed with GET /v1/agent-computers/{c}/skills (source fleet or agent).
 - credentials: [names]. anthropic → Claude Code, openai → Codex, github → GH_TOKEN/GITHUB_TOKEN, any other name →
   file /run/a12s/secrets/<name> (the agent can read that file, but not list the directory: put the exact path in its
   instructions). The list ADDS to the defaults' list (the one list that doesn't replace): with defaults [anthropic],
@@ -452,6 +458,9 @@ GET /v1/agent-computers/{c}/terminal            owner, or prefix
 POST /v1/agent-computers/{c}/terminal/{id}/resize owner, or prefix
 GET /v1/agent-computers/{c}/files               owner, or prefix
 PUT /v1/agent-computers/{c}/files               owner, or prefix
+GET /v1/agent-computers/{c}/skills              owner, or prefix
+PUT /v1/agent-computers/{c}/skills/{skill}      owner, or prefix
+DELETE /v1/agent-computers/{c}/skills/{skill}   owner, or prefix
 GET /v1/drives                                  owner
 DELETE /v1/drives/{d}                           owner
 POST /v1/agent-computers/{c}/inbox              send

@@ -13,7 +13,8 @@ import { credentialEnv } from './credentials.js';
 import { checkAttach, prepareDirs, prepareKeep } from './dirs.js';
 import { isDiskFull } from './disk.js';
 import { Journal } from './journal.js';
-import { sendToInbox, type TlsMaterial } from './send.js';
+import { controllerCall, sendToInbox, type TlsMaterial } from './send.js';
+import { Skills } from './skills.js';
 import { apiHandler, controllerOnly, localHandler } from './server.js';
 import { parseUses, wire } from './wiring.js';
 
@@ -55,9 +56,11 @@ async function main(): Promise<void> {
   const deps: HarnessDeps = { cfg, credentialEnv: () => credentialEnv(cfg), mcpServers: servers, wiringEnv: wiring.env };
   const adapter: Adapter = cfg.harness.kind === 'codex' ? new CodexAdapter(deps) : new ClaudeAdapter(deps);
   const computer = new Computer(cfg, journal, adapter, servers);
+  const skills = cfg.controller ? new Skills(cfg, (method, path, payload, headers) => controllerCall(cfg, tls, method, path, payload, headers), log) : null;
+  computer.skills = skills;
 
   rmSync(cfg.sockPath, { force: true });
-  const local = createHttpServer(localHandler(computer, cfg.send.length ? (req) => sendToInbox(cfg, tls, req) : null));
+  const local = createHttpServer(localHandler(computer, cfg.send.length ? (req) => sendToInbox(cfg, tls, req) : null, skills));
   await new Promise<void>((r) => local.listen(cfg.sockPath, r));
   chmodSync(cfg.sockPath, 0o666);
 

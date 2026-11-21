@@ -63,11 +63,14 @@ type Computer struct {
 	// Instructions become CLAUDE.md (claude-code) or AGENTS.md (codex) on the home drive.
 	Instructions string `yaml:"instructions,omitempty" json:"instructions,omitempty"`
 	// Files are more text files for the home drive, by path relative to it.
-	Files       map[string]string `yaml:"files,omitempty" json:"files,omitempty"`
-	Resources   Resources         `yaml:"resources,omitempty" json:"resources,omitzero"`
-	Credentials []string          `yaml:"credentials,omitempty" json:"credentials,omitzero"`
-	Egress      Egress            `yaml:"egress,omitempty" json:"egress,omitzero"`
-	Security    Security          `yaml:"security,omitempty" json:"security,omitzero"`
+	Files map[string]string `yaml:"files,omitempty" json:"files,omitempty"`
+	// Skills are harness skills by name, each its files by path inside the skill folder (SKILL.md first). The agent
+	// sees them in whichever harness runs; they are never hashed into a generation.
+	Skills      map[string]map[string]string `yaml:"skills,omitempty" json:"skills,omitempty"`
+	Resources   Resources                    `yaml:"resources,omitempty" json:"resources,omitzero"`
+	Credentials []string                     `yaml:"credentials,omitempty" json:"credentials,omitzero"`
+	Egress      Egress                       `yaml:"egress,omitempty" json:"egress,omitzero"`
+	Security    Security                     `yaml:"security,omitempty" json:"security,omitzero"`
 	// Attach mounts host folders into the home, by name; set only by the owner, never in defaults.
 	Attach map[string]Attach `yaml:"attach,omitempty" json:"attach,omitempty"`
 	// Inbox is Controller state, not container config: never hashed into a generation.

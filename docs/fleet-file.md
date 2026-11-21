@@ -27,12 +27,14 @@ agent_computers:
     image: slim
     credentials: [anthropic]
     instructions: You are scout. Answer questions about the a12s docs.
-    files:                                     # more files for its home drive; edit them and a12s up to update
-      .claude/skills/cite/SKILL.md: |
-        ---
-        name: cite
-        description: Cite the file and line for every claim.
-        ---
+    skills:                                    # harness skills; land where whichever harness runs reads them
+      cite:
+        SKILL.md: |
+          ---
+          name: cite
+          description: Cite the file and line for every claim.
+          ---
+          Name the file and line for each claim you make.
     egress: { allow: [api.anthropic.com] }
     power:
       sleepAfterIdle: 15m
@@ -91,7 +93,8 @@ agent_computers:
 | `harness.settings` | Optional, Claude Code only (an error for `codex`): an object of Claude Code settings, passed as its `--settings` every time the harness starts, so every session, new or resumed, runs with them. It merges with `defaults.harness.settings` key by key. Example: `settings: { fastMode: true }` turns on [fast mode](https://code.claude.com/docs/en/fast-mode). Changing it restages the agent computer at its next idle boundary, like a model change. A session should start with fast mode: turning it on in a running session bills its whole context again, uncached; use a new session (`a12s send <name> --fresh "…"`). `turn.finished` says how each Turn ran (`usage.speed`, `fastMode`). |
 | `image` | `slim`, or a custom image reference built FROM slim. See [Images](images.md#custom-images). |
 | `instructions` | Text written to the home drive as `CLAUDE.md` (claude-code) or `AGENTS.md` (codex): the agent's standing role. |
-| `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.claude/skills/x/SKILL.md`, `.mcp.json`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB; `instructions` and a `files` entry for the same `CLAUDE.md` (`AGENTS.md` for codex) is an error. |
+| `skills` | `{name: {path: text}}`: harness skills, each its files by clean path inside the skill folder. See [Skills](#skills). |
+| `files` | `{path: text}`: more text files for the home drive, by clean path relative to `/home/agent` (`.mcp.json`, `bin/tool`). A file that starts with `#!` is executable. Instructions and files together are at most 1 MiB; `instructions` and a `files` entry for the same `CLAUDE.md` (`AGENTS.md` for codex) is an error. |
 | `resources` | `{cpu, memory, disk}`, e.g. `{ cpu: 2, memory: 4Gi, disk: 30Gi }`. Zero means no limit. `disk` is the home drive's size where the driver gives drives a size (GCE; on Docker the home is a volume on the host's disk and `disk` has no effect). A drive only grows: a smaller `disk` than the drive has changes nothing. A new `disk` grows the drive without restarting the agent computer; on GCE the filesystem takes the new size at its next wake. |
 | `credentials` | Credential names, added to `defaults.credentials`; set each value with `a12s creds set <name>`, or name its source in the top-level `credentials`. See [Credentials](credentials.md). |
 | `egress.allow` | Hosts this agent computer may reach over HTTPS. `["*"]` allows any public host on any port. The harness bundle's sign-in hosts are added automatically. |
@@ -108,6 +111,29 @@ asleep, run `a12s sleep <name>` after `a12s up`.
 Instructions and files are written onto the home drive before the agent computer first starts, and again when they
 change: a changed file is rewritten at the next idle boundary and the session continues. Files the agent wrote
 elsewhere on the home drive are kept; one of these files that the agent edited is overwritten.
+
+## Skills
+
+`skills` holds the agent's [skills](https://code.claude.com/docs/en/skills) by name: lowercase letters, digits and
+hyphens, at most 64 characters. Each is a map of files by path inside the skill folder. `SKILL.md` is required and
+starts with YAML frontmatter that has a `description` (and a `name`, if any, equal to the skill's name); other files
+(scripts, references) are optional, and one that starts with `#!` is executable. `defaults.skills` gives every agent
+computer a shared set; an agent computer's own `skills` add to it name by name, a skill of the same name replaces the default one whole, and `name: null` drops one. One agent computer's skills are at
+most 1 MiB, apart from the 1 MiB of instructions and files.
+
+computerd writes the skills where the running harness reads them, `~/.claude/skills/<name>/` for claude-code and
+`~/.agents/skills/<name>/` for codex, before every Turn, so a harness switch, a new home drive or a wake finds the
+same ones. A change restarts an idle harness before its next Turn, resuming the session, and restages nothing.
+
+An agent also keeps skills of its own: the `save_skill` and `delete_skill` [system tools](concepts.md#system-tools)
+write them to the Controller, never into the Fleet, so `a12s up` and an app that writes specs leave them alone, and
+they don't count against the spec. They are at most 512 KiB each, 4 MiB and 200 skills per agent computer, and go
+when the agent computer is removed. A name in the Fleet's `skills` wins: the agent can't save or delete it. List and
+change both kinds with [`/v1/agent-computers/{c}/skills`](api.md#skills).
+
+A folder the agent writes by hand in a skills folder is left alone, unless the Fleet or the agent's saved skills
+take its name: then it moves to `~/.a12s-replaced-skills/`. Edits to a managed skill's folder are replaced at the
+next Turn.
 
 Scaling is editing `agent_computers:` and running `a12s up` again: only what changed is created, staged or removed.
 

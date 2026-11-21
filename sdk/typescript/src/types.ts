@@ -34,6 +34,8 @@ export interface AgentComputerSpec {
   instructions?: string;
   /** File contents by path, written into the agent computer's home. */
   files?: Record<string, string>;
+  /** Harness skills by name, each its files by path inside the skill folder (SKILL.md required). */
+  skills?: Record<string, Record<string, string>>;
   /** `disk`: the home drive's size where the driver has one (GCE); it only ever grows. */
   resources?: { cpu?: string | number; memory?: string | number; disk?: string | number };
   /** Credential names, added to the defaults' list; their values come from `a12s creds set` or the credentials API. */

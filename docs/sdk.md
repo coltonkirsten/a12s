@@ -66,7 +66,7 @@ credentials in `defaults` a name and instructions are enough. It returns once th
 ```ts
 const coder = await fleet.agentComputers.create("coder", {
   instructions: "You write and run Python. Answer with the output.",
-  files: { ".claude/skills/style/SKILL.md": "…" },
+  skills: { style: { "SKILL.md": "…" } },
   egress: { allow: ["pypi.org", "files.pythonhosted.org"] },
   power: { sleepAfterIdle: "30m" },
 });
@@ -76,7 +76,7 @@ const coder = await fleet.agentComputers.create("coder", {
 coder = fleet.agent_computers.create(
     "coder",
     instructions="You write and run Python. Answer with the output.",
-    files={".claude/skills/style/SKILL.md": "…"},
+    skills={"style": {"SKILL.md": "…"}},
     egress={"allow": ["pypi.org", "files.pythonhosted.org"]},
     power={"sleepAfterIdle": "30m"},
 )

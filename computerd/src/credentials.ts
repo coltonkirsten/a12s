@@ -27,10 +27,11 @@ const SECRETCOMMIT = join(dirname(fileURLToPath(import.meta.url)), 'secretcommit
 /** Runs filesystem ops inside the agent's home as uid/gid 1000 (as the current user in dev). */
 export function agentFs(cfg: Config, ops: AgentFsOp[]): AgentFsResult[] {
   if (ops.length === 0) return [];
-  const r = spawnSync(process.execPath, [AGENTFS, JSON.stringify(ops)], {
+  const r = spawnSync(process.execPath, [AGENTFS], {
+    input: JSON.stringify(ops),
     env: {},
     encoding: 'utf8',
-    timeout: 10_000,
+    timeout: 30_000,
     maxBuffer: 4 << 20,
     ...(cfg.isRoot ? { uid: AGENT_UID, gid: AGENT_GID } : {}),
   });

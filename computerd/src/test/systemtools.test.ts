@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Computer } from '../computer.js';
 import { localHandler } from '../server.js';
+import type { Skills } from '../skills.js';
 import { testConfig } from './helpers.js';
 
 test('system tools MCP server forwards to the computerd socket', async () => {
@@ -30,7 +31,7 @@ test('system tools MCP server forwards to the computerd socket', async () => {
   try {
     await client.connect(transport);
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name), ['restart_harness', 'background_tasks']);
+    assert.deepEqual(tools.map((t) => t.name), ['restart_harness', 'background_tasks', 'save_skill', 'delete_skill']);
     const r = await client.callTool({ name: 'restart_harness', arguments: {} });
     assert.equal(restarts, 1);
     assert.deepEqual(r.content, [{ type: 'text', text: '{"message":"restart #1"}' }]);
@@ -74,6 +75,38 @@ test('the send tool exists only with a grant and returns the Controller reply ve
     assert.equal(denied.isError, true);
     assert.match(JSON.stringify(denied.content), /add scout to agent_computers.builder.grants.send/);
     assert.deepEqual(sent[0], { computer: 'reviewer', body: 'please review', replaceKey: 'r1' });
+  } finally {
+    await client.close();
+    server.close();
+  }
+});
+
+test('save_skill and delete_skill go to the Controller and answer without echoing the files', async () => {
+  const cfg = testConfig();
+  mkdirSync(dirname(cfg.sockPath), { recursive: true });
+  const calls: unknown[] = [];
+  const skills = {
+    save: async (name: string, files: Record<string, string>) => (calls.push(['save', name, files]), { status: 200, body: { files }, etag: null }),
+    remove: async (name: string) => (calls.push(['remove', name]), { status: 409, body: { code: 'conflict', message: `skill ${name} comes from the Fleet` }, etag: null }),
+  } as unknown as Skills;
+  const server = createServer(localHandler({} as unknown as Computer, null, skills));
+  await new Promise<void>((r) => server.listen(cfg.sockPath, r));
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(dirname(fileURLToPath(import.meta.url)), '..', 'systemtools.js')],
+    env: { A12S_SOCK: cfg.sockPath },
+  });
+  const client = new Client({ name: 'test', version: '0' });
+  try {
+    await client.connect(transport);
+    const files = { 'SKILL.md': '---\nname: deploy\ndescription: x\n---\n' };
+    const saved = await client.callTool({ name: 'save_skill', arguments: { name: 'deploy', files } });
+    assert.equal(saved.isError, false);
+    assert.match((saved.content as { text: string }[])[0]!.text, /Saved skill deploy/);
+    assert.doesNotMatch((saved.content as { text: string }[])[0]!.text, /description: x/);
+    const refused = await client.callTool({ name: 'delete_skill', arguments: { name: 'style' } });
+    assert.equal(refused.isError, true);
+    assert.deepEqual(calls, [['save', 'deploy', files], ['remove', 'style']]);
   } finally {
     await client.close();
     server.close();

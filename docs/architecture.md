@@ -64,7 +64,8 @@ are `{code, message, fix?, details?}` with a stable `code`. The main routes:
 
 Agent computers and Services call the Controller with their certificates. Only the live certificate for a running
 container is accepted. Services and agent computers with `grants.send` may enqueue and read or withdraw their own
-Messages. Nothing else exists on this listener.
+Messages, and an agent computer may read and change its own skills (`save_skill`, `delete_skill`, and the copy before
+each Turn). Nothing else exists on this listener.
 
 ## Docker driver
 
@@ -114,7 +115,9 @@ address, which VPC anti-spoofing makes the VM's own. See [GCE driver](drivers/gc
   change, with a root-owned marker in `/home/.a12s-files` naming the applied digest. A copy overwrites those files
   and leaves the rest of the home drive alone.
 - **computerd** (`/opt/a12s/computerd`) waits for its TLS files, listens with mTLS on `:7443`, keeps the journal
-  (`/home/.a12s/journal.db`, SQLite) and runs the harness as uid 1000.
+  (`/home/.a12s/journal.db`, SQLite) and runs the harness as uid 1000. Before each Turn it fetches the agent
+  computer's skills from the Controller and writes them into the harness's skills folder as uid 1000, recording what
+  it wrote in `/home/.a12s/skills.json`.
 - **Environment** set by the driver includes `A12S_COMPUTER`, `A12S_FLEET`, `A12S_HARNESS_KIND`,
   `A12S_HARNESS_VERSION`, `A12S_MODEL`, `A12S_HARNESS_SETTINGS` (`harness.settings` as JSON), `A12S_BUNDLE`, `A12S_CREDENTIALS`,
   `A12S_PROXY` and `A12S_CONTROLLER`, plus `A12S_SERVICE_<SVC>_<PORT>` for each used Service port.
