@@ -37,7 +37,8 @@ puts this together.
 | **Grant** | A permission written on the side that acts: `grants.send` (may send to these agent computers), `uses` (may reach these Services). |
 | **Service** | A non-agent container from the same Fleet: a clock, a database, an MCP server. See [Services](services.md). |
 | **Drive** | A persistent volume: each agent computer's home drive, a drive per kept path of an [attached folder](fleet-file.md#attached-folders), and a Service's state drive. |
-| **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds skills, settings and anything else. |
+| **Instructions**, **files** | Text the Fleet writes onto an agent computer's home drive: `instructions` becomes its `CLAUDE.md` (or `AGENTS.md` for Codex), `files` holds settings and anything else. |
+| **Skills** | Harness skills by name, from the Fleet (`skills`) and the ones the agent saves itself; computerd writes them where the running harness reads them. See [Fleet file: Skills](fleet-file.md#skills). |
 | **Harness**, **HarnessBundle** | The agent program (Claude Code or Codex), shipped as a pinned read-only bundle per version. |
 | **Controller** | The process `a12s up` starts in a container: it holds the Fleet and its version, reconciles it, owns the inboxes and serves the API. |
 | **computerd** | The small daemon inside every agent computer that runs the harness and keeps the journal. |
@@ -213,7 +214,10 @@ while nobody watched can still be read. A Turn is in that history before its `tu
 computerd gives the agent a small MCP server, `a12s`, for managing its own environment:
 
 - `restart_harness`: restart the harness when the current Turn ends, resume the same session and continue. Use it
-  after writing new skills or MCP config to the home drive.
+  to load a skill just saved or MCP config just written to the home drive.
+- `save_skill` (`name`, `files`) and `delete_skill` (`name`): keep a skill of the agent's own, or drop one. a12s
+  keeps it with the agent computer, not on the home drive, and writes it where the running harness reads skills
+  from the next Turn on. A skill from the Fleet can't be saved over or deleted. See [Skills](fleet-file.md#skills).
 - `background_tasks` (optionally `id` and `hours`): list the session's background tasks with when each started and
   when its time limit ends; with `id` (the one the harness gave the task, e.g. Claude Code's background shell id, or
   `process-<pid>` for a detached process) and
@@ -222,8 +226,8 @@ computerd gives the agent a small MCP server, `a12s`, for managing its own envir
   computer's inbox. Present only when the agent computer has `grants.send`, and only for those agent computers. It returns a receipt, not
   an answer: the reply, if any, comes back as a new Message in a later Turn.
 
-Skills, MCP configs and harness settings live on the home drive, so the agent can change them; the harness program
-itself is read-only.
+MCP configs and harness settings live on the home drive, so the agent can change them; skills it saves with
+`save_skill` live with the Controller; the harness program itself is read-only.
 
 ## Permissions
 

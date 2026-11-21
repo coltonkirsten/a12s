@@ -29,11 +29,14 @@ func (c *Controller) MTLSHandler() http.Handler {
 	mux.HandleFunc("POST /v1/agent-computers/{c}/inbox", c.granted(c.handleEnqueue))
 	mux.HandleFunc("GET /v1/agent-computers/{c}/inbox/{id}", c.ownMessages(c.handleInboxGet))
 	mux.HandleFunc("DELETE /v1/agent-computers/{c}/inbox/{id}", c.ownMessages(c.handleWithdraw))
+	mux.HandleFunc("GET /v1/agent-computers/{c}/skills", ownSkills(c.handleSkills))
+	mux.HandleFunc("PUT /v1/agent-computers/{c}/skills/{skill}", ownSkills(c.handlePutSkill))
+	mux.HandleFunc("DELETE /v1/agent-computers/{c}/skills/{skill}", ownSkills(c.handleDeleteSkill))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p, _ := peerOf(r)
 		writeJSON(w, http.StatusForbidden, api.Error{Code: api.ErrForbidden,
 			Message: fmt.Sprintf("%s may not call %s %s on the mTLS listener", p, r.Method, r.URL.Path),
-			Fix:     "the mTLS listener serves inbox sends (with a grant) only; owner calls go to the owner API"})
+			Fix:     "the mTLS listener serves inbox sends (with a grant) and an agent computer's own skills only; owner calls go to the owner API"})
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, entry, err := c.livePeer(r)

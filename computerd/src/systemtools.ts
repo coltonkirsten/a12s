@@ -30,6 +30,30 @@ const tools: { name: string; description: string; inputSchema: Record<string, un
       },
     },
   },
+  {
+    name: 'save_skill',
+    description:
+      'Save one of your skills: a procedure you repeat or a how-to you worked hard to find, so you (in later sessions) skip the search. ' +
+      'Creates the skill or replaces it whole; to edit, save it again with every file. ' +
+      'files maps paths inside the skill folder to their text. SKILL.md is required and starts with YAML frontmatter: ' +
+      '---, name: <the same name>, description: <when to use it, one line>, ---, then the steps. Other files (scripts, references) are optional; ' +
+      'a file that starts with #! is made executable. a12s keeps your skills, not the home drive, so they survive sleeps, ' +
+      'a new home drive and a harness switch. Edits made by hand to a saved skill\'s folder are replaced: always save through this tool. ' +
+      'A skill loads from your next turn; call restart_harness to load it now.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', pattern: '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$', description: 'Lowercase letters, digits and hyphens' },
+        files: { type: 'object', additionalProperties: { type: 'string' }, description: 'Path inside the skill folder → text; SKILL.md required' },
+      },
+      required: ['name', 'files'],
+    },
+  },
+  {
+    name: 'delete_skill',
+    description: 'Delete one of your saved skills. Skills your operator set are not yours to delete.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
 ];
 if (sendTo.length) {
   tools.push({

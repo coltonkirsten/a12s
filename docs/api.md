@@ -43,6 +43,9 @@ is the owner token; `POST /v1/tokens` (or `a12s token create`) makes [scoped one
 | `POST /v1/agent-computers/{c}/terminal/{id}/resize` | `{rows, cols}` → `204` (owner or prefix) |
 | `GET /v1/agent-computers/{c}/files` | `?path=/home/agent/…` → a folder's `entries` or a file's `content` ([below](#terminal-and-files); owner or prefix) |
 | `PUT /v1/agent-computers/{c}/files` | `?path=…`, the file's bytes → `204`: replace it as the agent user (owner or prefix) |
+| `GET /v1/agent-computers/{c}/skills` | → `{storeId, digest, skills: [{name, source, files, updatedAt?, by?}]}` with `ETag: "<digest>"` ([below](#skills); owner or prefix) |
+| `PUT /v1/agent-computers/{c}/skills/{name}` | `{files}` → the skill: save one of the agent's own skills (owner or prefix) |
+| `DELETE /v1/agent-computers/{c}/skills/{name}` | → `{deleted}`: remove one of the agent's own skills (owner or prefix) |
 | `POST /v1/agent-computers/{c}/power` | `{"state": "asleep"\|"awake"}` |
 | `POST /v1/agent-computers/{c}/inbox/hold`, `…/resume`, `…/clear` | hold, resume (`{"session": "new"}` to start fresh) or clear an inbox |
 | `GET /v1/services`, `GET /v1/services/{s}` | Service status, with `spec` as written; an [external](services.md#external-services) one has `external` (its host) and no `pin` |
@@ -227,6 +230,24 @@ most 1 MiB of content. `404 not_found`, `403 forbidden` (the agent user can't re
 and clean, or not a file or folder). `PUT …/files?path=<file>` with the bytes as the body (at most 8 MiB) makes its
 folder and replaces the file, owned by the agent; it is journaled (`file written`). The calls use the image's `sh`,
 `stat` and `head` (GNU or busybox).
+
+## Skills
+
+`GET /v1/agent-computers/{c}/skills` lists every skill the agent computer's harness sees, by name: `source: "fleet"`
+for one from the Fleet's `skills` (or `defaults.skills`), `source: "agent"` for one the agent saved with
+`save_skill` or a caller saved with `PUT`, which also carries `updatedAt` and `by` (`computer:<c>`, `local`,
+`token:<name>`). It works asleep. `digest` changes whenever the set does; `If-None-Match: "<digest>"` answers `304`.
+
+`PUT /v1/agent-computers/{c}/skills/{name}` with `{"files": {"SKILL.md": "…", …}}` creates or replaces one of the
+agent's own skills, whole; `DELETE` removes one (`404` if the agent has none by that name). Both answer `409 conflict`
+for a name the Fleet's `skills` has, `400 invalid` for a bad name or a `SKILL.md` without frontmatter and a
+`description`, and `413 body_too_large` past the limits in [Fleet file: Skills](fleet-file.md#skills). The agent
+computer reaches the same three routes for itself, and only for itself, over the mTLS listener.
+
+`storeId` names the agent's store. It is empty until the first save and changes only when the store is made anew
+(the agent computer was removed and added again, or the Controller lost its state dir), so an app that keeps its own
+copy of the agent's skills can tell a skill the agent deleted (same `storeId`) from a store that was lost (a new
+one) and put its copy back.
 
 ## Errors
 

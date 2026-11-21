@@ -293,8 +293,9 @@ fleet.agent_computers.get("helper").update(instructions="Answer in one sentence.
 The agent computer restarts between Turns, never in the middle of one, and keeps its conversation. To also start a
 fresh conversation, send the next Message with `fresh: true` (`a12s send lead --fresh "…"`).
 
-`files` can hold anything Claude Code reads from the home directory: `.claude/skills/`,
-`.claude/settings.json`, `.mcp.json`. They overwrite the agent's copies; other files on the home drive stay.
+`files` can hold anything the harness reads from the home directory: `.claude/settings.json`, `.mcp.json`. They
+overwrite the agent's copies; other files on the home drive stay. Skills go in `skills`, which lands in whichever
+harness runs ([Fleet file: Skills](fleet-file.md#skills)).
 
 ## Give agents tools and network access
 

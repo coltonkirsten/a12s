@@ -171,6 +171,8 @@ type Controller struct {
 	// Computer or Service, deliveries included, takes only that one's lock (lockComputer), so a slow
 	// restage or wake never delays any other.
 	specMu sync.Mutex
+	// skillsMu serializes writes to the agents' skill stores.
+	skillsMu sync.Mutex
 
 	mu    sync.Mutex // guards everything below
 	state *State

@@ -70,6 +70,8 @@ class AgentComputerSpec(TypedDict, total=False):
     """Written as CLAUDE.md (claude-code) or AGENTS.md (codex) on the home drive."""
     files: dict[str, str]
     """More text files for the home drive, by path relative to it; up to 1 MiB with the instructions."""
+    skills: dict[str, dict[str, str]]
+    """Harness skills by name, each its files by path inside the skill folder (SKILL.md required)."""
     resources: ResourcesSpec
     credentials: list[str]
     egress: EgressSpec

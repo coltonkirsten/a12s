@@ -4,6 +4,17 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Added: skills as a Fleet field. `skills: {name: {SKILL.md: …, other files}}` on an agent computer (or in
+  `defaults`, as a shared set) lands where the running harness reads skills, `~/.claude/skills` for claude-code and
+  `~/.agents/skills` for codex, so a harness switch or a new home drive keeps them. They have their own 1 MiB per
+  agent computer, apart from instructions and files, and a change restages nothing: an idle harness restarts before
+  its next Turn, resuming the session.
+- Added: agents save their own skills with the `save_skill` and `delete_skill` system tools. The Controller keeps
+  them beside its state, outside the Fleet, so `a12s up` and apps that write specs leave them alone.
+  `GET /v1/agent-computers/{c}/skills` lists both kinds, `PUT` and `DELETE …/skills/{name}` change the agent's own.
+- Changed: write skills under `skills`, not as `files` entries under `.claude/skills/`. Such files still work for
+  claude-code, but don't follow a switch to codex.
+
 ## v0.13.1 (2026-11-21)
 
 A patch release: a harness switch on GCE no longer loops an agent in Error when a stopped leftover container holds

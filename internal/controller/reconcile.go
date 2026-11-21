@@ -773,6 +773,9 @@ func (c *Controller) removeComputer(ctx context.Context, name string) error {
 			c.logf("%s: turn history: %v", name, err)
 		}
 	}
+	if err := c.removeSkillStore(name); err != nil {
+		c.logf("%s: skills: %v", name, err)
+	}
 	c.logf("%s: removed", name)
 	if r, ok := c.drv.(driver.HomeRetirer); ok {
 		c.retireHome(ctx, r, name)

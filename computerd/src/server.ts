@@ -4,6 +4,7 @@ import { HttpError, type Computer, type TurnInboxRequest, type TurnRequest } fro
 import { isDiskFull } from './disk.js';
 import type { EventEnvelope, Journal } from './journal.js';
 import type { SendReply, SendRequest } from './send.js';
+import type { Skills } from './skills.js';
 
 const MAX_BODY = 2 << 20; // a 1 MiB render plus 2,000 inbox entries
 const KEEPALIVE_MS = 15_000;
@@ -225,7 +226,7 @@ export function streamEvents(
 }
 
 /** System tools endpoints on the local unix socket (the agent's MCP server calls these). */
-export function localHandler(computer: Computer, sendTo: ((req: SendRequest) => Promise<SendReply>) | null = null): Handler {
+export function localHandler(computer: Computer, sendTo: ((req: SendRequest) => Promise<SendReply>) | null = null, skills: Skills | null = null): Handler {
   return wrap(computer, async (req, res, url) => {
     if (req.method !== 'POST') throw new HttpError(405, 'POST only');
     if (url.pathname === '/v1/system/restart_harness') return send(res, 200, { message: computer.requestRestart() });
@@ -243,6 +244,26 @@ export function localHandler(computer: Computer, sendTo: ((req: SendRequest) => 
       if (typeof body.replaceKey === 'string' && body.replaceKey) r.replaceKey = body.replaceKey;
       return send(res, 200, await sendTo(r));
     }
+    if (url.pathname === '/v1/system/save_skill' || url.pathname === '/v1/system/delete_skill') {
+      if (!skills) throw new HttpError(503, 'skills need the Controller (A12S_CONTROLLER is not set)');
+      const body = await readJson(req);
+      const name = str(body, 'name');
+      if (url.pathname === '/v1/system/delete_skill') return send(res, 200, replyOf(await skills.remove(name), `Deleted skill ${name}.`));
+      const files = body.files;
+      if (typeof files !== 'object' || files === null || Array.isArray(files) || Object.values(files).some((v) => typeof v !== 'string')) {
+        throw new HttpError(400, 'files must be an object of path → text, with SKILL.md');
+      }
+      return send(res, 200, replyOf(await skills.save(name, files as Record<string, string>), SAVED(name)));
+    }
     throw new HttpError(404, 'not found');
   });
+}
+
+const SAVED = (name: string) =>
+  `Saved skill ${name}. It is kept by a12s, so it survives sleeps, a new home drive and a harness switch. ` +
+  'It loads from your next turn; call restart_harness to load it into this session now.';
+
+/** The Controller's answer for the agent: a plain sentence when it worked (not the files back), its error when not. */
+function replyOf(reply: SendReply, ok: string): { status: number; message?: string; body?: unknown } {
+  return reply.status === 200 ? { status: 200, message: ok } : { status: reply.status, body: reply.body };
 }

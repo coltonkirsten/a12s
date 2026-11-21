@@ -121,7 +121,7 @@ func (c Computer) validate(field string) []error {
 			bad("security.seccomp", "%v", err)
 		}
 	}
-	for _, msg := range slices.Concat(validateFiles(c), validateAttach(c)) {
+	for _, msg := range slices.Concat(validateFiles(c), validateSkills(c.Skills), validateAttach(c)) {
 		errs = append(errs, fmt.Errorf("%s.%s", field, msg))
 	}
 

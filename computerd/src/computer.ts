@@ -7,6 +7,7 @@ import { credentialFiles, credentialGeneration, wireCredentials, type Wiring } f
 import { Detached, detachedPrompt, LinuxProcesses, tailOf, type DetachedTask, type ProcessTable } from './detached.js';
 import { homeDisk, isDiskFull, nextLevel, type DiskLevel, type DiskUsage } from './disk.js';
 import type { InboxOutcome, InboxRecord, Journal } from './journal.js';
+import type { Skills } from './skills.js';
 
 export interface SessionRecord {
   sessionId: string;
@@ -121,6 +122,7 @@ const KILL_AFTER_MS = 5_000;
 
 const CONTINUE_PROMPT = 'a12s restarted your harness at your request and resumed this session. Continue the task you were working on.';
 const PRECHECK_TIMEOUT_MS = 60_000;
+const SKILLS_SYNC_TIMEOUT_MS = 5_000;
 const RECLAIM_DEBOUNCE_MS = 200;
 
 /**
@@ -146,6 +148,10 @@ export class Computer {
   private owedContinuation: { id: string; parentTurn: string | null } | null = null;
   /** The credential generation actually in effect: wired, and any long-lived harness restarted with it. */
   private ackedGeneration: number | null = null;
+  /** Copies the Controller's skills into the harness's skills folder; null when there is no Controller. */
+  skills: Skills | null = null;
+  /** The skills digest the running harness started with. */
+  private skillsLoaded: string | null = null;
   private credentialTimer: NodeJS.Timeout | null = null;
   private failedGeneration: number | null = null;
   private watchers: FSWatcher[] = [];
@@ -392,15 +398,19 @@ export class Computer {
       if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
         throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
       }
+      const skills = await this.syncSkills();
       const generation = credentialGeneration(this.cfg);
-      // Rotated credentials must not stay in a long-lived harness, but restarting it would end background work:
-      // with some running, the rotation waits for the idle boundary.
+      // Rotated credentials and changed skills must not wait in a long-lived harness, but restarting it would end
+      // background work: with some running, both wait for the idle boundary.
       // A background turn may have started during the awaits above; a restart would kill it.
       const quiet = this.backgroundCount() === 0 && !this.background;
-      if (this.wire(turnId) && generation !== this.ackedGeneration && quiet) {
+      const rotated = this.wire(turnId) && generation !== this.ackedGeneration;
+      const relearn = skills !== null && this.skillsLoaded !== null && skills !== this.skillsLoaded;
+      if ((rotated || relearn) && quiet) {
         await this.adapter.restart();
-        this.ackedGeneration = generation;
+        if (rotated) this.ackedGeneration = generation;
       }
+      if (skills !== null && (quiet || this.skillsLoaded === null)) this.skillsLoaded = skills;
       // A stop may have landed during the awaits above: then nothing reaches the harness.
       if (active.stopRequested) throw new Error('stopped before dispatch');
       if (wanted !== (previous?.sessionId ?? null)) this.endDetached(); // leaving a session ends its background work
@@ -863,6 +873,7 @@ export class Computer {
       const wired = this.wire(null);
       await this.restartSession();
       if (wired) this.ackedGeneration = generation;
+      this.skillsLoaded = null; // the new harness read whatever skills the folder holds now
       if (session) {
         const reason = await this.precheck(session);
         if (reason) {
@@ -956,6 +967,17 @@ export class Computer {
   // wireCredentials is synchronous end to end (sync fs, spawnSync), so the watcher, after-turn, prompt-time and
   // .generation paths cannot interleave inside computerd; the commit itself guards against the external injector.
   /** Returns true only if every declared credential is wired; failures are journaled (names, never values). */
+  private async syncSkills(): Promise<string | null> {
+    if (!this.skills) return null;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<null>((r) => (timer = setTimeout(() => r(null), SKILLS_SYNC_TIMEOUT_MS)));
+    try {
+      return await Promise.race([this.skills.sync().catch(() => null), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private wire(turn: string | null): boolean {
     const scope = { turn, session: this.session?.sessionId ?? null };
     let w: Wiring;
