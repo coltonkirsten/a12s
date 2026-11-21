@@ -4,6 +4,14 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+## v0.14.0 (2026-11-21)
+
+A minor release about skills: a harness-agnostic `skills` Fleet field, and system tools for agents to save their own
+skills, which the Controller keeps outside the Fleet. Upgrading: install the new release and `a12s up`; agent
+computers on `slim` move to `slim:0.14.0` at their next idle boundary. Rebuild custom images FROM
+`ghcr.io/coltonkirsten/a12s/slim:0.14.0` under new tags: computerd changed (it writes the skills and serves the new
+tools), and a 0.14 Controller drives only 0.14 computerd.
+
 - Added: skills as a Fleet field. `skills: {name: {SKILL.md: …, other files}}` on an agent computer (or in
   `defaults`, as a shared set) lands where the running harness reads skills, `~/.claude/skills` for claude-code and
   `~/.agents/skills` for codex, so a harness switch or a new home drive keeps them. They have their own 1 MiB per
