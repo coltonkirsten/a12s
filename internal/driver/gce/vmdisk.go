@@ -97,7 +97,9 @@ func (g *vmGuest) prune(ctx context.Context, keep ...string) error {
 }
 
 // resetBundleVolume removes the bundle volume unless it holds bundleID, and reports whether a bundle must be
-// extracted into a new one. No container may use the volume.
+// extracted into a new one. Materialize has already removed the Computer's own container; any other stopped container
+// still mounting the volume (an extractor an interrupted Materialize left, an orphaned older container) is a leftover
+// and goes with it. A running one is an error: it would lose its bundle.
 func (g *vmGuest) resetBundleVolume(ctx context.Context, bundleID string) (bool, error) {
 	cli, name := g.eng.Client(), BundleVolume(g.e.Fleet)
 	res, err := cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
@@ -108,6 +110,9 @@ func (g *vmGuest) resetBundleVolume(ctx context.Context, bundleID string) (bool,
 	case res.Volume.Labels[labelBundle] == bundleID:
 		return false, nil
 	default:
+		if err := g.removeVolumeUsers(ctx, name); err != nil {
+			return false, err
+		}
 		if _, err := cli.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil {
 			return false, fmt.Errorf("remove volume %s: %w", name, err)
 		}
@@ -117,6 +122,28 @@ func (g *vmGuest) resetBundleVolume(ctx context.Context, bundleID string) (bool,
 		return false, fmt.Errorf("create volume %s: %w", name, err)
 	}
 	return true, nil
+}
+
+// removeVolumeUsers removes the stopped containers that mount volume, and fails on a running one.
+func (g *vmGuest) removeVolumeUsers(ctx context.Context, volume string) error {
+	cli := g.eng.Client()
+	cs, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: make(client.Filters).Add("volume", volume)})
+	if err != nil {
+		return fmt.Errorf("list containers using volume %s: %w", volume, err)
+	}
+	for _, c := range cs.Items {
+		name := c.ID
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		if c.State == container.StateRunning || c.State == container.StateRestarting || c.State == container.StatePaused {
+			return fmt.Errorf("volume %s is in use by %s container %s", volume, c.State, name)
+		}
+		if _, err := cli.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !engine.IsNotFound(err) {
+			return fmt.Errorf("remove leftover container %s using volume %s: %w", name, volume, err)
+		}
+	}
+	return nil
 }
 
 // loadNeeds is the disk a load of these images takes at its peak: the engine unpacks the whole saved archive to a

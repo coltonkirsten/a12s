@@ -4,6 +4,11 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- Fixed: on GCE, a stopped container left on an agent VM that still mounts the bundle volume (an orphaned older
+  container, an extractor an interrupted switch left) no longer loops the agent in Error with `remove volume
+  a12s-<fleet>-bundles: volume is in use` when its harness changes. The switch removes it; a running one is named in
+  the error instead (#161).
+
 ## v0.13.0 (2026-11-20)
 
 A minor release about the home disk: every agent is told to keep a clean computer and is asked to clean up at 90%,
