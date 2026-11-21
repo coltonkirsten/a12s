@@ -143,10 +143,23 @@ func objectOf(raw json.RawMessage) (map[string]any, error) {
 	return out, nil
 }
 
-// mergeComputer is MergeJSON, except that credentials are the defaults' followed by the agent computer's own, each
+// mergeComputer is MergeJSON, except that skills replace by name and credentials are the defaults' followed by the agent computer's own, each
 // name once.
 func mergeComputer(defaults, own map[string]any) map[string]any {
 	out := MergeJSON(defaults, own)
+	if base, ok := defaults["skills"].(map[string]any); ok {
+		// A skill is replaced whole, never file by file; null drops a default skill.
+		skills := maps.Clone(base)
+		over, _ := own["skills"].(map[string]any)
+		for name, v := range over {
+			if v == nil {
+				delete(skills, name)
+				continue
+			}
+			skills[name] = v
+		}
+		out["skills"] = skills
+	}
 	base, _ := defaults["credentials"].([]any)
 	extra, ok := own["credentials"].([]any)
 	if !ok || len(base) == 0 {

@@ -50,10 +50,22 @@ export class Skills {
     return `/v1/agent-computers/${this.cfg.computer}/skills`;
   }
 
-  /** Fetches the skills and writes them out if they changed. Returns their digest, or null when the Controller can't say. */
-  async sync(): Promise<string | null> {
+  private queue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Fetches the skills and writes them out if they changed: the digest and whether this call wrote the folder, or
+   * null when the Controller can't say or a write failed. One sync runs at a time, so none mistakes another's
+   * folders for hand-made ones.
+   */
+  sync(): Promise<{ digest: string; wrote: boolean } | null> {
+    const run = this.queue.then(() => this.syncNow());
+    this.queue = run.catch(() => null);
+    return run;
+  }
+
+  private async syncNow(): Promise<{ digest: string; wrote: boolean } | null> {
     const had = this.manifest();
-    const current = had?.root === skillsRoot(this.cfg);
+    const current = had?.root === skillsRoot(this.cfg) && had.digest !== '';
     let reply: ControllerReply;
     try {
       const headers: Record<string, string> = current ? { 'if-none-match': `"${had!.digest}"` } : {};
@@ -62,18 +74,17 @@ export class Skills {
       this.log(`skills: ${(err as Error).message}`);
       return null;
     }
-    if (reply.status === 304 && current) return had!.digest;
+    if (reply.status === 304 && current) return { digest: had!.digest, wrote: false };
     if (reply.status !== 200) {
       // 404 from a Controller without skills: nothing to keep in step with.
       if (reply.status !== 404) this.log(`skills: GET ${reply.status} ${JSON.stringify(reply.body)}`);
       return null;
     }
     const res = reply.body as SkillsResponse;
-    this.write(res.skills, res.digest, had);
-    return res.digest;
+    return this.write(res.skills, res.digest, had) ? { digest: res.digest, wrote: true } : null;
   }
 
-  private write(skills: Skill[], digest: string, had: Manifest | null): void {
+  private write(skills: Skill[], digest: string, had: Manifest | null): boolean {
     const root = skillsRoot(this.cfg);
     const keep = new Set(skills.map((s) => s.name));
     const ops: AgentFsOp[] = [];
@@ -98,13 +109,12 @@ export class Skills {
       }
     }
     const failed = agentFs(this.cfg, ops).filter((r) => !r.ok);
-    if (failed.length) {
-      this.log(`skills: ${failed.length} file steps failed: ${failed.map((f) => (f.ok ? '' : f.error)).join('; ')}`);
-      return; // no manifest: the next sync writes them again
-    }
+    // The folders are ours even when a step failed; an empty digest makes the next sync write them all again.
     const tmp = `${this.manifestPath}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ digest, root, names: [...keep].sort() } satisfies Manifest));
+    writeFileSync(tmp, JSON.stringify({ digest: failed.length ? '' : digest, root, names: [...keep].sort() } satisfies Manifest));
     renameSync(tmp, this.manifestPath);
+    if (failed.length) this.log(`skills: ${failed.length} file steps failed: ${failed.map((f) => (f.ok ? '' : f.error)).join('; ')}`);
+    return failed.length === 0;
   }
 
   private manifest(): Manifest | null {

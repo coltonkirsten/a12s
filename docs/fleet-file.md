@@ -118,7 +118,7 @@ elsewhere on the home drive are kept; one of these files that the agent edited i
 hyphens, at most 64 characters. Each is a map of files by path inside the skill folder. `SKILL.md` is required and
 starts with YAML frontmatter that has a `description` (and a `name`, if any, equal to the skill's name); other files
 (scripts, references) are optional, and one that starts with `#!` is executable. `defaults.skills` gives every agent
-computer a shared set; an agent computer's own `skills` add to it, name by name. One agent computer's skills are at
+computer a shared set; an agent computer's own `skills` add to it name by name, a skill of the same name replaces the default one whole, and `name: null` drops one. One agent computer's skills are at
 most 1 MiB, apart from the 1 MiB of instructions and files.
 
 computerd writes the skills where the running harness reads them, `~/.claude/skills/<name>/` for claude-code and

@@ -41,8 +41,13 @@ func ValidateSkill(name string, files map[string]string) []string {
 		bad = append(bad, fmt.Sprintf("%q must be lowercase letters, digits and hyphens, at most 64 characters", name))
 	}
 	for _, p := range slices.Sorted(maps.Keys(files)) {
-		if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
+		if p == "" || p == "." || strings.HasPrefix(p, "/") || strings.ContainsAny(p, "\\\x00") || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
 			bad = append(bad, fmt.Sprintf("%q must be a clean path inside the skill folder", p))
+		}
+		for d := path.Dir(p); d != "."; d = path.Dir(d) {
+			if _, ok := files[d]; ok {
+				bad = append(bad, fmt.Sprintf("%q is a file and also the folder of %q", d, p))
+			}
 		}
 	}
 	body, ok := files[SkillFile]

@@ -85,6 +85,8 @@ func TestSkillsRefuseFleetNamesAndBadSkills(t *testing.T) {
 		{"/v1/agent-computers/builder/skills/notes", `{"files":{"SKILL.md":"---\nname: other\ndescription: x\n---\n"}}`, http.StatusBadRequest},
 		{"/v1/agent-computers/builder/skills/Bad_Name", `{"files":{"SKILL.md":"---\ndescription: x\n---\n"}}`, http.StatusBadRequest},
 		{"/v1/agent-computers/builder/skills/notes", `{"files":{"SKILL.md":"---\ndescription: x\n---\n","../escape":"x"}}`, http.StatusBadRequest},
+		{"/v1/agent-computers/builder/skills/notes", `{"files":{"SKILL.md":"---\ndescription: x\n---\n",".":"x"}}`, http.StatusBadRequest},
+		{"/v1/agent-computers/builder/skills/notes", `{"files":{"SKILL.md":"---\ndescription: x\n---\n","ref":"x","ref/a.md":"y"}}`, http.StatusBadRequest},
 		{"/v1/agent-computers/nobody/skills/notes", `{"files":{"SKILL.md":"---\ndescription: x\n---\n"}}`, http.StatusNotFound},
 	}
 	for _, tc := range cases {

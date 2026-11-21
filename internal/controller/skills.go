@@ -145,6 +145,10 @@ func (c *Controller) putSkill(name, skill string, files map[string]string, by st
 	}
 	c.skillsMu.Lock()
 	defer c.skillsMu.Unlock()
+	// Checked again under the lock: a removal that ran since must not leave a store behind for a later namesake.
+	if _, err := c.fleetSkills(name); err != nil {
+		return api.Skill{}, err
+	}
 	st, err := c.loadSkillStore(name)
 	if err != nil {
 		return api.Skill{}, err
@@ -219,7 +223,7 @@ func (c *Controller) handleSkills(w http.ResponseWriter, r *http.Request) {
 
 func (c *Controller) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	var req api.PutSkillRequest
-	if !decode(w, r, 2*fleet.MaxAgentSkillBytes, &req) {
+	if !decode(w, r, maxSpecBody, &req) {
 		return
 	}
 	s, err := c.putSkill(r.PathValue("c"), r.PathValue("skill"), req.Files, skillAuthor(r))

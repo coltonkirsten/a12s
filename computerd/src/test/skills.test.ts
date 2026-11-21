@@ -42,9 +42,9 @@ test('skills land in the harness folder, follow a harness switch and never lose 
   writeFileSync(join(claude, 'mine', 'SKILL.md'), 'left alone');
 
   const skills = new Skills(cfg, ctl.call);
-  assert.equal(await skills.sync(), 'sha256:1');
+  assert.deepEqual(await skills.sync(), { digest: 'sha256:1', wrote: true });
   assert.equal(readFileSync(join(claude, 'style', 'SKILL.md'), 'utf8'), md('style'));
-  assert.equal(await skills.sync(), 'sha256:1', 'an unchanged set is a 304');
+  assert.deepEqual(await skills.sync(), { digest: 'sha256:1', wrote: false }, 'an unchanged set is a 304');
 
   const saved = await skills.save('deploy', { 'SKILL.md': md('deploy'), 'bin/run.sh': '#!/bin/sh\necho hi\n' });
   assert.equal(saved.status, 200);
@@ -76,4 +76,14 @@ test('a Controller that cannot answer leaves the folder as it is', async () => {
   const old = new Skills(cfg, async () => ({ status: 404, body: { code: 'not_found' }, etag: null }));
   assert.equal(await old.sync(), null);
   assert.ok(!existsSync(skillsRoot(cfg)));
+});
+
+test('concurrent syncs never set aside folders another one wrote', async () => {
+  const cfg = testConfig();
+  mkdirSync(cfg.stateDir, { recursive: true });
+  const ctl = controller([{ name: 'a', source: 'agent', files: { 'SKILL.md': md('a') } }, { name: 'b', source: 'agent', files: { 'SKILL.md': md('b') } }]);
+  const skills = new Skills(cfg, ctl.call);
+  await Promise.all([skills.sync(), skills.sync(), skills.save('c', { 'SKILL.md': md('c') })]);
+  assert.ok(!existsSync(join(cfg.agentHome, '.a12s-replaced-skills')));
+  assert.deepEqual(readdirSync(skillsRoot(cfg)).sort(), ['a', 'b', 'c']);
 });

@@ -405,12 +405,13 @@ export class Computer {
       // A background turn may have started during the awaits above; a restart would kill it.
       const quiet = this.backgroundCount() === 0 && !this.background;
       const rotated = this.wire(turnId) && generation !== this.ackedGeneration;
-      const relearn = skills !== null && this.skillsLoaded !== null && skills !== this.skillsLoaded;
+      // A harness may already be running (Codex starts at wake): new folders on disk reach it only through a restart.
+      const relearn = skills !== null && (skills.wrote || (this.skillsLoaded !== null && skills.digest !== this.skillsLoaded));
       if ((rotated || relearn) && quiet) {
         await this.adapter.restart();
         if (rotated) this.ackedGeneration = generation;
       }
-      if (skills !== null && (quiet || this.skillsLoaded === null)) this.skillsLoaded = skills;
+      if (skills !== null && quiet) this.skillsLoaded = skills.digest;
       // A stop may have landed during the awaits above: then nothing reaches the harness.
       if (active.stopRequested) throw new Error('stopped before dispatch');
       if (wanted !== (previous?.sessionId ?? null)) this.endDetached(); // leaving a session ends its background work
@@ -967,7 +968,7 @@ export class Computer {
   // wireCredentials is synchronous end to end (sync fs, spawnSync), so the watcher, after-turn, prompt-time and
   // .generation paths cannot interleave inside computerd; the commit itself guards against the external injector.
   /** Returns true only if every declared credential is wired; failures are journaled (names, never values). */
-  private async syncSkills(): Promise<string | null> {
+  private async syncSkills(): Promise<{ digest: string; wrote: boolean } | null> {
     if (!this.skills) return null;
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<null>((r) => (timer = setTimeout(() => r(null), SKILLS_SYNC_TIMEOUT_MS)));
