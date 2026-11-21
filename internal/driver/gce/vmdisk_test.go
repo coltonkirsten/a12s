@@ -45,6 +45,8 @@ type fakeContainer struct {
 	labels          map[string]string
 	entrypoint      []string
 	exited          bool
+	running         bool
+	volumes         []string // the volumes it mounts
 }
 
 func newFakeEngine(capacity int64) *fakeEngine {
@@ -176,9 +178,18 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"stream": "Loaded image ID: " + id + "\n"})
 
 	case r.Method == http.MethodGet && p == "/containers/json":
+		var filters map[string]map[string]bool
+		_ = json.Unmarshal([]byte(r.URL.Query().Get("filters")), &filters)
 		var out []map[string]any
 		for _, c := range f.containers {
-			out = append(out, map[string]any{"Id": c.id, "Names": []string{"/" + c.name}, "ImageID": c.image, "Image": c.image})
+			if want := filters["volume"]; len(want) > 0 && !slices.ContainsFunc(c.volumes, func(v string) bool { return want[v] }) {
+				continue
+			}
+			state := "exited"
+			if c.running {
+				state = "running"
+			}
+			out = append(out, map[string]any{"Id": c.id, "Names": []string{"/" + c.name}, "ImageID": c.image, "Image": c.image, "State": state})
 		}
 		writeJSON(w, out)
 	case r.Method == http.MethodPost && p == "/containers/create":
@@ -186,6 +197,9 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Image      string
 			Entrypoint []string
 			Labels     map[string]string
+			HostConfig struct {
+				Mounts []struct{ Type, Source string }
+			}
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		name := r.URL.Query().Get("name")
@@ -201,6 +215,11 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.nextID++
 		c := &fakeContainer{id: fmt.Sprintf("c%d", f.nextID), name: name, image: id, labels: body.Labels, entrypoint: body.Entrypoint}
+		for _, m := range body.HostConfig.Mounts {
+			if m.Type == "volume" {
+				c.volumes = append(c.volumes, m.Source)
+			}
+		}
 		f.containers[c.id] = c
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(w, map[string]any{"Id": c.id})
@@ -215,8 +234,13 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && op == "json":
 			writeJSON(w, map[string]any{"Id": c.id, "Name": "/" + c.name, "Image": c.image,
-				"State": map[string]any{"Running": false, "Status": "exited"}, "Config": map[string]any{"Labels": c.labels}})
+				"State": map[string]any{"Running": c.running, "Status": map[bool]string{false: "exited", true: "running"}[c.running]}, "Config": map[string]any{"Labels": c.labels}})
 		case r.Method == http.MethodDelete && op == "":
+			if c.running && r.URL.Query().Get("force") != "1" {
+				w.WriteHeader(http.StatusConflict)
+				writeJSON(w, map[string]string{"message": "container is running"})
+				return
+			}
 			delete(f.containers, c.id)
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && op == "start":
@@ -257,7 +281,15 @@ func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"Name": strings.TrimPrefix(p, "/volumes/"), "Labels": labels})
 	case r.Method == http.MethodDelete && strings.HasPrefix(p, "/volumes/"):
-		delete(f.volumes, strings.TrimPrefix(p, "/volumes/"))
+		name := strings.TrimPrefix(p, "/volumes/")
+		for _, c := range f.containers {
+			if slices.Contains(c.volumes, name) {
+				w.WriteHeader(http.StatusConflict)
+				writeJSON(w, map[string]string{"message": "remove " + name + ": volume is in use - [" + c.id + "]"})
+				return
+			}
+		}
+		delete(f.volumes, name)
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && p == "/volumes/create":
 		var body struct {
@@ -299,7 +331,7 @@ func agentVM(t *testing.T, capacity int64) (*vmGuest, *fakeEngine, driver.Comput
 	vm.images["sha256:vm-tb2"] = &fakeImage{size: 2 * gb1, tags: []string{"a12s.local/image:tb2"}}
 	vm.images["sha256:vm-bundle"] = &fakeImage{size: gb1 / 4, tags: []string{"a12s.local/image:bundle"}}
 	vm.containers["old"] = &fakeContainer{id: "old", name: "a12s-lab-builder", image: "sha256:vm-tb2",
-		labels: map[string]string{engine.LabelGeneration: "2"}}
+		labels: map[string]string{engine.LabelGeneration: "2"}, volumes: []string{BundleVolume("lab")}}
 	vm.volumes[BundleVolume("lab")] = map[string]string{engine.LabelFleet: "lab", labelBundle: "sha256:bundle"}
 	g := &vmGuest{
 		e:   &Engines{Fleet: "lab", Local: engine.New(fakeClient(t, ctrl), "lab")},
@@ -369,6 +401,44 @@ func TestMaterializePrunesOnAWakeOfTheSameGeneration(t *testing.T) {
 	}
 	if vm.containerLocked("old") == nil {
 		t.Fatal("the running generation's container was replaced")
+	}
+}
+
+// A harness switch replaces the bundle volume. A stopped container other than the Computer's own that still mounts
+// it (an orphaned older container, an extractor an interrupted Materialize left) must not block that forever: it is a
+// leftover and goes. Seen on silico-ribo 2026-11-21 (a12s#161), which looped in Error on "volume is in use".
+func TestMaterializeRemovesLeftoversHoldingTheBundleVolume(t *testing.T) {
+	g, vm, spec := agentVM(t, 20*gb1)
+	vm.volumes[BundleVolume("lab")][labelBundle] = "sha256:old-bundle" // the spec names a new bundle
+	vm.containers["orphan"] = &fakeContainer{id: "orphan", name: "a12s-lab-lab-builder-a6d447du", image: "sha256:vm-tb1",
+		volumes: []string{BundleVolume("lab")}}
+	vm.containers["extract"] = &fakeContainer{id: "extract", name: "a12s-lab-bundle-extract-0badf00d", image: "sha256:vm-bundle",
+		volumes: []string{BundleVolume("lab")}}
+	if err := g.Materialize(context.Background(), spec); err != nil {
+		t.Fatalf("Materialize = %v", err)
+	}
+	for _, ref := range []string{"orphan", "extract"} {
+		if vm.containerLocked(ref) != nil {
+			t.Errorf("leftover %s still on the VM", ref)
+		}
+	}
+	if got := vm.volumes[BundleVolume("lab")][labelBundle]; got != "sha256:bundle" {
+		t.Fatalf("bundle volume holds %q, want the new bundle", got)
+	}
+}
+
+// A running container using the bundle volume is not a leftover: Materialize refuses, naming it, and removes nothing.
+func TestMaterializeRefusesToPullTheBundleFromARunningContainer(t *testing.T) {
+	g, vm, spec := agentVM(t, 20*gb1)
+	vm.volumes[BundleVolume("lab")][labelBundle] = "sha256:old-bundle"
+	vm.containers["other"] = &fakeContainer{id: "other", name: "a12s-lab-intruder", image: "sha256:vm-tb1",
+		running: true, volumes: []string{BundleVolume("lab")}}
+	err := g.Materialize(context.Background(), spec)
+	if err == nil || !strings.Contains(err.Error(), "a12s-lab-intruder") {
+		t.Fatalf("Materialize = %v, want an error naming the running container", err)
+	}
+	if vm.containerLocked("other") == nil {
+		t.Fatal("the running container was removed")
 	}
 }
 
