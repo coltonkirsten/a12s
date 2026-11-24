@@ -472,13 +472,18 @@ func (c *Controller) readEvents(name string, s *computerd.Stream) {
 				}
 			}
 		case api.EventSessionChanged:
+			// to is null when the session ended without a successor (its harness was switched).
 			var d struct {
-				To string `json:"to"`
+				To *string `json:"to"`
 			}
-			if json.Unmarshal(ev.Data, &d) == nil && d.To != "" {
+			if json.Unmarshal(ev.Data, &d) == nil {
+				to := ""
+				if d.To != nil {
+					to = *d.To
+				}
 				c.mu.Lock()
-				if rec := c.state.Computers[name]; rec != nil && rec.Session != d.To {
-					rec.Session = d.To
+				if rec := c.state.Computers[name]; rec != nil && rec.Session != to {
+					rec.Session = to
 					_ = c.saveLocked()
 				}
 				c.mu.Unlock()
