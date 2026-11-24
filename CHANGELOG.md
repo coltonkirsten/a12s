@@ -4,7 +4,13 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
-- A harness switch starts a new session instead of holding the inbox. computerd used to keep the old harness's
+## v0.14.1 (2026-11-23)
+
+A patch release: a harness switch starts a new session instead of holding the inbox. Upgrading: install the new
+release and `a12s up` (or swap the Controller image); agent computers on `slim` move to `slim:0.14.1` at their next
+idle boundary. Rebuild custom images FROM `ghcr.io/coltonkirsten/a12s/slim:0.14.1`: the fix is in computerd.
+
+- Fixed: a harness switch starts a new session instead of holding the inbox. computerd used to keep the old harness's
   session and fail the next Turn with `resume.failed` (`session … belongs to claude-code, not codex`), so the inbox
   stayed held (`resume_failed`) until someone ran `a12s inbox resume <name> --new`. A session now belongs to its
   harness: at wake after a switch computerd ends it with `session.changed` (`to: null`, `reason`) and the next Turn
