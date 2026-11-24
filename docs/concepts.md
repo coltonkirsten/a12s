@@ -79,6 +79,11 @@ migration" must not run without its context. The old session id and drives are k
 emitted. Recover with an explicit new session (`a12s send <name> --fresh "…"`, or `a12s inbox resume <name> --new`) or
 repair the cause (for example roll back the bundle) and retry.
 
+**A session belongs to its harness.** Switching `harness.kind` ends the old harness's session: the other harness
+cannot resume it, so there is nothing to recover. At wake computerd emits `session.changed` with `to: null` and a
+`reason` (`harness changed from claude-code to codex`), and the next Turn starts the new harness's first session. The
+old session's files stay on the home drive; switching back does not resume it.
+
 **Interrupted Turns stay interrupted.** Side effects may already have happened, so nothing is replayed
 automatically. The conversation survives, so "continue" works.
 

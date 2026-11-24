@@ -236,6 +236,14 @@ export class Computer {
     const loaded = loadSessionRecord(this.sessionPath);
     this.session = loaded.record;
     this.sessionDamaged = loaded.damaged;
+    // A session belongs to the harness that made it: after a harness switch there is no session to resume, so it
+    // ends here, visibly, and the next Turn starts this harness's first one. Its files stay on the home drive.
+    if (this.session && this.session.harness !== this.cfg.harness.kind) {
+      const reason = `harness changed from ${this.session.harness} to ${this.cfg.harness.kind}`;
+      this.journal.append('session.changed', { from: this.session.sessionId, to: null, reason });
+      rmSync(this.sessionPath, { force: true });
+      this.session = null;
+    }
     if (this.sessionDamaged) {
       this.resumePending = true;
       this.journal.append('resume.failed', { sessionId: null, reason: this.sessionDamaged, at: 'wake' });
@@ -395,9 +403,6 @@ export class Computer {
     try {
       await this.testHooks('accept');
       if (req.session === 'current' && this.sessionDamaged) throw new ResumeError(this.sessionDamaged);
-      if (req.session === 'current' && previous && previous.harness !== this.cfg.harness.kind) {
-        throw new ResumeError(`session ${previous.sessionId} belongs to ${previous.harness}, not ${this.cfg.harness.kind}`);
-      }
       const skills = await this.syncSkills();
       const generation = credentialGeneration(this.cfg);
       // Rotated credentials and changed skills must not wait in a long-lived harness, but restarting it would end
@@ -995,7 +1000,6 @@ export class Computer {
   }
 
   private async precheck(session: SessionRecord): Promise<string | null> {
-    if (session.harness !== this.cfg.harness.kind) return `session ${session.sessionId} belongs to ${session.harness}, not ${this.cfg.harness.kind}`;
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<string>((r) => (timer = setTimeout(() => r('precheck timed out'), PRECHECK_TIMEOUT_MS)));
     try {

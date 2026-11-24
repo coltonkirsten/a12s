@@ -84,6 +84,31 @@ test('resume failure: resume.failed at wake and at prompt, resumePending stays, 
   assert.equal(computer.status().resumePending, false);
 });
 
+test('harness switch: the other harness\'s session ends at wake, so the next current Turn starts a fresh one', async () => {
+  const cfg = testConfig(); // harness claude-code
+  writeFileSync(join(cfg.stateDir, 'session.json'), JSON.stringify({ sessionId: 's_codex', harness: 'codex', cwd: '/home/agent/proj' }));
+  const { journal, adapter, computer, types, finished } = setup(cfg);
+  await computer.start();
+  const ended = journal.after(0, null, 100).find((e) => e.type === 'session.changed');
+  assert.deepEqual(ended?.data, { from: 's_codex', to: null, reason: 'harness changed from codex to claude-code' });
+  assert.ok(!types().includes('resume.failed'));
+  assert.deepEqual([computer.status().resumePending, computer.status().session], [false, null]);
+
+  const t = await computer.submitTurn({ requestId: 'r1', session: 'current', prompt: 'hello' });
+  assert.notEqual(t.sessionId, 's_codex');
+  assert.equal(adapter.inputs[0]?.sessionId, null, 'never asked the harness to resume the other harness\'s session');
+  assert.equal(adapter.inputs[0]?.cwd, cfg.agentHome);
+  adapter.finish();
+  await until(() => finished(t.turnId) === 'completed');
+  assert.ok(!types(t.turnId).includes('resume.failed'));
+  assert.equal(computer.status().resumePending, false);
+
+  // Waking again finds this harness's own session and ends nothing.
+  const again = setup(cfg);
+  await again.computer.start();
+  assert.equal(again.computer.status().session, t.sessionId);
+});
+
 test('stop is idempotent and the turn ends interrupted; unknown turns are 404', async () => {
   const { computer, finished } = setup();
   await computer.start();

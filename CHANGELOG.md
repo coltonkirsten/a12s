@@ -4,6 +4,12 @@ Breaking changes are allowed before 1.0 when they make a12s simpler; each one is
 
 ## Unreleased
 
+- A harness switch starts a new session instead of holding the inbox. computerd used to keep the old harness's
+  session and fail the next Turn with `resume.failed` (`session … belongs to claude-code, not codex`), so the inbox
+  stayed held (`resume_failed`) until someone ran `a12s inbox resume <name> --new`. A session now belongs to its
+  harness: at wake after a switch computerd ends it with `session.changed` (`to: null`, `reason`) and the next Turn
+  starts fresh. The TypeScript SDK's `SessionChangedEvent.to` is `string | null`.
+
 ## v0.14.0 (2026-11-21)
 
 A minor release about skills: a harness-agnostic `skills` Fleet field, and system tools for agents to save their own

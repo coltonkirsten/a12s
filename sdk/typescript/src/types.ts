@@ -538,7 +538,8 @@ export type ToolFinishedEvent = Ev<"tool.finished", ToolFinishedData>;
 export type PermissionEvent = Ev<"permission", { decision: "allow" | "deny"; kind: string; tool?: string; detail?: unknown }>;
 export type DiagnosticEvent = Ev<"diagnostic", DiagnosticData>;
 export type TurnFinishedEvent = Ev<"turn.finished", TurnFinishedData>;
-export type SessionChangedEvent = Ev<"session.changed", { from: string | null; to: string }>;
+/** `to` is null when the session ended with no successor: its harness was switched, so the next Turn starts a new one. */
+export type SessionChangedEvent = Ev<"session.changed", { from: string | null; to: string | null; reason?: string }>;
 export type ResumeFailedEvent = Ev<"resume.failed", ResumeFailedData>;
 export type LifecycleEvent = Ev<"lifecycle", { phase: string; [k: string]: unknown }>;
 export type HarnessRestartedEvent = Ev<"harness.restarted", Record<string, unknown>>;
